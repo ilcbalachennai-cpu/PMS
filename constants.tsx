@@ -1,0 +1,134 @@
+
+import { StatutoryConfig, Employee, User, LeavePolicy } from './types';
+
+// Branding Configuration
+export const BRAND_CONFIG = {
+  appName: 'BharatPay',
+  appNameSuffix: 'Pro',
+  companyName: 'ILCbala',
+  tagline: 'Decoding Indian Labour Laws',
+  // Use a placeholder image initially. You can upload your own logo in the Settings or Login screen.
+  logoUrl: 'https://ui-avatars.com/api/?name=ILC&background=0D8ABC&color=fff&size=200', 
+};
+
+export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
+  epfCeiling: 15000,
+  epfEmployeeRate: 0.12,
+  epfEmployerRate: 0.12,
+  esiCeiling: 21000,
+  esiEmployeeRate: 0.0075,
+  esiEmployerRate: 0.0325,
+  // Changed default to HalfYearly for Tamil Nadu Compliance
+  ptDeductionCycle: 'HalfYearly', 
+  ptSlabs: [
+    { min: 0, max: 21000, amount: 0 },
+    { min: 21001, max: 30000, amount: 135 },
+    { min: 30001, max: 45000, amount: 315 },
+    { min: 45001, max: 60000, amount: 690 },
+    { min: 60001, max: 75000, amount: 1025 },
+    { min: 75001, max: 9999999, amount: 1250 }
+  ],
+  lwfAmount: 25,
+  bonusRate: 0.0833,
+  pfComplianceType: 'Statutory' // Default for 20+ employees
+};
+
+export const DEFAULT_LEAVE_POLICY: LeavePolicy = {
+  el: { maxPerYear: 18, maxCarryForward: 45, label: 'Earned Leave (EL)' },
+  sl: { maxPerYear: 12, maxCarryForward: 0, label: 'Sick Leave (SL)' },
+  cl: { maxPerYear: 12, maxCarryForward: 0, label: 'Casual Leave (CL)' }
+};
+
+export const INDIAN_STATES = [
+  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", 
+  "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", 
+  "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", 
+  "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+  "Andaman and Nicobar Islands", "Chandigarh", "Dadra and Nagar Haveli and Daman and Diu", 
+  "Delhi", "Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry"
+];
+
+export const PT_STATE_PRESETS = {
+  'Tamil Nadu': {
+    cycle: 'HalfYearly',
+    slabs: [
+      { min: 0, max: 21000, amount: 0 },
+      { min: 21001, max: 30000, amount: 135 },
+      { min: 30001, max: 45000, amount: 315 },
+      { min: 45001, max: 60000, amount: 690 },
+      { min: 60001, max: 75000, amount: 1025 },
+      { min: 75001, max: 9999999, amount: 1250 }
+    ]
+  },
+  'Karnataka': {
+    cycle: 'Monthly',
+    slabs: [
+      { min: 0, max: 14999, amount: 0 },
+      { min: 15000, max: 9999999, amount: 200 }
+    ]
+  },
+  'Maharashtra': {
+    cycle: 'Monthly',
+    slabs: [
+      { min: 0, max: 7500, amount: 0 },
+      { min: 7501, max: 10000, amount: 175 },
+      { min: 10001, max: 9999999, amount: 200 } 
+      // Note: In MH, Feb is 300, but simpler logic used here for standard
+    ]
+  },
+  'West Bengal': {
+    cycle: 'Monthly',
+    slabs: [
+      { min: 0, max: 10000, amount: 0 },
+      { min: 10001, max: 15000, amount: 110 },
+      { min: 15001, max: 25000, amount: 130 },
+      { min: 25001, max: 40000, amount: 150 },
+      { min: 40001, max: 9999999, amount: 200 }
+    ]
+  },
+  'Telangana': {
+    cycle: 'Monthly',
+    slabs: [
+       { min: 0, max: 15000, amount: 0 },
+       { min: 15001, max: 20000, amount: 150 },
+       { min: 20001, max: 9999999, amount: 200 }
+    ]
+  },
+  'Andhra Pradesh': {
+    cycle: 'Monthly',
+    slabs: [
+       { min: 0, max: 15000, amount: 0 },
+       { min: 15001, max: 20000, amount: 150 },
+       { min: 20001, max: 9999999, amount: 200 }
+    ]
+  },
+  'Kerala': {
+    cycle: 'HalfYearly',
+    slabs: [
+      { min: 0, max: 11999, amount: 0 },
+      { min: 12000, max: 17999, amount: 120 },
+      { min: 18000, max: 29999, amount: 180 },
+      { min: 30000, max: 44999, amount: 300 },
+      { min: 45000, max: 59999, amount: 450 },
+      { min: 60000, max: 74999, amount: 600 },
+      { min: 75000, max: 99999, amount: 750 },
+      { min: 100000, max: 124999, amount: 1000 },
+      { min: 125000, max: 9999999, amount: 1250 }
+    ]
+  },
+  'Gujarat': {
+    cycle: 'Monthly',
+    slabs: [
+        { min: 0, max: 12000, amount: 0 },
+        { min: 12001, max: 9999999, amount: 200 }
+    ]
+  }
+};
+
+export const MOCK_USERS: User[] = [
+  { username: 'admin', password: 'password', name: 'System Administrator', role: 'Admin', email: 'admin@bharatpay.com' },
+  { username: 'hr', password: 'password', name: 'HR Manager', role: 'HR', email: 'hr@bharatpay.com' },
+  { username: 'viewer', password: 'password', name: 'Auditor', role: 'Viewer', email: 'audit@bharatpay.com' }
+];
+
+export const SAMPLE_EMPLOYEES: Employee[] = [];
