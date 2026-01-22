@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   Users, 
@@ -218,41 +217,68 @@ const App: React.FC = () => {
   };
 
   const handleBulkAddEmployees = (newEmps: Employee[]) => {
-    const updatedEmployees = [...employees, ...newEmps];
-    setEmployees(updatedEmployees);
+    // 1. Update Employees (Upsert Logic: Update if exists, else Add)
+    setEmployees(currentEmployees => {
+      // Explicitly type tuple to ensure map is Map<string, Employee>
+      const empMap = new Map<string, Employee>();
+      currentEmployees.forEach(e => empMap.set(e.id, e));
+      
+      newEmps.forEach(newEmp => {
+        const existing = empMap.get(newEmp.id);
+        if (existing) {
+             // Merge to preserve data not available in Excel (like Photo)
+             empMap.set(newEmp.id, {
+                 ...newEmp,
+                 photoUrl: existing.photoUrl,
+                 // Append import log to service records
+                 serviceRecords: [...existing.serviceRecords, ...newEmp.serviceRecords]
+             });
+        } else {
+             empMap.set(newEmp.id, newEmp);
+        }
+      });
+      return Array.from(empMap.values());
+    });
     
-    // Initialize attendance for new employees
-    const newAttendances = newEmps.map(e => ({ 
-        employeeId: e.id, 
-        month: globalMonth, 
-        year: globalYear, 
-        presentDays: 30, 
-        earnedLeave: 0, 
-        sickLeave: 0,
-        casualLeave: 0,
-        lopDays: 0 
-    }));
-    setAttendances(prev => [...prev, ...newAttendances]);
+    // 2. Initialize Associated Data (ONLY for completely new IDs)
+    // We don't want to reset ledgers/attendance for existing employees being updated via Excel.
+    const currentIds = new Set(employees.map(e => e.id));
+    const trulyNewEmps = newEmps.filter(e => !currentIds.has(e.id));
 
-    // Initialize leave ledgers
-    const newLeaves = newEmps.map(e => ({
-        employeeId: e.id,
-        el: { opening: 0, eligible: 1.5, encashed: 0, availed: 0, balance: 1.5 },
-        sl: { eligible: 1, availed: 0, balance: 1 },
-        cl: { availed: 0, accumulation: 0, balance: 0 }
-    }));
-    setLeaveLedgers(prev => [...prev, ...newLeaves]);
+    if (trulyNewEmps.length > 0) {
+        // Initialize attendance for new employees
+        const newAttendances = trulyNewEmps.map(e => ({ 
+            employeeId: e.id, 
+            month: globalMonth, 
+            year: globalYear, 
+            presentDays: 30, 
+            earnedLeave: 0, 
+            sickLeave: 0,
+            casualLeave: 0,
+            lopDays: 0 
+        }));
+        setAttendances(prev => [...prev, ...newAttendances]);
 
-    // Initialize advance ledgers
-    const newAdvances = newEmps.map(e => ({ 
-        employeeId: e.id, 
-        opening: 0,
-        totalAdvance: 0, 
-        monthlyInstallment: 0, 
-        paidAmount: 0, 
-        balance: 0 
-    }));
-    setAdvanceLedgers(prev => [...prev, ...newAdvances]);
+        // Initialize leave ledgers
+        const newLeaves = trulyNewEmps.map(e => ({
+            employeeId: e.id,
+            el: { opening: 0, eligible: 1.5, encashed: 0, availed: 0, balance: 1.5 },
+            sl: { eligible: 1, availed: 0, balance: 1 },
+            cl: { availed: 0, accumulation: 0, balance: 0 }
+        }));
+        setLeaveLedgers(prev => [...prev, ...newLeaves]);
+
+        // Initialize advance ledgers
+        const newAdvances = trulyNewEmps.map(e => ({ 
+            employeeId: e.id, 
+            opening: 0,
+            totalAdvance: 0, 
+            monthlyInstallment: 0, 
+            paidAmount: 0, 
+            balance: 0 
+        }));
+        setAdvanceLedgers(prev => [...prev, ...newAdvances]);
+    }
   };
 
   const handleLogout = () => {

@@ -2,6 +2,37 @@
 import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger } from '../types';
 import { PT_STATE_PRESETS } from '../constants';
 
+// Helper to map Branch/City to State for PT Compliance
+const getBranchState = (branchName: string = ''): string | null => {
+  const b = branchName.toLowerCase().trim();
+  
+  // Tamil Nadu
+  if (b.includes('chennai') || b.includes('coimbatore') || b.includes('madurai') || b.includes('salem') || b.includes('tiruchirappalli') || b.includes('kanchipuram') || b.includes('hosur') || b.includes('tamil')) return 'Tamil Nadu';
+  
+  // Karnataka
+  if (b.includes('bangalore') || b.includes('bengaluru') || b.includes('mysore') || b.includes('mangalore') || b.includes('hubli') || b.includes('belgaum') || b.includes('udupi') || b.includes('karnataka')) return 'Karnataka';
+  
+  // Maharashtra
+  if (b.includes('mumbai') || b.includes('pune') || b.includes('nagpur') || b.includes('nashik') || b.includes('aurangabad') || b.includes('thane') || b.includes('maharashtra')) return 'Maharashtra';
+  
+  // West Bengal
+  if (b.includes('kolkata') || b.includes('howrah') || b.includes('durgapur') || b.includes('siliguri') || b.includes('bengal')) return 'West Bengal';
+  
+  // Telangana
+  if (b.includes('hyderabad') || b.includes('warangal') || b.includes('nizamabad') || b.includes('telangana')) return 'Telangana';
+  
+  // Andhra Pradesh
+  if (b.includes('visakhapatnam') || b.includes('vizag') || b.includes('vijayawada') || b.includes('guntur') || b.includes('tirupati') || b.includes('andhra')) return 'Andhra Pradesh';
+  
+  // Kerala
+  if (b.includes('kochi') || b.includes('cochin') || b.includes('trivandrum') || b.includes('thiruvananthapuram') || b.includes('kozhikode') || b.includes('calicut') || b.includes('kerala')) return 'Kerala';
+  
+  // Gujarat
+  if (b.includes('ahmedabad') || b.includes('surat') || b.includes('vadodara') || b.includes('baroda') || b.includes('rajkot') || b.includes('gandhinagar') || b.includes('gujarat')) return 'Gujarat';
+  
+  return null;
+};
+
 export const calculatePayroll = (
   employee: Employee,
   config: StatutoryConfig,
@@ -51,16 +82,44 @@ export const calculatePayroll = (
     (employee.specialAllowance2 || 0) + 
     (employee.specialAllowance3 || 0);
 
-  // PF Calculation Logic (PF Wage = Basic + DA + Retaining Allowance)
-  const baseWageForPF = basic + da + retaining;
+  // --- PF Calculation Logic (New 6-Step Logic) ---
+  
+  // Step 1: Basic + DA + Retaining Allowance = A
+  const wageA = basic + da + retaining;
+  
+  // Step 2: Gross wages including all components = B
+  const wageB = grossEarnings;
+
+  // Step 3: Gross wages - A = C (Allowances)
+  const wageC = wageB - wageA;
+
+  // Step 4: If C/B > 50%, then excess amount D = C - (50% of B)
+  let wageD = 0;
+  if (wageB > 0) {
+      const allowancePercentage = wageC / wageB;
+      if (allowancePercentage > 0.50) {
+          // Calculate the excess amount
+          const fiftyPercentOfGross = Math.round(wageB * 0.50);
+          wageD = wageC - fiftyPercentOfGross;
+      }
+  }
+
+  // Step 5: Gross PF wages = A + D
+  let grossPFWage = wageA + wageD;
+  grossPFWage = Math.round(grossPFWage);
+
   let epfEmployee = 0;
   let vpfEmployee = 0;
   let epfEmployer = 0;
   let epsEmployer = 0;
   
   if (!employee.isPFExempt) {
+    // Step 6: Apply Ceiling Check
+    // If Gross PF wages > PF wage ceiling (15000) then restrict PF wages to PF Wage ceiling.
+    
     // 1. Employee Statutory Contribution
-    let pfWageForEmployee = employee.isPFHigherWages ? baseWageForPF : Math.min(baseWageForPF, config.epfCeiling);
+    // Check if employee has opted for Higher Wages contribution, otherwise use the calculated Step 6 wage
+    let pfWageForEmployee = employee.isPFHigherWages ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
     
     const baseRate = 0.12; 
     epfEmployee = Math.round(pfWageForEmployee * baseRate);
@@ -71,7 +130,7 @@ export const calculatePayroll = (
     }
 
     // 3. Employer Contribution
-    let pfWageForEmployer = employee.isEmployerPFHigher ? baseWageForPF : Math.min(baseWageForPF, config.epfCeiling);
+    let pfWageForEmployer = employee.isEmployerPFHigher ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
     
     const epsWage = Math.min(pfWageForEmployer, config.epfCeiling);
     epsEmployer = Math.round(epsWage * 0.0833);
@@ -88,16 +147,21 @@ export const calculatePayroll = (
     esiEmployer = Math.ceil(grossEarnings * config.esiEmployerRate);
   }
 
-  // Professional Tax Calculation (Dynamic based on State)
+  // Professional Tax Calculation (Dynamic based on Branch/Work Location)
   let pt = 0;
   
   // Default to global config
   let ptCycle = config.ptDeductionCycle;
   let ptSlabs = config.ptSlabs;
 
-  // OVERRIDE: Check if Employee's state has specific rules
-  if (employee.state && PT_STATE_PRESETS[employee.state as keyof typeof PT_STATE_PRESETS]) {
-      const stateRule = PT_STATE_PRESETS[employee.state as keyof typeof PT_STATE_PRESETS];
+  // OVERRIDE: Determine State based on Branch (Organization Hierarchy)
+  // Logic: The city/location in the 'branch' field dictates the PT rules.
+  // Note: We deliberately do NOT fallback to employee.state (Residential Address) 
+  // as per requirement to strictly follow work location.
+  const branchState = getBranchState(employee.branch);
+
+  if (branchState && PT_STATE_PRESETS[branchState as keyof typeof PT_STATE_PRESETS]) {
+      const stateRule = PT_STATE_PRESETS[branchState as keyof typeof PT_STATE_PRESETS];
       ptCycle = stateRule.cycle as any;
       ptSlabs = stateRule.slabs;
   }

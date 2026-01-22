@@ -191,11 +191,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     const wsMaster = XLSX.utils.aoa_to_sheet(masterData);
 
     // Apply Validation to State Column (Column N -> Index 13)
-    // Note: This requires the sheet to be aware of validation. 
-    // In many basic versions of XLSX, writing validation is limited. 
-    // We adding a reference sheet is the most reliable cross-version method.
-    
-    // Attempt to set validation (works in some Excel versions when generated this way)
     if (!ws['!dataValidation']) ws['!dataValidation'] = [];
     ws['!dataValidation'].push({
       sqref: "N2:N1000", // Apply to State column rows 2-1000
@@ -229,6 +224,12 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
 
       const safeString = (val: any) => val ? String(val).trim() : "";
       
+      // Helper to match headers case-insensitively and ignoring whitespace (e.g. "State " == "state")
+      const getValue = (row: any, key: string) => {
+        const foundKey = Object.keys(row).find(k => k.trim().toLowerCase() === key.toLowerCase());
+        return foundKey ? row[foundKey] : undefined;
+      };
+
       const processDate = (val: any) => {
          if (!val) return "";
          if (typeof val === 'number') {
@@ -239,53 +240,53 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
       };
 
       const newEmployees: Employee[] = data.map((row: any) => ({
-        id: safeString(row["Employee ID"]) || `EMP${Math.floor(Math.random() * 10000)}`,
-        name: safeString(row["Name"]) || "Unknown",
-        designation: safeString(row["Designation"]) || "Staff",
-        department: safeString(row["Division"]) || "",
-        division: safeString(row["Division"]) || "",
-        branch: safeString(row["Branch"]) || "",
-        site: safeString(row["Site"]) || "",
-        doj: processDate(row["DOJ (YYYY-MM-DD)"]) || new Date().toISOString().split('T')[0],
-        dob: processDate(row["DOB (YYYY-MM-DD)"]),
+        id: safeString(getValue(row, "Employee ID")) || `EMP${Math.floor(Math.random() * 10000)}`,
+        name: safeString(getValue(row, "Name")) || "Unknown",
+        designation: safeString(getValue(row, "Designation")) || "Staff",
+        department: safeString(getValue(row, "Division")) || "",
+        division: safeString(getValue(row, "Division")) || "",
+        branch: safeString(getValue(row, "Branch")) || "",
+        site: safeString(getValue(row, "Site")) || "",
+        doj: processDate(getValue(row, "DOJ (YYYY-MM-DD)")) || new Date().toISOString().split('T')[0],
+        dob: processDate(getValue(row, "DOB (YYYY-MM-DD)")),
         
-        fatherSpouseName: safeString(row["Father/Spouse Name"]),
-        relationship: safeString(row["Relationship"]) || "Father",
+        fatherSpouseName: safeString(getValue(row, "Father/Spouse Name")),
+        relationship: safeString(getValue(row, "Relationship")) || "Father",
         
-        // Map Excel Address Columns
-        flatNumber: safeString(row["Flat/Door No"]),
-        streetAddress: safeString(row["Street/Building"]) || safeString(row["Address"]), // Fallback for old templates
-        city: safeString(row["City"]),
-        state: safeString(row["State"]) || "Tamil Nadu",
-        pincode: safeString(row["Pincode"]),
+        // Map Excel Address Columns using Robust Getter
+        flatNumber: safeString(getValue(row, "Flat/Door No")),
+        streetAddress: safeString(getValue(row, "Street/Building")) || safeString(getValue(row, "Address")), 
+        city: safeString(getValue(row, "City")),
+        state: safeString(getValue(row, "State")) || "Tamil Nadu",
+        pincode: safeString(getValue(row, "Pincode")),
 
-        mobile: safeString(row["Mobile"]),
+        mobile: safeString(getValue(row, "Mobile")),
         
-        pan: safeString(row["PAN"]),
-        aadhaarNumber: safeString(row["Aadhaar"]),
-        uanc: safeString(row["UAN"]),
-        pfNumber: safeString(row["PF Number"]),
+        pan: safeString(getValue(row, "PAN")),
+        aadhaarNumber: safeString(getValue(row, "Aadhaar")),
+        uanc: safeString(getValue(row, "UAN")),
+        pfNumber: safeString(getValue(row, "PF Number")),
         esiNumber: "", 
         
-        bankAccount: safeString(row["Bank Account"]),
-        ifsc: safeString(row["IFSC"]),
+        bankAccount: safeString(getValue(row, "Bank Account")),
+        ifsc: safeString(getValue(row, "IFSC")),
 
-        basicPay: Number(row["Basic Pay"]) || 0,
-        da: Number(row["DA"]) || 0,
-        hra: Number(row["HRA"]) || 0,
-        conveyance: Number(row["Conveyance"]) || 0,
-        retainingAllowance: Number(row["Retaining Allowance"]) || 0,
-        washing: Number(row["Washing Allowance"]) || 0,
-        attire: Number(row["Attire Allowance"]) || 0,
-        specialAllowance1: Number(row["Special Allowance 1"]) || 0,
-        specialAllowance2: Number(row["Special Allowance 2"]) || 0,
-        specialAllowance3: Number(row["Special Allowance 3"]) || 0,
+        basicPay: Number(getValue(row, "Basic Pay")) || 0,
+        da: Number(getValue(row, "DA")) || 0,
+        hra: Number(getValue(row, "HRA")) || 0,
+        conveyance: Number(getValue(row, "Conveyance")) || 0,
+        retainingAllowance: Number(getValue(row, "Retaining Allowance")) || 0,
+        washing: Number(getValue(row, "Washing Allowance")) || 0,
+        attire: Number(getValue(row, "Attire Allowance")) || 0,
+        specialAllowance1: Number(getValue(row, "Special Allowance 1")) || 0,
+        specialAllowance2: Number(getValue(row, "Special Allowance 2")) || 0,
+        specialAllowance3: Number(getValue(row, "Special Allowance 3")) || 0,
 
-        isPFExempt: safeString(row["PF Option"]).toLowerCase() === "exempt",
-        isPFHigherWages: safeString(row["PF Option"]).toLowerCase() === "higher wages",
+        isPFExempt: safeString(getValue(row, "PF Option")).toLowerCase() === "exempt",
+        isPFHigherWages: safeString(getValue(row, "PF Option")).toLowerCase() === "higher wages",
         isEmployerPFHigher: false,
         isESIExempt: false,
-        employeeVPFRate: Number(row["VPF Rate"]) || 0,
+        employeeVPFRate: Number(getValue(row, "VPF Rate")) || 0,
 
         serviceRecords: [{ date: new Date().toISOString().split('T')[0], type: 'Appointment', description: 'Imported via Excel' }]
       }));

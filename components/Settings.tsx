@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy } from '../types';
 import { PT_STATE_PRESETS } from '../constants';
 
@@ -17,6 +16,13 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, currentLogo, set
   const [formData, setFormData] = useState(config);
   const [localLeavePolicy, setLocalLeavePolicy] = useState(leavePolicy);
   const [saved, setSaved] = useState(false);
+  const [selectedStatePreset, setSelectedStatePreset] = useState<string>('Tamil Nadu');
+
+  // Factory Reset State
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetError, setResetError] = useState('');
+  const SUPERVISOR_PASSWORD = "admin";
 
   const handlePFTypeChange = (type: PFComplianceType) => {
     // Logic: Statutory is 12%, Voluntary is 10%
@@ -32,6 +38,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, currentLogo, set
   const handleStatePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const state = e.target.value as keyof typeof PT_STATE_PRESETS;
     if (PT_STATE_PRESETS[state]) {
+      setSelectedStatePreset(state);
       setFormData({
         ...formData,
         ptDeductionCycle: PT_STATE_PRESETS[state].cycle as 'Monthly' | 'HalfYearly',
@@ -86,16 +93,14 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, currentLogo, set
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const handleFactoryReset = () => {
-      // First warning
-      if(!confirm("⚠️ CRITICAL WARNING ⚠️\n\nYou are about to perform a FACTORY RESET.\n\nThis will PERMANENTLY DELETE:\n• All Employee Profiles\n• Attendance Records\n• Payroll History\n• Saved Settings & Logos\n\nThis action is IRREVERSIBLE.\n\nDo you want to continue?")) {
-        return;
-      }
+  const initiateFactoryReset = () => {
+    setShowResetModal(true);
+    setResetPassword('');
+    setResetError('');
+  };
 
-      // Second confirmation with manual input
-      const confirmation = prompt("To confirm deletion, please type 'DELETE' in the box below:");
-      
-      if(confirmation === 'DELETE') {
+  const executeFactoryReset = () => {
+      if (resetPassword === SUPERVISOR_PASSWORD) {
           // Explicitly clear all application specific keys
           const keysToRemove = [
             'app_employees',
@@ -119,12 +124,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, currentLogo, set
           alert("System has been successfully reset. The application will now restart.");
           window.location.reload();
       } else {
-          alert("Reset Cancelled: Verification code did not match.");
+          setResetError("Incorrect Password. Access Denied.");
       }
   };
 
   return (
-    <div className="max-w-4xl space-y-8 text-white">
+    <div className="max-w-4xl space-y-8 text-white relative">
       <div className="bg-amber-900/20 border border-amber-700/50 p-6 rounded-2xl flex gap-4 text-amber-200">
         <AlertCircle size={28} className="shrink-0 text-amber-400" />
         <div className="text-sm space-y-2">
@@ -217,6 +222,9 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, currentLogo, set
           </div>
           
           <div className="p-8 space-y-6">
+            <p className="text-xs text-amber-400 italic font-medium border-l-2 border-amber-500 pl-3">
+              Wages for the Purpose of PF and ESI is as per New Labour Code 2020 subject to Wage Ceiling
+            </p>
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PF Wage Ceiling</label>
@@ -347,6 +355,15 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, currentLogo, set
                </div>
             </div>
 
+            {/* Display Active State Above Slab Table */}
+            {selectedStatePreset && (
+              <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-lg border border-slate-700 w-fit">
+                  <MapPin size={14} className="text-slate-400" />
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Active Configuration:</span>
+                  <span className="text-xs font-bold uppercase tracking-wide text-amber-400">{selectedStatePreset}</span>
+              </div>
+            )}
+
             <div className="border border-slate-800 rounded-xl overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-[#0f172a] text-[10px] text-slate-400 uppercase font-bold tracking-widest">
@@ -391,7 +408,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, currentLogo, set
 
       <div className="flex justify-between items-center p-2 pt-6 border-t border-slate-800">
         <button 
-           onClick={handleFactoryReset}
+           onClick={initiateFactoryReset}
            className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all border border-red-900/50 text-red-500 hover:bg-red-900/20 hover:text-red-400 text-xs"
         >
             <AlertTriangle size={16} /> FACTORY RESET DATA
@@ -407,6 +424,50 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, currentLogo, set
           {saved ? 'CONFIGURATION SAVED!' : 'UPDATE ALL PARAMETERS'}
         </button>
       </div>
+
+       {/* Reset Modal */}
+       {showResetModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+                    <X size={20} />
+                </button>
+                <div className="flex flex-col items-center gap-2">
+                    <div className="p-4 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2">
+                        <AlertTriangle size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-white text-center">FACTORY RESET</h3>
+                    <p className="text-xs text-red-300 text-center leading-relaxed">
+                        CRITICAL WARNING: This will permanently delete ALL data including employees, payroll history, and settings. This action is IRREVERSIBLE.
+                    </p>
+                </div>
+                
+                <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+                        <KeyRound size={16} />
+                        <span>Supervisor Authorization</span>
+                    </div>
+                    <input 
+                        type="password" 
+                        placeholder="Enter Admin Password" 
+                        autoFocus
+                        className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all`}
+                        value={resetPassword}
+                        onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }}
+                        onKeyDown={(e) => e.key === 'Enter' && executeFactoryReset()}
+                    />
+                    {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
+                </div>
+                
+                <button 
+                    onClick={executeFactoryReset}
+                    className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-900/20 transition-all flex items-center justify-center gap-2"
+                >
+                    <Trash2 size={18} /> CONFIRM DELETE ALL DATA
+                </button>
+            </div>
+        </div>
+       )}
     </div>
   );
 };

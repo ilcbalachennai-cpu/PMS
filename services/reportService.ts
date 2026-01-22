@@ -195,17 +195,44 @@ export const generatePaySlipsPDF = (
 export const generatePFECR = (results: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string) => {
     const data = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        // EPF Wages is capped at 15000 for standard calculation unless higher wages is selected
-        const pfWageBase = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
-        const cappedWage = Math.min(pfWageBase, 15000);
+        
+        // --- PF Wage Calculation Logic (Mirrors payrollEngine.ts) ---
+        // Step 1: A = Basic + DA + Retaining
+        const wageA = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
+        // Step 2: B = Gross
+        const wageB = r.earnings.total;
+        // Step 3: C = Gross - A
+        const wageC = wageB - wageA;
+        // Step 4: D = Excess if C > 50% of B
+        let wageD = 0;
+        if (wageB > 0) {
+             const allowancePercentage = wageC / wageB;
+             if (allowancePercentage > 0.50) {
+                 const fiftyPercentOfGross = Math.round(wageB * 0.50);
+                 wageD = wageC - fiftyPercentOfGross;
+             }
+        }
+        // Step 5: Gross PF Wages = A + D
+        let grossPFWage = wageA + wageD;
+        grossPFWage = Math.round(grossPFWage);
+
+        // Step 6: Capped Wage (15000) for ECR Reporting
+        const cappedWage = Math.min(grossPFWage, 15000);
+        
+        // Determining Wages for Columns
+        // EPF Wages: Use Actual Gross PF Wage (if Higher Wages option) OR Capped Wage
+        const epfWages = emp?.isPFHigherWages ? grossPFWage : cappedWage;
+        
+        // EPS Wages: Strictly capped at 15000
+        const epsWages = cappedWage;
         
         return {
             UAN: emp?.uanc || '',
             Name: emp?.name || '',
             Gross: r.earnings.total,
-            EPF_Wages: emp?.isPFHigherWages ? pfWageBase : cappedWage,
-            EPS_Wages: cappedWage, // EPS is strictly capped at 15000
-            EDLI_Wages: cappedWage, // EDLI capped at 15000
+            EPF_Wages: epfWages,
+            EPS_Wages: epsWages,
+            EDLI_Wages: epsWages, // EDLI follows EPS Cap
             EE_Share: r.deductions.epf,
             ER_Share: r.employerContributions.epf,
             EPS_Share: r.employerContributions.eps,
