@@ -1,10 +1,11 @@
 
 import React, { useState } from 'react';
-import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet } from 'lucide-react';
+import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw } from 'lucide-react';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy } from '../types';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
 import PayrollProcessor from './PayrollProcessor';
+import PayCycleGateway from './PayCycleGateway';
 
 interface PayProcessProps {
   employees: Employee[];
@@ -26,7 +27,7 @@ interface PayProcessProps {
 
 const PayProcess: React.FC<PayProcessProps> = (props) => {
   const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'payroll'>('attendance');
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const [isGatewayOpen, setIsGatewayOpen] = useState(true);
 
   const TabButton = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
     <button
@@ -42,6 +43,20 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
     </button>
   );
 
+  // GATEWAY VIEW
+  if (isGatewayOpen) {
+    return (
+        <PayCycleGateway 
+            month={props.month}
+            setMonth={props.setMonth}
+            year={props.year}
+            setYear={props.setYear}
+            onProceed={() => setIsGatewayOpen(false)}
+        />
+    );
+  }
+
+  // MAIN WORKSPACE VIEW
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       
@@ -54,32 +69,21 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 </div>
                 <div>
                     <h2 className="text-xl font-black text-white">Monthly Pay Process</h2>
-                    <p className="text-slate-400 text-sm">Select the period and complete the 3-step cycle.</p>
+                    <p className="text-slate-400 text-sm">Active Period: <span className="text-white font-bold">{props.month} {props.year}</span></p>
                 </div>
             </div>
 
-            <div className="flex items-center gap-3 bg-[#0f172a] p-2 rounded-xl border border-slate-700">
-                <select 
-                    value={props.month}
-                    onChange={e => props.setMonth(e.target.value)}
-                    className="bg-transparent border-none text-white font-bold text-sm focus:ring-0 cursor-pointer px-2 outline-none"
-                >
-                    {months.map(m => <option key={m} value={m} className="bg-[#0f172a]">{m}</option>)}
-                </select>
-                <div className="w-px h-6 bg-slate-700"></div>
-                <select 
-                    value={props.year}
-                    onChange={e => props.setYear(+e.target.value)}
-                    className="bg-transparent border-none text-white font-bold text-sm focus:ring-0 cursor-pointer px-2 outline-none"
-                >
-                    <option value={2024} className="bg-[#0f172a]">2024</option>
-                    <option value={2025} className="bg-[#0f172a]">2025</option>
-                </select>
-            </div>
+            <button 
+                onClick={() => setIsGatewayOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-[#0f172a] hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition-all text-xs font-bold"
+            >
+                <RefreshCw size={14} />
+                Change Pay Period
+            </button>
         </div>
 
         {/* 2. Navigation Tabs */}
-        <div className="flex gap-2 mt-8 border-b border-slate-700 pb-1">
+        <div className="flex gap-2 mt-8 border-b border-slate-700 pb-1 overflow-x-auto">
             <TabButton id="attendance" label="1. Attendance" icon={CalendarDays} />
             <TabButton id="ledgers" label="2. Manage Advances" icon={Wallet} />
             <TabButton id="payroll" label="3. Run Payroll" icon={Calculator} />
@@ -99,6 +103,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 setYear={props.setYear}
                 savedRecords={props.savedRecords}
                 leaveLedgers={props.leaveLedgers}
+                setLeaveLedgers={props.setLeaveLedgers} // Updated: Pass setter
                 hideContextSelector={true} // New prop to hide internal selector
             />
         )}

@@ -1,8 +1,8 @@
 
-import React, { useMemo } from 'react';
-import { ShieldCheck, FileSpreadsheet, FileCode, FileText, Download, Eye, ScrollText, Landmark, Lock } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { ShieldCheck, FileSpreadsheet, FileCode, FileText, Download, Eye, ScrollText, Landmark, Lock, AlertTriangle, Scale, BookOpen, X } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig } from '../types';
-import { generatePFECR, generateESIReturn, generatePTReport, generateTDSReport } from '../services/reportService';
+import { generatePFECR, generateESIReturn, generatePTReport, generateTDSReport, generateCodeOnWagesReport } from '../services/reportService';
 
 interface StatutoryReportsProps {
   payrollHistory: PayrollResult[];
@@ -23,6 +23,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     globalYear,
     setGlobalYear
 }) => {
+  const [showCode88Modal, setShowCode88Modal] = useState(false);
   
   // Check if current month is finalized
   const isFinalized = useMemo(() => {
@@ -50,8 +51,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
              generatePTReport(currentData, employees, fileName);
         } else if (reportName.includes('Form 16A') || reportName.includes('Income Tax')) {
              generateTDSReport(currentData, employees, fileName);
+        } else if (reportName.includes('Code 88') || reportName.includes('Social Security')) {
+             generateCodeOnWagesReport(currentData, employees, format as any, fileName);
         } else if (reportName.includes('Form')) {
-            // Placeholder for PDF Forms that require complex layout (Form 5, 10, etc)
              alert(`${reportName} generation is a premium feature coming soon. Please use ECR/Returns for filing.`);
         } else {
             alert("Report generation not implemented for this type yet.");
@@ -63,7 +65,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500">
+    <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 relative">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#1e293b] p-6 rounded-xl border border-slate-800">
         <div>
            <h2 className="text-2xl font-black text-white">Statutory Reports</h2>
@@ -121,15 +123,27 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
               </div>
             </div>
 
-            {/* Arrear ECR */}
-            <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-800/50 space-y-3">
-              <span className="text-xs font-medium text-slate-300 block border-b border-slate-800 pb-2">Arrear ECR</span>
+            {/* Code on Wages 2020 Impact Report */}
+            <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-900/40 space-y-3">
+              <div className="flex items-center justify-between border-b border-amber-900/40 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Scale size={14} className="text-amber-400" />
+                    <span className="text-xs font-bold text-amber-300">Code on Social Security 2020(Clause 88)</span>
+                  </div>
+                  <button 
+                    onClick={() => setShowCode88Modal(true)}
+                    className="flex items-center gap-1 text-[9px] font-bold text-amber-400 hover:text-white bg-amber-900/40 px-2 py-1 rounded transition-colors"
+                  >
+                    <BookOpen size={10} /> Read Clause
+                  </button>
+              </div>
+              <p className="text-[10px] text-amber-200/70">PF contribution impact on Employees - Report</p>
               <div className="flex gap-2">
-                <button onClick={() => handleDownload('PF Arrear ECR', 'Excel')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-green-900/20 text-green-400 px-2 py-1.5 rounded hover:bg-green-900/40 border border-green-900/30">
+                <button onClick={() => handleDownload('Code 88 Impact Report', 'Excel')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-amber-900/30 text-amber-400 px-2 py-1.5 rounded hover:bg-amber-900/50 border border-amber-900/40">
                   <FileSpreadsheet size={12} /> Excel
                 </button>
-                <button onClick={() => handleDownload('PF Arrear ECR', 'Text')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-slate-700 text-slate-300 px-2 py-1.5 rounded hover:bg-slate-600 border border-slate-600">
-                  <FileCode size={12} /> Text
+                <button onClick={() => handleDownload('Code 88 Impact Report', 'PDF')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-amber-900/30 text-amber-400 px-2 py-1.5 rounded hover:bg-amber-900/50 border border-amber-900/40">
+                  <FileText size={12} /> PDF
                 </button>
               </div>
             </div>
@@ -151,18 +165,6 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
               <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 transition-colors border border-slate-800/50">
                 <span className="text-xs font-medium text-slate-300">Form 12A (Monthly Statement)</span>
                 <button onClick={() => handleDownload('Form 12A', 'PDF')} className="text-blue-400 hover:text-white transition-colors p-1.5 bg-blue-900/20 rounded">
-                  <FileText size={14} />
-                </button>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 transition-colors border border-slate-800/50">
-                <span className="text-xs font-medium text-slate-300">Form 3A (Annual Contribution)</span>
-                <button onClick={() => handleDownload('Form 3A', 'PDF')} className="text-blue-400 hover:text-white transition-colors p-1.5 bg-blue-900/20 rounded">
-                  <FileText size={14} />
-                </button>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 transition-colors border border-slate-800/50">
-                <span className="text-xs font-medium text-slate-300">Form 6A (Consolidated Annual)</span>
-                <button onClick={() => handleDownload('Form 6A', 'PDF')} className="text-blue-400 hover:text-white transition-colors p-1.5 bg-blue-900/20 rounded">
                   <FileText size={14} />
                 </button>
               </div>
@@ -255,8 +257,72 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             </div>
           </div>
         </div>
-
       </div>
+      )}
+
+      {/* CODE 88 INFORMATION MODAL */}
+      {showCode88Modal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-xl shadow-2xl flex flex-col text-slate-900 relative">
+                <div className="p-6 bg-slate-100 border-b border-slate-300 flex justify-between items-center sticky top-0 z-10">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-amber-100 p-2 rounded-lg text-amber-700">
+                            <Scale size={24} />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-black text-slate-900">Definition of "Wages" - Clause (88)</h2>
+                            <p className="text-xs text-slate-600 font-bold uppercase tracking-wider">Social Security Code, 2020</p>
+                        </div>
+                    </div>
+                    <button onClick={() => setShowCode88Modal(false)} className="text-slate-500 hover:text-red-500 bg-white p-2 rounded-full shadow hover:shadow-lg transition-all">
+                        <X size={20} />
+                    </button>
+                </div>
+                
+                <div className="p-8 space-y-6 font-serif leading-relaxed text-sm bg-slate-50/50">
+                    <div className="p-4 bg-amber-50 border-l-4 border-amber-500 text-amber-900 italic mb-6">
+                        "PF Wages as Per Code 88" calculation is derived from the following legal definition. Ensure allowances do not exceed 50% of the total remuneration.
+                    </div>
+
+                    <p className="font-bold text-slate-800">(88) "wages" means all remuneration, whether by way of salaries, allowances or otherwise, expressed in terms of money or capable of being so expressed which would, if the terms of employment, express or implied, were fulfilled, be payable to a person employed in respect of his employment or of work done in such employment, and includes,—</p>
+                    
+                    <ul className="list-[lower-alpha] pl-8 space-y-1 text-slate-700 font-medium">
+                        <li>basic pay;</li>
+                        <li>dearness allowance; and</li>
+                        <li>retaining allowance, if any,</li>
+                    </ul>
+
+                    <p className="font-bold text-slate-800 mt-4">but does not include—</p>
+                    <ul className="list-[lower-alpha] pl-8 space-y-2 text-slate-600">
+                        <li>any bonus payable under any law for the time being in force, which does not form part of the remuneration payable under the terms of employment;</li>
+                        <li>the value of any house-accommodation, or of the supply of light, water, medical attendance or other amenity or of any service excluded from the computation of wages by a general or special order of the appropriate Government;</li>
+                        <li>any contribution paid by the employer to any pension or provident fund, and the interest which may have accrued thereon;</li>
+                        <li>any conveyance allowance or the value of any travelling concession;</li>
+                        <li>any sum paid to the employed person to defray special expenses entailed on him by the nature of his employment;</li>
+                        <li>house rent allowance;</li>
+                        <li>remuneration payable under any award or settlement between the parties or order of a court or Tribunal;</li>
+                        <li>any overtime allowance;</li>
+                        <li>any commission payable to the employee;</li>
+                        <li>any gratuity payable on the termination of employment;</li>
+                        <li>any retrenchment compensation or other retirement benefit payable to the employee or any ex gratia payment made to him on the termination of employment, under any law for the time being in force:</li>
+                    </ul>
+
+                    <div className="p-6 bg-blue-50 border border-blue-200 rounded-xl mt-6">
+                        <p className="font-bold text-blue-900 mb-2 underline">The Proviso (Critical Calculation Rule):</p>
+                        <p className="text-blue-800 font-medium text-justify">
+                            Provided that for calculating the wages under this clause, if payments made by the employer to the employee under sub-clauses (a) to (i) <span className="text-red-600 font-bold bg-red-100 px-1">exceeds one-half</span>, or such other per cent. as may be notified by the Central Government, of the all remuneration calculated under this clause, the <span className="text-red-600 font-bold bg-red-100 px-1">amount which exceeds such one-half, or the per cent. so notified, shall be deemed as remuneration and shall be accordingly added in wages under this clause</span>:
+                        </p>
+                        <p className="text-blue-800 font-medium text-justify mt-4">
+                            Provided further that for the purpose of equal wages to all genders and for the purpose of payment of wages, the emoluments specified in sub-clauses (d), (f), (g) and (h) shall be taken for computation of wage.
+                        </p>
+                    </div>
+
+                    <p className="text-slate-600 italic">
+                        <span className="font-bold text-slate-800 not-italic">Explanation.—</span>Where an employee is given in lieu of the whole or part of the wages payable to him, any remuneration in kind by his employer, the value of such remuneration in kind which does not exceed fifteen per cent. of the total wages payable to him, shall be deemed to form part of the wages of such employee.
+                    </p>
+                </div>
+            </div>
+        </div>
       )}
     </div>
   );

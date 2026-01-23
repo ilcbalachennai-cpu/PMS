@@ -1,6 +1,7 @@
 
-import React, { useState, useMemo } from 'react';
-import { Upload, Table as TableIcon, CheckCircle2, AlertCircle, FileSpreadsheet, Save, Lock, AlertTriangle, Users, Edit2, X, CheckCircle, HelpCircle } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { Upload, Table as TableIcon, CheckCircle2, AlertCircle, FileSpreadsheet, Save, Lock, AlertTriangle, Users, Edit2, X, CheckCircle, HelpCircle, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { Employee, Attendance, PayrollResult, LeaveLedger } from '../types';
 
 interface AttendanceManagerProps {
@@ -13,7 +14,8 @@ interface AttendanceManagerProps {
   setMonth: (m: string) => void;
   setYear: (y: number) => void;
   savedRecords: PayrollResult[];
-  leaveLedgers: LeaveLedger[]; // Added for validation
+  leaveLedgers: LeaveLedger[]; 
+  setLeaveLedgers?: (ledgers: LeaveLedger[]) => void; // Added setter for syncing
   hideContextSelector?: boolean;
 }
 
@@ -27,11 +29,13 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   setYear,
   savedRecords,
   leaveLedgers,
+  setLeaveLedgers,
   hideContextSelector = false
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false); // Used for persistent saved state
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Custom Modal State
   const [modalState, setModalState] = useState<{
@@ -52,7 +56,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   // Helper to get or create attendance record for current view
   const getAttendance = (empId: string) => {
     return attendances.find(a => a.employeeId === empId && a.month === month && a.year === year) || 
-           { employeeId: empId, month: month, year: year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
+           { employeeId: empId, month: month, year: year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0, encashedDays: 0 };
   };
 
   const handleUpdate = (empId: string, field: keyof Attendance, value: number) => {
@@ -68,6 +72,10 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     // Basic validation, strict validation happens on save/render
     if (field === 'lopDays' || field === 'presentDays' || field === 'earnedLeave' || field === 'sickLeave' || field === 'casualLeave') {
       newVal = Math.min(newVal, daysInMonth);
+    }
+    // Encashment validation (logic wise, you can't encash more than 30 usually, but validation against balance happens in render/save)
+    if (field === 'encashedDays') {
+        newVal = Math.max(0, value); 
     }
 
     if (exists) {
@@ -88,6 +96,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
          sickLeave: 0,
          casualLeave: 0,
          lopDays: 0,
+         encashedDays: 0,
          [field]: newVal
       };
       setAttendances([...attendances, newRecord]);
@@ -97,10 +106,10 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   const handleSave = () => {
     if (isLocked) return;
 
-    // VALIDATION: Check if at least one employee has non-zero data
+    // VALIDATION 1: Check if at least one employee has non-zero data
     const hasData = employees.some(emp => {
         const att = getAttendance(emp.id);
-        const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0);
+        const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0) + (att.encashedDays || 0);
         return total > 0;
     });
 
@@ -114,15 +123,73 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
         return;
     }
 
+    // VALIDATION 2: Check Ledger Balances against CAPACITY (Opening + Eligible)
+    // We check against Total Capacity because Balance might be reduced if we already saved once.
+    const ledgerErrors = employees.filter(emp => {
+        const att = getAttendance(emp.id);
+        const ledger = leaveLedgers.find(l => l.employeeId === emp.id);
+        if (!ledger) return false;
+
+        const elUsed = (att.earnedLeave || 0) + (att.encashedDays || 0);
+        const elCapacity = (ledger.el.opening || 0) + (ledger.el.eligible || 0);
+        const isELExceeded = elUsed > elCapacity;
+
+        const slCapacity = (ledger.sl.eligible || 0); // Assuming SL eligible includes opening/total for year/month
+        const isSLExceeded = att.sickLeave > slCapacity;
+
+        const clCapacity = (ledger.cl.accumulation || 0); // CL uses accumulation as total available
+        const isCLExceeded = (att.casualLeave || 0) > clCapacity;
+
+        return isELExceeded || isSLExceeded || isCLExceeded;
+    });
+
+    if (ledgerErrors.length > 0) {
+        setModalState({
+            isOpen: true,
+            type: 'error',
+            title: 'Balance Exceeded',
+            message: `Cannot save: Leave usage exceeds available limit for ${ledgerErrors.length} employee(s).\n\nEnsure usage does not exceed Opening + Eligible credits.`
+        });
+        return;
+    }
+
     setIsSaving(true);
-    // Persist to LocalStorage
+    
+    // 1. Sync Attendance to Leave Ledgers (Update Availed & Balance)
+    if (setLeaveLedgers) {
+        const updatedLedgers = leaveLedgers.map(ledger => {
+            const att = getAttendance(ledger.employeeId);
+            
+            // Recalculate Balances based on Current Attendance
+            // EL
+            const elAvailed = att.earnedLeave || 0;
+            const elEncashed = att.encashedDays || 0;
+            const elBalance = (ledger.el.opening + ledger.el.eligible) - elEncashed - elAvailed;
+
+            // SL
+            const slAvailed = att.sickLeave || 0;
+            const slBalance = (ledger.sl.eligible) - slAvailed;
+
+            // CL
+            const clAvailed = att.casualLeave || 0;
+            const clBalance = (ledger.cl.accumulation) - clAvailed;
+
+            return {
+                ...ledger,
+                el: { ...ledger.el, availed: elAvailed, encashed: elEncashed, balance: elBalance },
+                sl: { ...ledger.sl, availed: slAvailed, balance: slBalance },
+                cl: { ...ledger.cl, availed: clAvailed, balance: clBalance }
+            };
+        });
+        setLeaveLedgers(updatedLedgers);
+    }
+
+    // 2. Persist Attendance
     try {
         localStorage.setItem('app_attendance', JSON.stringify(attendances));
         setTimeout(() => {
             setIsSaving(false);
             setJustSaved(true);
-            // NOTE: We do NOT set a timeout to revert 'justSaved'. 
-            // It stays true (Green button) until handleUpdate is called (user edits something).
         }, 800);
     } catch (e) {
         console.error(e);
@@ -136,19 +203,115 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     }
   };
 
-  const simulateExcelUpload = () => {
+  const downloadTemplate = () => {
+    const headers = ["Employee ID", "Name", "Present Days", "EL (Availed)", "EL Encash", "SL (Sick)", "CL (Casual)", "LOP"];
+    // Pre-fill with current employees
+    const data = employees.map(emp => [
+        emp.id,
+        emp.name,
+        0, 0, 0, 0, 0, 0
+    ]);
+    
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Attendance");
+    XLSX.writeFile(wb, `Attendance_Template_${month}_${year}.xlsx`);
+  };
+
+  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isLocked) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+
     setIsUploading(true);
-    setTimeout(() => {
-      setIsUploading(false);
-      // In a real app, this would parse the excel and update 'attendances' for the selected month
-      setModalState({
-          isOpen: true,
-          type: 'success',
-          title: 'Upload Successful',
-          message: 'Verified ID, Name, and restricted LOP values for ' + employees.length + ' records.'
-      });
-    }, 1500);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        const newAttendances = [...attendances];
+        let updateCount = 0;
+
+        data.forEach((row: any) => {
+            // Flexible key matching helper
+            const getVal = (keys: string[]) => {
+                for (const k of keys) {
+                    const foundKey = Object.keys(row).find(rk => rk.trim().toLowerCase() === k.toLowerCase());
+                    if (foundKey && row[foundKey] !== undefined) return Number(row[foundKey]);
+                }
+                return 0;
+            };
+
+            const getStr = (keys: string[]) => {
+                for (const k of keys) {
+                    const foundKey = Object.keys(row).find(rk => rk.trim().toLowerCase() === k.toLowerCase());
+                    if (foundKey && row[foundKey]) return String(row[foundKey]).trim();
+                }
+                return null;
+            };
+
+            const empId = getStr(['Employee ID', 'ID', 'Emp ID']);
+            if (!empId) return;
+
+            // Update existing or create new for THIS MONTH/YEAR
+            const existingIdx = newAttendances.findIndex(a => a.employeeId === empId && a.month === month && a.year === year);
+            
+            // Clean inputs
+            const present = Math.min(getVal(['Present Days', 'Present', 'Paid Days']) || 0, daysInMonth);
+            const el = getVal(['EL (Availed)', 'EL', 'Earned Leave', 'EL (Earned)']);
+            const encash = getVal(['EL Encash', 'Encashment', 'EL Encashed']);
+            const sl = getVal(['SL (Sick)', 'SL', 'Sick Leave']);
+            const cl = getVal(['CL (Casual)', 'CL', 'Casual Leave']);
+            const lop = getVal(['LOP', 'Loss of Pay', 'Absent']);
+
+            const attRecord: Attendance = {
+                employeeId: empId,
+                month,
+                year,
+                presentDays: present,
+                earnedLeave: el,
+                sickLeave: sl,
+                casualLeave: cl,
+                lopDays: lop,
+                encashedDays: encash
+            };
+
+            if (existingIdx >= 0) {
+                newAttendances[existingIdx] = attRecord;
+            } else {
+                newAttendances.push(attRecord);
+            }
+            updateCount++;
+        });
+
+        setAttendances(newAttendances);
+        setJustSaved(false); // Reset saved status as data changed
+        setModalState({
+            isOpen: true,
+            type: 'success',
+            title: 'Import Successful',
+            message: `Updated attendance records for ${updateCount} employees.\n\nPlease review and click 'Update Attendance' to save.`
+        });
+
+      } catch (error: any) {
+          console.error(error);
+          setModalState({
+            isOpen: true,
+            type: 'error',
+            title: 'Import Failed',
+            message: 'Could not parse Excel file. Please use the template.'
+        });
+      } finally {
+          setIsUploading(false);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    };
+    reader.readAsBinaryString(file);
   };
 
   if (employees.length === 0) {
@@ -175,6 +338,21 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                 <p className="text-xs text-amber-300/80">
                     Payroll for {month} {year} has been finalized. Attendance modification is disabled to ensure data integrity.
                     <br/> To edit, unlock the payroll period from "Pay Reports".
+                </p>
+            </div>
+        </div>
+      )}
+
+      {/* Saved/Read-Only Status Banner */}
+      {!isLocked && justSaved && (
+        <div className="bg-emerald-900/20 border border-emerald-700 p-4 rounded-xl flex gap-3 items-center animate-in fade-in slide-in-from-top-2">
+            <div className="p-2 bg-emerald-900/40 rounded-full text-emerald-400">
+                <CheckCircle2 size={20} />
+            </div>
+            <div>
+                <h3 className="font-bold text-emerald-200 text-sm">Attendance Saved & Synced</h3>
+                <p className="text-xs text-emerald-300/80">
+                    Data is currently in <b>Read-Only</b> mode. Click 'Modify Attendance' to make changes.
                 </p>
             </div>
         </div>
@@ -210,12 +388,12 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
 
         <div className="flex gap-3">
              <button 
-                onClick={handleSave}
+                onClick={justSaved ? () => setJustSaved(false) : handleSave}
                 disabled={isSaving || isLocked}
                 className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed ${
                     justSaved
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20' 
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-900/20' 
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20'
                 }`}
              >
                 {isSaving ? (
@@ -223,22 +401,37 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                 ) : isLocked ? (
                     <Lock size={18} />
                 ) : justSaved ? (
-                    <CheckCircle2 size={18} />
-                ) : (
                     <Edit2 size={18} />
+                ) : (
+                    <Save size={18} />
                 )}
                 
-                {isLocked ? 'Locked' : justSaved ? 'Saved' : 'Update Attendance'}
+                {isLocked ? 'Locked' : justSaved ? 'Modify Attendance' : 'Save Attendance'}
              </button>
 
             <button 
-              onClick={simulateExcelUpload}
+                onClick={downloadTemplate}
+                className="flex items-center gap-2 bg-slate-700 text-slate-200 px-4 py-2.5 rounded-lg font-bold transition-all border border-slate-600 hover:bg-slate-600 text-sm"
+                title="Download Excel Template"
+            >
+                <Download size={16} /> Template
+            </button>
+
+            <button 
+              onClick={() => fileInputRef.current?.click()}
               disabled={isUploading || isLocked}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-lg font-bold transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-bold transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed"
             >
               {isUploading ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : <Upload size={18} />}
-              Excel Upload
+              Excel Import
             </button>
+            <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleExcelUpload} 
+                className="hidden" 
+                accept=".xlsx, .xls" 
+            />
         </div>
       </div>
 
@@ -248,7 +441,10 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
             <tr>
               <th className="px-6 py-4">Employee Identity</th>
               <th className="px-4 py-4 text-center">Present Days</th>
-              <th className="px-4 py-4 text-center">EL (Earned)</th>
+              {/* UPDATED: Renamed from EL (Earned) to EL (Availed) */}
+              <th className="px-4 py-4 text-center">EL (Availed)</th>
+              {/* UPDATED: Font color to Orange */}
+              <th className="px-4 py-4 text-center text-orange-400">EL Encash</th>
               <th className="px-4 py-4 text-center">SL (Sick)</th>
               <th className="px-4 py-4 text-center">CL (Casual)</th>
               <th className="px-4 py-4 text-center text-red-400">LOP</th>
@@ -258,20 +454,29 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
           <tbody className="divide-y divide-slate-800">
             {employees.map(emp => {
               const att = getAttendance(emp.id);
-              const ledger = leaveLedgers.find(l => l.employeeId === emp.id) || { el: { balance: 0 }, sl: { balance: 0 }, cl: { balance: 0 } };
+              const ledger = leaveLedgers.find(l => l.employeeId === emp.id) || { el: { balance: 0, opening: 0, eligible: 0 }, sl: { balance: 0, eligible: 0 }, cl: { balance: 0, accumulation: 0 } };
               
               const totalAccounted = att.presentDays + att.earnedLeave + att.sickLeave + (att.casualLeave || 0) + att.lopDays;
               const isInvalid = totalAccounted > daysInMonth;
               
-              // Validate Balances
-              const isELExceeded = att.earnedLeave > (ledger.el.balance || 0);
-              const isSLExceeded = att.sickLeave > (ledger.sl.balance || 0);
-              const isCLExceeded = (att.casualLeave || 0) > (ledger.cl.balance || 0);
+              // Validate Balances against CAPACITY (Opening + Eligible) to avoid double counting regression
+              const elUsed = (att.earnedLeave || 0) + (att.encashedDays || 0);
+              const elCapacity = (ledger.el.opening || 0) + (ledger.el.eligible || 0);
+              const isELExceeded = elUsed > elCapacity;
+
+              const slCapacity = (ledger.sl.eligible || 0);
+              const isSLExceeded = att.sickLeave > slCapacity;
+
+              const clCapacity = (ledger.cl.accumulation || 0);
+              const isCLExceeded = (att.casualLeave || 0) > clCapacity;
 
               const exceededErrors = [];
-              if (isELExceeded) exceededErrors.push(`EL Balance: ${ledger.el.balance}`);
-              if (isSLExceeded) exceededErrors.push(`SL Balance: ${ledger.sl.balance}`);
-              if (isCLExceeded) exceededErrors.push(`CL Balance: ${ledger.cl.balance}`);
+              if (isELExceeded) exceededErrors.push(`EL Limit: ${elCapacity}`);
+              if (isSLExceeded) exceededErrors.push(`SL Limit: ${slCapacity}`);
+              if (isCLExceeded) exceededErrors.push(`CL Limit: ${clCapacity}`);
+
+              // Force disable if saved or locked
+              const inputDisabled = isLocked || justSaved;
 
               return (
                 <tr key={emp.id} className="hover:bg-slate-800/50 transition-colors">
@@ -280,46 +485,58 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     <div className="text-[10px] text-slate-400 uppercase tracking-tight font-mono">{emp.id}</div>
                   </td>
                   <td className="px-4 py-4 text-center">
-                    <input disabled={isLocked} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1.5 text-center text-sm text-white font-mono disabled:opacity-50" value={att.presentDays} onChange={e => handleUpdate(emp.id, 'presentDays', +e.target.value || 0)} />
+                    <input disabled={inputDisabled} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1.5 text-center text-sm text-white font-mono disabled:opacity-50" value={att.presentDays} onChange={e => handleUpdate(emp.id, 'presentDays', +e.target.value || 0)} />
                   </td>
                   <td className="px-4 py-4 text-center">
                     <div className="relative">
                         <input 
-                            disabled={isLocked} 
+                            disabled={inputDisabled} 
                             type="number" 
                             className={`w-16 bg-[#0f172a] border rounded p-1.5 text-center text-sm font-mono disabled:opacity-50 ${isELExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700 text-white'}`} 
                             value={att.earnedLeave} 
                             onChange={e => handleUpdate(emp.id, 'earnedLeave', +e.target.value || 0)} 
                         />
-                        {isELExceeded && <div className="absolute -top-3 left-0 w-full text-[8px] text-red-400 font-bold bg-black/80 rounded px-1">Max: {ledger.el.balance}</div>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 text-center">
+                    <div className="relative">
+                        {/* UPDATED: Input styling to Orange */}
+                        <input 
+                            disabled={inputDisabled} 
+                            type="number" 
+                            className={`w-16 bg-orange-900/20 border rounded p-1.5 text-center text-sm font-mono font-bold disabled:opacity-50 ${isELExceeded ? 'border-red-500 text-red-500 bg-red-900/10' : 'border-orange-900/50 text-orange-400'}`} 
+                            value={att.encashedDays || 0} 
+                            onChange={e => handleUpdate(emp.id, 'encashedDays', +e.target.value || 0)} 
+                        />
+                        {isELExceeded && <div className="absolute -top-3 left-0 w-full text-[8px] text-red-400 font-bold bg-black/80 rounded px-1">Max: {elCapacity}</div>}
                     </div>
                   </td>
                   <td className="px-4 py-4 text-center">
                     <div className="relative">
                         <input 
-                            disabled={isLocked} 
+                            disabled={inputDisabled} 
                             type="number" 
                             className={`w-16 bg-[#0f172a] border rounded p-1.5 text-center text-sm font-mono disabled:opacity-50 ${isSLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700 text-white'}`} 
                             value={att.sickLeave} 
                             onChange={e => handleUpdate(emp.id, 'sickLeave', +e.target.value || 0)} 
                         />
-                        {isSLExceeded && <div className="absolute -top-3 left-0 w-full text-[8px] text-red-400 font-bold bg-black/80 rounded px-1">Max: {ledger.sl.balance}</div>}
+                        {isSLExceeded && <div className="absolute -top-3 left-0 w-full text-[8px] text-red-400 font-bold bg-black/80 rounded px-1">Max: {slCapacity}</div>}
                     </div>
                   </td>
                    <td className="px-4 py-4 text-center">
                     <div className="relative">
                         <input 
-                            disabled={isLocked} 
+                            disabled={inputDisabled} 
                             type="number" 
                             className={`w-16 bg-[#0f172a] border rounded p-1.5 text-center text-sm font-mono disabled:opacity-50 ${isCLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700 text-white'}`} 
                             value={att.casualLeave || 0} 
                             onChange={e => handleUpdate(emp.id, 'casualLeave', +e.target.value || 0)} 
                         />
-                        {isCLExceeded && <div className="absolute -top-3 left-0 w-full text-[8px] text-red-400 font-bold bg-black/80 rounded px-1">Max: {ledger.cl.balance}</div>}
+                        {isCLExceeded && <div className="absolute -top-3 left-0 w-full text-[8px] text-red-400 font-bold bg-black/80 rounded px-1">Max: {clCapacity}</div>}
                     </div>
                   </td>
                   <td className="px-4 py-4 text-center">
-                    <input disabled={isLocked} type="number" className="w-16 bg-red-900/10 border border-red-900/40 rounded p-1.5 text-center text-sm text-red-200 font-bold font-mono disabled:opacity-50" value={att.lopDays} onChange={e => handleUpdate(emp.id, 'lopDays', +e.target.value || 0)} />
+                    <input disabled={inputDisabled} type="number" className="w-16 bg-red-900/10 border border-red-900/40 rounded p-1.5 text-center text-sm text-red-200 font-bold font-mono disabled:opacity-50" value={att.lopDays} onChange={e => handleUpdate(emp.id, 'lopDays', +e.target.value || 0)} />
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1">
@@ -330,8 +547,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                         )}
                         {exceededErrors.length > 0 ? (
                             <div className="flex flex-col gap-1 text-[10px] text-amber-400 bg-amber-900/20 px-2 py-1 rounded border border-amber-900/50">
-                                <div className="flex items-center gap-1 font-bold"><AlertTriangle size={12} /> Restricted Balance</div>
-                                {exceededErrors.map((err, i) => <span key={i} className="text-amber-200/70">{err} - Move excess to LOP</span>)}
+                                <div className="flex items-center gap-1 font-bold"><AlertTriangle size={12} /> Restricted Limit</div>
+                                {exceededErrors.map((err, i) => <span key={i} className="text-amber-200/70">{err}</span>)}
                             </div>
                         ) : !isInvalid && (
                             <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-bold bg-emerald-950/20 px-2 py-1 rounded border border-emerald-900/50 w-fit">

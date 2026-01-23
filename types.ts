@@ -37,6 +37,7 @@ export interface Attendance {
   sickLeave: number;
   casualLeave: number;
   lopDays: number;
+  encashedDays?: number; // New field for Leave Encashment input in Attendance
 }
 
 export type PFComplianceType = 'Statutory' | 'Voluntary';
@@ -149,6 +150,7 @@ export interface PayrollResult {
   gratuityAccrual: number;
   netPay: number;
   status?: 'Draft' | 'Finalized'; // New field for Freezing data
+  isCode88?: boolean;
 }
 
 export interface User {

@@ -5,6 +5,44 @@ import autoTable from 'jspdf-autotable';
 import { Employee, PayrollResult } from '../types';
 import { BRAND_CONFIG } from '../constants';
 
+// --- Utility: Number to Words (Indian System) ---
+export const numberToWords = (num: number): string => {
+  const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
+  const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  const regex = /^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/;
+  
+  const getLT20 = (n: number) => a[Number(n)];
+  const getGT20 = (n: number) => b[Number(n[0])] + ' ' + a[Number(n[1])];
+
+  const numToWords = (input: number): string => {
+    if (input === 0) return '';
+    
+    // Handle large numbers by breaking down
+    if (input >= 10000000) { // Crore
+        return numToWords(Math.floor(input / 10000000)) + 'Crore ' + numToWords(input % 10000000);
+    }
+    if (input >= 100000) { // Lakh
+        return numToWords(Math.floor(input / 100000)) + 'Lakh ' + numToWords(input % 100000);
+    }
+    if (input >= 1000) { // Thousand
+        return numToWords(Math.floor(input / 1000)) + 'Thousand ' + numToWords(input % 1000);
+    }
+    if (input >= 100) { // Hundred
+        return numToWords(Math.floor(input / 100)) + 'Hundred ' + numToWords(input % 100);
+    }
+    
+    // Less than 100
+    if (input < 20) return getLT20(input);
+    return getGT20(input.toString() as any); // Type cast for string index access
+  };
+
+  const integerPart = Math.floor(num);
+  if (integerPart === 0) return 'Zero';
+  
+  return numToWords(integerPart).trim();
+};
+
 export const generateExcelReport = (data: any[], sheetName: string, fileName: string) => {
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
@@ -17,7 +55,8 @@ export const generatePDFTableReport = (
   headers: string[],
   data: (string | number)[][],
   fileName: string,
-  orientation: 'p' | 'l' = 'l'
+  orientation: 'p' | 'l' = 'l',
+  footnote?: string
 ) => {
   const doc = new jsPDF(orientation, 'mm', 'a4');
   
@@ -36,12 +75,23 @@ export const generatePDFTableReport = (
     startY: 30,
     theme: 'grid',
     headStyles: { fillColor: [41, 128, 185], textColor: 255, fontSize: 8 },
-    bodyStyles: { fontSize: 8 },
-    styles: { cellPadding: 2 }
+    bodyStyles: { fontSize: 7 }, // Smaller font for many columns
+    styles: { cellPadding: 1 }
   });
 
-  // Footer
+  // Footer & Footnote
   const pageCount = doc.getNumberOfPages();
+  const finalY = (doc as any).lastAutoTable.finalY + 10;
+
+  if (footnote) {
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(0); // Black for visibility
+      // Ensure footnote doesn't go off page
+      const printY = finalY > doc.internal.pageSize.height - 20 ? doc.internal.pageSize.height - 20 : finalY;
+      doc.text(footnote, 14, printY);
+  }
+
   for(let i = 1; i <= pageCount; i++) {
      doc.setPage(i);
      doc.setFontSize(8);
@@ -51,6 +101,65 @@ export const generatePDFTableReport = (
   }
 
   doc.save(`${fileName}.pdf`);
+};
+
+export const generateSimplePaySheetPDF = (
+  results: PayrollResult[],
+  employees: Employee[],
+  month: string,
+  year: number
+) => {
+  const headers = [
+    'ID', 'Name', 'Days', 
+    'Basic', 'DA', 'Retn', 'HRA', 'Conv', 'Spec', 'Othr', 'Encash', 'GROSS', // Earnings
+    'PF', 'VPF', 'ESI', 'PT', 'TDS', 'LWF', 'Adv', 'DED', // Deductions
+    'NET PAY'
+  ];
+  
+  let hasCode88 = false;
+
+  const data = results.map(r => {
+    const emp = employees.find(e => e.id === r.employeeId);
+    const special = r.earnings.special1 + r.earnings.special2 + r.earnings.special3;
+    const other = r.earnings.washing + r.earnings.attire;
+    
+    if (r.isCode88) hasCode88 = true;
+
+    // Add Asterisk to PF amount if Code 88 applies
+    const pfDisplay = r.isCode88 
+        ? `${Math.round(r.deductions.epf)}*` 
+        : Math.round(r.deductions.epf);
+
+    return [
+      r.employeeId,
+      emp?.name || '',
+      r.payableDays,
+      Math.round(r.earnings.basic),
+      Math.round(r.earnings.da),
+      Math.round(r.earnings.retainingAllowance),
+      Math.round(r.earnings.hra),
+      Math.round(r.earnings.conveyance),
+      Math.round(special),
+      Math.round(other),
+      Math.round(r.earnings.leaveEncashment),
+      Math.round(r.earnings.total),
+      pfDisplay, // Use formatted PF display
+      Math.round(r.deductions.vpf),
+      Math.round(r.deductions.esi),
+      Math.round(r.deductions.pt),
+      Math.round(r.deductions.it),
+      Math.round(r.deductions.lwf),
+      Math.round(r.deductions.advanceRecovery),
+      Math.round(r.deductions.total),
+      Math.round(r.netPay)
+    ];
+  });
+  
+  const footnote = hasCode88 
+    ? "* Code on Social Security 2020 [ Clause 88 ] impact on PF Contribution" 
+    : undefined;
+
+  generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, data as any[][], `PaySheet_${month}_${year}`, 'l', footnote);
 };
 
 export const generatePaySlipsPDF = (
@@ -140,12 +249,16 @@ export const generatePaySlipsPDF = (
     // --- Financials Table ---
     const startY = 85;
     
+    const pfAmountStr = res.isCode88 
+        ? `${res.deductions.epf.toFixed(2)}*` 
+        : res.deductions.epf.toFixed(2);
+
     autoTable(doc, {
         startY: startY,
         margin: { left: 14, right: 14 },
         head: [['Earnings', 'Amount (Rs.)', 'Deductions', 'Amount (Rs.)']],
         body: [
-            ['Basic Pay', res.earnings.basic.toFixed(2), 'Provident Fund', res.deductions.epf.toFixed(2)],
+            ['Basic Pay', res.earnings.basic.toFixed(2), 'Provident Fund', pfAmountStr],
             ['DA', res.earnings.da.toFixed(2), 'Professional Tax', res.deductions.pt.toFixed(2)],
             ['Retaining Allowance', res.earnings.retainingAllowance.toFixed(2), 'ESI', res.deductions.esi.toFixed(2)],
             ['HRA', res.earnings.hra.toFixed(2), 'Income Tax Recovery', res.deductions.it.toFixed(2)],
@@ -178,131 +291,203 @@ export const generatePaySlipsPDF = (
     doc.text("NET SALARY PAYABLE:", 20, finalY + 10);
     
     doc.setFontSize(14);
-    doc.text(`Rs. ${res.netPay.toLocaleString('en-IN')}/-`, 180, finalY + 10, { align: 'right' });
+    doc.text(`Rs. ${Math.round(res.netPay).toLocaleString('en-IN')}/-`, 180, finalY + 10, { align: 'right' });
+
+    // --- Amount in Words ---
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 41, 59);
+    const amountWords = numberToWords(Math.round(res.netPay));
+    doc.text(`Amount in Words: ${amountWords} Rupees Only`, 14, finalY + 25);
+
+    // --- Footnotes ---
+    let footerY = finalY + 35;
+    
+    if (res.isCode88) {
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(0);
+        doc.text("* Code on Social Security 2020 [ Clause 88 ] impact on PF Contribution", 14, footerY);
+        footerY += 5;
+    }
 
     // --- Footer ---
     doc.setFontSize(8);
     doc.setFont("helvetica", "italic");
     doc.setTextColor(148, 163, 184);
-    doc.text("This is a computer-generated document and does not require a signature.", 105, finalY + 30, { align: 'center' });
+    doc.text("This is a computer-generated document and does not require a signature.", 105, footerY, { align: 'center' });
   });
 
   doc.save(`PaySlips_${month}_${year}.pdf`);
 };
 
-// --- NEW STATUTORY REPORT GENERATORS ---
+export const generatePFECR = (
+  results: PayrollResult[],
+  employees: Employee[],
+  format: 'Excel' | 'Text',
+  fileName: string
+) => {
+  const headers = ['UAN', 'Member Name', 'Gross Wages', 'EPF Wages', 'EPS Wages', 'EDLI Wages', 'EPF Contri Remitted', 'EPS Contri Remitted', 'EPF EPS Diff Remitted', 'NCP Days', 'Refund of Advances'];
+  
+  const data = results.map(r => {
+    const emp = employees.find(e => e.id === r.employeeId);
+    if (!emp) return [];
+    
+    const epfWages = r.deductions.epf > 0 ? Math.round(r.deductions.epf / 0.12) : 0; 
+    const epsWages = r.employerContributions.eps > 0 ? Math.round(r.employerContributions.eps / 0.0833) : 0;
+    
+    return [
+      emp.uanc || '',
+      emp.name,
+      Math.round(r.earnings.total),
+      epfWages,
+      epsWages,
+      epsWages, 
+      Math.round(r.deductions.epf), // EE Share
+      Math.round(r.employerContributions.eps), // ER EPS
+      Math.round(r.employerContributions.epf), // ER EPF Diff
+      Math.max(0, r.daysInMonth - r.payableDays), // NCP Days
+      0 // Refund
+    ];
+  });
 
-export const generatePFECR = (results: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string) => {
-    const data = results.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        
-        // --- PF Wage Calculation Logic (Mirrors payrollEngine.ts) ---
-        // Step 1: A = Basic + DA + Retaining
-        const wageA = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
-        // Step 2: B = Gross
-        const wageB = r.earnings.total;
-        // Step 3: C = Gross - A
-        const wageC = wageB - wageA;
-        // Step 4: D = Excess if C > 50% of B
-        let wageD = 0;
-        if (wageB > 0) {
-             const allowancePercentage = wageC / wageB;
-             if (allowancePercentage > 0.50) {
-                 const fiftyPercentOfGross = Math.round(wageB * 0.50);
-                 wageD = wageC - fiftyPercentOfGross;
-             }
-        }
-        // Step 5: Gross PF Wages = A + D
-        let grossPFWage = wageA + wageD;
-        grossPFWage = Math.round(grossPFWage);
-
-        // Step 6: Capped Wage (15000) for ECR Reporting
-        const cappedWage = Math.min(grossPFWage, 15000);
-        
-        // Determining Wages for Columns
-        // EPF Wages: Use Actual Gross PF Wage (if Higher Wages option) OR Capped Wage
-        const epfWages = emp?.isPFHigherWages ? grossPFWage : cappedWage;
-        
-        // EPS Wages: Strictly capped at 15000
-        const epsWages = cappedWage;
-        
-        return {
-            UAN: emp?.uanc || '',
-            Name: emp?.name || '',
-            Gross: r.earnings.total,
-            EPF_Wages: epfWages,
-            EPS_Wages: epsWages,
-            EDLI_Wages: epsWages, // EDLI follows EPS Cap
-            EE_Share: r.deductions.epf,
-            ER_Share: r.employerContributions.epf,
-            EPS_Share: r.employerContributions.eps,
-            NCP_Days: r.daysInMonth - r.payableDays,
-            Refund: 0
-        };
-    });
-
-    if (format === 'Excel') {
-        generateExcelReport(data, 'ECR Data', fileName);
-    } else {
-        // Generate Text File (No Header, #~# Separated as per EPFO Unified Portal format)
-        const rows = data.map(d => `${d.UAN}#~#${d.Name}#~#${d.Gross}#~#${d.EPF_Wages}#~#${d.EPS_Wages}#~#${d.EDLI_Wages}#~#${d.EE_Share}#~#${d.ER_Share}#~#${d.EPS_Share}#~#${d.NCP_Days}#~#${d.Refund}`).join('\n');
-        const blob = new Blob([rows], { type: 'text/plain' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${fileName}.txt`;
-        a.click();
-        window.URL.revokeObjectURL(url);
-    }
+  if (format === 'Excel') {
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "PF_ECR");
+    XLSX.writeFile(wb, `${fileName}.xlsx`);
+  } else {
+    // TEXT FORMAT: Removed Header Row as per requirement
+    const content = data.map(row => row.join(',')).join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fileName}.txt`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  }
 };
 
-export const generateESIReturn = (results: PayrollResult[], employees: Employee[], format: 'Excel' | 'PDF', fileName: string) => {
-    const data = results.filter(r => r.deductions.esi > 0).map(r => {
-         const emp = employees.find(e => e.id === r.employeeId);
-         return {
-             'IP Number': emp?.esiNumber || '',
-             'IP Name': emp?.name || '',
-             'No of Days': r.payableDays,
-             'Total Wages': r.earnings.total,
-             'IP Contribution': r.deductions.esi,
-             'Reason Code': 0,
-             'Last Working Day': ''
-         };
+export const generateESIReturn = (
+  results: PayrollResult[],
+  employees: Employee[],
+  format: 'Excel' | 'PDF',
+  fileName: string
+) => {
+  const headers = ['IP Number', 'IP Name', 'No of Days', 'Total Monthly Wages', 'Reason Code for Zero days', 'Last Working Day'];
+  
+  const data = results.map(r => {
+     const emp = employees.find(e => e.id === r.employeeId);
+     if (!emp) return [];
+     if (r.deductions.esi === 0 && !emp.esiNumber) return []; 
+
+     return [
+       emp.esiNumber || '',
+       emp.name,
+       r.payableDays,
+       Math.round(r.earnings.total),
+       r.payableDays === 0 ? '1' : '0', 
+       ''
+     ];
+  }).filter(row => row.length > 0);
+
+  if (format === 'Excel') {
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "ESI_Return");
+    XLSX.writeFile(wb, `${fileName}.xlsx`);
+  } else {
+    generatePDFTableReport("ESI Monthly Return", headers, data as any[][], fileName, 'p');
+  }
+};
+
+export const generatePTReport = (
+  results: PayrollResult[],
+  employees: Employee[],
+  fileName: string
+) => {
+    const headers = ['Emp ID', 'Name', 'Gross Salary', 'PT Deducted', 'State'];
+    const data = results.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        return [
+            r.employeeId,
+            emp?.name || '',
+            Math.round(r.earnings.total),
+            Math.round(r.deductions.pt),
+            emp?.state || 'TN'
+        ];
+    }).filter(r => Number(r[3]) > 0);
+
+    generatePDFTableReport("Professional Tax Report", headers, data as any[][], fileName, 'p');
+};
+
+export const generateTDSReport = (
+    results: PayrollResult[],
+    employees: Employee[],
+    fileName: string
+) => {
+    const headers = ['Emp ID', 'PAN', 'Name', 'Gross Salary', 'TDS Deducted'];
+    const data = results.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        return [
+            r.employeeId,
+            emp?.pan || '',
+            emp?.name || '',
+            Math.round(r.earnings.total),
+            Math.round(r.deductions.it)
+        ];
+    }).filter(r => Number(r[4]) > 0);
+
+    generatePDFTableReport("TDS (Income Tax) Report", headers, data as any[][], fileName, 'p');
+};
+
+export const generateCodeOnWagesReport = (
+    results: PayrollResult[],
+    employees: Employee[],
+    format: 'Excel' | 'PDF',
+    fileName: string
+) => {
+    // Filter only employees impacted by Code 88 (where Wage D > 0, which corresponds to isCode88 true)
+    const impactedResults = results.filter(r => r.isCode88);
+
+    if (impactedResults.length === 0) {
+        alert("No employees found impacted by Code on Social Security 2020 (Clause 88) for this period.");
+        return;
+    }
+
+    const headers = ['ID', 'Name', 'Gross Wages (B)', 'Basic+DA+Ret (A)', 'Allowances (C)', '50% of Gross', 'Excluded Amount (D)', 'PF Wages (A+D)'];
+    
+    const data = impactedResults.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        
+        const basic = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
+        const gross = r.earnings.total;
+        const allowances = gross - basic;
+        const fiftyPercent = Math.round(gross * 0.5);
+        const wageD = Math.max(0, allowances - fiftyPercent);
+        const pfWages = basic + wageD;
+        
+        return [
+            r.employeeId,
+            emp?.name || '',
+            Math.round(gross),
+            Math.round(basic),
+            Math.round(allowances),
+            fiftyPercent,
+            wageD,
+            Math.round(pfWages)
+        ];
     });
 
+    const reportTitle = "Code on Social Security 2020(Clause 88)";
+
     if (format === 'Excel') {
-        generateExcelReport(data, 'ESI Monthly Return', fileName);
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Code_88_Analysis");
+        XLSX.writeFile(wb, `${fileName}.xlsx`);
     } else {
-        const headers = ['IP Number', 'Name', 'Days', 'Wages', 'ESI Contrib'];
-        const rows = data.map(d => [d['IP Number'], d['IP Name'], d['No of Days'], d['Total Wages'], d['IP Contribution']]);
-        generatePDFTableReport('Monthly ESI Return', headers, rows as any[][], fileName, 'p');
+        generatePDFTableReport(reportTitle, headers, data as any[][], fileName, 'l');
     }
-}
-
-export const generatePTReport = (results: PayrollResult[], employees: Employee[], fileName: string) => {
-     const data = results.filter(r => r.deductions.pt > 0).map(r => {
-         const emp = employees.find(e => e.id === r.employeeId);
-         return [
-             emp?.id || '',
-             emp?.name || '',
-             r.earnings.total,
-             r.deductions.pt
-         ]
-     });
-     const headers = ['Emp ID', 'Name', 'Gross Wages', 'PT Deducted'];
-     generatePDFTableReport('Professional Tax Report', headers, data as any[][], fileName, 'p');
-}
-
-export const generateTDSReport = (results: PayrollResult[], employees: Employee[], fileName: string) => {
-     const data = results.filter(r => r.deductions.it > 0).map(r => {
-         const emp = employees.find(e => e.id === r.employeeId);
-         return [
-             emp?.pan || '',
-             emp?.name || '',
-             r.earnings.total,
-             r.deductions.it
-         ]
-     });
-     const headers = ['PAN', 'Name', 'Gross Wages', 'TDS Deducted'];
-     generatePDFTableReport('Income Tax Deduction Report', headers, data as any[][], fileName, 'p');
 }

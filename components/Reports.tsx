@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { 
   Download, 
@@ -77,7 +78,7 @@ const Reports: React.FC<ReportsProps> = ({
     isOpen: boolean;
     type: 'confirm' | 'success' | 'error';
     title: string;
-    message: string;
+    message: string | React.ReactNode;
     onConfirm?: () => void;
   }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
@@ -89,24 +90,14 @@ const Reports: React.FC<ReportsProps> = ({
   }, [savedRecords, month, year]);
 
   // Helper to get fresh data
-  const getPayrollData = (): PayrollResult[] => {
+  const getPayrollData = (): PayrollResult[] | null => {
     // Try to get saved data first (Draft or Finalized)
     const existingRecords = savedRecords.filter(r => r.month === month && r.year === year);
     if (existingRecords.length > 0) {
         return existingRecords;
     }
-
-    // If no saved data, calculate on the fly (Preview Mode)
-    return employees.map(emp => {
-      const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { 
-        employeeId: emp.id, month: month, year: year, presentDays: 30, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 
-      };
-      
-      const empLeave = leaveLedgers.find(l => l.employeeId === emp.id) || { employeeId: emp.id, el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 }, sl: { eligible: 0, availed: 0, balance: 0 }, cl: { availed: 0, accumulation: 0, balance: 0 } };
-      const empAdvance = advanceLedgers.find(a => a.employeeId === emp.id) || { employeeId: emp.id, totalAdvance: 0, monthlyInstallment: 0, paidAmount: 0, balance: 0 };
-
-      return calculatePayroll(emp, config, att, empLeave, empAdvance, month, year);
-    });
+    // Return null if no saved data found
+    return null;
   };
 
   const executeFreeze = () => {
@@ -120,7 +111,7 @@ const Reports: React.FC<ReportsProps> = ({
             const currentData = getPayrollData();
             
             if (!currentData || currentData.length === 0) {
-                throw new Error("No payroll data found to freeze. Please 'Run Payroll' first.");
+                throw new Error("No payroll data found to freeze. Please 'Run Payroll' and 'Save Draft' first.");
             }
 
             // 2. Prepare FINALIZED Data (Synchronous)
@@ -140,19 +131,25 @@ const Reports: React.FC<ReportsProps> = ({
             if (setLeaveLedgers) {
                 setLeaveLedgers(prevLedgers => prevLedgers.map(ledger => {
                 // Ensure we match the exact attendance record used for payroll
-                const att = attendances.find(a => a.employeeId === ledger.employeeId && a.month === month && a.year === year) || { earnedLeave: 0, sickLeave: 0, casualLeave: 0 };
+                const att = attendances.find(a => a.employeeId === ledger.employeeId && a.month === month && a.year === year) || { earnedLeave: 0, sickLeave: 0, casualLeave: 0, encashedDays: 0 };
+                
+                // CRITICAL FIX: Calculate Closing Balance from "Capacity - Usage" to avoid Double Deduction if 'balance' was already updated by Attendance Save.
+                // Previous Logic: (ledger.el.balance) - elUsed. 
+                // New Logic: (Opening + Eligible) - elUsed. This is robust whether balance was pre-updated or not.
                 
                 // EL Logic
-                // Formula: True Closing = Current Balance - Attendance Usage
-                const elClosing = (ledger.el.balance || 0) - (att.earnedLeave || 0);
+                const elUsed = (att.earnedLeave || 0) + (att.encashedDays || 0);
+                const elCapacity = (ledger.el.opening || 0) + (ledger.el.eligible || 0);
+                const elClosing = elCapacity - elUsed; // True Closing Balance
+                
                 const elNewAccrual = 1.5;
 
                 // CL Logic
-                const clClosing = (ledger.cl.balance || 0) - (att.casualLeave || 0);
+                const clClosing = (ledger.cl.accumulation || 0) - (att.casualLeave || 0);
                 const clNewAccrual = 1.0;
 
                 // SL Logic
-                const slClosing = (ledger.sl.balance || 0) - (att.sickLeave || 0);
+                const slClosing = (ledger.sl.eligible || 0) - (att.sickLeave || 0);
                 const slNewAccrual = 1.0; 
 
                 return {
@@ -185,6 +182,9 @@ const Reports: React.FC<ReportsProps> = ({
                     const recovery = payroll ? payroll.deductions.advanceRecovery : 0;
                     
                     // True Closing = Current Balance (which includes manual payments) - Payroll Recovery
+                    // Note: Advance Ledger "balance" is robustly calculated as "Open + Grant - Paid" in LedgerManager.
+                    // However, here we need to capture the state. 
+                    // Best approach: Use the calculated balance from ledger state and subtract recovery.
                     const closingBalance = (ledger.balance || 0) - recovery;
 
                     return {
@@ -203,7 +203,13 @@ const Reports: React.FC<ReportsProps> = ({
                 isOpen: true,
                 type: 'success',
                 title: 'Data Frozen Successfully',
-                message: `Payroll for ${month} ${year} has been successfully FROZEN.\n\nLedgers have been rolled over with accruals.`
+                message: (
+                    <div className="text-slate-400">
+                        Payroll for <span className="text-sky-400 font-bold text-lg">{month} {year}</span> has been successfully FROZEN.
+                        <br /><br />
+                        Ledgers have been rolled over with accruals.
+                    </div>
+                )
             });
 
         } catch (error: any) {
@@ -225,7 +231,18 @@ const Reports: React.FC<ReportsProps> = ({
           isOpen: true,
           type: 'confirm',
           title: `Freeze Payroll: ${month} ${year}`,
-          message: "Are you sure you want to FREEZE payroll?\n\nThis will:\n1. Lock data for Statutory Reports.\n2. ROLLOVER Ledgers to next month (Deduct used leaves/advances).\n3. Add monthly Accruals (CL +1, EL +1.5).",
+          message: (
+            <div className="text-slate-400">
+                Are you sure you want to FREEZE payroll for <span className="text-sky-400 font-bold text-base">{month} {year}</span>?
+                <br /><br />
+                This will:
+                <ul className="list-disc pl-6 mt-2 text-left space-y-1">
+                    <li>Lock data for Statutory Reports.</li>
+                    <li>ROLLOVER Ledgers to next month.</li>
+                    <li>Add monthly Accruals (CL +1, EL +1.5).</li>
+                </ul>
+            </div>
+          ),
           onConfirm: executeFreeze
       });
   };
@@ -259,21 +276,45 @@ const Reports: React.FC<ReportsProps> = ({
     await new Promise(resolve => setTimeout(resolve, 500));
     const results = getPayrollData();
 
+    if (!results || results.length === 0) {
+        setIsGenerating(false);
+        setModalState({
+            isOpen: true,
+            type: 'error',
+            title: 'Data Not Found',
+            message: `Payroll for ${month} ${year} has NOT been generated yet.\n\nPlease go to 'Run Payroll' -> 'Calculate Pay Sheet' and 'Save Draft' before generating reports.`
+        });
+        return;
+    }
+
     try {
       if (reportType === 'Pay Sheet') {
         const flatData = results.map(r => {
           const emp = employees.find(e => e.id === r.employeeId);
+          const special = r.earnings.special1 + r.earnings.special2 + r.earnings.special3;
+          const other = r.earnings.washing + r.earnings.attire;
+          
           return {
             'Emp ID': r.employeeId,
             'Name': emp?.name,
             'Designation': emp?.designation,
             'Days Paid': r.payableDays,
             'Basic': r.earnings.basic,
+            'DA': r.earnings.da,
+            'Retaining': r.earnings.retainingAllowance,
+            'HRA': r.earnings.hra,
+            'Conveyance': r.earnings.conveyance,
+            'Special Allw': special,
+            'Other Allw': other,
+            'Leave Encash': r.earnings.leaveEncashment,
             'Gross Pay': r.earnings.total,
             'EPF': r.deductions.epf,
+            'VPF': r.deductions.vpf,
             'ESI': r.deductions.esi,
             'PT': r.deductions.pt,
             'TDS': r.deductions.it,
+            'LWF': r.deductions.lwf,
+            'Adv Recovery': r.deductions.advanceRecovery,
             'Total Ded': r.deductions.total,
             'NET PAY': r.netPay
           };
@@ -282,11 +323,19 @@ const Reports: React.FC<ReportsProps> = ({
         if (format === 'Excel') {
           generateExcelReport(flatData, 'Pay Sheet', `PaySheet_${month}_${year}`);
         } else {
-          const headers = ['ID', 'Name', 'Days', 'Basic', 'Gross', 'PF', 'ESI', 'PT', 'TDS', 'Net Pay'];
+          const headers = [
+             'ID', 'Name', 'Days', 
+             'Basic', 'DA', 'Retn', 'HRA', 'Conv', 'Spec', 'Othr', 'Encash', 'GROSS',
+             'PF', 'VPF', 'ESI', 'PT', 'TDS', 'LWF', 'Adv', 'DED', 
+             'NET PAY'
+          ];
           const pdfData = flatData.map(d => [
-            d['Emp ID'], d['Name'], d['Days Paid'], d['Basic'], d['Gross Pay'], d['EPF'], d['ESI'], d['PT'], d['TDS'], d['NET PAY']
+            d['Emp ID'], d['Name'], d['Days Paid'], 
+            d['Basic'], d['DA'], d['Retaining'], d['HRA'], d['Conveyance'], d['Special Allw'], d['Other Allw'], d['Leave Encash'], d['Gross Pay'],
+            d['EPF'], d['VPF'], d['ESI'], d['PT'], d['TDS'], d['LWF'], d['Adv Recovery'], d['Total Ded'], 
+            d['NET PAY']
           ]);
-          generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, pdfData as any[][], `PaySheet_${month}_${year}`);
+          generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, pdfData as any[][], `PaySheet_${month}_${year}`, 'l');
         }
       } 
       else if (reportType === 'Pay Slips') {
@@ -395,12 +444,11 @@ const Reports: React.FC<ReportsProps> = ({
                 {/* Scenario 1: Unsaved Data (Show Save & Freeze) */}
                 {currentMonthStatus === 'Unsaved' && (
                     <button 
-                        onClick={initiateFreeze}
-                        disabled={isFreezing}
-                        className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg transition-colors disabled:opacity-50"
+                        disabled
+                        className="flex items-center gap-2 px-6 py-3 bg-slate-800 text-slate-500 font-bold rounded-lg border border-slate-700 cursor-not-allowed"
                     >
-                        {isFreezing ? <RefreshCw className="animate-spin" size={18} /> : <Save size={18} />}
-                        {isFreezing ? 'Freezing...' : 'Save & Freeze Data'}
+                        <Save size={18} />
+                        Run Payroll First
                     </button>
                 )}
 
@@ -429,7 +477,17 @@ const Reports: React.FC<ReportsProps> = ({
         </div>
       </div>
 
-      <div className="space-y-8 animate-in fade-in duration-300">
+      {currentMonthStatus === 'Unsaved' && (
+          <div className="bg-amber-900/20 border border-amber-700/50 p-4 rounded-xl flex items-center gap-4 text-amber-200">
+              <AlertTriangle size={24} className="text-amber-400 shrink-0" />
+              <div>
+                  <h4 className="font-bold text-sm">Action Required</h4>
+                  <p className="text-xs text-amber-400/80">Payroll has not been calculated or saved for {month} {year}. You must complete the payroll process before generating reports.</p>
+              </div>
+          </div>
+      )}
+
+      <div className={`space-y-8 animate-in fade-in duration-300 ${currentMonthStatus === 'Unsaved' ? 'opacity-50 pointer-events-none' : ''}`}>
         
         {/* Section 1: Core Payroll Documents */}
         <div>
@@ -661,7 +719,7 @@ const Reports: React.FC<ReportsProps> = ({
                          <HelpCircle size={24} />}
                     </div>
                     <h3 className="text-lg font-bold text-white text-center">{modalState.title}</h3>
-                    <p className="text-sm text-slate-400 text-center whitespace-pre-line">{modalState.message}</p>
+                    <div className="text-sm text-slate-400 text-center whitespace-pre-line">{modalState.message}</div>
                 </div>
                 
                 <div className="flex gap-3 mt-4">

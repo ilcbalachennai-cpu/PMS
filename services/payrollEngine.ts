@@ -65,7 +65,10 @@ export const calculatePayroll = (
   // Bonus is payable annually, not monthly. 
   const bonus = 0; 
   
-  const leaveEncashment = Math.round(((basic + da) / daysInMonth) * leave.el.encashed);
+  // Updated Leave Encashment Calculation using attendance.encashedDays
+  // Formula: (Basic + DA) / DaysInMonth * EncashedDays
+  const encashedDays = attendance.encashedDays || 0;
+  const leaveEncashment = Math.round(((employee.basicPay + (employee.da || 0)) / daysInMonth) * encashedDays);
   
   // Total Earned Gross for this specific month
   const grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
@@ -107,6 +110,8 @@ export const calculatePayroll = (
   // Step 5: Gross PF wages = A + D
   let grossPFWage = wageA + wageD;
   grossPFWage = Math.round(grossPFWage);
+
+  const isCode88 = wageD > 0;
 
   let epfEmployee = 0;
   let vpfEmployee = 0;
@@ -280,6 +285,7 @@ export const calculatePayroll = (
     deductions: { epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf, advanceRecovery, total: totalDeductions },
     employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer },
     gratuityAccrual: Math.round(((basic + da) * 15 / 26) / 12),
-    netPay: grossEarnings - totalDeductions
+    netPay: grossEarnings - totalDeductions,
+    isCode88
   };
 };
