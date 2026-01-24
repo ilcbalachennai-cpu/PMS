@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -42,17 +42,35 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT'>('EXPORT');
   const backupFileRef = useRef<HTMLInputElement>(null);
 
+  // Progress Bar State
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processProgress, setProcessProgress] = useState(0);
+  const [processStatus, setProcessStatus] = useState('');
+
   const SUPERVISOR_PASSWORD = "admin";
 
+  // Helper for UI breathing room
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
   // --- ENCRYPTION LOGIC ---
-  const handleEncryptedExport = () => {
+  const handleEncryptedExport = async () => {
     if (!encryptionKey) {
         alert("Please enter a secure password to encrypt your data.");
         return;
     }
 
+    setIsProcessing(true);
+    setProcessProgress(0);
+    setProcessStatus('Initializing export process...');
+
     try {
+        await delay(500);
+
         // 1. Gather all data
+        setProcessStatus('Gathering system data...');
+        setProcessProgress(20);
+        await delay(300);
+
         const dataBundle = {
             employees: JSON.parse(localStorage.getItem('app_employees') || '[]'),
             config: JSON.parse(localStorage.getItem('app_config') || '{}'),
@@ -72,8 +90,16 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         };
 
         // 2. Encrypt
+        setProcessStatus('Encrypting sensitive information...');
+        setProcessProgress(50);
+        await delay(400);
+
         const jsonString = JSON.stringify(dataBundle);
         const encrypted = CryptoJS.AES.encrypt(jsonString, encryptionKey).toString();
+
+        setProcessStatus('Generating secure backup file...');
+        setProcessProgress(80);
+        await delay(400);
 
         // 3. Download
         const blob = new Blob([encrypted], { type: 'text/plain' });
@@ -82,13 +108,30 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         a.href = url;
         const dateStr = new Date().toISOString().split('T')[0];
         a.download = `BharatPay_Secure_Backup_${dateStr}.enc`;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        // 4. Success State - STRICT PAUSE with VISUAL SUCCESS
+        setProcessProgress(100);
+        setProcessStatus('Data Exported Successfully!');
+        
+        // Wait 4 seconds with 100% visible (Increased from 2s)
+        await delay(4000); 
         
         setShowBackupModal(false);
         setEncryptionKey('');
-        alert("Data Saved Successfully");
+        setIsProcessing(false);
+        
+        // Post-close alert (deferred to avoid blocking UI close)
+        setTimeout(() => {
+            alert("Data Exported Successfully. Please keep the file safe.");
+        }, 100);
+
     } catch (e) {
         console.error(e);
+        setIsProcessing(false);
         alert("Encryption failed.");
     }
   };
@@ -100,11 +143,28 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
           return;
       }
 
+      setIsProcessing(true);
+      setProcessProgress(0);
+      setProcessStatus('Reading backup file...');
+
       const reader = new FileReader();
-      reader.onload = (e) => {
+      
+      // Basic progress for file reading
+      reader.onprogress = (event) => {
+          if (event.lengthComputable) {
+              const percent = Math.round((event.loaded / event.total) * 30); // First 30% is reading
+              setProcessProgress(percent);
+          }
+      };
+
+      reader.onload = async (e) => {
           try {
               const encryptedContent = e.target?.result as string;
               
+              setProcessStatus('Decrypting data...');
+              setProcessProgress(40);
+              await delay(300);
+
               // 1. Decrypt
               const bytes = CryptoJS.AES.decrypt(encryptedContent, encryptionKey);
               const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
@@ -113,8 +173,16 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                   throw new Error("Wrong Password or Corrupt File");
               }
 
+              setProcessStatus('Verifying data integrity...');
+              setProcessProgress(60);
+              await delay(300);
+
               // 2. Parse
               const data = JSON.parse(decryptedString);
+
+              setProcessStatus('Restoring database...');
+              setProcessProgress(80);
+              await delay(400);
 
               // 3. PREPARE ENVIRONMENT & AVOID QUOTA ERROR
               // Save current user session from storage to memory
@@ -145,11 +213,25 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                   localStorage.setItem('app_master_sites', JSON.stringify(data.masters.sites));
               }
 
-              alert("Data Restored Successfully");
-              onRestore();
+              // 5. Success State - STRICT PAUSE with VISUAL SUCCESS
+              setProcessProgress(100);
+              setProcessStatus('Data Restored Successfully!');
+              
+              // Wait 4 seconds with 100% visible (Increased from 2s)
+              await delay(4000);
+
+              setIsProcessing(false);
+              setShowBackupModal(false);
+              
+              // Post-close alert and reload (deferred)
+              setTimeout(() => {
+                  alert("System Restored Successfully. The application will now refresh.");
+                  onRestore();
+              }, 100);
 
           } catch (err: any) {
               console.error(err);
+              setIsProcessing(false);
               if (err.message === "Wrong Password or Corrupt File") {
                   alert("Decryption Failed: Incorrect password or invalid file format.");
               } else if (err.name === 'QuotaExceededError' || err.message?.toLowerCase().includes('quota')) {
@@ -829,56 +911,91 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
        {showBackupModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
-                    <X size={20} />
-                </button>
+                {!isProcessing && (
+                    <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+                        <X size={20} />
+                    </button>
+                )}
+                
                 <div className="flex flex-col items-center gap-2">
-                    <div className="p-4 bg-blue-900/20 text-blue-400 rounded-full border border-blue-900/50 mb-2">
-                        <Lock size={32} />
+                    {/* VISUAL SUCCESS INDICATOR */}
+                    <div className={`p-4 rounded-full border mb-2 transition-all duration-500 ${processProgress === 100 ? 'bg-emerald-900/30 text-emerald-400 border-emerald-500/50' : isProcessing ? 'bg-indigo-900/30 text-indigo-400 border-indigo-500/50' : 'bg-blue-900/20 text-blue-400 border-blue-900/50'}`}>
+                        {processProgress === 100 ? <CheckCircle2 size={32} /> : isProcessing ? <Loader2 size={32} className="animate-spin" /> : <Lock size={32} />}
                     </div>
                     <h3 className="text-xl font-black text-white text-center">
-                        {backupMode === 'EXPORT' ? 'Encrypted Export' : 'Secure Restore'}
+                        {isProcessing 
+                            ? (backupMode === 'EXPORT' ? 'Exporting Data...' : 'Restoring System...') 
+                            : (backupMode === 'EXPORT' ? 'Encrypted Export' : 'Secure Restore')
+                        }
                     </h3>
-                    <p className="text-xs text-slate-400 text-center leading-relaxed">
-                        {backupMode === 'EXPORT' 
-                            ? 'Create a secure backup file for your local disk. You must set a password to encrypt this file.'
-                            : 'Restore data from a backup file. Existing data will be overwritten.'}
-                    </p>
+                    {!isProcessing && (
+                        <p className="text-xs text-slate-400 text-center leading-relaxed">
+                            {backupMode === 'EXPORT' 
+                                ? 'Create a secure backup file for your local disk. You must set a password to encrypt this file.'
+                                : 'Restore data from a backup file. Existing data will be overwritten.'}
+                        </p>
+                    )}
                 </div>
                 
-                <div className="space-y-4 mt-2">
-                    {backupMode === 'IMPORT' && (
+                {isProcessing ? (
+                    <div className="w-full py-6 px-2 space-y-4">
+                        <div className="space-y-2">
+                            <div className="flex justify-between items-end mb-2">
+                                <span className={`text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${processProgress === 100 ? 'text-emerald-400 text-sm animate-pulse' : 'text-slate-400'}`}>
+                                    {processStatus}
+                                </span>
+                                <span className={`text-xs font-bold font-mono ${processProgress === 100 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                    {processProgress}%
+                                </span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                                <div 
+                                    className={`h-full transition-all duration-300 ease-out ${
+                                        backupMode === 'EXPORT' ? 'bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.6)]'
+                                    }`}
+                                    style={{ width: `${processProgress}%` }}
+                                ></div>
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-center text-slate-500 italic animate-pulse">
+                            Please do not close this window or refresh the page.
+                        </p>
+                    </div>
+                ) : (
+                    <div className="space-y-4 mt-2 w-full">
+                        {backupMode === 'IMPORT' && (
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Select Backup File</label>
+                                <input 
+                                    type="file" 
+                                    ref={backupFileRef}
+                                    className="w-full text-xs text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
+                                    accept=".enc"
+                                />
+                            </div>
+                        )}
+
                         <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Select Backup File</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">
+                                {backupMode === 'EXPORT' ? 'Set Encryption Password' : 'Enter Decryption Password'}
+                            </label>
                             <input 
-                                type="file" 
-                                ref={backupFileRef}
-                                className="w-full text-xs text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
-                                accept=".enc"
+                                type="password" 
+                                placeholder="Enter Password" 
+                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                value={encryptionKey}
+                                onChange={(e) => setEncryptionKey(e.target.value)}
                             />
                         </div>
-                    )}
-
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">
-                            {backupMode === 'EXPORT' ? 'Set Encryption Password' : 'Enter Decryption Password'}
-                        </label>
-                        <input 
-                            type="password" 
-                            placeholder="Enter Password" 
-                            className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                            value={encryptionKey}
-                            onChange={(e) => setEncryptionKey(e.target.value)}
-                        />
+                        
+                        <button 
+                            onClick={backupMode === 'EXPORT' ? handleEncryptedExport : handleEncryptedImport}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
+                        >
+                            {backupMode === 'EXPORT' ? 'DOWNLOAD SECURE BACKUP' : 'RESTORE DATA'}
+                        </button>
                     </div>
-                    
-                    <button 
-                        onClick={backupMode === 'EXPORT' ? handleEncryptedExport : handleEncryptedImport}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
-                    >
-                        {backupMode === 'EXPORT' ? 'DOWNLOAD SECURE BACKUP' : 'RESTORE DATA'}
-                    </button>
-                </div>
+                )}
             </div>
         </div>
        )}
