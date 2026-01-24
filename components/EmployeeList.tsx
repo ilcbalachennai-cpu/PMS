@@ -37,6 +37,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   const getEmptyForm = (): Partial<Employee> => ({
     id: `EMP00${employees.length + 1}`,
     name: '',
+    gender: 'Male', // Default Gender
     dob: '',
     doj: new Date().toISOString().split('T')[0],
     designation: designations[0] || '',
@@ -142,7 +143,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   const downloadTemplate = () => {
     // 1. Define Headers
     const headers = [
-      "Employee ID", "Name", "Designation", "Division", "Branch", "Site", 
+      "Employee ID", "Name", "Gender", "Designation", "Division", "Branch", "Site", 
       "DOJ (YYYY-MM-DD)", "DOB (YYYY-MM-DD)", 
       "Father/Spouse Name", "Relationship", 
       "Flat/Door No", "Street/Building", "City", "State", "Pincode", 
@@ -157,7 +158,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     // 2. Mock Data Row
     const data = [
       [
-        "EMP101", "John Doe", "Engineer", "Engineering", "Chennai", "Main Plant", 
+        "EMP101", "John Doe", "Male", "Engineer", "Engineering", "Chennai", "Main Plant", 
         "2023-01-01", "1990-01-01", 
         "Robert Doe", "Father", 
         "No 12", "Anna Salai", "Chennai", "Tamil Nadu", "600002",
@@ -181,27 +182,18 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     // or at least provide it for Copy-Paste.
     
     const masterData = [
-        ["Valid States", "Valid Divisions", "Valid Branches"],
+        ["Valid States", "Valid Divisions", "Valid Branches", "Gender"],
         ...INDIAN_STATES.map((s, i) => [
             s, 
             divisions[i] || "", 
-            branches[i] || ""
+            branches[i] || "",
+            i < 3 ? ["Male", "Female", "Others"][i] : ""
         ])
     ];
     const wsMaster = XLSX.utils.aoa_to_sheet(masterData);
 
-    // Apply Validation to State Column (Column N -> Index 13)
-    if (!ws['!dataValidation']) ws['!dataValidation'] = [];
-    ws['!dataValidation'].push({
-      sqref: "N2:N1000", // Apply to State column rows 2-1000
-      type: "list",
-      operator: "equal",
-      formula1: "'MasterData'!$A$2:$A$40", // Reference the MasterData sheet
-      showDropDown: true,
-      showErrorMessage: true,
-      errorTitle: "Invalid State",
-      error: "Please select a valid state from the list."
-    });
+    // Apply Validation to State Column (Column N -> Index 13) - No strict validation for excel download in free version easily
+    // But we provide the template structure.
 
     XLSX.utils.book_append_sheet(wb, ws, "Template");
     XLSX.utils.book_append_sheet(wb, wsMaster, "MasterData");
@@ -242,6 +234,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
       const newEmployees: Employee[] = data.map((row: any) => ({
         id: safeString(getValue(row, "Employee ID")) || `EMP${Math.floor(Math.random() * 10000)}`,
         name: safeString(getValue(row, "Name")) || "Unknown",
+        gender: safeString(getValue(row, "Gender")) as any || "Male", // Added Gender Map
         designation: safeString(getValue(row, "Designation")) || "Staff",
         department: safeString(getValue(row, "Division")) || "",
         division: safeString(getValue(row, "Division")) || "",
@@ -430,8 +423,9 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
             <button 
                 onClick={() => fileInputRef.current?.click()}
                 className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-lg text-sm font-bold"
+                title="Import Excel Data"
             >
-                <FileSpreadsheet size={16} /> Import Excel
+                <Upload size={16} /> Import
             </button>
             <input 
                 type="file" 
@@ -554,6 +548,9 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                   <h3 className="text-2xl font-black text-white leading-tight">{selectedEmp.name}</h3>
                   <div className="flex items-center gap-2 mt-1">
                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-700 text-slate-300 border border-slate-600 font-mono">{selectedEmp.id}</span>
+                     {selectedEmp.gender && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-900/40 text-purple-300 border border-purple-800/50 uppercase">{selectedEmp.gender}</span>
+                     )}
                   </div>
                   <p className="text-sm text-blue-400 font-bold mt-2">{selectedEmp.designation}</p>
                 </div>
@@ -755,6 +752,15 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 {/* Personal & Family Section */}
                 <div className="md:col-span-3">
                     <h3 className="text-xs font-bold text-sky-400 uppercase tracking-widest mb-2 border-b border-slate-800 pb-2 mt-4">Personal & Family Details</h3>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Gender</label>
+                  <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-blue-500" value={newEmpForm.gender} onChange={e => setNewEmpForm({...newEmpForm, gender: e.target.value as any})}>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Transgender">Transgender</option>
+                    <option value="Others">Others</option>
+                  </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-slate-400 uppercase">Father / Spouse Name</label>

@@ -1,8 +1,8 @@
 
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { IndianRupee, Users, Building, ShieldCheck, TrendingUp } from 'lucide-react';
-import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger } from '../types';
+import { IndianRupee, Users, Building, ShieldCheck, TrendingUp, Database } from 'lucide-react';
+import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, View } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
 
 interface DashboardProps {
@@ -13,21 +13,46 @@ interface DashboardProps {
   advanceLedgers: AdvanceLedger[];
   month: string;
   year: number;
+  onNavigate: (view: View) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ employees, config, attendances, leaveLedgers, advanceLedgers, month, year }) => {
+const Dashboard: React.FC<DashboardProps> = ({ employees, config, attendances, leaveLedgers, advanceLedgers, month, year, onNavigate }) => {
+  
+  if (employees.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-10rem)] space-y-8 animate-in fade-in duration-700">
+        <div className="relative">
+            <div className="absolute inset-0 bg-blue-500/20 blur-2xl rounded-full"></div>
+            <div className="relative p-8 bg-[#1e293b] rounded-full border border-slate-700 shadow-2xl">
+                <Database size={64} className="text-slate-500" />
+            </div>
+        </div>
+        
+        <div className="text-center space-y-4 max-w-lg px-4">
+            <h2 className="text-3xl font-black text-white tracking-tight">System Ready</h2>
+            <div className="p-6 bg-[#1e293b]/50 border border-slate-800 rounded-xl shadow-xl backdrop-blur-sm">
+                <p className="text-slate-300 text-lg font-medium leading-relaxed">
+                    Data is empty. Go to <button onClick={() => onNavigate(View.Settings)} className="text-blue-400 font-bold bg-blue-900/20 px-2 py-0.5 rounded border border-blue-900/50 hover:bg-blue-900/40 hover:text-blue-300 transition-colors cursor-pointer inline-flex items-center gap-1">Configuration</button> section to import data, else start afresh.
+                </p>
+            </div>
+        </div>
+      </div>
+    );
+  }
+
   const payrollResults = employees.map(emp => {
     const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { employeeId: emp.id, month, year, presentDays: 31, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
     
     // SAFE ACCESS: Defaults for missing ledgers to prevent crash
     const leave = leaveLedgers.find(l => l.employeeId === emp.id) || {
       employeeId: emp.id,
-      el: { opening: 0, eligible: 0, encashed: 0, balance: 0 },
+      el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
       sl: { eligible: 0, availed: 0, balance: 0 },
       cl: { availed: 0, accumulation: 0, balance: 0 }
     };
     const advance = advanceLedgers.find(a => a.employeeId === emp.id) || {
       employeeId: emp.id,
+      opening: 0,
       totalAdvance: 0,
       monthlyInstallment: 0,
       paidAmount: 0,

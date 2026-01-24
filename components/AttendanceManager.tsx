@@ -421,9 +421,10 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading || isLocked}
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-bold transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed"
+              title="Import Excel Data"
             >
               {isUploading ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : <Upload size={18} />}
-              Excel Import
+              Import
             </button>
             <input 
                 type="file" 

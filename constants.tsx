@@ -1,5 +1,5 @@
 
-import { StatutoryConfig, Employee, User, LeavePolicy } from './types';
+import { StatutoryConfig, Employee, User, LeavePolicy, CompanyProfile } from './types';
 
 // Branding Configuration
 export const BRAND_CONFIG = {
@@ -10,6 +10,38 @@ export const BRAND_CONFIG = {
   // Use a placeholder image initially. You can upload your own logo in the Settings or Login screen.
   logoUrl: 'https://ui-avatars.com/api/?name=ILC&background=0D8ABC&color=fff&size=200', 
 };
+
+export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
+  establishmentName: 'Your Establishment Name',
+  tradeName: '',
+  cin: '',
+  lin: '',
+  pfCode: '',
+  esiCode: '',
+  gstNo: '',
+  pan: '',
+  address: '',
+  state: 'Tamil Nadu',
+  city: '',
+  mobile: '',
+  telephone: '',
+  email: '',
+  website: '',
+  natureOfBusiness: 'Manufacturing'
+};
+
+export const NATURE_OF_BUSINESS_OPTIONS = [
+  'Manufacturing',
+  'Software / IT Services',
+  'Construction',
+  'Retail / Trading',
+  'Hospitality',
+  'Education',
+  'Financial Services',
+  'Logistics / Transport',
+  'Healthcare',
+  'Others'
+];
 
 export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
   epfCeiling: 15000,

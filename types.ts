@@ -57,9 +57,29 @@ export interface StatutoryConfig {
   pfComplianceType: PFComplianceType; // Company-level compliance
 }
 
+export interface CompanyProfile {
+  establishmentName: string;
+  tradeName: string;
+  cin: string; // ID Proof
+  lin: string; // Labour Identification No
+  pfCode: string;
+  esiCode: string;
+  gstNo: string;
+  pan: string;
+  address: string; // Registered Office Address
+  state: string;
+  city: string;
+  mobile: string;
+  telephone: string;
+  email: string;
+  website: string;
+  natureOfBusiness: string;
+}
+
 export interface Employee {
   id: string;
   name: string;
+  gender: 'Male' | 'Female' | 'Transgender' | 'Others'; // Added Gender
   dob: string;
   designation: string;
   department: string; // Mapping to Division in UI

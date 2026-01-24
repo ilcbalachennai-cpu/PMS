@@ -1,4 +1,3 @@
-
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -364,9 +363,9 @@ export const generateTNFormR = (
       { content: 'Units of work done', rowSpan: 2 },
       { content: 'Daily rate / Piece rate', rowSpan: 2 },
       { content: 'Overtime Rate', rowSpan: 2 },
-      { content: 'Wages earned', colSpan: 6, styles: { halign: 'center' } },
+      { content: 'Wages earned', colSpan: 6, styles: { halign: 'center' as const } },
       { content: 'Gross Wages', rowSpan: 2 },
-      { content: 'Deductions', colSpan: 4, styles: { halign: 'center' } },
+      { content: 'Deductions', colSpan: 4, styles: { halign: 'center' as const } },
       { content: 'Net Wages', rowSpan: 2 },
       { content: 'Signature', rowSpan: 2 },
       { content: 'Total unpaid amounts', rowSpan: 2 },
@@ -569,9 +568,9 @@ export const generateTNFormP = (
       { content: 'Father\'s /Husband\'s name', rowSpan: 2 },
       { content: 'Employee No', rowSpan: 2 },
       { content: 'Designation', rowSpan: 2 },
-      { content: 'Advance Paid', colSpan: 4, styles: { halign: 'center' } },
-      { content: 'Deduction for Damages/Loss', colSpan: 5, styles: { halign: 'center' } },
-      { content: 'Fines', colSpan: 4, styles: { halign: 'center' } },
+      { content: 'Advance Paid', colSpan: 4, styles: { halign: 'center' as const } },
+      { content: 'Deduction for Damages/Loss', colSpan: 5, styles: { halign: 'center' as const } },
+      { content: 'Fines', colSpan: 4, styles: { halign: 'center' as const } },
       { content: 'Remarks', rowSpan: 2 }
     ],
     [
@@ -759,8 +758,8 @@ export const generateFormB = (
       { content: 'Classification', rowSpan: 2 },
       { content: 'Father/Husband Name', rowSpan: 2 },
       { content: 'Days Worked', rowSpan: 2 },
-      { content: 'Wages earned', colSpan: 9, styles: { halign: 'center' } },
-      { content: 'Deductions', colSpan: 8, styles: { halign: 'center' } },
+      { content: 'Wages earned', colSpan: 9, styles: { halign: 'center' as const } },
+      { content: 'Deductions', colSpan: 8, styles: { halign: 'center' as const } },
       { content: 'Net Payable', rowSpan: 2 },
       { content: 'Signature', rowSpan: 2 },
       { content: 'Remarks', rowSpan: 2 },
@@ -919,9 +918,9 @@ export const generateCentralWageSlip = (
 
     if (index % 2 === 0) {
         doc.setDrawColor(200);
-        doc.setLineDash([2, 2], 0);
+        (doc as any).setLineDash([2, 2], 0);
         doc.line(10, 135, 200, 135);
-        doc.setLineDash([], 0);
+        (doc as any).setLineDash([], 0);
     }
   });
 
