@@ -12,7 +12,10 @@ interface PayCycleGatewayProps {
 
 const PayCycleGateway: React.FC<PayCycleGatewayProps> = ({ month, year, setMonth, setYear, onProceed }) => {
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const years = [2024, 2025, 2026];
+  
+  // Dynamic Year Range: Current Year - 5 to Current Year + 1
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
 
   return (
     <div className="flex flex-col items-center justify-start min-h-[500px] h-full pt-10 pb-8 animate-in fade-in duration-500 p-4">

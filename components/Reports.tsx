@@ -82,6 +82,10 @@ const Reports: React.FC<ReportsProps> = ({
     onConfirm?: () => void;
   }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
+  // Dynamic Year Range: Current Year - 5 to Current Year + 1
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+
   // Get current status from saved history
   const currentMonthStatus = useMemo(() => {
     const record = savedRecords.find(r => r.month === month && r.year === year);
@@ -412,8 +416,9 @@ const Reports: React.FC<ReportsProps> = ({
                     {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => (<option key={m} value={m}>{m}</option>))}
                 </select>
                 <select value={year} onChange={e => setYear(+e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white">
-                    <option value={2024}>2024</option>
-                    <option value={2025}>2025</option>
+                    {yearOptions.map(y => (
+                        <option key={y} value={y}>{y}</option>
+                    ))}
                 </select>
             </div>
         </div>

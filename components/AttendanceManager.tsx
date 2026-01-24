@@ -37,6 +37,10 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   const [justSaved, setJustSaved] = useState(false); // Used for persistent saved state
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Dynamic Year Range: Current Year - 5 to Current Year + 1
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+
   // Custom Modal State
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
@@ -376,8 +380,9 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                 onChange={e => setYear(+e.target.value)}
                 className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
             >
-                <option value={2024}>2024</option>
-                <option value={2025}>2025</option>
+                {yearOptions.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                ))}
             </select>
             </>
           )}

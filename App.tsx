@@ -67,8 +67,8 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const mainContentRef = useRef<HTMLElement>(null);
   
   // --- GLOBAL DATE STATE (To ensure persistence across views) ---
-  const [globalMonth, setGlobalMonth] = useState<string>('November');
-  const [globalYear, setGlobalYear] = useState<number>(2024);
+  const [globalMonth, setGlobalMonth] = useState<string>('April');
+  const [globalYear, setGlobalYear] = useState<number>(2025);
 
   // New State for controlling Settings Tab
   const [settingsTab, setSettingsTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA'>('STATUTORY');
@@ -338,6 +338,15 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       }
   };
 
+  // Helper to calculate Financial Year label dynamically
+  const getFinancialYearLabel = () => {
+    const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
+    const startYear = isJanToMar ? globalYear - 1 : globalYear;
+    const endYear = startYear + 1;
+    // Format: "FY 25-26 ACTIVE"
+    return `FY ${String(startYear).slice(-2)}-${String(endYear).slice(-2)} ACTIVE`;
+  };
+
   if (!currentUser) {
     return <Login onLogin={handleLogin} currentLogo={logoUrl} setLogo={handleUpdateLogo} />;
   }
@@ -455,7 +464,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                   </span>
                   <span className="text-xs font-black tracking-[0.15em] text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-sky-400 to-emerald-400 animate-pulse">
-                    FY 24-25 ACTIVE
+                    {getFinancialYearLabel()}
                   </span>
                 </div>
               </div>
@@ -480,6 +489,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                payrollHistory={payrollHistory}
                employees={employees}
                config={config}
+               companyProfile={companyProfile}
                globalMonth={globalMonth}
                setGlobalMonth={setGlobalMonth}
                globalYear={globalYear}
