@@ -13,7 +13,7 @@ interface DashboardProps {
   advanceLedgers: AdvanceLedger[];
   month: string;
   year: number;
-  onNavigate: (view: View) => void;
+  onNavigate: (view: View, tab?: string) => void;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ employees, config, attendances, leaveLedgers, advanceLedgers, month, year, onNavigate }) => {
@@ -28,12 +28,12 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, attendances, l
             </div>
         </div>
         
-        <div className="text-center space-y-4 max-w-lg px-4">
+        <div className="text-center space-y-4 max-w-xl px-4">
             <h2 className="text-3xl font-black text-white tracking-tight">System Ready</h2>
             <div className="p-6 bg-[#1e293b]/50 border border-slate-800 rounded-xl shadow-xl backdrop-blur-sm">
-                <p className="text-slate-300 text-lg font-medium leading-relaxed">
-                    Data is empty. Go to <button onClick={() => onNavigate(View.Settings)} className="text-blue-400 font-bold bg-blue-900/20 px-2 py-0.5 rounded border border-blue-900/50 hover:bg-blue-900/40 hover:text-blue-300 transition-colors cursor-pointer inline-flex items-center gap-1">Configuration</button> section to import data, else start afresh.
-                </p>
+                <div className="text-slate-300 text-lg font-medium leading-relaxed">
+                    Data is empty. Go to Data Management under <button onClick={() => onNavigate(View.Settings, 'DATA')} className="text-blue-400 font-bold hover:text-blue-300 border-b border-blue-500/50 hover:border-blue-400 transition-colors inline-block cursor-pointer">Configuration</button> section to restore Data else <button onClick={() => onNavigate(View.Employees)} className="text-emerald-400 font-bold hover:text-emerald-300 border-b border-emerald-500/50 hover:border-emerald-400 transition-colors inline-block cursor-pointer">start afresh</button>.
+                </div>
             </div>
         </div>
       </div>
