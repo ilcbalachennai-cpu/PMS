@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { 
   Users, 
   LayoutDashboard, 
@@ -38,6 +39,7 @@ import Login from './components/Login';
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeView, setActiveView] = useState<View>(View.Dashboard);
+  const mainContentRef = useRef<HTMLElement>(null);
   
   // --- GLOBAL DATE STATE (To ensure persistence across views) ---
   const [globalMonth, setGlobalMonth] = useState<string>('November');
@@ -198,6 +200,14 @@ const App: React.FC = () => {
   useEffect(() => { safeSave('app_master_branches', branches); }, [branches]);
   useEffect(() => { safeSave('app_master_sites', sites); }, [sites]);
 
+  // Scroll to top on activeView change or login using useLayoutEffect for instant transition
+  useLayoutEffect(() => {
+    if (mainContentRef.current) {
+        // Force scroll to top instantly
+        mainContentRef.current.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [activeView, currentUser]);
+
   // --- PERSISTENCE LOGIC END ---
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -311,7 +321,7 @@ const App: React.FC = () => {
   );
 
   return (
-    <div className="flex min-h-screen bg-[#020617] text-white">
+    <div className="flex h-screen overflow-hidden bg-[#020617] text-white">
       <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} transition-all duration-300 bg-[#0f172a] border-r border-slate-800 flex flex-col`}>
         <div className="p-6 flex items-center gap-3 border-b border-slate-800">
           <div className="bg-blue-600 p-2 rounded-lg text-white shrink-0"><IndianRupee size={24} /></div>
@@ -388,7 +398,8 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto">
+      {/* Main Content: Standard scroll behavior ensured, forced top position on nav */}
+      <main ref={mainContentRef} className="flex-1 overflow-y-auto">
         <header className="bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 h-20 flex items-center justify-between px-8 sticky top-0 z-10">
           {/* Replaced View Title with Company Info */}
           <div>
@@ -444,6 +455,9 @@ const App: React.FC = () => {
                setGlobalMonth={setGlobalMonth}
                globalYear={globalYear}
                setGlobalYear={setGlobalYear}
+               attendances={attendances}
+               leaveLedgers={leaveLedgers}
+               advanceLedgers={advanceLedgers}
             />
           )}
           {activeView === View.Employees && (

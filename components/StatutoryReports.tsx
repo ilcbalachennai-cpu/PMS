@@ -1,8 +1,8 @@
 
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, FileSpreadsheet, FileCode, FileText, Download, Eye, ScrollText, Landmark, Lock, AlertTriangle, Scale, BookOpen, X } from 'lucide-react';
-import { PayrollResult, Employee, StatutoryConfig } from '../types';
-import { generatePFECR, generateESIReturn, generatePTReport, generateTDSReport, generateCodeOnWagesReport } from '../services/reportService';
+import { ShieldCheck, FileSpreadsheet, FileCode, FileText, Download, Eye, ScrollText, Landmark, Lock, AlertTriangle, Scale, BookOpen, X, Book, ClipboardList, Building } from 'lucide-react';
+import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger } from '../types';
+import { generatePFECR, generateESIReturn, generatePTReport, generateTDSReport, generateCodeOnWagesReport, generatePFForm12A, generateFormB, generateCentralWageSlip, generateFormC, generateTNFormR, generateTNFormT, generateTNFormP } from '../services/reportService';
 
 interface StatutoryReportsProps {
   payrollHistory: PayrollResult[];
@@ -12,6 +12,10 @@ interface StatutoryReportsProps {
   setGlobalMonth: (m: string) => void;
   globalYear: number;
   setGlobalYear: (y: number) => void;
+  // Added optional props for extended reports
+  attendances?: Attendance[];
+  leaveLedgers?: LeaveLedger[];
+  advanceLedgers?: AdvanceLedger[];
 }
 
 const StatutoryReports: React.FC<StatutoryReportsProps> = ({ 
@@ -21,7 +25,10 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     globalMonth,
     setGlobalMonth,
     globalYear,
-    setGlobalYear
+    setGlobalYear,
+    attendances = [],
+    leaveLedgers = [],
+    advanceLedgers = []
 }) => {
   const [showCode88Modal, setShowCode88Modal] = useState(false);
   
@@ -30,6 +37,16 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     const records = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
     return records.length > 0 && records[0].status === 'Finalized';
   }, [payrollHistory, globalMonth, globalYear]);
+
+  // Hacky way to get attendance for Form C if not passed (though now it should be passed)
+  const getAttendanceData = (): Attendance[] => {
+      if (attendances.length > 0) return attendances;
+      try {
+          const saved = localStorage.getItem('app_attendance');
+          if (saved) return JSON.parse(saved);
+      } catch (e) { console.error(e); }
+      return [];
+  };
 
   const handleDownload = (reportName: string, format: string) => {
     // Filter data for current month/year
@@ -41,6 +58,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     }
 
     const fileName = `${reportName.replace(/ /g, '_')}_${globalMonth}_${globalYear}`;
+    const attData = getAttendanceData();
 
     try {
         if (reportName.includes('ECR')) {
@@ -53,6 +71,20 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
              generateTDSReport(currentData, employees, fileName);
         } else if (reportName.includes('Code 88') || reportName.includes('Social Security')) {
              generateCodeOnWagesReport(currentData, employees, format as any, fileName);
+        } else if (reportName.includes('Form 12A')) {
+             generatePFForm12A(currentData, employees, config, globalMonth, globalYear);
+        } else if (reportName.includes('Form B') || reportName.includes('Pay Sheet (Central)')) {
+             generateFormB(currentData, employees, globalMonth, globalYear);
+        } else if (reportName.includes('Pay Slip (Central)')) {
+             generateCentralWageSlip(currentData, employees, globalMonth, globalYear);
+        } else if (reportName.includes('Form C') || reportName.includes('Muster Roll')) {
+             generateFormC(currentData, employees, attData, globalMonth, globalYear);
+        } else if (reportName.includes('TN Form R')) {
+             generateTNFormR(currentData, employees, globalMonth, globalYear);
+        } else if (reportName.includes('TN Form T')) {
+             generateTNFormT(currentData, employees, attData, leaveLedgers, globalMonth, globalYear);
+        } else if (reportName.includes('TN Form P')) {
+             generateTNFormP(currentData, employees, advanceLedgers, globalMonth, globalYear);
         } else if (reportName.includes('Form')) {
              alert(`${reportName} generation is a premium feature coming soon. Please use ECR/Returns for filing.`);
         } else {
@@ -102,6 +134,108 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         
+        {/* NEW: Tamil Nadu Shops & Establishment Act Reports */}
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl col-span-1 md:col-span-2">
+          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
+            <Building className="text-emerald-500" size={20} />
+            <h3 className="font-bold text-white text-sm">Tamil Nadu Shops & Establishment Act Reports</h3>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+             {/* 1. Register of Wages (Form R) */}
+             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-emerald-500/30 transition-all group">
+                <div className="flex items-center gap-3 mb-2">
+                    <FileText size={24} className="text-emerald-400" />
+                    <div>
+                        <h4 className="font-bold text-slate-200">1. Form R</h4>
+                        <p className="text-xs text-slate-500">Register of Wages</p>
+                    </div>
+                </div>
+                <button onClick={() => handleDownload('TN Form R', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-emerald-900/20 text-emerald-300 font-bold text-xs rounded-lg hover:bg-emerald-900/40 transition-colors">
+                    <Eye size={14} /> View PDF
+                </button>
+             </div>
+
+             {/* 2. Wage Slip (Form T) */}
+             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-emerald-500/30 transition-all group">
+                <div className="flex items-center gap-3 mb-2">
+                    <ScrollText size={24} className="text-emerald-400" />
+                    <div>
+                        <h4 className="font-bold text-slate-200">2. Form T</h4>
+                        <p className="text-xs text-slate-500">Wage Slip / Leave Card</p>
+                    </div>
+                </div>
+                <button onClick={() => handleDownload('TN Form T', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-emerald-900/20 text-emerald-300 font-bold text-xs rounded-lg hover:bg-emerald-900/40 transition-colors">
+                    <Download size={14} /> Download PDF
+                </button>
+             </div>
+
+             {/* 3. Register of Advance (Form P) */}
+             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-emerald-500/30 transition-all group">
+                <div className="flex items-center gap-3 mb-2">
+                    <ClipboardList size={24} className="text-emerald-400" />
+                    <div>
+                        <h4 className="font-bold text-slate-200">3. Form P</h4>
+                        <p className="text-xs text-slate-500">Register of Advances & Fines</p>
+                    </div>
+                </div>
+                <button onClick={() => handleDownload('TN Form P', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-emerald-900/20 text-emerald-300 font-bold text-xs rounded-lg hover:bg-emerald-900/40 transition-colors">
+                    <Eye size={14} /> View PDF
+                </button>
+             </div>
+          </div>
+        </div>
+
+        {/* Existing Central Law Reports */}
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl col-span-1 md:col-span-2">
+          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
+            <Book className="text-purple-500" size={20} />
+            <h3 className="font-bold text-white text-sm">Central Law Report (Small Establishments / Central Rules)</h3>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+             {/* 1. Pay Sheet (Form B) */}
+             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-purple-500/30 transition-all group">
+                <div className="flex items-center gap-3 mb-2">
+                    <FileText size={24} className="text-purple-400" />
+                    <div>
+                        <h4 className="font-bold text-slate-200">1. Register of Wages (Form B)</h4>
+                        <p className="text-xs text-slate-500">Wage Register</p>
+                    </div>
+                </div>
+                <button onClick={() => handleDownload('Form B', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-purple-900/20 text-purple-300 font-bold text-xs rounded-lg hover:bg-purple-900/40 transition-colors">
+                    <Eye size={14} /> View PDF
+                </button>
+             </div>
+
+             {/* 2. Pay Slip (Form XIX) */}
+             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-purple-500/30 transition-all group">
+                <div className="flex items-center gap-3 mb-2">
+                    <ScrollText size={24} className="text-purple-400" />
+                    <div>
+                        <h4 className="font-bold text-slate-200">2. Pay Slip (Form XIX)</h4>
+                        <p className="text-xs text-slate-500">Wage Slips [Rule 78(1)(b)]</p>
+                    </div>
+                </div>
+                <button onClick={() => handleDownload('Pay Slip (Central)', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-purple-900/20 text-purple-300 font-bold text-xs rounded-lg hover:bg-purple-900/40 transition-colors">
+                    <Download size={14} /> Download PDF
+                </button>
+             </div>
+
+             {/* 3. Muster Roll (Form C) */}
+             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-purple-500/30 transition-all group">
+                <div className="flex items-center gap-3 mb-2">
+                    <ClipboardList size={24} className="text-purple-400" />
+                    <div>
+                        <h4 className="font-bold text-slate-200">3. Muster Roll (Form C)</h4>
+                        <p className="text-xs text-slate-500">Attendance Register</p>
+                    </div>
+                </div>
+                <button onClick={() => handleDownload('Form C', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-purple-900/20 text-purple-300 font-bold text-xs rounded-lg hover:bg-purple-900/40 transition-colors">
+                    <Eye size={14} /> View PDF
+                </button>
+             </div>
+          </div>
+        </div>
+
         {/* 1. Provident Fund (EPF) */}
         <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
           <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">

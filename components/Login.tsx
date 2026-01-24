@@ -48,7 +48,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo, setLogo }) => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#020617] flex items-center justify-center p-4 relative isolation-auto">
+    <div className="min-h-screen w-full bg-[#020617] flex items-center justify-center p-4 relative">
       {/* Background Decor - Fixed Position to avoid layout shift */}
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-amber-600/10 rounded-full blur-[100px]"></div>

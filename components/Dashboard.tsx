@@ -67,64 +67,65 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, attendances, l
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-top-4 duration-500">
+    <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
       
       {/* Date Header for Dashboard */}
       <div className="flex items-center justify-between">
-         <h2 className="text-xl font-bold text-white flex items-center gap-2">
+         <h2 className="text-lg font-bold text-white flex items-center gap-2">
             Overview <span className="text-slate-500 text-sm font-normal">for {month} {year}</span>
          </h2>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         {stats.map((stat, i) => (
-          <div key={i} className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 shadow-xl hover:bg-slate-800/80 transition-all">
-            <div className="flex items-center gap-4">
-              <div className={`${stat.bg} ${stat.color} p-4 rounded-xl border border-white/5`}>
-                <stat.icon size={24} />
+          <div key={i} className="bg-[#1e293b] p-4 rounded-xl border border-slate-800 shadow-lg hover:bg-slate-800/80 transition-all">
+            <div className="flex items-center gap-3">
+              <div className={`${stat.bg} ${stat.color} p-2.5 rounded-lg border border-white/5`}>
+                <stat.icon size={20} />
               </div>
               <div>
-                <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">{stat.label}</p>
-                <h3 className="text-2xl font-black text-white">{stat.value}</h3>
+                <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">{stat.label}</p>
+                <h3 className="text-lg font-black text-white">{stat.value}</h3>
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 bg-[#1e293b] p-8 rounded-2xl border border-slate-800 shadow-xl">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-8">Net Pay vs Deductions per Employee</h3>
-          <div className="h-80 w-full">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 bg-[#1e293b] p-5 rounded-xl border border-slate-800 shadow-lg">
+          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Net Pay vs Deductions per Employee</h3>
+          {/* Reduced height from h-64 to h-56 to make it very compact */}
+          <div className="h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
-                <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
                 <Tooltip 
                   cursor={{ fill: '#334155' }}
-                  contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', color: '#fff' }}
+                  contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
                 />
-                <Bar dataKey="Net" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
-                <Bar dataKey="Deductions" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={40} />
+                <Bar dataKey="Net" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={25} />
+                <Bar dataKey="Deductions" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={25} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="bg-[#1e293b] p-8 rounded-2xl border border-slate-800 shadow-xl">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-8">Statutory Breakdown</h3>
-          <div className="h-64 w-full">
+        <div className="bg-[#1e293b] p-5 rounded-xl border border-slate-800 shadow-lg">
+          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Statutory Breakdown</h3>
+          <div className="h-40 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={pieData}
                   cx="50%"
                   cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={8}
+                  innerRadius={45}
+                  outerRadius={65}
+                  paddingAngle={5}
                   dataKey="value"
                   stroke="none"
                 >
@@ -133,17 +134,17 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, attendances, l
                   ))}
                 </Pie>
                 <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', color: '#ffffff' }}
+                  contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', color: '#ffffff', fontSize: '12px' }}
                   itemStyle={{ color: '#ffffff' }}
                 />
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-8 space-y-3">
+          <div className="mt-4 space-y-2">
             {pieData.map((d, i) => (
-              <div key={i} className="flex items-center justify-between text-xs px-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i] }}></div>
+              <div key={i} className="flex items-center justify-between text-[10px] px-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i] }}></div>
                   <span className="text-slate-400 font-medium">{d.name}</span>
                 </div>
                 <span className="font-bold text-white">₹{d.value.toLocaleString()}</span>
