@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw } from 'lucide-react';
-import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy } from '../types';
+import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile } from '../types';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
 import PayrollProcessor from './PayrollProcessor';
@@ -10,6 +10,7 @@ import PayCycleGateway from './PayCycleGateway';
 interface PayProcessProps {
   employees: Employee[];
   config: StatutoryConfig;
+  companyProfile: CompanyProfile;
   attendances: Attendance[];
   setAttendances: (att: Attendance[]) => void;
   leaveLedgers: LeaveLedger[];
@@ -130,6 +131,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             <PayrollProcessor 
                 employees={props.employees}
                 config={props.config}
+                companyProfile={props.companyProfile}
                 attendances={props.attendances}
                 leaveLedgers={props.leaveLedgers}
                 advanceLedgers={props.advanceLedgers}

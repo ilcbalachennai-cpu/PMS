@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Play, CheckCircle, FileText, Calculator, AlertTriangle, X, Printer, Save, Lock, Snowflake, HelpCircle, CheckCircle2, FileSpreadsheet } from 'lucide-react';
-import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger } from '../types';
+import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
 import { generatePaySlipsPDF, generateSimplePaySheetPDF, numberToWords } from '../services/reportService';
 import { BRAND_CONFIG } from '../constants';
@@ -9,6 +9,7 @@ import { BRAND_CONFIG } from '../constants';
 interface PayrollProcessorProps {
   employees: Employee[];
   config: StatutoryConfig;
+  companyProfile: CompanyProfile;
   attendances: Attendance[];
   leaveLedgers: LeaveLedger[];
   advanceLedgers: AdvanceLedger[];
@@ -28,6 +29,7 @@ interface PayrollProcessorProps {
 const PayrollProcessor: React.FC<PayrollProcessorProps> = ({ 
   employees, 
   config, 
+  companyProfile,
   attendances, 
   leaveLedgers, 
   advanceLedgers, 
@@ -425,8 +427,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                             <div className="font-sans text-slate-900">
                                 {/* Header */}
                                 <div className="text-center mb-6">
-                                    <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-widest">{BRAND_CONFIG.companyName}</h1>
-                                    <p className="text-sm text-slate-600 font-medium mt-1">Industrial Estate, Chennai, Tamil Nadu</p>
+                                    <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-widest">{companyProfile.establishmentName || BRAND_CONFIG.companyName.toUpperCase()}</h1>
+                                    <p className="text-sm text-slate-600 font-medium mt-1">{companyProfile.city ? `${companyProfile.city}, ${companyProfile.state}` : 'Industrial Estate, Chennai, Tamil Nadu'}</p>
                                     <div className="mt-4">
                                         <h2 className="text-lg font-bold text-slate-800 uppercase">PAY SLIP - {month.toUpperCase()} {year}</h2>
                                     </div>
@@ -452,6 +454,11 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                             <span className="font-bold">UAN No:</span>
                                             <span className="text-slate-900">{emp.uanc || 'N/A'}</span>
                                         </div>
+                                        {/* Added ESI here to balance columns */}
+                                        <div className="grid grid-cols-[120px_1fr]">
+                                            <span className="font-bold">ESI No:</span>
+                                            <span className="text-slate-900">{emp.esiNumber || 'N/A'}</span>
+                                        </div>
                                     </div>
 
                                     {/* Right Column */}
@@ -471,62 +478,72 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                         <div className="grid grid-cols-[120px_1fr]">
                                             <span className="font-bold">PF No:</span>
                                             <span className="text-slate-900">{emp.pfNumber || 'N/A'}</span>
+                                        </div>     
+                                        <div className="grid grid-cols-[120px_1fr]">
+                                            <span className="font-bold">PAN No:</span>
+                                            <span className="text-slate-900">{emp.pan || 'N/A'}</span>
                                         </div>
                                     </div>
                                 </div>
-
-                                {/* Earnings & Deductions Table */}
+                                         
+                                                                                                                {/* Earnings & Deductions Table */}
                                 <table className="w-full text-sm border border-slate-300 mb-6 text-slate-900">
                                     <thead className="bg-slate-800 text-white font-bold">
                                         <tr>
                                             <th className="py-2 px-4 text-left w-1/4">Earnings</th>
-                                            <th className="py-2 px-4 text-right w-1/4">Amount (Rs.)</th>
+                                            <th className="py-2 px-4 text-right w-1/4">Amount (₹.)</th>
                                             <th className="py-2 px-4 text-left w-1/4 border-l border-slate-600">Deductions</th>
-                                            <th className="py-2 px-4 text-right w-1/4">Amount (Rs.)</th>
+                                            <th className="py-2 px-4 text-right w-1/4">Amount (₹.)</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-200">
                                         <tr>
                                             <td className="py-2 px-4 text-slate-800">Basic Pay</td>
                                             <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.basic.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">Provident Fund</td>
+                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">Provident Fund{viewingSlip.isCode88 ? "* " : ""}</td>
                                             <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.epf.toFixed(2)}</td>
                                         </tr>
                                         <tr>
                                             <td className="py-2 px-4 text-slate-800">DA</td>
                                             <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.da.toFixed(2)}</td>
+                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">ESI{viewingSlip.isESICodeWagesUsed ? "** " : ""}</td>
+                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.esi.toFixed(2)}</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-2 px-4 text-slate-800">Retaining Allowance</td>
+                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.retainingAllowance.toFixed(2)}</td>
                                             <td className="py-2 px-4 border-l border-slate-200 text-slate-800">Professional Tax</td>
                                             <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.pt.toFixed(2)}</td>
                                         </tr>
                                         <tr>
                                             <td className="py-2 px-4 text-slate-800">HRA</td>
                                             <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.hra.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">ESI</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.esi.toFixed(2)}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 px-4 text-slate-800">Conveyance</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.conveyance.toFixed(2)}</td>
                                             <td className="py-2 px-4 border-l border-slate-200 text-slate-800">Income Tax</td>
                                             <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.it.toFixed(2)}</td>
                                         </tr>
                                         <tr>
-                                            <td className="py-2 px-4 text-slate-800">Special Allowances</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{specialAllowanceTotal.toFixed(2)}</td>
+                                            <td className="py-2 px-4 text-slate-800">Conveyance</td>
+                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.conveyance.toFixed(2)}</td>
                                             <td className="py-2 px-4 border-l border-slate-200 text-slate-800">VPF</td>
                                             <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.vpf.toFixed(2)}</td>
                                         </tr>
                                         <tr>
-                                            <td className="py-2 px-4 text-slate-800">Other Allowances</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{otherAllowanceTotal.toFixed(2)}</td>
+                                            <td className="py-2 px-4 text-slate-800">Special Allowances</td>
+                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{specialAllowanceTotal.toFixed(2)}</td>
                                             <td className="py-2 px-4 border-l border-slate-200 text-slate-800">LWF</td>
                                             <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.lwf.toFixed(2)}</td>
                                         </tr>
                                         <tr>
-                                            <td className="py-2 px-4 text-slate-800">Leave Encashment</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.leaveEncashment.toFixed(2)}</td>
+                                            <td className="py-2 px-4 text-slate-800">Other Allowances</td>
+                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{otherAllowanceTotal.toFixed(2)}</td>
                                             <td className="py-2 px-4 border-l border-slate-200 text-slate-800">Advance Recovery</td>
                                             <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.advanceRecovery.toFixed(2)}</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-2 px-4 text-slate-800">Leave Encashment</td>
+                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.leaveEncashment.toFixed(2)}</td>
+                                            <td className="py-2 px-4 border-l border-slate-200"></td>
+                                            <td className="py-2 px-4 text-right"></td>
                                         </tr>
                                         <tr className="bg-slate-100 font-bold border-t border-slate-300">
                                             <td className="py-2 px-4 text-slate-900">Total Earnings</td>
@@ -540,16 +557,25 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                 {/* Net Pay Box */}
                                 <div className="border-2 border-blue-500 bg-white p-4 flex justify-between items-center mb-6 shadow-sm">
                                     <span className="font-bold text-slate-900 text-lg uppercase">NET SALARY PAYABLE:</span>
-                                    <span className="font-black text-slate-900 text-2xl">Rs. {Math.round(viewingSlip.netPay).toLocaleString('en-IN')}/-</span>
+                                    <span className="font-black text-slate-900 text-2xl">₹. {Math.round(viewingSlip.netPay).toLocaleString('en-IN')}/-</span>
                                 </div>
                                 
                                 {/* Amount in Words */}
                                 <div className="text-slate-800 text-sm font-bold border-b border-slate-300 pb-4 mb-4">
                                    Amount in Words: {numberToWords(Math.round(viewingSlip.netPay))} Rupees Only
                                 </div>
+                                
+                                {/* Code 88 indicator */}
+
+                                <div className="flex justify-between items-end border-t border-slate-300 pt-4">
+                                <div className="space-y-1">
+                                {viewingSlip.isCode88 && <p className="text-[10px] italic text-slate-500">* PF calculated on Code Wages (Social Security Code 2020)</p>}
+                                 {viewingSlip.isESICodeWagesUsed && <p className="text-[10px] italic text-slate-500">** ESI calculated on Code Wages (Social Security Code 2020)</p>}
+                                </div>
+                                </div>
 
                                 {/* Footer */}
-                                <div className="text-center space-y-2">
+                                <div className="text-center space-y-2 mt-4">
                                     <p className="text-xs text-slate-500 italic">This is a computer-generated document and does not require a signature.</p>
                                 </div>
                             </div>

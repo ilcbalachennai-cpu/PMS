@@ -32,6 +32,8 @@ export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
 
 export const NATURE_OF_BUSINESS_OPTIONS = [
   'Manufacturing',
+  'Services Industry',
+  'Contract Labour',
   'Software / IT Services',
   'Construction',
   'Retail / Trading',

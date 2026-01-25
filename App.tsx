@@ -476,6 +476,8 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <Dashboard 
               employees={employees} 
               config={config} 
+              companyProfile={companyProfile}
+              setCompanyProfile={setCompanyProfile}
               attendances={attendances} 
               leaveLedgers={leaveLedgers} 
               advanceLedgers={advanceLedgers}
@@ -516,6 +518,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <PayProcess 
                 employees={employees}
                 config={config}
+                companyProfile={companyProfile}
                 attendances={attendances}
                 setAttendances={setAttendances}
                 leaveLedgers={leaveLedgers}

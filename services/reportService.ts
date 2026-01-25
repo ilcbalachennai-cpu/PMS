@@ -1,4 +1,3 @@
-
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -270,22 +269,36 @@ export const generatePaySlipsPDF = (
     doc.text("PF No:", rightX, y);
     doc.setFont("helvetica", "normal");
     doc.text(emp.pfNumber || 'N/A', rightX + 25, y);
+y += inc;
+    doc.setFont("helvetica", "bold");
+    doc.text("ESI No:", leftX, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(emp.esiNumber || 'N/A', leftX + 30, y);
+    
+    doc.setFont("helvetica", "bold");
+    doc.text("PAN No:", rightX, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(emp.pan || 'N/A', rightX + 25, y);
 
     // --- Financials Table ---
     const startY = 85;
     
-    const pfAmountStr = res.isCode88 
-        ? `${res.deductions.epf.toFixed(2)}*` 
-        : res.deductions.epf.toFixed(2);
+     // PF Label Logic: Suffix asterisk to Label if applicable
+    const pfLabel = res.isCode88 ? 'Provident Fund*' : 'Provident Fund';
+    const pfAmount = res.deductions.epf.toFixed(2); 
+
+    // ESI Label Logic: Suffix double asterisk to Label if applicable
+    const esiLabel = res.isESICodeWagesUsed ? 'ESI**' : 'ESI';
+    const esiAmount = res.deductions.esi.toFixed(2);
 
     autoTable(doc, {
         startY: startY,
         margin: { left: 14, right: 14 },
-        head: [['Earnings', 'Amount (Rs.)', 'Deductions', 'Amount (Rs.)']],
+        head: [['Earnings', 'Amount (₹.)', 'Deductions', 'Amount (₹.)']],
         body: [
-            ['Basic Pay', res.earnings.basic.toFixed(2), 'Provident Fund', pfAmountStr],
-            ['DA', res.earnings.da.toFixed(2), 'Professional Tax', res.deductions.pt.toFixed(2)],
-            ['Retaining Allowance', res.earnings.retainingAllowance.toFixed(2), 'ESI', res.deductions.esi.toFixed(2)],
+            ['Basic Pay', res.earnings.basic.toFixed(2), pfLabel, pfAmount ],
+            ['DA', res.earnings.da.toFixed(2), esiLabel, esiAmount ],
+            ['Retaining Allowance', res.earnings.retainingAllowance.toFixed(2), 'Professional Tax', res.deductions.pt.toFixed(2)],
             ['HRA', res.earnings.hra.toFixed(2), 'Income Tax Recovery', res.deductions.it.toFixed(2)],
             ['Conveyance', res.earnings.conveyance.toFixed(2), 'VPF', res.deductions.vpf.toFixed(2)],
             ['Special Allowance', (res.earnings.special1 + res.earnings.special2 + res.earnings.special3).toFixed(2), 'LWF', res.deductions.lwf.toFixed(2)],
@@ -316,7 +329,7 @@ export const generatePaySlipsPDF = (
     doc.text("NET SALARY PAYABLE:", 20, finalY + 10);
     
     doc.setFontSize(14);
-    doc.text(`Rs. ${Math.round(res.netPay).toLocaleString('en-IN')}/-`, 180, finalY + 10, { align: 'right' });
+    doc.text(`₹.${Math.round(res.netPay).toLocaleString('en-IN')}/-`, 180, finalY + 10, { align: 'right' });
 
     // --- Amount in Words ---
     doc.setFontSize(10);
@@ -332,10 +345,16 @@ export const generatePaySlipsPDF = (
         doc.setFontSize(8);
         doc.setFont("helvetica", "italic");
         doc.setTextColor(0);
-        doc.text("* Code on Social Security 2020 [ Clause 88 ] impact on PF Contribution", 14, footerY);
+        doc.text("* PF calculated on Code Wages (Social Security Code 2020)", 14, footerY);;
         footerY += 5;
     }
-
+ if (res.isESICodeWagesUsed) {
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(0);
+        doc.text("** ESI calculated on Code Wages (Social Security Code 2020)", 14, footerY);
+        footerY += 5;
+    }
     // --- Footer ---
     doc.setFontSize(8);
     doc.setFont("helvetica", "italic");
@@ -1205,4 +1224,68 @@ export const generateTNFormP = (
     }
 
     generatePDFTableReport(`TN Form P (Register of Advances) - ${month} ${year}`, headers, data as any[][], `TN_FormP_${month}_${year}`, 'l');
+};
+
+export const generateESICodeWagesReport = (
+    results: PayrollResult[],
+    employees: Employee[],
+    format: 'Excel' | 'PDF',
+    fileName: string
+) => {
+    const data = results.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        // ESI is typically calculated on Gross Wages. 
+        // Code on Wages 2020 might define wages differently (similar to PF) but for ESI currently it's usually Gross.
+        // This report highlights the wages considered for ESI vs Gross.
+        const gross = Math.round(r.earnings.total);
+        const esiWages = (r.deductions.esi > 0 || r.employerContributions.esi > 0) ? gross : 0;
+        
+        return {
+            'Emp ID': r.employeeId,
+            'Name': emp?.name,
+            'Gross Wages': gross,
+            'ESI Wages': esiWages,
+            'EE Contribution': Math.round(r.deductions.esi),
+            'ER Contribution': Math.round(r.employerContributions.esi),
+            'Coverage': esiWages > 0 ? 'YES' : 'NO'
+        };
+    });
+
+    if (format === 'Excel') {
+        generateExcelReport(data, 'ESI Wages Analysis', fileName);
+    } else {
+        const headers = ['ID', 'Name', 'Gross', 'ESI Wage', 'EE Share', 'ER Share', 'Covered'];
+        const tableData = data.map(d => [d['Emp ID'], d['Name'], d['Gross Wages'], d['ESI Wages'], d['EE Contribution'], d['ER Contribution'], d['Coverage']]);
+        generatePDFTableReport('ESI Wages & Contribution Report', headers, tableData as any[][], fileName, 'p');
+    }
+};
+
+export const generateESIExitReport = (
+    results: PayrollResult[],
+    employees: Employee[],
+    month: string,
+    year: number
+) => {
+    const headers = ['ID', 'Name', 'Gross Wages', 'Reason'];
+    
+    // Filter for employees with 0 ESI deduction
+    const data = results
+        .filter(r => r.deductions.esi === 0)
+        .map(r => {
+             const emp = employees.find(e => e.id === r.employeeId);
+             const gross = r.earnings.total;
+             let reason = 'Unknown';
+             if (emp?.isESIExempt) reason = 'Exempt (Policy)';
+             else if (gross > 21000) reason = 'Salary > 21k';
+             else reason = 'Zero Earnings / LOP';
+             
+             return [
+                 r.employeeId,
+                 emp?.name || '',
+                 Math.round(gross),
+                 reason
+             ];
+        });
+
+    generatePDFTableReport(`ESI Excluded Employees - ${month} ${year}`, headers, data as any[][], `ESI_Exit_Report_${month}_${year}`, 'p');
 };

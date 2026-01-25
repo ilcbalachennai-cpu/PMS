@@ -1,8 +1,8 @@
 
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, FileSpreadsheet, FileCode, FileText, Download, Eye, ScrollText, Landmark, Lock, AlertTriangle, Scale, BookOpen, X, Book, ClipboardList, Building, Calendar, User } from 'lucide-react';
+import { ShieldCheck, FileSpreadsheet, FileCode, FileText, Download, Eye, ScrollText, Landmark, Lock, AlertTriangle, Scale, BookOpen, X, Book, ClipboardList, Building, Calendar, User, LogOut } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile } from '../types';
-import { generatePFECR, generateESIReturn, generatePTReport, generateTDSReport, generateCodeOnWagesReport, generatePFForm12A, generatePFForm12, generateFormB, generateCentralWageSlip, generateFormC, generateTNFormR, generateTNFormT, generateTNFormP, generatePFForm3A, generatePFForm6A } from '../services/reportService';
+import { generatePFECR, generateESIReturn, generatePTReport, generateTDSReport, generateCodeOnWagesReport, generatePFForm12A, generatePFForm12, generateFormB, generateCentralWageSlip, generateFormC, generateTNFormR, generateTNFormT, generateTNFormP, generatePFForm3A, generatePFForm6A, generateESIExitReport, generateESICodeWagesReport } from '../services/reportService';
 
 interface StatutoryReportsProps {
   payrollHistory: PayrollResult[];
@@ -115,6 +115,10 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         if (reportName.includes('ECR')) {
              if (currentData.length === 0) throw new Error("No finalized data for this month.");
              generatePFECR(currentData, employees, format as any, fileName);
+        } else if (reportName.includes('ESI Code Wages')) {
+             generateESICodeWagesReport(currentData, employees, format as any, fileName);
+        } else if (reportName.includes('ESI Exit')) {
+             generateESIExitReport(currentData, employees, globalMonth, globalYear);
         } else if (reportName.includes('ESI')) {
              if (currentData.length === 0) throw new Error("No finalized data for this month.");
              generateESIReturn(currentData, employees, format as any, fileName);
@@ -394,7 +398,49 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
           {/* Changed internal grid to grid-cols-1 to stack vertically */}
           <div className="p-6 grid grid-cols-1 gap-6">
             
-            {/* Registers */}
+            {/* Monthly Return & Impact - MOVED UP */}
+            <div className="space-y-4">
+                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Online Contribution & Impact</h4>
+                <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/50 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-200">Monthly ESI Return</span>
+                        <span className="text-[9px] px-2 py-0.5 bg-pink-900/30 text-pink-400 rounded border border-pink-900/50">Mandatory</span>
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={() => handleDownload('Monthly ESI', 'Excel')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-slate-800 text-slate-300 px-2 py-2 rounded hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all">
+                        <FileSpreadsheet size={14} /> Excel (Upload)
+                        </button>
+                        <button onClick={() => handleDownload('Monthly ESI View', 'PDF')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-slate-800 text-slate-300 px-4 py-2 rounded hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all">
+                        <Eye size={14} /> View PDF
+                        </button>
+                    </div>
+                    
+                    {/* Exit Report Button */}
+                    <button onClick={() => handleDownload('ESI Exit Report', 'PDF')} className="w-full flex items-center justify-center gap-2 text-[10px] font-bold bg-red-900/10 text-red-400 px-4 py-2 rounded hover:bg-red-900/20 border border-red-900/30 transition-all">
+                        <LogOut size={14} /> List of Employees Out of Coverage
+                    </button>
+                </div>
+
+                {/* ESI on Code Wages Report Block */}
+                <div className="p-4 rounded-xl bg-pink-900/10 border border-pink-900/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Scale size={14} className="text-pink-400" />
+                        <span className="text-xs font-bold text-pink-300">ESI on Code Wages</span>
+                      </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => handleDownload('ESI Code Wages', 'Excel')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-pink-900/20 text-pink-400 px-2 py-2 rounded hover:bg-pink-900/40 border border-pink-900/30 transition-all">
+                      <FileSpreadsheet size={12} /> Excel
+                    </button>
+                    <button onClick={() => handleDownload('ESI Code Wages', 'PDF')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-pink-900/20 text-pink-400 px-2 py-2 rounded hover:bg-pink-900/40 border border-pink-900/30 transition-all">
+                      <FileText size={12} /> PDF
+                    </button>
+                  </div>
+               </div>
+            </div>
+
+            {/* Registers - MOVED DOWN */}
             <div className="space-y-4">
                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Registers & Declaration</h4>
                 <div className="space-y-2">
@@ -418,26 +464,6 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         <Eye size={14} /> View
                     </button>
                     </div>
-                </div>
-            </div>
-
-            {/* Monthly Return */}
-            <div className="space-y-4">
-                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Online Contribution</h4>
-                <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/50 space-y-3">
-                    <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-200">Monthly ESI Return</span>
-                        <span className="text-[9px] px-2 py-0.5 bg-pink-900/30 text-pink-400 rounded border border-pink-900/50">Mandatory</span>
-                    </div>
-                    <div className="flex gap-2">
-                        <button onClick={() => handleDownload('Monthly ESI', 'Excel')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-slate-800 text-slate-300 px-2 py-2 rounded hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all">
-                        <FileSpreadsheet size={14} /> Excel (Upload)
-                        </button>
-                        <button onClick={() => handleDownload('Monthly ESI View', 'PDF')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-slate-800 text-slate-300 px-4 py-2 rounded hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all">
-                        <Eye size={14} /> View PDF
-                        </button>
-                    </div>
-                    <p className="text-[10px] text-slate-500 italic mt-2">Generate standard Excel format for ESI Portal upload.</p>
                 </div>
             </div>
 

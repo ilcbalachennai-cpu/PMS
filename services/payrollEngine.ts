@@ -144,12 +144,49 @@ export const calculatePayroll = (
     epfEmployer = totalEmployerPF - epsEmployer;
   }
 
-  // ESI (ESI Wage = Gross Earnings)
+  // --- ESI Calculation (Updated for Social Security Code 2020) ---
   let esiEmployee = 0;
   let esiEmployer = 0;
-  if (!employee.isESIExempt && grossEarnings <= config.esiCeiling) {
-    esiEmployee = Math.ceil(grossEarnings * config.esiEmployeeRate);
-    esiEmployer = Math.ceil(grossEarnings * config.esiEmployerRate);
+  let isESICodeWagesUsed = false;
+  let esiRemark = '';
+
+  if (!employee.isESIExempt) {
+    // 1. Determine Effective ESI Wages
+    // As per Code on Social Security 2020, "Wages" definition is consistent with Code on Wages.
+    // Therefore, ESI Wage should be the same as 'grossPFWage' (A + D), not Gross Earnings.
+    
+    let effectiveESIWage = grossPFWage;
+    
+    // Flag if Code Wages differs from Actual Gross (for reporting purposes)
+    if (Math.abs(effectiveESIWage - grossEarnings) > 1) {
+        isESICodeWagesUsed = true;
+    }
+
+    // 2. Ceiling Check (21000) with Cycle Logic (April/Oct)
+    if (effectiveESIWage > config.esiCeiling) {
+        // Exceeds ceiling (21000)
+        
+        // Check if current month is start of contribution period (April or October)
+        // Rule: "if it exceed continue to contribute till the following month if April or October whichever is earlier"
+        // "then if the month is April or October, no more ESI contribution allowed"
+        
+        if (month === 'April' || month === 'October') {
+             // Employee goes OUT OF COVERAGE for this new period
+             esiEmployee = 0;
+             esiEmployer = 0;
+             esiRemark = 'IP is out of coverage';
+             isESICodeWagesUsed = false; // Reset flag as no contribution is made
+        } else {
+             // Continue contributing (Employee was covered at start of period or coverage continues)
+             esiEmployee = Math.ceil(effectiveESIWage * config.esiEmployeeRate);
+             esiEmployer = Math.ceil(effectiveESIWage * config.esiEmployerRate);
+        }
+
+    } else {
+        // Within Ceiling -> Standard Calculation
+        esiEmployee = Math.ceil(effectiveESIWage * config.esiEmployeeRate);
+        esiEmployer = Math.ceil(effectiveESIWage * config.esiEmployerRate);
+    }
   }
 
   // Professional Tax Calculation (Dynamic based on Branch/Work Location)
@@ -160,9 +197,6 @@ export const calculatePayroll = (
   let ptSlabs = config.ptSlabs;
 
   // OVERRIDE: Determine State based on Branch (Organization Hierarchy)
-  // Logic: The city/location in the 'branch' field dictates the PT rules.
-  // Note: We deliberately do NOT fallback to employee.state (Residential Address) 
-  // as per requirement to strictly follow work location.
   const branchState = getBranchState(employee.branch);
 
   if (branchState && PT_STATE_PRESETS[branchState as keyof typeof PT_STATE_PRESETS]) {
@@ -173,76 +207,48 @@ export const calculatePayroll = (
 
   if (ptCycle === 'HalfYearly') {
     // --- Half-Yearly Logic (e.g. Tamil Nadu) ---
-    // Logic: Deduct monthly based on projected half-yearly income and worked months in that block.
-    
-    // 1. Determine Half-Year Block (Apr-Sep or Oct-Mar)
     let blockStartYear = year;
-    let blockStartMonthIdx = 3; // Default to Apr (Index 3)
-    
-    // Block 1: Apr(3) to Sep(8) -> Start: Apr 1, Current Year
-    // Block 2: Oct(9) to Dec(11) -> Start: Oct 1, Current Year
-    // Block 2: Jan(0) to Mar(2)  -> Start: Oct 1, Previous Year
+    let blockStartMonthIdx = 3; 
     
     if (monthIdx >= 3 && monthIdx <= 8) {
-       // Apr - Sep
        blockStartMonthIdx = 3; 
        blockStartYear = year;
     } else {
-       // Oct - Mar
-       blockStartMonthIdx = 9; // Oct
-       if (monthIdx <= 2) { // Jan, Feb, Mar
+       blockStartMonthIdx = 9; 
+       if (monthIdx <= 2) { 
           blockStartYear = year - 1;
-       } else { // Oct, Nov, Dec
+       } else { 
           blockStartYear = year;
        }
     }
     
     const blockStartDate = new Date(blockStartYear, blockStartMonthIdx, 1);
-    
-    // Determine Block End Date
-    // If started Apr(3), end is Sep(8) 30th
-    // If started Oct(9), end is Mar(2) 31st next year
     const blockEndYear = blockStartMonthIdx === 3 ? blockStartYear : blockStartYear + 1;
     const blockEndMonthIdx = blockStartMonthIdx === 3 ? 8 : 2;
-    const blockEndDate = new Date(blockEndYear, blockEndMonthIdx + 1, 0); // Last day of month
+    const blockEndDate = new Date(blockEndYear, blockEndMonthIdx + 1, 0); 
 
-    // 2. Determine Effective Start Date (Later of Block Start or DOJ)
     const dojDate = new Date(employee.doj);
-    // Normalize times to midnight for comparison
     dojDate.setHours(0,0,0,0);
     blockStartDate.setHours(0,0,0,0);
     blockEndDate.setHours(0,0,0,0);
 
     const effectiveStartDate = dojDate > blockStartDate ? dojDate : blockStartDate;
 
-    // 3. Calculate Months Worked/Active in this Block
-    // Logic: (EndYear - StartYear)*12 + (EndMonth - StartMonth) + 1 (Inclusive)
     let monthsWorked = 0;
-    
     if (effectiveStartDate <= blockEndDate) {
         monthsWorked = (blockEndDate.getFullYear() - effectiveStartDate.getFullYear()) * 12 + 
                        (blockEndDate.getMonth() - effectiveStartDate.getMonth()) + 1;
     }
-
-    // Safety clamp (Block is max 6 months)
     monthsWorked = Math.max(1, Math.min(6, monthsWorked));
-
-    // 4. Calculate Projected Income using Standard Monthly Gross (Master)
-    // Use Master Salary (22500) * Months (6 or 5) as per Case Study
     const projectedHalfYearlyIncome = standardMonthlyGross * monthsWorked;
-
-    // 5. Find applicable Slab
     const slab = ptSlabs.find(s => projectedHalfYearlyIncome >= s.min && projectedHalfYearlyIncome <= s.max);
     
     if (slab && slab.amount > 0) {
-        // 6. Amortize tax over the active months
-        // e.g. 1250 / 6 = 208, or 1250 / 5 = 250
         pt = Math.round(slab.amount / monthsWorked);
     }
 
   } else {
-    // --- Monthly Logic (e.g. Karnataka) ---
-    // Uses actual Earned Gross for the month
+    // --- Monthly Logic ---
     if (grossEarnings > 0) {
         const slab = ptSlabs.find(s => grossEarnings >= s.min && grossEarnings <= s.max);
         if (slab) {
@@ -286,6 +292,8 @@ export const calculatePayroll = (
     employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer },
     gratuityAccrual: Math.round(((basic + da) * 15 / 26) / 12),
     netPay: grossEarnings - totalDeductions,
-    isCode88
+    isCode88,
+    isESICodeWagesUsed,
+    esiRemark
   };
 };

@@ -171,6 +171,8 @@ export interface PayrollResult {
   netPay: number;
   status?: 'Draft' | 'Finalized'; // New field for Freezing data
   isCode88?: boolean;
+  isESICodeWagesUsed?: boolean;
+  esiRemark?: string;
 }
 
 export interface User {
