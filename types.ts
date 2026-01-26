@@ -74,6 +74,7 @@ export interface CompanyProfile {
   email: string;
   website: string;
   natureOfBusiness: string;
+  flashNews?: string; // New field for Flash News
 }
 
 export interface Employee {

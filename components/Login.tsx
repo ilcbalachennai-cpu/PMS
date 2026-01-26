@@ -64,15 +64,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo, setLogo }) => {
             {/* 1. App Title with Rupee Symbol */}
             <div className="flex flex-col items-center mb-6">
                 <div className="flex items-center gap-3 mb-2">
-                    <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-lg shadow-blue-900/20">
-                        <IndianRupee size={28} />
+                    <div className="bg-[#4169E1] p-2.5 rounded-xl text-white shadow-lg shadow-blue-500/20">
+                        <IndianRupee size={28} className="text-[#FF9933]" />
                     </div>
-                    <h1 className="text-3xl font-black text-white tracking-tight">
-                        {BRAND_CONFIG.appName}<span className="text-blue-500">{BRAND_CONFIG.appNameSuffix}</span>
+                    <h1 className="text-3xl font-black tracking-tight">
+                        <span className="text-[#FF9933]">Bharat</span>
+                        <span className="text-white">Pay</span>
+                        <span className="text-[#4ADE80] ml-1">{BRAND_CONFIG.appNameSuffix}</span>
                     </h1>
                 </div>
                 <p className="text-slate-300 text-sm font-semibold tracking-wide">Comprehensive Pay Roll Management</p>
-                <p className="text-[10px] text-sky-500 font-bold uppercase tracking-widest mt-1 opacity-90">Powered By {BRAND_CONFIG.companyName}</p>
+                <p className="text-[10px] text-slate-400 font-bold tracking-widest mt-1 opacity-90">
+                    POWERED By <span className="text-[#FF9933]">{BRAND_CONFIG.companyName}</span>
+                </p>
             </div>
 
             {/* 2. Logo */}

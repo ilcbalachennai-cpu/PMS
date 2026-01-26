@@ -116,36 +116,36 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
              if (currentData.length === 0) throw new Error("No finalized data for this month.");
              generatePFECR(currentData, employees, format as any, fileName);
         } else if (reportName.includes('ESI Code Wages')) {
-             generateESICodeWagesReport(currentData, employees, format as any, fileName);
+             generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile);
         } else if (reportName.includes('ESI Exit')) {
-             generateESIExitReport(currentData, employees, globalMonth, globalYear);
+             generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('ESI')) {
              if (currentData.length === 0) throw new Error("No finalized data for this month.");
-             generateESIReturn(currentData, employees, format as any, fileName);
+             generateESIReturn(currentData, employees, format as any, fileName, companyProfile);
         } else if (reportName.includes('PT') || reportName.includes('Professional')) {
-             generatePTReport(currentData, employees, fileName);
+             generatePTReport(currentData, employees, fileName, companyProfile);
         } else if (reportName.includes('Form 16A') || reportName.includes('Income Tax')) {
-             generateTDSReport(currentData, employees, fileName);
+             generateTDSReport(currentData, employees, fileName, companyProfile);
         } else if (reportName.includes('Code 88') || reportName.includes('Social Security')) {
-             generateCodeOnWagesReport(currentData, employees, format as any, fileName);
+             generateCodeOnWagesReport(currentData, employees, format as any, fileName, companyProfile);
         } else if (reportName.includes('Form 12A (Revised)')) {
              if (currentData.length === 0) throw new Error("No finalized data for this month.");
              generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
         } else if (reportName.includes('Form 12 (Old)')) {
              if (currentData.length === 0) throw new Error("No finalized data for this month.");
-             generatePFForm12(currentData, employees, config, globalMonth, globalYear);
+             generatePFForm12(currentData, employees, config, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('Form B') || reportName.includes('Pay Sheet (Central)')) {
-             generateFormB(currentData, employees, globalMonth, globalYear);
+             generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('Pay Slip (Central)')) {
              generateCentralWageSlip(currentData, employees, globalMonth, globalYear);
         } else if (reportName.includes('Form C') || reportName.includes('Muster Roll')) {
-             generateFormC(currentData, employees, attData, globalMonth, globalYear);
+             generateFormC(currentData, employees, attData, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('TN Form R')) {
-             generateTNFormR(currentData, employees, globalMonth, globalYear);
+             generateTNFormR(currentData, employees, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('TN Form T')) {
-             generateTNFormT(currentData, employees, attData, leaveLedgers, globalMonth, globalYear);
+             generateTNFormT(currentData, employees, attData, leaveLedgers, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('TN Form P')) {
-             generateTNFormP(currentData, employees, advanceLedgers, globalMonth, globalYear);
+             generateTNFormP(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('Form 3A')) {
              openRangeModal('Form 3A');
         } else if (reportName.includes('Form 6A')) {

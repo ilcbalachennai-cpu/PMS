@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useMemo } from 'react';
-import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList } from 'lucide-react';
+import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy } from '../types';
 
@@ -36,6 +36,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false); // State to track saved/read-only mode
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Custom Modal State
@@ -53,7 +54,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
   }, [savedRecords, month, year]);
 
   const handleLeaveUpdate = (empId: string, field: 'el' | 'sl' | 'cl', subField: string, value: number) => {
-      if (isLocked || isReadOnly || !setLeaveLedgers) return;
+      if (isLocked || isReadOnly || justSaved || !setLeaveLedgers) return;
 
       const updated = leaveLedgers.map(l => {
           if (l.employeeId === empId) {
@@ -71,7 +72,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
   };
 
   const handleAdvanceUpdate = (empId: string, field: keyof AdvanceLedger, value: number) => {
-      if (isLocked || isReadOnly || !setAdvanceLedgers) return;
+      if (isLocked || isReadOnly || justSaved || !setAdvanceLedgers) return;
       
       const updated = advanceLedgers.map(a => {
           if (a.employeeId === empId) {
@@ -93,6 +94,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
     // Simulate save (persistence is handled by parent via useEffect)
     setTimeout(() => {
         setIsSaving(false);
+        setJustSaved(true); // Enable Read-Only mode
         setModalState({
             isOpen: true,
             type: 'success',
@@ -127,7 +129,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
   };
 
   const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (isLocked || isReadOnly) return;
+      if (isLocked || isReadOnly || justSaved) return;
       const file = e.target.files?.[0];
       if (!file) return;
 
@@ -199,6 +201,21 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
         </div>
        )}
 
+       {/* Saved/Read-Only Status Banner */}
+       {!isLocked && justSaved && (
+        <div className="bg-emerald-900/20 border border-emerald-700 p-4 rounded-xl flex gap-3 items-center animate-in fade-in slide-in-from-top-2">
+            <div className="p-2 bg-emerald-900/40 rounded-full text-emerald-400">
+                <CheckCircle2 size={20} />
+            </div>
+            <div>
+                <h3 className="font-bold text-emerald-200 text-sm">Ledgers Saved</h3>
+                <p className="text-xs text-emerald-300/80">
+                    Data is currently in <b>Read-Only</b> mode. Click 'Modify {viewMode === 'leave' ? 'Leave' : 'Advance'}' to make changes.
+                </p>
+            </div>
+        </div>
+       )}
+
        <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-4">
               <div className={`p-3 rounded-xl border ${viewMode === 'leave' ? 'bg-emerald-900/30 border-emerald-500/20 text-emerald-400' : 'bg-blue-900/30 border-blue-500/20 text-blue-400'}`}>
@@ -215,17 +232,31 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
           <div className="flex gap-3">
               {!isReadOnly && !isLocked && (
                   <>
-                  <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg">
-                      {isSaving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : <Save size={16} />}
-                      Save Changes
+                  <button 
+                    onClick={justSaved ? () => setJustSaved(false) : handleSave} 
+                    disabled={isSaving} 
+                    className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg ${
+                        justSaved 
+                        ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-900/20' 
+                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    }`}
+                  >
+                      {isSaving ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> 
+                      ) : justSaved ? (
+                          <Edit2 size={16} />
+                      ) : (
+                          <Save size={16} />
+                      )}
+                      {justSaved ? `Modify ${viewMode === 'leave' ? 'Leave' : 'Advance'}` : 'Save Changes'}
                   </button>
                   <button onClick={downloadTemplate} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2.5 rounded-lg font-bold text-sm border border-slate-600">
                       <Download size={16} /> Template
                   </button>
                   <button 
                     onClick={() => fileInputRef.current?.click()} 
-                    disabled={isUploading} 
-                    className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg"
+                    disabled={isUploading || justSaved} 
+                    className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed"
                     title="Import Excel Data"
                   >
                       {isUploading ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : <Upload size={16} />}
@@ -263,13 +294,16 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                </thead>
                <tbody className="divide-y divide-slate-800">
                    {employees.map(emp => {
+                       // Common disabled state for inputs
+                       const inputDisabled = isReadOnly || isLocked || justSaved;
+
                        if (viewMode === 'leave') {
                            const l = leaveLedgers.find(led => led.employeeId === emp.id) || { el: { opening: 0, eligible: 0, balance: 0 }, sl: { balance: 0 }, cl: { balance: 0 } };
                            return (
                                <tr key={emp.id} className="hover:bg-slate-800/50">
                                    <td className="px-6 py-4"><div className="text-sm font-bold text-white">{emp.name}</div><div className="text-[10px] text-slate-500">{emp.id}</div></td>
                                    <td className="px-4 py-4 text-center text-slate-300 font-mono text-sm">{l.el.opening}</td>
-                                   <td className="px-4 py-4 text-center"><input disabled={isReadOnly || isLocked} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-white text-sm" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
+                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-white text-sm disabled:opacity-50" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
                                    <td className="px-4 py-4 text-center font-bold text-blue-400">{l.el.balance}</td>
                                    <td className="px-4 py-4 text-center text-emerald-400">{l.sl.balance}</td>
                                    <td className="px-4 py-4 text-center text-amber-400">{l.cl.balance}</td>
@@ -281,9 +315,9 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                <tr key={emp.id} className="hover:bg-slate-800/50">
                                    <td className="px-6 py-4"><div className="text-sm font-bold text-white">{emp.name}</div><div className="text-[10px] text-slate-500">{emp.id}</div></td>
                                    <td className="px-4 py-4 text-center text-slate-400 font-mono">{a.opening || 0}</td>
-                                   <td className="px-4 py-4 text-center"><input disabled={isReadOnly || isLocked} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-emerald-400 font-bold text-sm" value={a.totalAdvance} onChange={e => handleAdvanceUpdate(emp.id, 'totalAdvance', +e.target.value)} /></td>
-                                   <td className="px-4 py-4 text-center"><input disabled={isReadOnly || isLocked} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-amber-400 text-sm" value={a.paidAmount} onChange={e => handleAdvanceUpdate(emp.id, 'paidAmount', +e.target.value)} /></td>
-                                   <td className="px-4 py-4 text-center"><input disabled={isReadOnly || isLocked} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-slate-300 text-sm" value={a.monthlyInstallment} onChange={e => handleAdvanceUpdate(emp.id, 'monthlyInstallment', +e.target.value)} /></td>
+                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-emerald-400 font-bold text-sm disabled:opacity-50" value={a.totalAdvance} onChange={e => handleAdvanceUpdate(emp.id, 'totalAdvance', +e.target.value)} /></td>
+                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-amber-400 text-sm disabled:opacity-50" value={a.paidAmount} onChange={e => handleAdvanceUpdate(emp.id, 'paidAmount', +e.target.value)} /></td>
+                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-slate-300 text-sm disabled:opacity-50" value={a.monthlyInstallment} onChange={e => handleAdvanceUpdate(emp.id, 'monthlyInstallment', +e.target.value)} /></td>
                                    <td className="px-4 py-4 text-center font-black text-white text-lg">{a.balance}</td>
                                </tr>
                            );

@@ -1,6 +1,6 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2 } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -16,15 +16,26 @@ interface SettingsProps {
   setLeavePolicy: (policy: LeavePolicy) => void;
   onRestore: () => void;
   initialTab?: 'STATUTORY' | 'COMPANY' | 'DATA';
+  userRole?: string;
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, initialTab = 'STATUTORY' }) => {
+const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, initialTab = 'STATUTORY', userRole }) => {
   const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA'>(initialTab);
   const [formData, setFormData] = useState(config);
   const [profileData, setProfileData] = useState(companyProfile);
   const [localLeavePolicy, setLocalLeavePolicy] = useState(leavePolicy);
   const [saved, setSaved] = useState(false);
   const [selectedStatePreset, setSelectedStatePreset] = useState<string>('Tamil Nadu');
+
+  // Check if data exists to enable/disable backup
+  const hasData = useMemo(() => {
+      try {
+          const emps = JSON.parse(localStorage.getItem('app_employees') || '[]');
+          return Array.isArray(emps) && emps.length > 0;
+      } catch (e) {
+          return false;
+      }
+  }, []);
 
   // Sync activeTab if initialTab changes prop
   useEffect(() => {
@@ -41,6 +52,9 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   const [encryptionKey, setEncryptionKey] = useState('');
   const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT'>('EXPORT');
   const backupFileRef = useRef<HTMLInputElement>(null);
+
+  // Overwrite Warning State
+  const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
 
   // Progress Bar State
   const [isProcessing, setIsProcessing] = useState(false);
@@ -136,7 +150,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     }
   };
 
-  const handleEncryptedImport = () => {
+  const executeImport = () => {
       const file = backupFileRef.current?.files?.[0];
       if (!file || !encryptionKey) {
           alert("Please select a file and enter the decryption password.");
@@ -243,6 +257,20 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
           }
       };
       reader.readAsText(file);
+  };
+
+  const handleEncryptedImport = () => {
+      const file = backupFileRef.current?.files?.[0];
+      if (!file || !encryptionKey) {
+          alert("Please select a file and enter the decryption password.");
+          return;
+      }
+
+      if (hasData) {
+          setShowOverwriteConfirm(true);
+      } else {
+          executeImport();
+      }
   };
 
   const handlePFTypeChange = (type: PFComplianceType) => {
@@ -660,6 +688,28 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 gap-y-8">
+                {/* NEW: Flash News Configuration - Restricted to Admin/Developer */}
+                {userRole === 'Admin' && (
+                    <div className="md:col-span-3 bg-amber-900/10 p-4 rounded-xl border border-amber-900/30">
+                        <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                            <Lock size={10} /> Developer Control: News Ticker
+                        </h4>
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2">
+                                <Megaphone size={12} /> Dashboard Scrolling Text
+                            </label>
+                            <input 
+                                type="text" 
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500" 
+                                value={profileData.flashNews || ''} 
+                                onChange={e => setProfileData({...profileData, flashNews: e.target.value})}
+                                placeholder="Enter news to scroll on dashboard header..." 
+                            />
+                            <p className="text-[9px] text-slate-500">Updates instantly on save.</p>
+                        </div>
+                    </div>
+                )}
+
                 <div className="md:col-span-3">
                     <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1">Legal Identity</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -795,23 +845,26 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-blue-500/50 transition-all group">
-                    <div className="p-3 bg-blue-900/20 text-blue-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
-                        <Download size={24} />
+                {/* Only show Backup option if data exists */}
+                {hasData && (
+                    <div className="bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-blue-500/50 transition-all group">
+                        <div className="p-3 bg-blue-900/20 text-blue-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
+                            <Download size={24} />
+                        </div>
+                        <h4 className="font-bold text-white mb-2">Backup Data</h4>
+                        <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+                            Create a secure, encrypted backup file (.enc) of your entire system data. You will need to set a password.
+                        </p>
+                        <button 
+                            onClick={() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); }}
+                            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
+                        >
+                            <Download size={16} /> Create Backup
+                        </button>
                     </div>
-                    <h4 className="font-bold text-white mb-2">Backup Data</h4>
-                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-                        Create a secure, encrypted backup file (.enc) of your entire system data. You will need to set a password.
-                    </p>
-                    <button 
-                        onClick={() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); }}
-                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
-                    >
-                        <Download size={16} /> Create Backup
-                    </button>
-                </div>
+                )}
 
-                <div className="bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-emerald-500/50 transition-all group">
+                <div className={`bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-emerald-500/50 transition-all group ${!hasData ? 'md:col-span-2' : ''}`}>
                     <div className="p-3 bg-emerald-900/20 text-emerald-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
                         <Upload size={24} />
                     </div>
@@ -989,13 +1042,64 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                         
                         <button 
-                            onClick={backupMode === 'EXPORT' ? handleEncryptedExport : handleEncryptedImport}
+                            onClick={backupMode === 'EXPORT' ? handleEncryptedExport : () => {
+                                // Check for file and key before showing warning logic
+                                const file = backupFileRef.current?.files?.[0];
+                                if (!file || !encryptionKey) {
+                                    alert("Please select a file and enter the decryption password.");
+                                    return;
+                                }
+                                if (hasData) {
+                                    setShowOverwriteConfirm(true);
+                                } else {
+                                    executeImport();
+                                }
+                            }}
                             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
                         >
                             {backupMode === 'EXPORT' ? 'DOWNLOAD SECURE BACKUP' : 'RESTORE DATA'}
                         </button>
                     </div>
                 )}
+            </div>
+        </div>
+       )}
+
+       {showOverwriteConfirm && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                 <div className="flex flex-col items-center gap-2">
+                    <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full border border-amber-900/50 mb-2">
+                        <AlertTriangle size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-white text-center">DATA OVERWRITE WARNING</h3>
+                    <p className="text-xs text-amber-200/80 text-center leading-relaxed">
+                        You have existing data in the system. Importing a backup will <b>PERMANENTLY OVERWRITE</b> all current employees and settings.
+                    </p>
+                </div>
+                
+                <div className="flex gap-3 mt-2">
+                    <button 
+                        onClick={() => {
+                            setShowOverwriteConfirm(false);
+                            setBackupMode('EXPORT'); // Switch to Export mode
+                            setEncryptionKey(''); // Clear key for new operation
+                        }}
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all text-xs"
+                    >
+                        SAVE EXISTING DATA
+                    </button>
+                    <button 
+                        onClick={() => {
+                            setShowOverwriteConfirm(false);
+                            executeImport();
+                        }}
+                        className="flex-1 bg-slate-700 hover:bg-red-600/20 text-slate-300 hover:text-red-400 border border-slate-600 hover:border-red-500/50 font-bold py-3 rounded-xl transition-all text-xs"
+                    >
+                        OVERWRITE
+                    </button>
+                </div>
+                <button onClick={() => setShowOverwriteConfirm(false)} className="text-xs text-slate-500 hover:text-slate-300 underline text-center mt-2">Cancel Operation</button>
             </div>
         </div>
        )}

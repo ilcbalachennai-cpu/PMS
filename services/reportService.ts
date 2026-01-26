@@ -1,3 +1,4 @@
+
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -80,23 +81,34 @@ export const generatePDFTableReport = (
   data: (string | number)[][],
   fileName: string,
   orientation: 'p' | 'l' = 'l',
-  footnote?: string
+  footnote?: string,
+  companyProfile?: CompanyProfile
 ) => {
   const doc = new jsPDF(orientation, 'mm', 'a4');
   
-  // Header
+  // Header - Uses Company Profile or Fallback
   doc.setFontSize(18);
-  doc.text(BRAND_CONFIG.companyName, 14, 15);
+  const companyName = companyProfile?.establishmentName || BRAND_CONFIG.companyName;
+  doc.text(companyName, 14, 15);
+
+  // Address - Small Font below Company Name
+  doc.setFontSize(8);
+  if (companyProfile) {
+      const addressLine = `${companyProfile.address}, ${companyProfile.city}, ${companyProfile.state}`.replace(/,\s*,/g, ',');
+      doc.text(addressLine, 14, 19);
+  }
+
   doc.setFontSize(11);
   doc.setTextColor(100);
-  doc.text(title, 14, 22);
+  // Adjusted Y position to account for address line
+  doc.text(title, 14, 24);
   doc.setTextColor(0);
 
-  // Table
+  // Table - Adjusted StartY
   autoTable(doc, {
     head: [headers],
     body: data,
-    startY: 30,
+    startY: 32,
     theme: 'grid',
     headStyles: { fillColor: [41, 128, 185], textColor: 255, fontSize: 8 },
     bodyStyles: { fontSize: 7 }, // Smaller font for many columns
@@ -131,7 +143,8 @@ export const generateSimplePaySheetPDF = (
   results: PayrollResult[],
   employees: Employee[],
   month: string,
-  year: number
+  year: number,
+  companyProfile?: CompanyProfile
 ) => {
   const headers = [
     'ID', 'Name', 'Days', 
@@ -183,14 +196,15 @@ export const generateSimplePaySheetPDF = (
     ? "* Code on Social Security 2020 [ Clause 88 ] impact on PF Contribution" 
     : undefined;
 
-  generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, data as any[][], `PaySheet_${month}_${year}`, 'l', footnote);
+  generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, data as any[][], `PaySheet_${month}_${year}`, 'l', footnote, companyProfile);
 };
 
 export const generatePaySlipsPDF = (
   payrollResults: PayrollResult[],
   employees: Employee[],
   month: string,
-  year: number
+  year: number,
+  companyProfile?: CompanyProfile
 ) => {
   const doc = new jsPDF('p', 'mm', 'a4');
   
@@ -206,12 +220,18 @@ export const generatePaySlipsPDF = (
     doc.setFontSize(20);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(30, 41, 59);
-    doc.text(BRAND_CONFIG.companyName.toUpperCase(), 105, 18, { align: 'center' });
+    // Dynamic Company Name
+    const companyName = companyProfile?.establishmentName || BRAND_CONFIG.companyName;
+    doc.text(companyName.toUpperCase(), 105, 18, { align: 'center' });
     
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(71, 85, 105);
-    doc.text("Industrial Estate, Chennai, Tamil Nadu", 105, 25, { align: 'center' });
+    // Dynamic Address
+    const address = companyProfile 
+        ? `${companyProfile.address}, ${companyProfile.city}, ${companyProfile.state}` 
+        : "Industrial Estate, Chennai, Tamil Nadu";
+    doc.text(address, 105, 25, { align: 'center' });
     
     doc.setFontSize(12);
     doc.setTextColor(15, 23, 42);
@@ -423,7 +443,8 @@ export const generateESIReturn = (
     results: PayrollResult[],
     employees: Employee[],
     format: 'Excel' | 'PDF',
-    fileName: string
+    fileName: string,
+    companyProfile?: CompanyProfile
 ) => {
     const data = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
@@ -446,14 +467,15 @@ export const generateESIReturn = (
     } else {
          const headers = ['IP Number', 'Name', 'Days', 'Wages', 'Reason Code'];
          const tableData = data.map(d => [d['IP Number'], d['IP Name'], d['No of Days'], d['Total Monthly Wages'], d['Reason Code']]);
-         generatePDFTableReport('Monthly ESI Return Data', headers, tableData, fileName, 'p');
+         generatePDFTableReport('Monthly ESI Return Data', headers, tableData, fileName, 'p', undefined, companyProfile);
     }
 }
 
 export const generatePTReport = (
     results: PayrollResult[],
     employees: Employee[],
-    fileName: string
+    fileName: string,
+    companyProfile?: CompanyProfile
 ) => {
     const headers = ['Emp ID', 'Name', 'Gross Income', 'PT Deducted'];
     const data = results.map(r => {
@@ -466,13 +488,14 @@ export const generatePTReport = (
         ];
     }).filter(row => (row[3] as number) > 0);
 
-    generatePDFTableReport('Professional Tax Deduction Report', headers, data as any[][], fileName, 'p');
+    generatePDFTableReport('Professional Tax Deduction Report', headers, data as any[][], fileName, 'p', undefined, companyProfile);
 };
 
 export const generateTDSReport = (
     results: PayrollResult[],
     employees: Employee[],
-    fileName: string
+    fileName: string,
+    companyProfile?: CompanyProfile
 ) => {
     const headers = ['Emp ID', 'Name', 'PAN', 'Gross Income', 'TDS Deducted'];
     const data = results.map(r => {
@@ -486,14 +509,15 @@ export const generateTDSReport = (
         ];
     }).filter(row => (row[4] as number) > 0);
 
-    generatePDFTableReport('Income Tax (TDS) Deduction Report', headers, data as any[][], fileName, 'p');
+    generatePDFTableReport('Income Tax (TDS) Deduction Report', headers, data as any[][], fileName, 'p', undefined, companyProfile);
 };
 
 export const generateCodeOnWagesReport = (
     results: PayrollResult[],
     employees: Employee[],
     format: 'Excel' | 'PDF',
-    fileName: string
+    fileName: string,
+    companyProfile?: CompanyProfile
 ) => {
     const data = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
@@ -522,7 +546,7 @@ export const generateCodeOnWagesReport = (
     } else {
         const headers = ['ID', 'Name', 'Gross', 'Basic+DA', 'Allw', '50% Limit', 'Excess', 'PF Wage', 'Impact'];
         const tableData = data.map(d => [d['Emp ID'], d['Name'], d['Gross (B)'], d['Basic+DA (A)'], d['Allowances (C)'], d['50% of Gross'], d['Excess (D)'], d['PF Wage (A+D)'], d['Impact']]);
-        generatePDFTableReport('Code on Wages (Clause 88) Impact Analysis', headers, tableData as any[][], fileName, 'l');
+        generatePDFTableReport('Code on Wages (Clause 88) Impact Analysis', headers, tableData as any[][], fileName, 'l', undefined, companyProfile);
     }
 };
 
@@ -533,7 +557,8 @@ export const generatePFForm12 = (
     employees: Employee[],
     config: StatutoryConfig,
     month: string,
-    year: number
+    year: number,
+    companyProfile?: CompanyProfile
 ) => {
     // OLD Form 12 (Monthly Statement) Logic
     let totalWages = 0;
@@ -578,7 +603,7 @@ export const generatePFForm12 = (
     data[1][6] = (data[1][1] as number).toString();
     data[2][6] = (data[2][2] as number).toString();
 
-    generatePDFTableReport(`Form 12 - Monthly Statement for ${month} ${year}`, headers, data as any[][], `Form12_Old_${month}_${year}`, 'p', `Total Subscribers: ${results.length}`);
+    generatePDFTableReport(`Form 12 - Monthly Statement for ${month} ${year}`, headers, data as any[][], `Form12_Old_${month}_${year}`, 'p', `Total Subscribers: ${results.length}`, companyProfile);
 };
 
 export const generatePFForm12A = (
@@ -827,7 +852,8 @@ export const generateFormB = (
   results: PayrollResult[],
   employees: Employee[],
   month: string,
-  year: number
+  year: number,
+  companyProfile?: CompanyProfile
 ) => {
    const headers = ['Sl.No', 'Name', 'Designation', 'Total Days', 'Basic', 'DA', 'Allowances', 'Gross Wages', 'PF', 'ESI', 'Other Ded', 'Total Ded', 'Net Wages'];
    const data = results.map((r, i) => {
@@ -851,7 +877,7 @@ export const generateFormB = (
        ];
    });
    
-   generatePDFTableReport(`FORM B [See Rule 21] - Register of Wages - ${month} ${year}`, headers, data as any[][], `FormB_${month}_${year}`, 'l');
+   generatePDFTableReport(`FORM B [See Rule 21] - Register of Wages - ${month} ${year}`, headers, data as any[][], `FormB_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateCentralWageSlip = (
@@ -868,7 +894,8 @@ export const generateFormC = (
     employees: Employee[],
     attendance: Attendance[],
     month: string,
-    year: number
+    year: number,
+    companyProfile?: CompanyProfile
 ) => {
     const headers = ['Sl.No', 'Name', 'Father/Husband', 'Sex', 'Designation', 'Present', 'Leaves', 'Work Done (Days)'];
     const data = results.map((r, i) => {
@@ -887,7 +914,7 @@ export const generateFormC = (
         ];
     });
 
-    generatePDFTableReport(`FORM D [See Rule 17] - Register of Attendance - ${month} ${year}`, headers, data as any[][], `FormC_MusterRoll_${month}_${year}`, 'l', "Note: Summary Muster Roll generated based on monthly aggregates.");
+    generatePDFTableReport(`FORM D [See Rule 17] - Register of Attendance - ${month} ${year}`, headers, data as any[][], `FormC_MusterRoll_${month}_${year}`, 'l', "Note: Summary Muster Roll generated based on monthly aggregates.", companyProfile);
 };
 
 export const generatePFForm3A = (
@@ -1071,7 +1098,7 @@ export const generatePFForm6A = (
       { content: 'Name of the Member', rowSpan: 2 },
       { content: 'Wages', rowSpan: 2 },
       { content: 'Worker\'s Share', rowSpan: 2 },
-      { content: 'Employer\'s Share', colSpan: 2, styles: { halign: 'center' } },
+      { content: 'Employer\'s Share', colSpan: 2, styles: { halign: 'center' as 'center' } },
       { content: 'Total', rowSpan: 2 },
       { content: 'Remarks', rowSpan: 2 }
     ],
@@ -1153,7 +1180,8 @@ export const generateTNFormR = (
   results: PayrollResult[],
   employees: Employee[],
   month: string,
-  year: number
+  year: number,
+  companyProfile?: CompanyProfile
 ) => {
     const headers = ['S.No', 'Name', 'Basic', 'DA', 'HRA', 'OT', 'Other', 'Gross', 'PF', 'ESI', 'Adv', 'Total Ded', 'Net'];
     const data = results.map((r, i) => {
@@ -1167,7 +1195,7 @@ export const generateTNFormR = (
             r.deductions.total, r.netPay
         ];
     });
-    generatePDFTableReport(`TN Form R (Register of Wages) - ${month} ${year}`, headers, data as any[][], `TN_FormR_${month}_${year}`, 'l');
+    generatePDFTableReport(`TN Form R (Register of Wages) - ${month} ${year}`, headers, data as any[][], `TN_FormR_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateTNFormT = (
@@ -1176,7 +1204,8 @@ export const generateTNFormT = (
   attendance: Attendance[],
   leaveLedgers: LeaveLedger[],
   month: string,
-  year: number
+  year: number,
+  companyProfile?: CompanyProfile
 ) => {
     const headers = ['ID', 'Name', 'EL Opn', 'EL Avl', 'EL Bal', 'Wages', 'Deductions', 'Net'];
     const data = results.map(r => {
@@ -1193,7 +1222,7 @@ export const generateTNFormT = (
             r.netPay
         ];
     });
-    generatePDFTableReport(`TN Form T (Wage Slips Summary) - ${month} ${year}`, headers, data as any[][], `TN_FormT_${month}_${year}`, 'l');
+    generatePDFTableReport(`TN Form T (Wage Slips Summary) - ${month} ${year}`, headers, data as any[][], `TN_FormT_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateTNFormP = (
@@ -1201,7 +1230,8 @@ export const generateTNFormP = (
   employees: Employee[],
   advanceLedgers: AdvanceLedger[],
   month: string,
-  year: number
+  year: number,
+  companyProfile?: CompanyProfile
 ) => {
     const headers = ['ID', 'Name', 'Advance Date', 'Amount', 'Purpose', 'Recovered', 'Balance'];
     const data = results.map(r => {
@@ -1223,14 +1253,15 @@ export const generateTNFormP = (
         data.push(['', 'No Advances', '', '', '', '', '']);
     }
 
-    generatePDFTableReport(`TN Form P (Register of Advances) - ${month} ${year}`, headers, data as any[][], `TN_FormP_${month}_${year}`, 'l');
+    generatePDFTableReport(`TN Form P (Register of Advances) - ${month} ${year}`, headers, data as any[][], `TN_FormP_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateESICodeWagesReport = (
     results: PayrollResult[],
     employees: Employee[],
     format: 'Excel' | 'PDF',
-    fileName: string
+    fileName: string,
+    companyProfile?: CompanyProfile
 ) => {
     const data = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
@@ -1256,7 +1287,7 @@ export const generateESICodeWagesReport = (
     } else {
         const headers = ['ID', 'Name', 'Gross', 'ESI Wage', 'EE Share', 'ER Share', 'Covered'];
         const tableData = data.map(d => [d['Emp ID'], d['Name'], d['Gross Wages'], d['ESI Wages'], d['EE Contribution'], d['ER Contribution'], d['Coverage']]);
-        generatePDFTableReport('ESI Wages & Contribution Report', headers, tableData as any[][], fileName, 'p');
+        generatePDFTableReport('ESI Wages & Contribution Report', headers, tableData as any[][], fileName, 'p', undefined, companyProfile);
     }
 };
 
@@ -1264,7 +1295,8 @@ export const generateESIExitReport = (
     results: PayrollResult[],
     employees: Employee[],
     month: string,
-    year: number
+    year: number,
+    companyProfile?: CompanyProfile
 ) => {
     const headers = ['ID', 'Name', 'Gross Wages', 'Reason'];
     
@@ -1287,5 +1319,5 @@ export const generateESIExitReport = (
              ];
         });
 
-    generatePDFTableReport(`ESI Excluded Employees - ${month} ${year}`, headers, data as any[][], `ESI_Exit_Report_${month}_${year}`, 'p');
+    generatePDFTableReport(`ESI Excluded Employees - ${month} ${year}`, headers, data as any[][], `ESI_Exit_Report_${month}_${year}`, 'p', undefined, companyProfile);
 };

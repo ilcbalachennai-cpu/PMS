@@ -7,8 +7,8 @@ export const BRAND_CONFIG = {
   appNameSuffix: 'Pro',
   companyName: 'ILCbala',
   tagline: 'Decoding Indian Labour Laws',
-  // Use a placeholder image initially. You can upload your own logo in the Settings or Login screen.
-  logoUrl: 'https://ui-avatars.com/api/?name=ILC&background=0D8ABC&color=fff&size=200', 
+  // SVG Data URI for ILCbala Logo (Permanent)
+  logoUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MDAgNDAwIj48Y2lyY2xlIGN4PSIyMDAiIGN5PSIyMDAiIHI9IjIwMCIgZmlsbD0iIzgwMDAwMCIvPjxlbGxpcHNlIGN4PSIyMDAiIGN5PSIyMDAiIHJ4PSIxOTUiIHJ5PSIxMjAiIGZpbGw9IiNGRkQ3MDAiLz48dGV4dCB4PSIyMDAiIHk9IjE4NSIgZm9udC1mYW1pbHk9InNlcmlmIiBmb250LXdlaWdodD0iYm9sZCIgZm9udC1zaXplPSI4MCIgZmlsbD0iIzgwMDAwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+SUxDYmFsYTwvdGV4dD48dGV4dCB4PSIyMDAiIHk9IjI0MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSJib25kIiBmb250LXN0eWxlPSJpdGFsaWMiIGZvbnQtc2l6ZT0iMjIiIGZpbGw9IiM4MDAwMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiPkRlY29kaW5nIEluZGlhbiBMYWJvdXIgTGF3czwvdGV4dD48L3N2Zz4=', 
 };
 
 export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
@@ -27,7 +27,8 @@ export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
   telephone: '',
   email: '',
   website: '',
-  natureOfBusiness: 'Manufacturing'
+  natureOfBusiness: 'Manufacturing',
+  flashNews: 'Welcome to BharatPay Pro! Ensure all PF ECRs are filed before the 15th. Check "Settings" to update this news.'
 };
 
 export const NATURE_OF_BUSINESS_OPTIONS = [

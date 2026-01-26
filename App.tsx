@@ -12,14 +12,16 @@ import {
   X, 
   ShieldCheck, 
   Network,
-  IndianRupee,
   UserCircle,
   Building2,
   MapPin,
   ChevronLeft,
   ChevronRight,
   Wrench,
-  CalendarClock
+  CalendarClock,
+  IndianRupee,
+  Megaphone,
+  Youtube
 } from 'lucide-react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
@@ -373,8 +375,16 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     <div className="flex h-screen overflow-hidden bg-[#020617] text-white">
       <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} transition-all duration-300 bg-[#0f172a] border-r border-slate-800 flex flex-col`}>
         <div className="p-6 flex items-center gap-3 border-b border-slate-800">
-          <div className="bg-blue-600 p-2 rounded-lg text-white shrink-0"><IndianRupee size={24} /></div>
-          {isSidebarOpen && <span className="text-xl font-bold tracking-tight">{BRAND_CONFIG.appName}<span className="text-blue-500">{BRAND_CONFIG.appNameSuffix}</span></span>}
+          <div className="bg-[#4169E1] p-2 rounded-lg text-white shrink-0 shadow-lg shadow-blue-500/20">
+            <IndianRupee size={24} className="text-[#FF9933]" />
+          </div>
+          {isSidebarOpen && (
+            <span className="text-xl font-black tracking-tight">
+                <span className="text-[#FF9933]">Bharat</span>
+                <span className="text-white">Pay</span>
+                <span className="text-[#4ADE80] ml-0.5">{BRAND_CONFIG.appNameSuffix}</span>
+            </span>
+          )}
         </div>
         
         <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
@@ -401,8 +411,8 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                  <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
               </div>
               <div className="leading-tight overflow-hidden">
-                <span className="text-[10px] text-slate-400 block tracking-widest uppercase">Powered By</span>
-                <span className="text-xs font-bold text-slate-200 block truncate">{BRAND_CONFIG.companyName}</span>
+                <span className="text-[10px] text-slate-400 block tracking-widest">POWERED By</span>
+                <span className="text-xs font-bold text-[#FF9933] block truncate">{BRAND_CONFIG.companyName}</span>
               </div>
             </div>
           </div>
@@ -442,19 +452,49 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       </aside>
 
       <main ref={mainContentRef} className="flex-1 overflow-y-auto">
-        <header className="bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 h-20 flex items-center justify-between px-8 sticky top-0 z-10">
-          <div>
-            <h2 className="text-xl font-black text-white tracking-wide flex items-center gap-2">
-               <Building2 size={20} className="text-blue-500" />
-               {companyProfile.establishmentName || BRAND_CONFIG.companyName}
+        <header className="bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 h-20 flex items-center justify-between px-8 sticky top-0 z-10 gap-6">
+          {/* Left: Company Name & Location */}
+          <div className="shrink-0 max-w-[30%]">
+            <h2 className="text-xl font-black text-white tracking-wide flex items-center gap-2 truncate">
+               <Building2 size={20} className="text-blue-500 shrink-0" />
+               <span className="truncate">{companyProfile.establishmentName || BRAND_CONFIG.companyName}</span>
             </h2>
-            <p className="text-[10px] text-slate-400 font-bold pl-7 flex items-center gap-1.5 mt-1">
-               <MapPin size={10} className="text-slate-500" />
+            <p className="text-[10px] text-slate-400 font-bold pl-7 flex items-center gap-1.5 mt-1 truncate">
+               <MapPin size={10} className="text-slate-500 shrink-0" />
                {companyProfile.city ? `${companyProfile.city}, ${companyProfile.state}` : 'Corporate HQ • Industrial Estate, Chennai, TN'}
             </p>
           </div>
           
-          <div className="flex items-center gap-4">
+          {/* Middle: Flash News Ticker */}
+          <div className="flex-1 flex flex-col justify-center overflow-hidden h-full max-w-[45%] gap-1">
+             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/50 border border-slate-800 rounded-lg w-full relative overflow-hidden group">
+                <div className="shrink-0 p-1.5 bg-amber-900/30 rounded text-amber-400 z-10 border border-amber-900/30">
+                    <Megaphone size={14} className="animate-pulse" />
+                </div>
+                <div className="overflow-hidden relative w-full h-5 flex items-center">
+                    <div className="animate-marquee whitespace-nowrap text-xs font-bold text-amber-100 uppercase tracking-widest absolute">
+                        {companyProfile.flashNews || 'Welcome to BharatPay Pro! Stay compliant with latest labour laws.'}
+                    </div>
+                </div>
+                {/* Gradient Fades for cleaner look */}
+                <div className="absolute left-10 top-0 bottom-0 w-4 bg-gradient-to-r from-slate-900/90 to-transparent z-10 pointer-events-none"></div>
+                <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-l from-slate-900/90 to-transparent z-10 pointer-events-none"></div>
+             </div>
+             
+             {/* YouTube Link */}
+             <a 
+                href="https://www.youtube.com/@ILCbala" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="flex items-center justify-center gap-2 text-[10px] font-bold text-slate-400 hover:text-red-400 transition-colors"
+             >
+                <Youtube size={12} className="text-red-500" />
+                Labour Laws and Hon'ble Court judgments -Decoded
+             </a>
+          </div>
+
+          {/* Right: Financial Year Badge */}
+          <div className="flex items-center gap-4 shrink-0">
             <div className="relative group overflow-hidden rounded-full p-[1px]">
               <span className="absolute inset-[-1000%] animate-[spin_3s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#059669_0%,#3b82f6_50%,#059669_100%)]" />
               <div className="inline-flex h-full w-full items-center justify-center rounded-full bg-[#0f172a] px-5 py-2 backdrop-blur-3xl">
@@ -463,7 +503,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 duration-1000"></span>
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                   </span>
-                  <span className="text-xs font-black tracking-[0.15em] text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-sky-400 to-emerald-400 animate-pulse">
+                  <span className="text-xs font-black tracking-[0.15em] text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-sky-400 to-emerald-400 animate-pulse whitespace-nowrap">
                     {getFinancialYearLabel()}
                   </span>
                 </div>
@@ -471,6 +511,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             </div>
           </div>
         </header>
+        
         <div className="p-8 max-w-7xl mx-auto">
           {activeView === View.Dashboard && (
             <Dashboard 
@@ -539,6 +580,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <Reports 
                 employees={employees} 
                 config={config} 
+                companyProfile={companyProfile} // Passed companyProfile
                 attendances={attendances}
                 savedRecords={payrollHistory}
                 setSavedRecords={setPayrollHistory}
@@ -571,6 +613,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               setLeavePolicy={setLeavePolicy} 
               onRestore={onRefresh}
               initialTab={settingsTab}
+              userRole={currentUser?.role}
           />}
           {activeView === View.AI_Assistant && <AIAssistant />}
         </div>

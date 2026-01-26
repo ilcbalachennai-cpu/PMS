@@ -23,15 +23,16 @@ import {
   ClipboardList,
   Eye
 } from 'lucide-react';
-import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy } from '../types';
+import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
-import { generateExcelReport, generatePDFTableReport, generatePaySlipsPDF } from '../services/reportService';
+import { generateExcelReport, generatePDFTableReport, generatePaySlipsPDF, generateSimplePaySheetPDF } from '../services/reportService';
 import LedgerManager from './LedgerManager';
 import { DEFAULT_LEAVE_POLICY } from '../constants'; // Fallback
 
 interface ReportsProps {
   employees: Employee[];
   config: StatutoryConfig;
+  companyProfile: CompanyProfile; // Added prop
   attendances: Attendance[];
   savedRecords: PayrollResult[];
   setSavedRecords: React.Dispatch<React.SetStateAction<PayrollResult[]>>;
@@ -50,6 +51,7 @@ interface ReportsProps {
 const Reports: React.FC<ReportsProps> = ({ 
     employees, 
     config, 
+    companyProfile,
     attendances, 
     savedRecords, 
     setSavedRecords,
@@ -339,12 +341,12 @@ const Reports: React.FC<ReportsProps> = ({
             d['EPF'], d['VPF'], d['ESI'], d['PT'], d['TDS'], d['LWF'], d['Adv Recovery'], d['Total Ded'], 
             d['NET PAY']
           ]);
-          generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, pdfData as any[][], `PaySheet_${month}_${year}`, 'l');
+          generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, pdfData as any[][], `PaySheet_${month}_${year}`, 'l', undefined, companyProfile);
         }
       } 
       else if (reportType === 'Pay Slips') {
         if (format === 'PDF') {
-            generatePaySlipsPDF(results, employees, month, year);
+            generatePaySlipsPDF(results, employees, month, year, companyProfile);
         }
       }
       else if (reportType === 'Bank Statement') {
@@ -364,7 +366,7 @@ const Reports: React.FC<ReportsProps> = ({
         } else {
             const headers = ['Name', 'Account No', 'IFSC', 'Net Pay'];
             const pdfData = bankData.map(d => [d['Employee Name'], d['Bank Account Number'], d['IFSC Code'], d['Net Salary']]);
-            generatePDFTableReport(`Bank Transfer Statement - ${month} ${year}`, headers, pdfData as any[][], `BankTransfer_${month}_${year}`, 'p');
+            generatePDFTableReport(`Bank Transfer Statement - ${month} ${year}`, headers, pdfData as any[][], `BankTransfer_${month}_${year}`, 'p', undefined, companyProfile);
         }
       }
       else if (reportType.includes('Summary')) {
@@ -381,7 +383,7 @@ const Reports: React.FC<ReportsProps> = ({
           } else {
              const headers = [groupKey.toUpperCase(), 'Total Cost (INR)'];
              const pdfData = summaryData.map(d => [d[groupKey], d['Total Cost'].toLocaleString()]);
-             generatePDFTableReport(`${groupKey} Wise Cost Summary - ${month}`, headers, pdfData as any[][], `${groupKey}_Summary`, 'p');
+             generatePDFTableReport(`${groupKey} Wise Cost Summary - ${month}`, headers, pdfData as any[][], `${groupKey}_Summary`, 'p', undefined, companyProfile);
           }
       }
     } catch (e: any) {
