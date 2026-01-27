@@ -119,12 +119,17 @@ export const calculatePayroll = (
   let epsEmployer = 0;
   
   if (!employee.isPFExempt) {
-    // Step 6: Apply Ceiling Check
-    // If Gross PF wages > PF wage ceiling (15000) then restrict PF wages to PF Wage ceiling.
-    
+    // Determine Logic Basis
+    const higherPension = employee.pfHigherPension;
+    const isHigherPensionEnabled = higherPension?.enabled;
+
     // 1. Employee Statutory Contribution
-    // Check if employee has opted for Higher Wages contribution, otherwise use the calculated Step 6 wage
-    let pfWageForEmployee = employee.isPFHigherWages ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
+    let pfWageForEmployee = 0;
+    if (isHigherPensionEnabled && higherPension.employeeContribution === 'Higher') {
+       pfWageForEmployee = grossPFWage;
+    } else {
+       pfWageForEmployee = employee.isPFHigherWages ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
+    }
     
     const baseRate = 0.12; 
     epfEmployee = Math.round(pfWageForEmployee * baseRate);
@@ -134,14 +139,32 @@ export const calculatePayroll = (
       vpfEmployee = Math.round(pfWageForEmployee * (employee.employeeVPFRate / 100));
     }
 
-    // 3. Employer Contribution
-    let pfWageForEmployer = employee.isEmployerPFHigher ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
+    // 3. Employer Contribution Logic (Splitting into EPS and EPF)
+    let pfWageForEmployer = 0;
+    if (isHigherPensionEnabled && higherPension.employerContribution === 'Higher') {
+        pfWageForEmployer = grossPFWage;
+    } else {
+        pfWageForEmployer = employee.isEmployerPFHigher ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
+    }
+
+    // EPS Calculation
+    let epsWage = 0;
+    if (isHigherPensionEnabled && higherPension.isHigherPensionOpted === 'Yes') {
+        // Impact: EPS calculated on Full Wages (or Employer PF Wages if capped differently, but usually implies full for higher pension)
+        epsWage = grossPFWage; 
+    } else {
+        // Standard: Capped at Ceiling (15000)
+        epsWage = Math.min(pfWageForEmployer, config.epfCeiling);
+    }
     
-    const epsWage = Math.min(pfWageForEmployer, config.epfCeiling);
     epsEmployer = Math.round(epsWage * 0.0833);
     
+    // Total Employer Share is 12% of (Employer PF Wage)
     const totalEmployerPF = Math.round(pfWageForEmployer * 0.12);
-    epfEmployer = totalEmployerPF - epsEmployer;
+    
+    // EPF (Employer) = Total Share - EPS Share
+    // If EPS > Total due to high wage calculation (unlikely with 8.33 vs 12, but safe check), handle appropriately
+    epfEmployer = Math.max(0, totalEmployerPF - epsEmployer);
   }
 
   // --- ESI Calculation (Updated for Social Security Code 2020) ---

@@ -132,6 +132,17 @@ export interface Employee {
   employeeVPFRate: number; // Voluntary contribution above base 12%
   isPFHigherWages: boolean; // Contribute on full basic (no ceiling)
   isEmployerPFHigher: boolean; // Employer also contributes on full basic
+  
+  // NEW: PF Higher Pension Option Impact
+  pfHigherPension?: {
+    enabled: boolean;
+    contributedBefore2014: 'Yes' | 'No'; // Header 1
+    dojImpact: string; // Header 2 (Date)
+    employeeContribution: 'Regular' | 'Higher'; // Header 3
+    employerContribution: 'Regular' | 'Higher'; // Header 4
+    isHigherPensionOpted: 'Yes' | 'No'; // Header 5
+  };
+
   photoUrl?: string;
   form1Url?: string;
   form2Url?: string;

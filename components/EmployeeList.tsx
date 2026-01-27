@@ -1,6 +1,5 @@
-
 import React, { useState, useRef } from 'react';
-import { Plus, Search, Edit2, Image as ImageIcon, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, FileSpreadsheet, Download, Lock, X, Save, MapPin, KeyRound, Trash2, Maximize2, Minimize2, ArrowLeft } from 'lucide-react';
+import { Plus, Search, Edit2, Image as ImageIcon, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, FileSpreadsheet, Download, Lock, X, Save, MapPin, KeyRound, Trash2, Maximize2, Minimize2, ArrowLeft, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, User } from '../types';
 import { INDIAN_STATES } from '../constants';
@@ -74,6 +73,17 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     employeeVPFRate: 0,
     isPFHigherWages: false,
     isEmployerPFHigher: false,
+    
+    // PF Higher Pension Defaults
+    pfHigherPension: {
+      enabled: false,
+      contributedBefore2014: 'No',
+      dojImpact: '',
+      employeeContribution: 'Regular',
+      employerContribution: 'Regular',
+      isHigherPensionOpted: 'No'
+    },
+
     photoUrl: '',
     serviceRecords: []
   });
@@ -247,6 +257,9 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
         isEmployerPFHigher: false,
         isESIExempt: false,
         employeeVPFRate: Number(getValue(row, "VPF Rate")) || 0,
+        
+        // Defaults for imported
+        pfHigherPension: { enabled: false, contributedBefore2014: 'No', dojImpact: '', employeeContribution: 'Regular', employerContribution: 'Regular', isHigherPensionOpted: 'No' },
 
         serviceRecords: [{ date: new Date().toISOString().split('T')[0], type: 'Appointment', description: 'Imported via Excel' }]
       }));
@@ -291,7 +304,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     const safeFormState = { 
         ...getEmptyForm(),
         ...emp,
-        // Explicitly map potentially undefined fields to ensure inputs are controlled
+        pfHigherPension: emp.pfHigherPension || getEmptyForm().pfHigherPension, // Ensure structure exists
         flatNumber: emp.flatNumber || '',
         streetAddress: emp.streetAddress || '',
         city: emp.city || '',
@@ -347,7 +360,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
 
   return (
     <div className="space-y-6 text-white relative">
-      {/* Search & Action Bar - Only show when NOT in full screen, as FS has its own header */}
+      {/* Search & Action Bar */}
       {!isFullScreen && (
       <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
@@ -372,14 +385,13 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* List View - Dynamically styles based on isFullScreen */}
+        {/* List View */}
         <div className={`${
             isFullScreen 
             ? 'fixed inset-0 z-[100] bg-[#0f172a] flex flex-col p-4 w-screen h-screen' 
             : 'lg:col-span-2 bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl h-fit max-h-[calc(100vh-12rem)] overflow-y-auto custom-scrollbar'
         }`}>
           
-          {/* Internal Header for Full Screen Mode */}
           {isFullScreen && (
               <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-800 shrink-0">
                   <div className="flex items-center gap-4">
@@ -458,7 +470,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
           </div>
         </div>
 
-        {/* Detail View - Only show if NOT in Full Screen Mode */}
+        {/* Detail View */}
         {!isFullScreen && (
         <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-6 shadow-xl sticky top-24 h-fit max-h-[calc(100vh-10rem)] overflow-y-auto custom-scrollbar">
           {selectedEmp ? (
@@ -579,6 +591,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                  </div>
               </div>
 
+              {/* Personal, Family, Address, Statutory sections kept same... */}
               {/* Personal & Family */}
               <div>
                   <h3 className="text-xs font-bold text-sky-400 uppercase tracking-widest mb-4 border-b border-slate-800 pb-2">Family & Organization</h3>
@@ -668,7 +681,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                       </div>
                       <div className="space-y-1">
                           <label className="text-[10px] font-bold text-slate-400 uppercase">ESI Number</label>
-                          <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-blue-500" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({...newEmpForm,esiNumber: e.target.value})} />
+                          <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-blue-500" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({...newEmpForm, esiNumber: e.target.value})} />
                       </div>
                       <div className="space-y-1">
                           <label className="text-[10px] font-bold text-slate-400 uppercase">PAN Number</label>
@@ -743,9 +756,9 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                   </div>
               </div>
 
-              {/* PF & ESI Options */}
+              {/* PF & ESI Options - EXISTING */}
               <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800">
-                  <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-4">Statutory Options</h3>
+                  <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-4">Statutory Options (Standard)</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                       <label className="flex items-center gap-3 cursor-pointer">
                           <input type="checkbox" className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500 bg-slate-800" checked={newEmpForm.isPFExempt} onChange={e => setNewEmpForm({...newEmpForm, isPFExempt: e.target.checked})} />
@@ -766,6 +779,100 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                   </div>
               </div>
 
+              {/* NEW: PF HIGHER PENSION OPTION IMPACT */}
+              <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xs font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2">
+                          <ShieldCheck size={16} /> PF Higher Pension Option Impact
+                      </h3>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                          <input 
+                              type="checkbox" 
+                              className="sr-only" 
+                              checked={newEmpForm.pfHigherPension?.enabled} 
+                              onChange={(e) => setNewEmpForm({
+                                  ...newEmpForm, 
+                                  pfHigherPension: { 
+                                      ...(newEmpForm.pfHigherPension || { contributedBefore2014: 'No', dojImpact: '', employeeContribution: 'Regular', employerContribution: 'Regular', isHigherPensionOpted: 'No' }), 
+                                      enabled: e.target.checked 
+                                  }
+                              })} 
+                          />
+                          <div className={`w-8 h-4 rounded-full transition-colors ${newEmpForm.pfHigherPension?.enabled ? 'bg-purple-600' : 'bg-slate-700'}`}></div>
+                          <span className={`text-[10px] font-bold uppercase tracking-wide ${newEmpForm.pfHigherPension?.enabled ? 'text-purple-400' : 'text-slate-500'}`}>
+                              {newEmpForm.pfHigherPension?.enabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                      </label>
+                  </div>
+
+                  {newEmpForm.pfHigherPension?.enabled && (
+                      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                          {/* Header 1 (A) */}
+                          <div className="space-y-1">
+                              <label className="text-[9px] font-bold text-slate-400 uppercase leading-tight">Contributing before 01-09-2014?</label>
+                              <select 
+                                  className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-xs outline-none focus:ring-1 focus:ring-purple-500"
+                                  value={newEmpForm.pfHigherPension.contributedBefore2014}
+                                  onChange={e => setNewEmpForm({ ...newEmpForm, pfHigherPension: { ...newEmpForm.pfHigherPension!, contributedBefore2014: e.target.value as any } })}
+                              >
+                                  <option value="Yes">Yes</option>
+                                  <option value="No">No</option>
+                              </select>
+                          </div>
+
+                          {/* Header 2 (B) */}
+                          <div className="space-y-1">
+                              <label className="text-[9px] font-bold text-slate-400 uppercase leading-tight">DOJ Impact on Higher Pension</label>
+                              <input 
+                                  type="date" 
+                                  className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-xs outline-none focus:ring-1 focus:ring-purple-500"
+                                  value={newEmpForm.pfHigherPension.dojImpact}
+                                  onChange={e => setNewEmpForm({ ...newEmpForm, pfHigherPension: { ...newEmpForm.pfHigherPension!, dojImpact: e.target.value } })}
+                              />
+                          </div>
+
+                          {/* Header 3 (C) */}
+                          <div className="space-y-1">
+                              <label className="text-[9px] font-bold text-slate-400 uppercase leading-tight">Employee Contribution</label>
+                              <select 
+                                  className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-xs outline-none focus:ring-1 focus:ring-purple-500"
+                                  value={newEmpForm.pfHigherPension.employeeContribution}
+                                  onChange={e => setNewEmpForm({ ...newEmpForm, pfHigherPension: { ...newEmpForm.pfHigherPension!, employeeContribution: e.target.value as any } })}
+                              >
+                                  <option value="Regular">Regular</option>
+                                  <option value="Higher">Higher</option>
+                              </select>
+                          </div>
+
+                          {/* Header 4 (D) */}
+                          <div className="space-y-1">
+                              <label className="text-[9px] font-bold text-slate-400 uppercase leading-tight">Employer Contribution</label>
+                              <select 
+                                  className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-xs outline-none focus:ring-1 focus:ring-purple-500"
+                                  value={newEmpForm.pfHigherPension.employerContribution}
+                                  onChange={e => setNewEmpForm({ ...newEmpForm, pfHigherPension: { ...newEmpForm.pfHigherPension!, employerContribution: e.target.value as any } })}
+                              >
+                                  <option value="Regular">Regular</option>
+                                  <option value="Higher">Higher</option>
+                              </select>
+                          </div>
+
+                          {/* Header 5 (E) */}
+                          <div className="space-y-1">
+                              <label className="text-[9px] font-bold text-slate-400 uppercase leading-tight">Higher Pension Opted?</label>
+                              <select 
+                                  className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-xs outline-none focus:ring-1 focus:ring-purple-500"
+                                  value={newEmpForm.pfHigherPension.isHigherPensionOpted}
+                                  onChange={e => setNewEmpForm({ ...newEmpForm, pfHigherPension: { ...newEmpForm.pfHigherPension!, isHigherPensionOpted: e.target.value as any } })}
+                              >
+                                  <option value="Yes">Yes</option>
+                                  <option value="No">No</option>
+                              </select>
+                          </div>
+                      </div>
+                  )}
+              </div>
+
               <div className="flex justify-end gap-4 pt-8 border-t border-slate-800 sticky bottom-0 bg-[#1e293b] py-4">
                 <button type="button" onClick={handleCloseModal} className="px-6 py-2.5 border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all font-bold">
                   CANCEL
@@ -779,7 +886,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
         </div>
       )}
 
-      {/* DELETE CONFIRMATION MODAL */}
+      {/* DELETE CONFIRMATION MODAL - Unchanged */}
       {deleteTarget && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
