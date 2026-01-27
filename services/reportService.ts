@@ -187,351 +187,223 @@ export const generateLeaveLedgerReport = (employees: Employee[], leaveLedgers: L
     generatePDFTableReport(type === 'BC' ? `Leave Ledger (Before Confirmation) - ${month} ${year}` : `Leave Ledger (After Confirmation) - ${month} ${year}`, headers, data as any[][], `Leave_Ledger_${type}_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
-export const generatePFForm3A = (
-    history: PayrollResult[], 
-    employees: Employee[], 
-    config: StatutoryConfig, 
-    startMonth: string, 
-    startYear: number, 
-    endMonth: string, 
-    endYear: number, 
-    selectedEmployeeId?: string,
-    companyProfile?: CompanyProfile
-) => {
+export const generatePFForm12A = (data: PayrollResult[], employees: Employee[], config: StatutoryConfig, companyProfile: CompanyProfile, month: string, year: number) => {
     const doc = new jsPDF('p', 'mm', 'a4');
-    const periods = getPeriodsInRange(startMonth, startYear, endMonth, endYear);
-    const empsToProcess = selectedEmployeeId ? employees.filter(e => e.id === selectedEmployeeId) : employees;
+    const width = doc.internal.pageSize.getWidth();
 
-    empsToProcess.forEach((emp, index) => {
-        if (index > 0) doc.addPage();
+    // 1. Header Section
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(220, 38, 38); // Red Color
+    doc.setFontSize(11);
+    doc.text("PF_Form12A (Revised)", width / 2, 10, { align: 'center' });
+    
+    doc.setTextColor(0); // Reset to Black
+    doc.setFontSize(9);
+    doc.text("(Only for Un-Exempted Establishment)", 14, 15);
+
+    // Left Side: Establishment Details
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("Name Address of Establishment", 14, 22);
+    
+    doc.setFont("helvetica", "bold");
+    doc.text((companyProfile?.establishmentName || BRAND_CONFIG.companyName).toUpperCase(), 14, 27);
+    
+    doc.setFont("helvetica", "normal");
+    const addressLines = doc.splitTextToSize(
+        `${companyProfile?.address || ''}\n${companyProfile?.city || ''}, ${companyProfile?.state || ''}`, 
+        80
+    );
+    doc.text(addressLines, 14, 32);
+
+    // Right Side: Act Details & Codes
+    const rightX = 100;
+    doc.text("| Employees Provident Fund And Misc. Provision Act 1952", rightX, 15);
+    doc.text("| Employees Pension Scheme [Paragraph 20 (4)]", rightX, 20);
+    
+    // Currency Period
+    const nextMonthIdx = (MONTHS.indexOf(month) + 1) % 12; // Simple next month logic roughly
+    // Better logic: Current month start to end
+    const daysInMonth = new Date(year, MONTHS.indexOf(month) + 1, 0).getDate();
+    doc.text(`| Currency Period from: 1st ${month} to ${daysInMonth} ${month}`, rightX, 25);
+    doc.text(`| Statement of Contribution for the Month of ${month} ${year}`, rightX, 30);
+    
+    doc.text("| (To be Filled by the EPFO)", rightX, 35);
+    doc.text("| Establishment Status", rightX, 40);
+    doc.text("| Group Code", rightX, 45);
+    doc.text("| Establishment Code", rightX, 50);
+
+    // 2. Red Calculation Sheet Header
+    const calcY = 60;
+    doc.setDrawColor(220, 38, 38);
+    doc.setLineWidth(0.5);
+    doc.line(14, calcY, width - 14, calcY);
+    doc.setTextColor(220, 38, 38);
+    doc.setFont("helvetica", "bold");
+    doc.text("PF ECR_UAN_CALCULATION SHEET", width / 2, calcY - 2, { align: 'center' });
+    doc.line(14, calcY - 6, width - 14, calcY - 6); // Top line
+
+    // 3. TRRN and Date Boxes (Yellow Highlight)
+    const boxY = calcY + 5;
+    doc.setFillColor(255, 255, 0); // Yellow
+    doc.rect(70, boxY, 20, 6, 'F'); // TRRN Label Box
+    doc.setTextColor(0);
+    doc.setFontSize(9);
+    doc.text("TRRN", 80, boxY + 4, { align: 'center' });
+    
+    doc.setFillColor(255, 255, 0); // Yellow
+    doc.rect(150, boxY, 20, 6, 'F'); // Date Label Box
+    doc.text("Date", 160, boxY + 4, { align: 'center' });
+
+    // 4. Calculations
+    let totalEPFWages = 0;
+    let totalEPSWages = 0;
+    let totalEDLIWages = 0;
+    let totalEE_Share = 0; // 12%
+    let totalER_EPF_Share = 0; // 3.67%
+    let totalER_EPS_Share = 0; // 8.33%
+
+    // Calculate Totals strictly
+    data.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
         
-        // --- Header Section ---
-        doc.setFontSize(11); doc.setFont("helvetica", "bold");
-        doc.text("For UnExempted Establishment Only ( Form 3A Revises)", 105, 12, { align: 'center' });
-        doc.setFontSize(9); doc.setFont("helvetica", "normal");
-        doc.text("The Employees Provident Fund Scheme 1952 (Paras 35 42)", 105, 17, { align: 'center' });
-        doc.text("The Employees Pension Scheme: 1995 (Para 19)", 105, 21, { align: 'center' });
-
-        const fromDateStr = `01/${(MONTHS.indexOf(startMonth) + 1).toString().padStart(2, '0')}/${startYear}`;
-        const toDateStr = `31/${(MONTHS.indexOf(endMonth) + 1).toString().padStart(2, '0')}/${endYear}`;
-        doc.text(`Contribution Card for Currency Period from: ${fromDateStr} to ${toDateStr}`, 105, 27, { align: 'center' });
-
-        let y = 35;
-        doc.setFontSize(10); doc.setFont("helvetica", "normal");
-        doc.text(`Account No: ${emp.pfNumber || 'N/A'}`, 14, y);
-        doc.text("Name Address of the Factory/ Establishment", 110, y);
+        // Wages
+        const actualWage = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
         
-        y += 5;
-        doc.text(`UAN No: ${emp.uanc || 'N/A'}`, 14, y);
-        
-        y += 6;
-        doc.setFont("helvetica", "normal");
-        doc.text(`Name/ Surname: `, 14, y);
-        doc.setFont("helvetica", "bold");
-        doc.text(emp.name.toUpperCase(), 42, y);
-        
-        doc.setFont("helvetica", "bold");
-        doc.text((companyProfile?.establishmentName || BRAND_CONFIG.companyName).toUpperCase(), 110, y);
-        
-        y += 5;
-        doc.setFont("helvetica", "normal");
-        doc.text(`Father/ Husband Name: ${emp.fatherSpouseName || 'N/A'}`, 14, y);
-        doc.setFontSize(8);
-        doc.text(companyProfile?.address || "Industrial Estate, Sector 10,", 110, y);
-        
-        y += 4;
-        doc.setFontSize(10);
-        doc.text(`Statutory Rate of Cont: ${Math.round(config.epfEmployeeRate * 100)}%`, 14, y);
-        doc.setFontSize(8);
-        doc.text(`${companyProfile?.city || "Chennai"}, ${companyProfile?.state || "Tamil Nadu"}`, 110, y);
+        // EPF Wages: Actual if Higher Wages opted, else capped at 15k
+        const epfWage = emp?.isPFHigherWages ? actualWage : Math.min(actualWage, config.epfCeiling);
+        totalEPFWages += Math.round(epfWage);
 
-        y += 6;
-        doc.setFontSize(9);
-        doc.text(`Voluntary Higher Rate of employee's Cont. (if any): ${emp.employeeVPFRate > 0 ? emp.employeeVPFRate + '%' : 'NIL'}`, 14, y);
-        
-        y += 5;
-        doc.text(`RE Cont. on Hr Wages to EPF (ER) Y/N: ${emp.isPFHigherWages ? 'Y' : 'N'}`, 14, y);
-        doc.text(`Vol.Cont. to Pension Y/N: N`, 120, y);
+        // EPS Wages: Always capped at 15k (unless Higher Pension enabled - check flag)
+        const epsWage = (emp?.pfHigherPension?.enabled && emp.pfHigherPension.isHigherPensionOpted === 'Yes') 
+            ? actualWage 
+            : Math.min(actualWage, 15000); // Standard EPS Cap
+        totalEPSWages += Math.round(epsWage);
 
-        // --- Table Section ---
-        const tableStartY = y + 8;
-        const columns = [
-            { header: "Month/ Year", dataKey: "period" },
-            { header: "Amount of\nWages", dataKey: "wages" },
-            { header: "Worker's Share\nEPF", dataKey: "ee_pf" },
-            { header: "Employer's Share\nEPF (A/c 1)", dataKey: "er_pf" },
-            { header: "PENSION FUND\n(A/c 10)", dataKey: "pension" },
-            { header: "Ref. of\nAdv.", dataKey: "adv" },
-            { header: "NCP Days\n(LOP)", dataKey: "ncp" }
-        ];
+        // EDLI Wages: Same as EPS usually
+        totalEDLIWages += Math.round(Math.min(actualWage, 15000));
 
-        const tableBody = periods.map(p => {
-            const res = history.find(r => r.employeeId === emp.id && r.month === p.month && r.year === p.year);
-            const wages = res ? (res.earnings.basic + res.earnings.da + res.earnings.retainingAllowance) : 0;
-            const ee_pf = res ? (res.deductions.epf + res.deductions.vpf) : 0; // Worker share includes VPF
-            const er_eps = res ? res.employerContributions.eps : 0;
-            const er_epf = res ? res.employerContributions.epf : 0;
-            const ncp = res ? (res.daysInMonth - res.payableDays) : 0;
-
-            return {
-                period: `${p.month.slice(0, 3)} '${p.year.toString().slice(-2)}`,
-                wages: wages > 0 ? wages.toLocaleString() : "0",
-                ee_pf: ee_pf > 0 ? ee_pf.toLocaleString() : "0",
-                er_pf: er_epf > 0 ? er_epf.toLocaleString() : "0",
-                pension: er_eps > 0 ? er_eps.toLocaleString() : "0",
-                adv: "",
-                ncp: ncp > 0 ? ncp : ""
-            };
-        });
-
-        // Add Total Row
-        const totalWages = history.filter(r => r.employeeId === emp.id && periods.some(p => p.month === r.month && p.year === r.year)).reduce((a, c) => a + (c.earnings.basic + c.earnings.da + c.earnings.retainingAllowance), 0);
-        const totalEE = history.filter(r => r.employeeId === emp.id && periods.some(p => p.month === r.month && p.year === r.year)).reduce((a, c) => a + c.deductions.epf + c.deductions.vpf, 0);
-        const totalEREPF = history.filter(r => r.employeeId === emp.id && periods.some(p => p.month === r.month && p.year === r.year)).reduce((a, c) => a + c.employerContributions.epf, 0);
-        const totalEPS = history.filter(r => r.employeeId === emp.id && periods.some(p => p.month === r.month && p.year === r.year)).reduce((a, c) => a + c.employerContributions.eps, 0);
-        // Correct NCP calc: Sum of (DaysInMonth - PayableDays) for months where payroll exists
-        const totalNCP = history.filter(r => r.employeeId === emp.id && periods.some(p => p.month === r.month && p.year === r.year)).reduce((a, c) => a + (c.daysInMonth - c.payableDays), 0);
-
-        autoTable(doc, {
-            startY: tableStartY,
-            head: [columns.map(c => c.header)],
-            body: tableBody.map(row => [row.period, row.wages, row.ee_pf, row.er_pf, row.pension, row.adv, row.ncp]),
-            theme: 'grid',
-            headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], lineWidth: 0.1, fontSize: 8, halign: 'center', lineColor: [200, 200, 200] },
-            bodyStyles: { fontSize: 8, halign: 'center', lineWidth: 0.1, lineColor: [200, 200, 200] },
-            foot: [['Total :', totalWages.toLocaleString(), totalEE.toLocaleString(), totalEREPF.toLocaleString(), totalEPS.toLocaleString(), "", totalNCP > 0 ? `${totalNCP}` : ""]],
-            footStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.1, halign: 'center', lineColor: [200, 200, 200] }
-        });
-
-        const finalY = (doc as any).lastAutoTable.finalY + 10;
-        doc.setFontSize(9); doc.setFont("helvetica", "normal");
-        doc.text("7- Remarks : A) Date of Leaving Service , if any:", 14, finalY);
-        if (emp.dol) doc.text(emp.dol, 80, finalY);
-        doc.text("B) Reason for leaving service, if any:", 32, finalY + 5);
-
-        const totalRemittance = totalEE + totalEREPF;
-        doc.setFontSize(8);
-        const certText = `Certified that the total amount of contribution (both shares) indicated in this card i.e. Rs. ${totalRemittance.toLocaleString()} has already been remitted in full in EPF A/c. No.1 and Pension Fund A/c. No. 10 Rs. ${totalEPS.toLocaleString()} (Vide note below)`;
-        doc.text(doc.splitTextToSize(certText, 182), 14, finalY + 15);
-        
-        const certText2 = "Certified that the Difference between the Total of contribution show under Cols. 3 4a 4b of the above table and that arrived at on the total wages shown in Cols. 2 at the prescribed rate is solely due to the rounding off of contribution to the nearest rupee under the rules.";
-        doc.text(doc.splitTextToSize(certText2, 182), 14, finalY + 25);
-
-        doc.setFontSize(10); doc.setFont("helvetica", "bold");
-        doc.text("For", 125, finalY + 40);
-        doc.text((companyProfile?.establishmentName || BRAND_CONFIG.companyName).toUpperCase(), 140, finalY + 40);
-        doc.setFont("helvetica", "normal");
-        const dateStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        doc.text(dateStr, 14, finalY + 50);
-        doc.text("Signature of employer with Official Seal", 135, finalY + 55);
+        // Shares
+        totalEE_Share += (r.deductions.epf); // Assuming VPF is separate, Form 12A usually tracks statutory 12%
+        totalER_EPS_Share += r.employerContributions.eps;
+        totalER_EPF_Share += r.employerContributions.epf;
     });
 
-    doc.save(`PF_Form_3A_${startMonth}_${startYear}_to_${endMonth}_${endYear}.pdf`);
-};
-
-export const generatePFForm6A = (history: PayrollResult[], employees: Employee[], config: StatutoryConfig, startMonth: string, startYear: number, endMonth: string, endYear: number, companyProfile?: CompanyProfile) => {
-     const doc = new jsPDF('l', 'mm', 'a4'); // Landscape
-     const periods = getPeriodsInRange(startMonth, startYear, endMonth, endYear);
-     
-     // HEADER
-     doc.setFontSize(12); doc.setFont("helvetica", "bold");
-     doc.text("(FOR UNEXEMPTED ESTABLISHMENTS' ONLY)", 148, 10, { align: 'center' });
-     doc.setFontSize(14);
-     doc.text("FORM 6A", 148, 16, { align: 'center' });
-     doc.setFontSize(10);
-     doc.text("THE EMPLOYEES' PROVIDENT FUND SCHEME, 1952 (PARAGRAPH 43)", 148, 22, { align: 'center' });
-     doc.text("AND", 148, 26, { align: 'center' });
-     doc.text("THE EMPLOYEES PENSION SCHEME, 1995 [PARAGRAPH 20 (4)]", 148, 30, { align: 'center' });
-
-     doc.setFontSize(9); doc.setFont("helvetica", "normal");
-     const fromDateStr = `1st ${startMonth} ${startYear}`;
-     const toDateStr = `31st ${endMonth} ${endYear}`;
-     doc.text(`Annual statement of contribution for the Currency period from ${fromDateStr} to ${toDateStr}`, 14, 40);
-
-     let y = 48;
-     doc.text(`Name & Address of the Establishment: ${(companyProfile?.establishmentName || "").toUpperCase()}, ${companyProfile?.address || ""}`, 14, y);
-     doc.text(`Statutory rate of contribution: ${Math.round(config.epfEmployeeRate * 100)}%`, 200, y);
-     y += 6;
-     doc.text(`Code No. of the Establishment: ${companyProfile?.pfCode || "N/A"}`, 14, y);
-     const volContributors = employees.filter(e => e.employeeVPFRate > 0).length;
-     doc.text(`No. of members voluntarily contributing at a higher rate: ${volContributors}`, 200, y);
-
-     // TABLE 1: MEMBER LIST
-     const headers = [
-         'Sl.\nNo', 
-         'Account No.', 
-         'Name of member\n(in block letters)', 
-         'Wages, retaining allowance\n(if any) & DA including\ncash value of food concession\npaid during the currency period.', 
-         'Amount of worker\'s\ncontributions deducted\nfrom the wages EPF', 
-         'Employer\'s Contribution w.e.f. 16-11-1995\n\nEPF difference\nbetween 12% & 8 1/3 %\n\nPension Fund 8 1/3 %', 
-         'Refund of\nAdvance', 
-         'Rate of higher voluntary\ncontribution (if any)', 
-         'Remarks'
-     ];
-
-     const agg: Record<string, any> = {};
-     history.filter(r => periods.some(p => p.month === r.month && p.year === r.year)).forEach(r => {
-         if (!agg[r.employeeId]) agg[r.employeeId] = { wages: 0, ee: 0, er_pf: 0, er_eps: 0 };
-         agg[r.employeeId].wages += (r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance);
-         agg[r.employeeId].ee += (r.deductions.epf + r.deductions.vpf);
-         agg[r.employeeId].er_pf += r.employerContributions.epf;
-         agg[r.employeeId].er_eps += r.employerContributions.eps;
-     });
-
-     const tableData = Object.keys(agg).map((id, i) => {
-         const emp = employees.find(e => e.id === id);
-         const d = agg[id];
-         return [
-             i + 1, 
-             emp?.pfNumber || emp?.uanc || '', 
-             emp?.name.toUpperCase(), 
-             d.wages.toLocaleString(), 
-             d.ee.toLocaleString(), 
-             `${d.er_pf.toLocaleString()}                ${d.er_eps.toLocaleString()}`, // Combined Column manually spaced
-             "", 
-             "", 
-             ""
-         ];
-     });
-
-     autoTable(doc, {
-         startY: y + 5,
-         head: [
-             [headers[0], headers[1], headers[2], headers[3], headers[4], headers[5], headers[6], headers[7], headers[8]]
-         ],
-         body: tableData,
-         theme: 'grid',
-         styles: { fontSize: 8, cellPadding: 1, overflow: 'linebreak', halign: 'center', valign: 'middle', lineWidth: 0.1, lineColor: [200, 200, 200] },
-         headStyles: { fillColor: [255, 255, 255], textColor: 0, lineWidth: 0.1, fontStyle: 'bold' },
-         columnStyles: {
-             0: { cellWidth: 10 },
-             1: { cellWidth: 35 },
-             2: { cellWidth: 40 },
-             3: { cellWidth: 35 },
-             4: { cellWidth: 25 },
-             5: { cellWidth: 40 }, // Employer Split
-             6: { cellWidth: 15 },
-             7: { cellWidth: 25 },
-             8: { cellWidth: 15 }
-         },
-         didParseCell: (data) => {
-             // Custom handling for splitting the header of Employer Contribution
-             if (data.section === 'head' && data.column.index === 5) {
-                 // The text is already set in headers array, autoTable handles newline
-             }
-         }
-     });
-
-     // RECONCILIATION TABLE (New Page or Follow up)
-     let finalY = (doc as any).lastAutoTable.finalY + 10;
-     if (finalY > 150) { // If not enough space, add page
-         doc.addPage();
-         finalY = 20;
-     }
-
-     doc.setFontSize(11); doc.setFont("helvetica", "bold");
-     doc.text("Reconciliation of Remittances", 148, finalY, { align: 'center' });
-
-     const recColumns = [
-         "No.", "Month", 
-         "EPF Contributions\nincluding refund of\nadvances A/c No. 1", 
-         "Pension Fund\nContributions A/c No. 10", 
-         "DLI Contribution\nA/c No. 21", 
-         "Adm. Charges\nA/c No. 2", 
-         "EDLI ADM.\nCharges A/c No. 22", 
-         "Cols. 5, 6, 7 Rs.\nAggregate\ncontributions"
-     ];
-
-     const recData = periods.map((p, i) => {
-         // Aggregate for ALL employees for this month
-         const monthlyRecords = history.filter(r => r.month === p.month && r.year === p.year);
-         
-         const totalPF_Wages = monthlyRecords.reduce((a, c) => a + (c.earnings.basic + c.earnings.da + c.earnings.retainingAllowance), 0);
-         
-         // A/c 1 = Total EE (EPF+VPF) + Total ER EPF Difference
-         const ac1 = monthlyRecords.reduce((a, c) => a + c.deductions.epf + c.deductions.vpf + c.employerContributions.epf, 0);
-         
-         // A/c 10 = Total ER EPS
-         const ac10 = monthlyRecords.reduce((a, c) => a + c.employerContributions.eps, 0);
-         
-         // A/c 21 = EDLI Contribution (0.5% of PF Wages, capped wages usually, here taking calculated total wages roughly for display)
-         // Note: Logic should use capped wages per employee (15k). Re-iterating to be precise.
-         const edliWages = monthlyRecords.reduce((a, c) => a + Math.min((c.earnings.basic + c.earnings.da + c.earnings.retainingAllowance), 15000), 0);
-         const ac21 = Math.round(edliWages * 0.005);
-
-         // A/c 2 = Admin Charges (0.5% of PF Wages, Min 500/75. Assuming > min for aggregate)
-         const ac2 = Math.round(totalPF_Wages * 0.005);
-
-         // A/c 22 = EDLI Admin (Usually 0 since 2017)
-         const ac22 = 0;
-
-         const aggregate = ac1 + ac10 + ac21 + ac2 + ac22;
-
-         return [
-             i + 1,
-             `${p.month} ${p.year}`,
-             ac1 > 0 ? ac1.toLocaleString() : "0",
-             ac10 > 0 ? ac10.toLocaleString() : "0",
-             ac21 > 0 ? ac21.toLocaleString() : "0",
-             ac2 > 0 ? ac2.toLocaleString() : "0",
-             ac22 > 0 ? ac22.toLocaleString() : "0",
-             aggregate > 0 ? aggregate.toLocaleString() : "0"
-         ];
-     });
-
-     autoTable(doc, {
-         startY: finalY + 5,
-         head: [recColumns],
-         body: recData,
-         theme: 'grid',
-         styles: { fontSize: 8, halign: 'center', valign: 'middle', lineWidth: 0.1, lineColor: [200, 200, 200] },
-         headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: 'bold', lineWidth: 0.1 }
-     });
-
-     finalY = (doc as any).lastAutoTable.finalY + 10;
-     
-     // Footer Notes
-     doc.setFontSize(8); doc.setFont("helvetica", "normal");
-     doc.text("NOTE:- (1) The names of all members, including those who had left service during the currency period, should be included in this statement.", 14, finalY);
-     doc.text("(2) In case of substantial variation in the wages/contribution of any members as compared to those shown in previous months statement, the reason should be explained adequately.", 14, finalY + 5);
-     doc.text("(3) In respect of those members who have not opted for Pension Fund their entire employers contribution @ 8 1/3% or 10% as the case may be shown under column No. 6.", 14, finalY + 10);
-
-     doc.setFontSize(10); doc.setFont("helvetica", "bold");
-     doc.text("Signature of Employer (with office seal)", 220, finalY + 25);
-
-     doc.save(`PF_Form_6A_${startMonth}_${startYear}_to_${endMonth}_${endYear}.pdf`);
-};
-
-export const generatePFForm12A = (data: PayrollResult[], employees: Employee[], config: StatutoryConfig, companyProfile: CompanyProfile, month: string, year: number) => {
-    // Reverted to earlier code format (summarized accounts table)
-    const headers = ['Group', 'Wages', 'A/c 01 (12%)', 'A/c 02', 'A/c 10 (8.33%)', 'A/c 21', 'A/c 22'];
+    const adminCharges = Math.round(totalEPFWages * 0.005); // A/c 2
+    const edliCharges = Math.round(totalEDLIWages * 0.005); // A/c 21 (EDLI Contribution, confusingly labeled as Charges in some contexts, but row 3 is wages)
     
-    const totalWages = data.reduce((acc, curr) => acc + (curr.earnings.basic + curr.earnings.da + curr.earnings.retainingAllowance), 0);
-    const eeShare = data.reduce((acc, curr) => acc + curr.deductions.epf, 0);
-    const erShare = data.reduce((acc, curr) => acc + curr.employerContributions.epf, 0);
-    const totalAc01 = eeShare + erShare;
-    const epsShare = data.reduce((acc, curr) => acc + curr.employerContributions.eps, 0);
-    
-    // Admin Charges (A/c 02) = 0.50% of wages
-    const adminCharges = Math.max(75, Math.round(totalWages * 0.0050));
-    
-    // EDLI Charges (A/c 21) = 0.50% of wages
-    const edliCharges = Math.round(totalWages * 0.0050);
+    // Correcting Row 3 based on Screenshot: "EDLI_Wages (A/c No.21)" -> This is the 0.5% Contribution
+    // Row 3 Total = 0.5% of EDLI Wages
+    const ac21_Amount = edliCharges;
 
-    const tableData = [[
-        'Total', 
-        totalWages.toFixed(2), 
-        totalAc01.toFixed(2), 
-        adminCharges.toFixed(2), 
-        epsShare.toFixed(2), 
-        edliCharges.toFixed(2), 
-        '0.00'
-    ]];
+    // Row 4: Admin Charges (A/c No.2) -> 0.5% of PF Wages
+    const ac2_Amount = Math.max(500, adminCharges); // Min 500 usually applies to challan, showing calc here
 
-    generatePDFTableReport(`PF Form 12A - ${month} ${year}`, headers, tableData, `Form12A_${month}_${year}`, 'p', undefined, companyProfile);
+    const totalColumnSum = (totalEE_Share) + (totalER_EPF_Share) + (totalER_EPS_Share) + (ac21_Amount) + (ac2_Amount);
+
+    // 5. Table Data Construction
+    const tableData = [
+        [
+            { content: 'EPF_Wages (A/c No.1)\n(12%+3.67%)', styles: { fontStyle: 'bold' } },
+            totalEPFWages,
+            '12%',
+            totalEE_Share,
+            '3.67%',
+            totalER_EPF_Share,
+            totalEE_Share + totalER_EPF_Share
+        ],
+        [
+            { content: 'EPS_Wages (A/c No.10)\n(8.33%)', styles: { fontStyle: 'bold' } },
+            totalEPSWages,
+            '',
+            '',
+            '8.33%',
+            totalER_EPS_Share,
+            totalER_EPS_Share
+        ],
+        [
+            { content: 'EDLI_Wages (A/c No.21)\n(0.50%)', styles: { fontStyle: 'bold' } },
+            totalEDLIWages,
+            '',
+            '',
+            '',
+            '',
+            ac21_Amount
+        ],
+        [
+            { content: 'Admin_Charges (A/c No.2)\n(0.50%)', styles: { fontStyle: 'bold' } },
+            totalEPFWages,
+            '',
+            '',
+            '',
+            '',
+            ac2_Amount
+        ],
+        [
+            { content: 'Admin_Charg_EDLI (0.0%)', styles: { fontStyle: 'bold' } },
+            '0',
+            '',
+            '',
+            '',
+            '',
+            '0'
+        ],
+        [
+            '',
+            '',
+            { content: totalEE_Share, styles: { fontStyle: 'bold' } },
+            '', // Merged visually by placement
+            { content: (totalER_EPF_Share + totalER_EPS_Share), styles: { fontStyle: 'bold' } }, // Employer Total
+            '',
+            { content: totalColumnSum, styles: { fontStyle: 'bold' } }
+        ]
+    ];
+
+    autoTable(doc, {
+        startY: boxY + 15,
+        head: [['PF-Wages', 'Wages', 'Employee Share', '', 'Employer Share', '', 'Total']], // Simplified Header to match visual
+        body: tableData as any,
+        theme: 'plain',
+        styles: { fontSize: 9, cellPadding: 2, overflow: 'visible' },
+        columnStyles: {
+            0: { cellWidth: 50 },
+            1: { cellWidth: 30 },
+            2: { cellWidth: 20 }, // Emp Rate
+            3: { cellWidth: 25 }, // Emp Amt
+            4: { cellWidth: 20 }, // Er Rate
+            5: { cellWidth: 25 }, // Er Amt
+            6: { cellWidth: 25, halign: 'right' } // Total
+        },
+        didParseCell: (data) => {
+            // Header Customization
+            if (data.section === 'head') {
+                if (data.column.index === 0) data.cell.text = ['PF-Wages'];
+                if (data.column.index === 1) data.cell.text = [totalEPFWages.toString()]; // Show Total Wages in Header line as per screenshot
+                if (data.column.index === 2) data.cell.text = ['Employee Share'];
+                if (data.column.index === 4) data.cell.text = ['Employer Share'];
+                if (data.column.index === 6) data.cell.text = ['Total'];
+                
+                // Clear others
+                if ([3, 5].includes(data.column.index)) data.cell.text = [''];
+                
+                data.cell.styles.fontStyle = 'bold';
+                data.cell.styles.textColor = 0;
+            }
+        },
+        // Draw lines manually for "Grand Total" effect
+        didDrawPage: (data) => {
+            const lastY = data.cursor?.y || 0;
+            doc.setDrawColor(200);
+            doc.line(14, lastY - 10, width - 14, lastY - 10); // Line above Total
+            doc.line(14, lastY, width - 14, lastY); // Line below Total
+        }
+    });
+
+    doc.save(`PF_Form12A_Revised_${month}_${year}.pdf`);
 };
 
 export const generatePFForm12 = (data: PayrollResult[], employees: Employee[], config: StatutoryConfig, month: string, year: number, companyProfile: CompanyProfile) => {
+    // Old format (Re-using logic but different simple table)
     generatePFForm12A(data, employees, config, companyProfile, month, year);
 };
 
@@ -657,20 +529,231 @@ export const generateESICodeWagesReport = (data: PayrollResult[], employees: Emp
     }
 };
 
-const getPeriodsInRange = (startMonth: string, startYear: number, endMonth: string, endYear: number) => {
-    const periods: { month: string, year: number }[] = [];
-    let currentYear = startYear;
-    let currentMonthIdx = MONTHS.indexOf(startMonth);
-    const endMonthIdx = MONTHS.indexOf(endMonth);
-    const endTotal = endYear * 12 + endMonthIdx;
+const getMonthsInRange = (startMonth: string, startYear: number, endMonth: string, endYear: number) => {
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const result = [];
+  let currentY = startYear;
+  let currentMIdx = months.indexOf(startMonth);
+  const endMIdx = months.indexOf(endMonth);
+  
+  // Safety break
+  let count = 0;
+  while(count < 24) { // Max 2 years loop
+      result.push({ month: months[currentMIdx], year: currentY });
+      if (currentY === endYear && currentMIdx === endMIdx) break;
+      
+      currentMIdx++;
+      if (currentMIdx > 11) {
+          currentMIdx = 0;
+          currentY++;
+      }
+      count++;
+  }
+  return result;
+};
+
+export const generatePFForm3A = (
+  payrollHistory: PayrollResult[], 
+  employees: Employee[], 
+  config: StatutoryConfig, 
+  startMonth: string, 
+  startYear: number, 
+  endMonth: string, 
+  endYear: number, 
+  targetEmployeeId: string | undefined, 
+  companyProfile: CompanyProfile
+) => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const periods = getMonthsInRange(startMonth, startYear, endMonth, endYear);
     
-    let safety = 0;
-    while(safety < 60) {
-        periods.push({ month: MONTHS[currentMonthIdx], year: currentYear });
-        if (currentYear * 12 + currentMonthIdx >= endTotal) break;
-        currentMonthIdx++;
-        if (currentMonthIdx > 11) { currentMonthIdx = 0; currentYear++; }
-        safety++;
+    // Determine employees to process
+    let employeesToProcess = employees;
+    if (targetEmployeeId) {
+        employeesToProcess = employees.filter(e => e.id === targetEmployeeId);
     }
-    return periods;
+    
+    // Sort employees by ID
+    employeesToProcess.sort((a, b) => a.id.localeCompare(b.id));
+
+    employeesToProcess.forEach((emp, index) => {
+        if (index > 0) doc.addPage();
+        
+        // Header
+        doc.setFontSize(14); doc.setFont("helvetica", "bold");
+        doc.text("FORM 3A (Revised)", 105, 10, { align: "center" });
+        doc.setFontSize(10); doc.setFont("helvetica", "normal");
+        doc.text("(For Un-Exempted Establishments)", 105, 15, { align: "center" });
+        
+        doc.setFontSize(10);
+        doc.text(`Currency Period: ${startMonth} ${startYear} to ${endMonth} ${endYear}`, 14, 25);
+        
+        // Establishment Details
+        doc.setFont("helvetica", "bold");
+        doc.text("1. Name & Address of Establishment:", 14, 32);
+        doc.setFont("helvetica", "normal");
+        doc.text(companyProfile.establishmentName, 80, 32);
+        doc.text(`${companyProfile.address}, ${companyProfile.city}`, 80, 37);
+        
+        doc.setFont("helvetica", "bold");
+        doc.text("2. Establishment Code:", 14, 45);
+        doc.setFont("helvetica", "normal");
+        doc.text(companyProfile.pfCode || "N/A", 80, 45);
+
+        // Employee Details
+        doc.setFont("helvetica", "bold");
+        doc.text("3. Name of Member:", 14, 52);
+        doc.setFont("helvetica", "normal");
+        doc.text(emp.name, 80, 52);
+        
+        doc.setFont("helvetica", "bold");
+        doc.text("4. Father's/Spouse's Name:", 14, 57);
+        doc.setFont("helvetica", "normal");
+        doc.text(emp.fatherSpouseName || "", 80, 57);
+        
+        doc.setFont("helvetica", "bold");
+        doc.text("5. Account No:", 14, 62);
+        doc.setFont("helvetica", "normal");
+        doc.text(emp.pfNumber || "", 80, 62);
+        
+        // Table Data
+        const bodyData = periods.map(p => {
+            const record = payrollHistory.find(r => r.employeeId === emp.id && r.month === p.month && r.year === p.year);
+            if (!record) return [p.month, 0, 0, 0, 0, 0];
+            
+            const wage = record.earnings.basic + record.earnings.da + record.earnings.retainingAllowance;
+            const epfWage = emp.isPFHigherWages ? wage : Math.min(wage, config.epfCeiling);
+            
+            return [
+                p.month + " " + p.year,
+                Math.round(epfWage), // Amount of Wages
+                Math.round(record.deductions.epf), // EPF (EE Share)
+                Math.round(record.employerContributions.eps), // EPS (ER Share) - 8.33%
+                Math.round(record.employerContributions.epf), // EPF (ER Share) - 3.67%
+                0 // Refund of Advances (Placeholder)
+            ];
+        });
+        
+        // Totals
+        const totalWages = bodyData.reduce((acc, curr) => acc + (curr[1] as number), 0);
+        const totalEE = bodyData.reduce((acc, curr) => acc + (curr[2] as number), 0);
+        const totalEPS = bodyData.reduce((acc, curr) => acc + (curr[3] as number), 0);
+        const totalER_EPF = bodyData.reduce((acc, curr) => acc + (curr[4] as number), 0);
+
+        bodyData.push(['TOTAL', totalWages, totalEE, totalEPS, totalER_EPF, 0]);
+
+        autoTable(doc, {
+            startY: 70,
+            head: [['Month', 'Wages', 'EPF Share (EE)', 'EPS Share (ER)', 'EPF Share (ER)', 'Refund of Adv']],
+            body: bodyData,
+            theme: 'grid',
+            headStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
+            styles: { fontSize: 9 }
+        });
+        
+        const finalY = (doc as any).lastAutoTable.finalY + 10;
+        doc.text("Certified that the amount of contribution deducted from wages has been deposited.", 14, finalY);
+        doc.text("Signature of Employer", 140, finalY + 15);
+    });
+
+    doc.save(`Form3A_${startMonth}${startYear}_${endMonth}${endYear}.pdf`);
+};
+
+export const generatePFForm6A = (
+  payrollHistory: PayrollResult[], 
+  employees: Employee[], 
+  config: StatutoryConfig, 
+  startMonth: string, 
+  startYear: number, 
+  endMonth: string, 
+  endYear: number, 
+  companyProfile: CompanyProfile
+) => {
+    const doc = new jsPDF('l', 'mm', 'a4');
+    const periods = getMonthsInRange(startMonth, startYear, endMonth, endYear);
+
+    // Header
+    doc.setFontSize(14); doc.setFont("helvetica", "bold");
+    doc.text("FORM 6A (Revised)", 148, 10, { align: "center" });
+    doc.setFontSize(10); doc.setFont("helvetica", "normal");
+    doc.text("Consolidated Annual Contribution Statement", 148, 15, { align: "center" });
+    
+    doc.setFontSize(10);
+    doc.text(`Currency Period: ${startMonth} ${startYear} to ${endMonth} ${endYear}`, 14, 25);
+    
+    doc.setFont("helvetica", "bold");
+    doc.text("Name of Establishment:", 14, 32);
+    doc.setFont("helvetica", "normal");
+    doc.text(companyProfile.establishmentName, 60, 32);
+    
+    doc.setFont("helvetica", "bold");
+    doc.text("Code No:", 220, 32);
+    doc.setFont("helvetica", "normal");
+    doc.text(companyProfile.pfCode || "", 240, 32);
+
+    // Prepare Data
+    // Aggregate per employee
+    const tableData = employees.map((emp, i) => {
+        let totalWages = 0;
+        let totalEE = 0; // 12%
+        let totalER_EPF = 0; // 3.67%
+        let totalER_EPS = 0; // 8.33%
+        
+        periods.forEach(p => {
+             const record = payrollHistory.find(r => r.employeeId === emp.id && r.month === p.month && r.year === p.year);
+             if (record) {
+                const wage = record.earnings.basic + record.earnings.da + record.earnings.retainingAllowance;
+                const epfWage = emp.isPFHigherWages ? wage : Math.min(wage, config.epfCeiling);
+                
+                totalWages += Math.round(epfWage);
+                totalEE += Math.round(record.deductions.epf);
+                totalER_EPS += Math.round(record.employerContributions.eps);
+                totalER_EPF += Math.round(record.employerContributions.epf);
+             }
+        });
+
+        // Skip if all zeros? No, form 6A usually lists all members. But for cleanliness maybe only those with contributions.
+        // Let's include if employee has PF number.
+        if (!emp.pfNumber) return null;
+
+        return [
+            i + 1,
+            emp.pfNumber,
+            emp.name,
+            totalWages,
+            totalEE,
+            totalER_EPS,
+            totalER_EPF,
+            0, // Refund
+            totalEE + totalER_EPF + totalER_EPS, // Total Remitted (Approx sum)
+            '' // Remarks
+        ];
+    }).filter(row => row !== null);
+
+    // Add Totals Row
+    const totals = tableData.reduce((acc, curr) => {
+        if (!curr) return acc;
+        acc[3] = (acc[3] as number) + (curr[3] as number);
+        acc[4] = (acc[4] as number) + (curr[4] as number);
+        acc[5] = (acc[5] as number) + (curr[5] as number);
+        acc[6] = (acc[6] as number) + (curr[6] as number);
+        acc[7] = (acc[7] as number) + (curr[7] as number);
+        acc[8] = (acc[8] as number) + (curr[8] as number);
+        return acc;
+    }, ['', '', 'TOTAL', 0, 0, 0, 0, 0, 0, '']);
+
+    tableData.push(totals);
+
+    autoTable(doc, {
+        startY: 40,
+        head: [['Sl', 'Acc No', 'Name', 'Wages', 'EE Share', 'EPS Share', 'ER EPF Share', 'Refund', 'Total', 'Rem']],
+        body: tableData as any,
+        theme: 'grid',
+        headStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
+        styles: { fontSize: 8 }
+    });
+    
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    doc.text("Signature of Employer", 240, finalY + 15);
+
+    doc.save(`Form6A_${startMonth}${startYear}_${endMonth}${endYear}.pdf`);
 };
