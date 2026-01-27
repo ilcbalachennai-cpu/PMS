@@ -862,22 +862,38 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 gap-y-8">
                 {userRole === 'Developer' && (
                     <div className="md:col-span-3 bg-amber-900/10 p-4 rounded-xl border border-amber-900/30">
-                        <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-2 flex items-center gap-2">
-                            <Lock size={10} /> Developer Control: News Ticker
+                        <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-amber-900/30 pb-2">
+                            <Lock size={10} /> Developer Controls
                         </h4>
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2">
-                                <Megaphone size={12} /> Dashboard Scrolling Text
-                            </label>
-                            <input 
-                                type="text" 
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500" 
-                                value={profileData.flashNews || ''} 
-                                onChange={e => setProfileData({...profileData, flashNews: e.target.value})}
-                                placeholder="Enter news to scroll on dashboard header..." 
-                            />
-                            <p className="text-[9px] text-slate-500">Updates instantly on save.</p>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2">
+                                    <Megaphone size={12} /> News Ticker
+                                </label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 text-xs" 
+                                    value={profileData.flashNews || ''} 
+                                    onChange={e => setProfileData({...profileData, flashNews: e.target.value})}
+                                    placeholder="Enter news to scroll on dashboard header..." 
+                                />
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2">
+                                    <Globe size={12} /> External App URL
+                                </label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 text-xs font-mono" 
+                                    value={profileData.externalAppUrl || ''} 
+                                    onChange={e => setProfileData({...profileData, externalAppUrl: e.target.value})}
+                                    placeholder="https://aistudio.google.com/..." 
+                                />
+                            </div>
                         </div>
+                        <p className="text-[9px] text-slate-500 mt-2 text-center">These settings affect the dashboard globally and update instantly on save.</p>
                     </div>
                 )}
 

@@ -81,6 +81,7 @@ export interface CompanyProfile {
   website: string;
   natureOfBusiness: string;
   flashNews?: string; // New field for Flash News
+  externalAppUrl?: string; // New field for External App Link
 }
 
 export interface Employee {
@@ -209,6 +210,7 @@ export enum View {
   Employees = 'employees',
   PayProcess = 'pay_process', // Consolidated Pay Process View
   Reports = 'reports',
+  PFCalculator = 'pf_calculator', // New Module
   Utilities = 'utilities',
   Settings = 'settings',
   AI_Assistant = 'ai_assistant'

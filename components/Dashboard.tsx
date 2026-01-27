@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { IndianRupee, Users, Building, ShieldCheck, TrendingUp, Database, Calendar } from 'lucide-react';
+import { IndianRupee, Users, Building, ShieldCheck, TrendingUp, Database, Calendar, Calculator, ArrowRight, ExternalLink, Sparkles } from 'lucide-react';
 import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, View, CompanyProfile } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
 
@@ -26,9 +26,54 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
   const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+  // Reusable Quick Links Component
+  const QuickLinks = ({ centered = false }: { centered?: boolean }) => (
+    <div className={`grid grid-cols-1 ${centered ? 'md:grid-cols-2 max-w-3xl' : 'md:grid-cols-3'} gap-4 w-full`}>
+         {/* Internal App Module Link */}
+         <button 
+            onClick={() => onNavigate(View.PFCalculator)}
+            className="col-span-1 bg-gradient-to-r from-blue-900/30 to-[#1e293b] p-4 rounded-xl border border-blue-800/30 flex items-center justify-between group hover:border-blue-500/50 transition-all shadow-lg cursor-pointer text-left"
+         >
+            <div className="flex items-center gap-4">
+                <div className="p-3 bg-blue-600 rounded-xl text-white shadow-lg shadow-blue-900/50 group-hover:scale-110 transition-transform">
+                    <Calculator size={24} />
+                </div>
+                <div>
+                    <h3 className="font-bold text-white text-sm">PF ECR Calculator</h3>
+                    <p className="text-[10px] text-blue-200/70">Generate Challan & Returns</p>
+                </div>
+            </div>
+            <div className="p-2 bg-slate-800 rounded-full text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <ArrowRight size={16} />
+            </div>
+         </button>
+
+         {/* External App Link */}
+         <a 
+            href={companyProfile.externalAppUrl || '#'} 
+            target="_blank"
+            rel="noopener noreferrer"
+            className="col-span-1 bg-gradient-to-r from-purple-900/30 to-[#1e293b] p-4 rounded-xl border border-purple-800/30 flex items-center justify-between group hover:border-purple-500/50 transition-all shadow-lg cursor-pointer text-left"
+         >
+            <div className="flex items-center gap-4">
+                <div className="p-3 bg-purple-600 rounded-xl text-white shadow-lg shadow-purple-900/50 group-hover:scale-110 transition-transform">
+                    <Sparkles size={24} />
+                </div>
+                <div>
+                    <h3 className="font-bold text-white text-sm">Launch AI Studio App</h3>
+                    <p className="text-[10px] text-purple-200/70">External Comprehensive Calc</p>
+                </div>
+            </div>
+            <div className="p-2 bg-slate-800 rounded-full text-slate-400 group-hover:bg-purple-600 group-hover:text-white transition-colors">
+                <ExternalLink size={16} />
+            </div>
+         </a> 
+    </div>
+  );
+
   if (employees.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-10rem)] space-y-8 animate-in fade-in duration-700">
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)] space-y-8 animate-in fade-in duration-700 py-10">
         <div className="relative">
             <div className="absolute inset-0 bg-blue-500/20 blur-2xl rounded-full"></div>
             <div className="relative p-8 bg-[#1e293b] rounded-full border border-slate-700 shadow-2xl">
@@ -43,6 +88,12 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
                     Data is empty. Go to Data Management under <button onClick={() => onNavigate(View.Settings, 'DATA')} className="text-blue-400 font-bold hover:text-blue-300 border-b border-blue-500/50 hover:border-blue-400 transition-colors inline-block cursor-pointer">Configuration</button> section to restore Data else <button onClick={() => onNavigate(View.Employees)} className="text-emerald-400 font-bold hover:text-emerald-300 border-b border-emerald-500/50 hover:border-emerald-400 transition-colors inline-block cursor-pointer">start afresh</button>.
                 </div>
             </div>
+        </div>
+
+        {/* Show Quick Links even in Empty State */}
+        <div className="w-full flex flex-col items-center gap-4 mt-8 pt-8 border-t border-slate-800/50">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Quick Access Tools</h3>
+            <QuickLinks centered={true} />
         </div>
       </div>
     );
@@ -148,6 +199,9 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
           </div>
         ))}
       </div>
+
+      {/* Quick Access Tools & External Apps */}
+      <QuickLinks />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-[#1e293b] p-5 rounded-xl border border-slate-800 shadow-lg">

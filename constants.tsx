@@ -28,7 +28,8 @@ export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
   email: '',
   website: '',
   natureOfBusiness: 'Manufacturing',
-  flashNews: 'Welcome to BharatPay Pro! Ensure all PF ECRs are filed before the 15th. Check "Settings" to update this news.'
+  flashNews: 'Welcome to BharatPay Pro! Ensure all PF ECRs are filed before the 15th. Check "Settings" to update this news.',
+  externalAppUrl: '' // Default empty
 };
 
 export const NATURE_OF_BUSINESS_OPTIONS = [

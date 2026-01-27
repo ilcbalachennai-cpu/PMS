@@ -34,6 +34,7 @@ import StatutoryReports from './components/StatutoryReports';
 import Utilities from './components/Utilities';
 import Settings from './components/Settings';
 import AIAssistant from './components/AIAssistant';
+import PFCalculator from './components/PFCalculator';
 
 import { 
   User, 
@@ -472,6 +473,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           <SidebarHeader title="Analytics" />
           <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" />
           <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" />
+          <NavigationItem view={View.PFCalculator} icon={Calculator} label="PF ECR Calculator" />
           
           <SidebarHeader title="System" />
           <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" />
@@ -681,6 +683,18 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               divisions={divisions} setDivisions={setDivisions}
               branches={branches} setBranches={setBranches}
               sites={sites} setSites={setSites}
+            />
+          )}
+          {activeView === View.PFCalculator && (
+            <PFCalculator 
+              employees={employees}
+              payrollHistory={payrollHistory}
+              config={config}
+              companyProfile={companyProfile}
+              month={globalMonth}
+              setMonth={setGlobalMonth}
+              year={globalYear}
+              setYear={setGlobalYear}
             />
           )}
           {/* Restrict Settings View access completely if not authorized, though sidebar hides it */}
