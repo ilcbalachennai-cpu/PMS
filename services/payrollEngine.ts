@@ -189,72 +189,98 @@ export const calculatePayroll = (
     }
   }
 
-  // Professional Tax Calculation (Dynamic based on Branch/Work Location)
+  // --- Professional Tax Calculation (Dynamic based on Branch/Work Location) ---
   let pt = 0;
   
-  // Default to global config
-  let ptCycle = config.ptDeductionCycle;
-  let ptSlabs = config.ptSlabs;
+  if (config.enableProfessionalTax !== false) {
+      // Default to global config
+      let ptCycle = config.ptDeductionCycle;
+      let ptSlabs = config.ptSlabs;
 
-  // OVERRIDE: Determine State based on Branch (Organization Hierarchy)
-  const branchState = getBranchState(employee.branch);
+      // OVERRIDE: Determine State based on Branch (Organization Hierarchy)
+      const branchState = getBranchState(employee.branch);
 
-  if (branchState && PT_STATE_PRESETS[branchState as keyof typeof PT_STATE_PRESETS]) {
-      const stateRule = PT_STATE_PRESETS[branchState as keyof typeof PT_STATE_PRESETS];
-      ptCycle = stateRule.cycle as any;
-      ptSlabs = stateRule.slabs;
+      if (branchState && PT_STATE_PRESETS[branchState as keyof typeof PT_STATE_PRESETS]) {
+          const stateRule = PT_STATE_PRESETS[branchState as keyof typeof PT_STATE_PRESETS];
+          ptCycle = stateRule.cycle as any;
+          ptSlabs = stateRule.slabs;
+      }
+
+      if (ptCycle === 'HalfYearly') {
+        // --- Half-Yearly Logic (e.g. Tamil Nadu) ---
+        let blockStartYear = year;
+        let blockStartMonthIdx = 3; 
+        
+        if (monthIdx >= 3 && monthIdx <= 8) {
+           blockStartMonthIdx = 3; 
+           blockStartYear = year;
+        } else {
+           blockStartMonthIdx = 9; 
+           if (monthIdx <= 2) { 
+              blockStartYear = year - 1;
+           } else { 
+              blockStartYear = year;
+           }
+        }
+        
+        const blockStartDate = new Date(blockStartYear, blockStartMonthIdx, 1);
+        const blockEndYear = blockStartMonthIdx === 3 ? blockStartYear : blockStartYear + 1;
+        const blockEndMonthIdx = blockStartMonthIdx === 3 ? 8 : 2;
+        const blockEndDate = new Date(blockEndYear, blockEndMonthIdx + 1, 0); 
+
+        const dojDate = new Date(employee.doj);
+        dojDate.setHours(0,0,0,0);
+        blockStartDate.setHours(0,0,0,0);
+        blockEndDate.setHours(0,0,0,0);
+
+        const effectiveStartDate = dojDate > blockStartDate ? dojDate : blockStartDate;
+
+        let monthsWorked = 0;
+        if (effectiveStartDate <= blockEndDate) {
+            monthsWorked = (blockEndDate.getFullYear() - effectiveStartDate.getFullYear()) * 12 + 
+                           (blockEndDate.getMonth() - effectiveStartDate.getMonth()) + 1;
+        }
+        monthsWorked = Math.max(1, Math.min(6, monthsWorked));
+        const projectedHalfYearlyIncome = standardMonthlyGross * monthsWorked;
+        const slab = ptSlabs.find(s => projectedHalfYearlyIncome >= s.min && projectedHalfYearlyIncome <= s.max);
+        
+        if (slab && slab.amount > 0) {
+            pt = Math.round(slab.amount / monthsWorked);
+        }
+
+      } else {
+        // --- Monthly Logic ---
+        if (grossEarnings > 0) {
+            const slab = ptSlabs.find(s => grossEarnings >= s.min && grossEarnings <= s.max);
+            if (slab) {
+                pt = slab.amount;
+            }
+        }
+      }
   }
 
-  if (ptCycle === 'HalfYearly') {
-    // --- Half-Yearly Logic (e.g. Tamil Nadu) ---
-    let blockStartYear = year;
-    let blockStartMonthIdx = 3; 
-    
-    if (monthIdx >= 3 && monthIdx <= 8) {
-       blockStartMonthIdx = 3; 
-       blockStartYear = year;
-    } else {
-       blockStartMonthIdx = 9; 
-       if (monthIdx <= 2) { 
-          blockStartYear = year - 1;
-       } else { 
-          blockStartYear = year;
-       }
-    }
-    
-    const blockStartDate = new Date(blockStartYear, blockStartMonthIdx, 1);
-    const blockEndYear = blockStartMonthIdx === 3 ? blockStartYear : blockStartYear + 1;
-    const blockEndMonthIdx = blockStartMonthIdx === 3 ? 8 : 2;
-    const blockEndDate = new Date(blockEndYear, blockEndMonthIdx + 1, 0); 
+  // --- Labour Welfare Fund (LWF) Calculation ---
+  let lwfEmployee = 0;
+  let lwfEmployer = 0;
 
-    const dojDate = new Date(employee.doj);
-    dojDate.setHours(0,0,0,0);
-    blockStartDate.setHours(0,0,0,0);
-    blockEndDate.setHours(0,0,0,0);
+  if (config.enableLWF !== false) {
+      let isLWFDeductionMonth = false;
+      
+      // Determine Cycle Logic
+      if (config.lwfDeductionCycle === 'Monthly') {
+          isLWFDeductionMonth = true;
+      } else if (config.lwfDeductionCycle === 'HalfYearly') {
+          // Typically June and December
+          isLWFDeductionMonth = month === 'June' || month === 'December';
+      } else if (config.lwfDeductionCycle === 'Yearly') {
+          // Typically December
+          isLWFDeductionMonth = month === 'December';
+      }
 
-    const effectiveStartDate = dojDate > blockStartDate ? dojDate : blockStartDate;
-
-    let monthsWorked = 0;
-    if (effectiveStartDate <= blockEndDate) {
-        monthsWorked = (blockEndDate.getFullYear() - effectiveStartDate.getFullYear()) * 12 + 
-                       (blockEndDate.getMonth() - effectiveStartDate.getMonth()) + 1;
-    }
-    monthsWorked = Math.max(1, Math.min(6, monthsWorked));
-    const projectedHalfYearlyIncome = standardMonthlyGross * monthsWorked;
-    const slab = ptSlabs.find(s => projectedHalfYearlyIncome >= s.min && projectedHalfYearlyIncome <= s.max);
-    
-    if (slab && slab.amount > 0) {
-        pt = Math.round(slab.amount / monthsWorked);
-    }
-
-  } else {
-    // --- Monthly Logic ---
-    if (grossEarnings > 0) {
-        const slab = ptSlabs.find(s => grossEarnings >= s.min && grossEarnings <= s.max);
-        if (slab) {
-            pt = slab.amount;
-        }
-    }
+      if (isLWFDeductionMonth && grossEarnings > 0) {
+          lwfEmployee = config.lwfEmployeeContribution;
+          lwfEmployer = config.lwfEmployerContribution;
+      }
   }
 
   // Income Tax
@@ -262,10 +288,9 @@ export const calculatePayroll = (
   const annualTaxable = (grossEarnings * 12) - 50000;
   if (annualTaxable > 700000) incomeTax = Math.round(((annualTaxable - 700000) * 0.1) / 12);
 
-  const lwf = config.lwfAmount;
   const advanceRecovery = Math.min(advance.monthlyInstallment, advance.balance);
 
-  const totalDeductions = epfEmployee + vpfEmployee + esiEmployee + pt + incomeTax + lwf + advanceRecovery;
+  const totalDeductions = epfEmployee + vpfEmployee + esiEmployee + pt + incomeTax + lwfEmployee + advanceRecovery;
 
   return {
     employeeId: employee.id,
@@ -288,8 +313,22 @@ export const calculatePayroll = (
       leaveEncashment, 
       total: grossEarnings 
     },
-    deductions: { epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf, advanceRecovery, total: totalDeductions },
-    employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer },
+    deductions: { 
+        epf: epfEmployee, 
+        vpf: vpfEmployee, 
+        esi: esiEmployee, 
+        pt, 
+        it: incomeTax, 
+        lwf: lwfEmployee, 
+        advanceRecovery, 
+        total: totalDeductions 
+    },
+    employerContributions: { 
+        epf: epfEmployer, 
+        eps: epsEmployer, 
+        esi: esiEmployer,
+        lwf: lwfEmployer 
+    },
     gratuityAccrual: Math.round(((basic + da) * 15 / 26) / 12),
     netPay: grossEarnings - totalDeductions,
     isCode88,

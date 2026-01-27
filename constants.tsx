@@ -53,7 +53,8 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
   esiCeiling: 21000,
   esiEmployeeRate: 0.0075,
   esiEmployerRate: 0.0325,
-  // Changed default to HalfYearly for Tamil Nadu Compliance
+  // PT Config
+  enableProfessionalTax: true,
   ptDeductionCycle: 'HalfYearly', 
   ptSlabs: [
     { min: 0, max: 21000, amount: 0 },
@@ -63,7 +64,12 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
     { min: 60001, max: 75000, amount: 1025 },
     { min: 75001, max: 9999999, amount: 1250 }
   ],
-  lwfAmount: 25,
+  // LWF Config
+  enableLWF: true,
+  lwfDeductionCycle: 'Yearly',
+  lwfEmployeeContribution: 10,
+  lwfEmployerContribution: 20,
+  
   bonusRate: 0.0833,
   pfComplianceType: 'Statutory' // Default for 20+ employees
 };
@@ -160,10 +166,23 @@ export const PT_STATE_PRESETS = {
   }
 };
 
+export const LWF_STATE_PRESETS = {
+  'Tamil Nadu': { cycle: 'Yearly', emp: 10, emplr: 20 }, // Dec
+  'Andhra Pradesh': { cycle: 'Yearly', emp: 30, emplr: 70 }, // Dec
+  'Telangana': { cycle: 'Yearly', emp: 30, emplr: 70 }, // Dec
+  'Karnataka': { cycle: 'Yearly', emp: 20, emplr: 40 }, // Dec
+  'Maharashtra': { cycle: 'HalfYearly', emp: 12, emplr: 36 }, // Jun/Dec
+  'Kerala': { cycle: 'HalfYearly', emp: 20, emplr: 20 }, // Jun/Dec
+  'Gujarat': { cycle: 'HalfYearly', emp: 6, emplr: 12 }, // Jun/Dec
+  'West Bengal': { cycle: 'HalfYearly', emp: 3, emplr: 15 }, // Jun/Dec
+  'Delhi': { cycle: 'HalfYearly', emp: 0.75, emplr: 2.25 }, // (0.75 * 6 = 4.5, etc. approximate for monthly cycle if configured differently, but mostly half yearly)
+  'Haryana': { cycle: 'Monthly', emp: 25, emplr: 50 },
+};
+
 export const MOCK_USERS: User[] = [
-  { username: 'admin', password: 'password', name: 'System Administrator', role: 'Admin', email: 'admin@bharatpay.com' },
-  { username: 'hr', password: 'password', name: 'HR Manager', role: 'HR', email: 'hr@bharatpay.com' },
-  { username: 'viewer', password: 'password', name: 'Auditor', role: 'Viewer', email: 'audit@bharatpay.com' }
+  { username: 'dev', password: 'dev@123', name: 'Master Developer', role: 'Developer', email: 'dev@bharatpay.com' },
+  { username: 'admin', password: 'admin@123', name: 'System Administrator', role: 'Administrator', email: 'admin@bharatpay.com' },
+  { username: 'user', password: 'user@123', name: 'Payroll Executive', role: 'User', email: 'user@bharatpay.com' }
 ];
 
 export const SAMPLE_EMPLOYEES: Employee[] = [];

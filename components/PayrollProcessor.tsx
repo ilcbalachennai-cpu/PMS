@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Play, CheckCircle, FileText, Calculator, AlertTriangle, X, Printer, Save, Lock, Snowflake, HelpCircle, CheckCircle2, FileSpreadsheet } from 'lucide-react';
-import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile } from '../types';
+import { Play, CheckCircle, FileText, Calculator, AlertTriangle, X, Printer, Save, Lock, Snowflake, HelpCircle, CheckCircle2, FileSpreadsheet, Unlock, KeyRound, RefreshCw, Eye } from 'lucide-react';
+import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile, User } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
 import { generatePaySlipsPDF, generateSimplePaySheetPDF, numberToWords } from '../services/reportService';
 import { BRAND_CONFIG } from '../constants';
@@ -14,16 +14,15 @@ interface PayrollProcessorProps {
   leaveLedgers: LeaveLedger[];
   advanceLedgers: AdvanceLedger[];
   savedRecords: PayrollResult[];
-  setSavedRecords: React.Dispatch<React.SetStateAction<PayrollResult[]>>; // Enhanced type definition
-  // Global date props
+  setSavedRecords: React.Dispatch<React.SetStateAction<PayrollResult[]>>;
   month: string;
   year: number;
   setMonth: (m: string) => void;
   setYear: (y: number) => void;
-  // Ledger Setters for Freeze
   setLeaveLedgers?: (l: LeaveLedger[]) => void;
   setAdvanceLedgers?: (a: AdvanceLedger[]) => void;
   hideContextSelector?: boolean;
+  currentUser?: User;
 }
 
 const PayrollProcessor: React.FC<PayrollProcessorProps> = ({ 
@@ -41,21 +40,18 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
   setYear,
   setLeaveLedgers,
   setAdvanceLedgers,
-  hideContextSelector = false
+  hideContextSelector = false,
+  currentUser
 }) => {
   const [processed, setProcessed] = useState<PayrollResult[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [showSavedFeedback, setShowSavedFeedback] = useState(false); // Persists "Draft Saved" state
-  const [viewingSlip, setViewingSlip] = useState<PayrollResult | null>(null);
+  const [showSavedFeedback, setShowSavedFeedback] = useState(false);
   const [isLoadedFromSave, setIsLoadedFromSave] = useState(false);
   const [payrollStatus, setPayrollStatus] = useState<'Draft' | 'Finalized' | null>(null);
-
-  // Dynamic Year Range: Current Year - 5 to Current Year + 1
-  const currentYear = new Date().getFullYear();
-  const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
-
-  // Custom Modal State
+  const [showUnlockAuth, setShowUnlockAuth] = useState(false);
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
     type: 'confirm' | 'success' | 'error';
@@ -64,22 +60,20 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     onConfirm?: () => void;
   }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
-  // Compliance Rule: If employee count >= 20, PF must be Statutory
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
   const isMandatoryStatutory = employees.length >= 20;
   const isComplianceValid = !isMandatoryStatutory || (isMandatoryStatutory && config.pfComplianceType === 'Statutory');
+  const canUnlock = currentUser?.role === 'Developer' || currentUser?.role === 'Administrator';
 
-  // Effect: Load Saved Records whenever Global Month/Year changes
   useEffect(() => {
-    // Safety check: ensure savedRecords is an array
     const history = Array.isArray(savedRecords) ? savedRecords : [];
     const existingRecords = history.filter(r => r.month === month && r.year === year);
-    
     if (existingRecords.length > 0) {
         setProcessed(existingRecords);
         setIsLoadedFromSave(true);
-        // If any record is Finalized, the whole month is considered Finalized
         setPayrollStatus(existingRecords[0].status || 'Draft');
-        setShowSavedFeedback(true); // Since it's loaded from save, it is saved
+        setShowSavedFeedback(true);
     } else {
         setProcessed([]);
         setIsLoadedFromSave(false);
@@ -88,13 +82,12 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     }
   }, [month, year, savedRecords]); 
 
-  // Safe Defaults
   const defaultLeaveLedger = (empId: string): LeaveLedger => ({
       employeeId: empId,
       el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
       sl: { eligible: 0, availed: 0, balance: 0 },
       cl: { availed: 0, accumulation: 0, balance: 0 }
-  });
+    });
 
   const defaultAdvanceLedger = (empId: string): AdvanceLedger => ({
       employeeId: empId,
@@ -110,33 +103,22 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     if (payrollStatus === 'Finalized') return;
 
     setIsProcessing(true);
-    // Short timeout for UI feedback only
     setTimeout(() => {
       try {
           const results = employees.map(emp => {
-            // Attendance default for calculation
             const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || 
                         { employeeId: emp.id, month: month, year: year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
-            
             const leave = leaveLedgers.find(l => l.employeeId === emp.id) || defaultLeaveLedger(emp.id);
             const advance = advanceLedgers.find(a => a.employeeId === emp.id) || defaultAdvanceLedger(emp.id);
-            
             const result = calculatePayroll(emp, config, att, leave, advance, month, year);
-            
-            // Set status to Draft initially
             result.status = 'Draft';
             return result;
           });
-          
-          // NOTE: We do NOT auto-save to persistence here anymore.
-          // User must explicitly click "Save Draft".
-
-          // Optimistic UI updates
           setProcessed(results);
           setIsProcessing(false);
-          setIsLoadedFromSave(false); // It's a fresh calculation
+          setIsLoadedFromSave(false);
           setPayrollStatus('Draft');
-          setShowSavedFeedback(false); // Reset feedback on recalculate (Re-edit mode)
+          setShowSavedFeedback(false);
       } catch (error: any) {
           console.error("Calculation Error:", error);
           setModalState({
@@ -152,58 +134,35 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
   const executeSave = async () => {
     setIsSaving(true);
-    setModalState(prev => ({ ...prev, isOpen: false })); // Close confirmation modal
-    
+    setModalState(prev => ({ ...prev, isOpen: false }));
     try {
-        // Validation: Check if processed data exists
         if (!processed || processed.length === 0) {
             throw new Error("No payroll data calculated. Please run 'Calculate Pay Sheet' first.");
         }
-
-        // 1. Prepare Draft Records
-        const draftRecords = processed.map(r => ({
-            ...r,
-            status: 'Draft' as const // Ensure we stay in Draft mode so Reports can Freeze later
-        }));
-        
-        // 2. Update Global History using FUNCTIONAL UPDATE to avoid stale state
+        const draftRecords = processed.map(r => ({ ...r, status: 'Draft' as const }));
         setSavedRecords(prevRecords => {
             const currentHistory = Array.isArray(prevRecords) ? prevRecords : [];
-            // Remove any existing records for this period (overwrite logic)
             const otherRecords = currentHistory.filter(r => !(r.month === month && r.year === year));
             return [...otherRecords, ...draftRecords];
         });
-
-        // 3. Update Local UI State
         setProcessed(draftRecords);
         setPayrollStatus('Draft');
         setIsLoadedFromSave(true);
-        
-        // Show Success Feedback Button persistently until re-edit
         setShowSavedFeedback(true);
-        
         setModalState({
             isOpen: true,
             type: 'success',
             title: 'Draft Saved',
             message: "Payroll calculated and saved as Draft.\n\nTo lock data and rollover ledgers, go to 'Pay Reports' and click 'Confirm & Freeze'."
         });
-
     } catch (error: any) {
-        console.error("Save Error:", error);
-        setModalState({
-            isOpen: true,
-            type: 'error',
-            title: 'Save Failed',
-            message: `Reason: ${error.message}`
-        });
+        setModalState({ isOpen: true, type: 'error', title: 'Save Failed', message: `Reason: ${error.message}` });
     } finally {
         setIsSaving(false);
     }
   };
 
   const initiateSave = () => {
-    // Always trigger save confirmation
     setModalState({
         isOpen: true,
         type: 'confirm',
@@ -222,21 +181,68 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     });
   };
 
-  const getEmployee = (id: string) => employees.find(e => e.id === id);
+  const handleConfirmUnlock = () => {
+      if (authPassword === currentUser?.password) {
+          setShowUnlockAuth(false);
+          setSavedRecords(prev => prev.map(r => {
+              if (r.month === month && r.year === year) {
+                  return { ...r, status: 'Draft' as const };
+              }
+              return r;
+          }));
+          setPayrollStatus('Draft');
+          setModalState({
+              isOpen: true,
+              type: 'success',
+              title: 'Period Unlocked',
+              message: "Payroll period unlocked successfully. You can now edit attendance and recalculate."
+          });
+      } else {
+          setAuthError('Incorrect Password');
+      }
+  };
+
+  const initiateUnlock = () => {
+      // Validation: Check for future records (Same logic as Reports)
+      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const currentMonthIdx = months.indexOf(month);
+      const currentVal = year * 12 + currentMonthIdx;
+
+      const futureRecord = savedRecords.find(r => {
+          const rMonthIdx = months.indexOf(r.month);
+          const rVal = r.year * 12 + rMonthIdx;
+          return rVal > currentVal;
+      });
+
+      if (futureRecord) {
+          setModalState({
+              isOpen: true,
+              type: 'error',
+              title: 'Unlock Restricted',
+              message: `Cannot unlock ${month} ${year}.\n\nPayroll for a future month (${futureRecord.month} ${futureRecord.year}) is already in process. Please revert the latest months first.`
+          });
+          return;
+      }
+
+      setAuthPassword('');
+      setAuthError('');
+      setShowUnlockAuth(true);
+  };
 
   const handleDownloadPaySheet = () => {
       if (processed.length === 0) return;
-      // Use simple pay sheet generator based on new request
-      generateSimplePaySheetPDF(processed, employees, month, year);
+      generateSimplePaySheetPDF(processed, employees, month, year, companyProfile);
   };
 
-  const handleDownloadIndividualSlip = (result: PayrollResult) => {
-      generatePaySlipsPDF([result], employees, month, year);
+  const handleViewSlip = (result: PayrollResult) => {
+      const emp = employees.find(e => e.id === result.employeeId);
+      if(emp) {
+          generatePaySlipsPDF([result], [emp], month, year, companyProfile);
+      }
   };
 
   return (
     <div className="space-y-6 text-white relative">
-      {/* Compliance Warning */}
       {!isComplianceValid && (
         <div className="bg-red-900/30 border border-red-700 p-6 rounded-2xl flex gap-4 items-start animate-pulse">
           <AlertTriangle className="text-red-400 shrink-0" size={32} />
@@ -252,14 +258,23 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         </div>
       )}
 
-      {/* Locked Status Banner */}
       {payrollStatus === 'Finalized' && (
-        <div className="bg-blue-900/20 border border-blue-700 p-4 rounded-xl flex gap-3 items-center">
-            <Lock className="text-blue-400" size={24} />
-            <div>
-                <h3 className="font-bold text-blue-200 text-sm">Payroll Period Locked</h3>
-                <p className="text-xs text-blue-300">Data for {month} {year} is confirmed. Statutory reports can be generated. To edit, you must unlock via Pay Reports.</p>
+        <div className="bg-blue-900/20 border border-blue-700 p-4 rounded-xl flex items-center justify-between shadow-lg">
+            <div className="flex gap-3 items-center">
+                <Lock className="text-blue-400" size={24} />
+                <div>
+                    <h3 className="font-bold text-blue-200 text-sm">Payroll Period Locked</h3>
+                    <p className="text-xs text-blue-300">Data for {month} {year} is confirmed. Statutory reports can be generated.</p>
+                </div>
             </div>
+            {canUnlock && (
+                <button 
+                    onClick={initiateUnlock}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-800 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors border border-blue-600 shadow-md"
+                >
+                    <Unlock size={14} /> Unlock Period
+                </button>
+            )}
         </div>
       )}
 
@@ -291,317 +306,109 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
              {processed.length > 0 && payrollStatus !== 'Finalized' && (
                <button 
-                onClick={initiateSave} 
-                disabled={isSaving || showSavedFeedback} 
-                className={`px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg transition-all text-sm disabled:opacity-70 disabled:cursor-not-allowed ${
-                    showSavedFeedback 
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20' 
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
+                   onClick={initiateSave}
+                   disabled={isSaving || isLoadedFromSave}
+                   className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all shadow-lg disabled:opacity-50 
+                       ${isLoadedFromSave 
+                           ? 'bg-slate-700 text-slate-400 cursor-not-allowed shadow-none' 
+                           : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}
                >
-                {isSaving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : showSavedFeedback ? <CheckCircle2 size={18} /> : <Save size={18} />}
-                {isSaving ? 'Saving...' : showSavedFeedback ? 'Draft Saved' : 'Save Draft'}
+                   {isSaving ? <RefreshCw className="animate-spin" size={18} /> : isLoadedFromSave ? <CheckCircle size={18} /> : <Save size={18} />}
+                   {isLoadedFromSave ? 'Draft Saved' : 'Save Draft'}
                </button>
              )}
-
-             {payrollStatus === 'Finalized' && (
-                 <button disabled className="px-6 py-3 rounded-xl font-bold flex items-center gap-2 bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700">
-                     <CheckCircle size={20} /> Data Saved & Locked
+             
+             {payrollStatus !== 'Finalized' && (
+                 <button 
+                     onClick={runPayroll}
+                     disabled={isProcessing || !isComplianceValid}
+                     className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg disabled:opacity-50"
+                 >
+                     {isProcessing ? <RefreshCw className="animate-spin" size={18} /> : <Play size={18} />}
+                     {processed.length > 0 ? 'Recalculate' : 'Run Payroll'}
                  </button>
              )}
-
-            {payrollStatus !== 'Finalized' && (
-                <button 
-                onClick={runPayroll} 
-                disabled={isProcessing || !isComplianceValid} 
-                className={`px-8 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg transition-all ${
-                    !isComplianceValid 
-                    ? 'bg-slate-700 text-slate-500 cursor-not-allowed border border-slate-600' 
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
-                >
-                {isProcessing ? <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" /> : <Play size={20} />}
-                {/* Changed to check processed.length for Re-Calculate status */}
-                {processed.length > 0 ? 'Re-Calculate' : 'Calculate Pay Sheet'}
-                </button>
-            )}
         </div>
       </div>
-
-      {/* Results Table */}
-      {processed.length > 0 && (
-        <div className="bg-[#1e293b] rounded-xl border border-slate-800 overflow-hidden shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+      
+      {/* Result Table */}
+      {processed.length > 0 ? (
+        <div className="bg-[#1e293b] rounded-xl border border-slate-800 overflow-hidden shadow-2xl">
           <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-[#0f172a] text-[10px] text-sky-400 uppercase font-bold tracking-widest">
-              <tr>
-                <th className="px-6 py-4">Employee</th>
-                <th className="px-4 py-4 text-center">Paid Days</th>
-                <th className="px-4 py-4 text-right text-emerald-400">Gross Earned</th>
-                <th className="px-4 py-4 text-right text-amber-400">EPF</th>
-                <th className="px-4 py-4 text-right text-amber-400">ESI</th>
-                <th className="px-4 py-4 text-right text-amber-400">PT</th>
-                <th className="px-4 py-4 text-right text-red-400">Total Ded.</th>
-                <th className="px-6 py-4 text-right text-blue-400">Net Payable</th>
-                <th className="px-4 py-4 text-center">Slip</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {processed.map((res) => {
-                  const emp = getEmployee(res.employeeId);
-                  if (!emp) return null;
+            <table className="w-full text-left">
+              <thead className="bg-[#0f172a] text-xs font-bold uppercase text-slate-400">
+                <tr>
+                  <th className="px-6 py-4">Employee</th>
+                  <th className="px-4 py-4 text-center">Days</th>
+                  <th className="px-4 py-4 text-center">Earnings</th>
+                  <th className="px-4 py-4 text-center">PF</th>
+                  <th className="px-4 py-4 text-center">ESI</th>
+                  <th className="px-4 py-4 text-center">TDS/PT</th>
+                  <th className="px-4 py-4 text-center">Deductions</th>
+                  <th className="px-6 py-4 text-right">Net Pay</th>
+                  <th className="px-4 py-4 text-center">View Slip</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {processed.map(res => {
+                  const emp = employees.find(e => e.id === res.employeeId);
                   return (
-                    <tr key={res.employeeId} className="hover:bg-slate-800/50 transition-colors group">
+                    <tr key={res.employeeId} className="hover:bg-slate-800/50">
                       <td className="px-6 py-4">
-                        <div className="font-bold text-white text-sm">{emp.name}</div>
+                        <div className="text-sm font-bold text-white">{emp?.name}</div>
                         <div className="text-[10px] text-slate-500 font-mono">{res.employeeId}</div>
                       </td>
-                      <td className="px-4 py-4 text-center">
-                        <span className="px-2 py-1 rounded bg-slate-900 text-slate-300 font-mono text-xs">{res.payableDays}</span>
-                      </td>
-                      <td className="px-4 py-4 text-right font-mono text-emerald-400">
-                        {Math.round(res.earnings.total).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-4 text-right font-mono text-slate-400">
-                        {Math.round(res.deductions.epf).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-4 text-right font-mono text-slate-400">
-                        {Math.round(res.deductions.esi).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-4 text-right font-mono text-slate-400">
-                        {Math.round(res.deductions.pt).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-4 text-right font-mono text-red-400 font-bold">
-                        {Math.round(res.deductions.total).toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 text-right font-mono text-blue-400 font-black text-lg">
-                        {Math.round(res.netPay).toLocaleString()}
+                      <td className="px-4 py-4 text-center text-slate-300 font-mono">{res.payableDays}</td>
+                      <td className="px-4 py-4 text-center text-emerald-400 font-mono">{res.earnings.total.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-center text-slate-400 font-mono">{res.deductions.epf.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-center text-slate-400 font-mono">{res.deductions.esi.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-center text-slate-400 font-mono">{(res.deductions.it + res.deductions.pt).toLocaleString()}</td>
+                      <td className="px-4 py-4 text-center text-red-400 font-mono">{res.deductions.total.toLocaleString()}</td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="font-bold text-white text-lg font-mono">₹{res.netPay.toLocaleString()}</div>
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <button 
-                            onClick={() => setViewingSlip(res)}
-                            className="p-2 hover:bg-blue-900/30 text-slate-500 hover:text-blue-400 rounded-lg transition-colors"
-                        >
-                            <FileText size={16} />
-                        </button>
+                          <button 
+                            onClick={() => handleViewSlip(res)}
+                            className="text-sky-400 hover:text-white p-2 hover:bg-sky-900/30 rounded transition-colors"
+                            title="View/Print Pay Slip"
+                          >
+                              <Eye size={18} />
+                          </button>
                       </td>
                     </tr>
                   );
-              })}
-            </tbody>
-          </table>
+                })}
+              </tbody>
+            </table>
           </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center p-12 bg-[#1e293b] rounded-xl border border-slate-800 border-dashed text-slate-500">
+            <Calculator size={48} className="mb-4 opacity-50" />
+            <h3 className="text-lg font-bold text-white">No Payroll Data</h3>
+            <p className="text-sm mb-6">Click "Run Payroll" to calculate salaries for this period.</p>
+            {payrollStatus !== 'Finalized' && (
+             <button 
+                 onClick={runPayroll}
+                 disabled={isProcessing || !isComplianceValid}
+                 className="flex items-center gap-2 px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg"
+             >
+                 <Play size={18} />
+                 Calculate Now
+             </button>
+            )}
         </div>
       )}
 
-      {/* PAY SLIP MODAL - Updated to Match ILCbala Screenshot */}
-      {viewingSlip && (
-         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white w-full max-w-3xl max-h-[95vh] overflow-y-auto rounded-lg shadow-2xl relative flex flex-col text-slate-900">
-                <div className="absolute top-4 right-4 flex gap-2 no-print">
-                    <button 
-                        onClick={() => handleDownloadIndividualSlip(viewingSlip)}
-                        className="text-slate-500 hover:text-blue-600 p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                        title="Download PDF"
-                    >
-                        <Printer size={20} />
-                    </button>
-                    <button onClick={() => setViewingSlip(null)} className="text-slate-400 hover:text-red-500 p-2 hover:bg-slate-100 rounded-full transition-colors">
-                        <X size={24} />
-                    </button>
-                </div>
-                
-                <div className="p-8">
-                    {(() => {
-                        const emp = getEmployee(viewingSlip.employeeId);
-                        if (!emp) return null;
-                        
-                        // FIX: Grouped Allowances mapping to match PDF logic exactly
-                        // "Special Allowances" in PDF refers to special1 + special2 + special3
-                        const specialAllowanceTotal = viewingSlip.earnings.special1 + viewingSlip.earnings.special2 + viewingSlip.earnings.special3;
-                        
-                        // "Other Allowances" in PDF refers to washing + attire
-                        const otherAllowanceTotal = viewingSlip.earnings.washing + viewingSlip.earnings.attire;
-
-                        return (
-                            <div className="font-sans text-slate-900">
-                                {/* Header */}
-                                <div className="text-center mb-6">
-                                    <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-widest">{companyProfile.establishmentName || BRAND_CONFIG.companyName.toUpperCase()}</h1>
-                                    <p className="text-sm text-slate-600 font-medium mt-1">{companyProfile.city ? `${companyProfile.city}, ${companyProfile.state}` : 'Industrial Estate, Chennai, Tamil Nadu'}</p>
-                                    <div className="mt-4">
-                                        <h2 className="text-lg font-bold text-slate-800 uppercase">PAY SLIP - {month.toUpperCase()} {year}</h2>
-                                    </div>
-                                </div>
-
-                                {/* Employee Details Grid */}
-                                <div className="grid grid-cols-2 gap-x-12 gap-y-2 text-sm text-slate-800 mb-6 border border-slate-200 p-4 rounded-lg bg-slate-50">
-                                    {/* Left Column */}
-                                    <div className="space-y-2">
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">Employee Name:</span>
-                                            <span className="uppercase text-slate-900">{emp.name}</span>
-                                        </div>
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">Employee ID:</span>
-                                            <span className="text-slate-900">{emp.id}</span>
-                                        </div>
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">Bank A/c:</span>
-                                            <span className="text-slate-900">{emp.bankAccount}</span>
-                                        </div>
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">UAN No:</span>
-                                            <span className="text-slate-900">{emp.uanc || 'N/A'}</span>
-                                        </div>
-                                        {/* Added ESI here to balance columns */}
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">ESI No:</span>
-                                            <span className="text-slate-900">{emp.esiNumber || 'N/A'}</span>
-                                        </div>
-                                    </div>
-
-                                    {/* Right Column */}
-                                    <div className="space-y-2">
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">Designation:</span>
-                                            <span className="text-slate-900">{emp.designation}</span>
-                                        </div>
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">Department:</span>
-                                            <span className="text-slate-900">{emp.department || emp.division || 'Corporate'}</span>
-                                        </div>
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">Days Paid:</span>
-                                            <span className="text-slate-900">{viewingSlip.payableDays} / {viewingSlip.daysInMonth}</span>
-                                        </div>
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">PF No:</span>
-                                            <span className="text-slate-900">{emp.pfNumber || 'N/A'}</span>
-                                        </div>     
-                                        <div className="grid grid-cols-[120px_1fr]">
-                                            <span className="font-bold">PAN No:</span>
-                                            <span className="text-slate-900">{emp.pan || 'N/A'}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                         
-                                                                                                                {/* Earnings & Deductions Table */}
-                                <table className="w-full text-sm border border-slate-300 mb-6 text-slate-900">
-                                    <thead className="bg-slate-800 text-white font-bold">
-                                        <tr>
-                                            <th className="py-2 px-4 text-left w-1/4">Earnings</th>
-                                            <th className="py-2 px-4 text-right w-1/4">Amount (₹.)</th>
-                                            <th className="py-2 px-4 text-left w-1/4 border-l border-slate-600">Deductions</th>
-                                            <th className="py-2 px-4 text-right w-1/4">Amount (₹.)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-200">
-                                        <tr>
-                                            <td className="py-2 px-4 text-slate-800">Basic Pay</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.basic.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">Provident Fund{viewingSlip.isCode88 ? "* " : ""}</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.epf.toFixed(2)}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 px-4 text-slate-800">DA</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.da.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">ESI{viewingSlip.isESICodeWagesUsed ? "** " : ""}</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.esi.toFixed(2)}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 px-4 text-slate-800">Retaining Allowance</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.retainingAllowance.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">Professional Tax</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.pt.toFixed(2)}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 px-4 text-slate-800">HRA</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.hra.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">Income Tax</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.it.toFixed(2)}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 px-4 text-slate-800">Conveyance</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.conveyance.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">VPF</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.vpf.toFixed(2)}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 px-4 text-slate-800">Special Allowances</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{specialAllowanceTotal.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">LWF</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.lwf.toFixed(2)}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 px-4 text-slate-800">Other Allowances</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{otherAllowanceTotal.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200 text-slate-800">Advance Recovery</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.advanceRecovery.toFixed(2)}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 px-4 text-slate-800">Leave Encashment</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.leaveEncashment.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-200"></td>
-                                            <td className="py-2 px-4 text-right"></td>
-                                        </tr>
-                                        <tr className="bg-slate-100 font-bold border-t border-slate-300">
-                                            <td className="py-2 px-4 text-slate-900">Total Earnings</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.earnings.total.toFixed(2)}</td>
-                                            <td className="py-2 px-4 border-l border-slate-300 text-slate-900">Total Deductions</td>
-                                            <td className="py-2 px-4 text-right font-mono text-slate-900">{viewingSlip.deductions.total.toFixed(2)}</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-
-                                {/* Net Pay Box */}
-                                <div className="border-2 border-blue-500 bg-white p-4 flex justify-between items-center mb-6 shadow-sm">
-                                    <span className="font-bold text-slate-900 text-lg uppercase">NET SALARY PAYABLE:</span>
-                                    <span className="font-black text-slate-900 text-2xl">₹. {Math.round(viewingSlip.netPay).toLocaleString('en-IN')}/-</span>
-                                </div>
-                                
-                                {/* Amount in Words */}
-                                <div className="text-slate-800 text-sm font-bold border-b border-slate-300 pb-4 mb-4">
-                                   Amount in Words: {numberToWords(Math.round(viewingSlip.netPay))} Rupees Only
-                                </div>
-                                
-                                {/* Code 88 indicator */}
-
-                                <div className="flex justify-between items-end border-t border-slate-300 pt-4">
-                                <div className="space-y-1">
-                                {viewingSlip.isCode88 && <p className="text-[10px] italic text-slate-500">* PF calculated on Code Wages (Social Security Code 2020)</p>}
-                                 {viewingSlip.isESICodeWagesUsed && <p className="text-[10px] italic text-slate-500">** ESI calculated on Code Wages (Social Security Code 2020)</p>}
-                                </div>
-                                </div>
-
-                                {/* Footer */}
-                                <div className="text-center space-y-2 mt-4">
-                                    <p className="text-xs text-slate-500 italic">This is a computer-generated document and does not require a signature.</p>
-                                </div>
-                            </div>
-                        );
-                    })()}
-                </div>
-            </div>
-         </div>
-      )}
-
-      {/* GENERAL NOTIFICATION / CONFIRMATION MODAL */}
+      {/* Confirmation Modal */}
       {modalState.isOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white">
-                    <X size={20} />
-                </button>
+                <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                 <div className="flex flex-col items-center gap-2">
-                    <div className={`p-3 rounded-full border ${
-                        modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : 
-                        modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' :
-                        'bg-blue-900/30 text-blue-500 border-blue-900/50'
-                    }`}>
-                        {modalState.type === 'error' ? <AlertTriangle size={24} /> : 
-                         modalState.type === 'success' ? <CheckCircle size={24} /> : 
-                         <HelpCircle size={24} />}
+                    <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>
+                        {modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle2 size={24} /> : <HelpCircle size={24} />}
                     </div>
                     <h3 className="text-lg font-bold text-white text-center">{modalState.title}</h3>
                     <div className="text-sm text-slate-400 text-center whitespace-pre-line">{modalState.message}</div>
@@ -610,28 +417,51 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 <div className="flex gap-3 mt-4">
                     {modalState.type === 'confirm' ? (
                         <>
-                            <button 
-                                onClick={() => setModalState({ ...modalState, isOpen: false })}
-                                className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button 
-                                onClick={modalState.onConfirm}
-                                className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg"
-                            >
-                                Confirm
-                            </button>
+                            <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors">Cancel</button>
+                            <button onClick={modalState.onConfirm} className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg">Confirm</button>
                         </>
                     ) : (
-                        <button 
-                            onClick={() => setModalState({ ...modalState, isOpen: false })}
-                            className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors"
-                        >
-                            Close
-                        </button>
+                        <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
                     )}
                 </div>
+            </div>
+        </div>
+      )}
+
+      {/* Unlock Auth Modal */}
+      {showUnlockAuth && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-blue-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                <button onClick={() => setShowUnlockAuth(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                <div className="flex flex-col items-center gap-2">
+                    <div className="p-4 bg-blue-900/20 text-blue-500 rounded-full border border-blue-900/50 mb-2">
+                        <KeyRound size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-white text-center">Unlock Payroll</h3>
+                    <p className="text-xs text-blue-300 text-center leading-relaxed">
+                        Enter your password to unlock the payroll period. This will revert the status to Draft.
+                    </p>
+                </div>
+                
+                <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                    <input 
+                        type="password" 
+                        placeholder="Enter your password" 
+                        autoFocus
+                        className={`w-full bg-[#0f172a] border ${authError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all`}
+                        value={authPassword}
+                        onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }}
+                        onKeyDown={(e) => e.key === 'Enter' && handleConfirmUnlock()}
+                    />
+                    {authError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{authError}</p>}
+                </div>
+                
+                <button 
+                    onClick={handleConfirmUnlock}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
+                >
+                    <Unlock size={18} /> CONFIRM UNLOCK
+                </button>
             </div>
         </div>
       )}

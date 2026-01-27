@@ -50,9 +50,15 @@ export interface StatutoryConfig {
   esiEmployeeRate: number;
   esiEmployerRate: number;
   // PT Configuration
+  enableProfessionalTax: boolean; // New Flag to toggle PT globally
   ptDeductionCycle: 'Monthly' | 'HalfYearly'; // Monthly for KA/MH, HalfYearly for TN/Kerala
   ptSlabs: { min: number; max: number; amount: number }[];
-  lwfAmount: number;
+  // LWF Configuration
+  enableLWF: boolean;
+  lwfDeductionCycle: 'Monthly' | 'HalfYearly' | 'Yearly';
+  lwfEmployeeContribution: number;
+  lwfEmployerContribution: number;
+  
   bonusRate: number;
   pfComplianceType: PFComplianceType; // Company-level compliance
 }
@@ -167,6 +173,7 @@ export interface PayrollResult {
     epf: number;
     eps: number;
     esi: number;
+    lwf: number;
   };
   gratuityAccrual: number;
   netPay: number;
@@ -174,13 +181,14 @@ export interface PayrollResult {
   isCode88?: boolean;
   isESICodeWagesUsed?: boolean;
   esiRemark?: string;
+  leaveSnapshot?: LeaveLedger; // Snapshot of ledger at the time of freezing
 }
 
 export interface User {
   username: string;
   password?: string;
   name: string;
-  role: 'Admin' | 'HR' | 'Viewer';
+  role: 'Developer' | 'Administrator' | 'User';
   email: string;
 }
 

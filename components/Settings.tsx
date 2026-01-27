@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone } from 'lucide-react';
-import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile } from '../types';
-import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS } from '../constants';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins } from 'lucide-react';
+import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
+import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS } from '../constants';
 import CryptoJS from 'crypto-js';
 
 interface SettingsProps {
@@ -17,15 +17,17 @@ interface SettingsProps {
   onRestore: () => void;
   initialTab?: 'STATUTORY' | 'COMPANY' | 'DATA';
   userRole?: string;
+  currentUser?: User; // Added currentUser prop
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, initialTab = 'STATUTORY', userRole }) => {
+const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, initialTab = 'STATUTORY', userRole, currentUser }) => {
   const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA'>(initialTab);
   const [formData, setFormData] = useState(config);
   const [profileData, setProfileData] = useState(companyProfile);
   const [localLeavePolicy, setLocalLeavePolicy] = useState(leavePolicy);
   const [saved, setSaved] = useState(false);
   const [selectedStatePreset, setSelectedStatePreset] = useState<string>('Tamil Nadu');
+  const [selectedLWFState, setSelectedLWFState] = useState<string>('Tamil Nadu');
 
   // Check if data exists to enable/disable backup
   const hasData = useMemo(() => {
@@ -53,6 +55,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT'>('EXPORT');
   const backupFileRef = useRef<HTMLInputElement>(null);
 
+  // Auth Modal State for Backup/Restore
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [pendingAuthAction, setPendingAuthAction] = useState<(() => void) | null>(null);
+
   // Overwrite Warning State
   const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
 
@@ -61,15 +69,34 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   const [processProgress, setProcessProgress] = useState(0);
   const [processStatus, setProcessStatus] = useState('');
 
-  const SUPERVISOR_PASSWORD = "admin";
-
   // Helper for UI breathing room
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  // --- AUTHENTICATION HELPERS ---
+  
+  const requireAuth = (callback: () => void) => {
+      setPendingAuthAction(() => callback);
+      setAuthPassword('');
+      setAuthError('');
+      setShowAuthModal(true);
+  };
+
+  const handleAuthSubmit = () => {
+      if (authPassword === currentUser?.password) {
+          setShowAuthModal(false);
+          if (pendingAuthAction) {
+              pendingAuthAction();
+          }
+          setPendingAuthAction(null);
+      } else {
+          setAuthError('Incorrect Login Password');
+      }
+  };
 
   // --- ENCRYPTION LOGIC ---
   const handleEncryptedExport = async () => {
     if (!encryptionKey) {
-        alert("Please enter a secure password to encrypt your data.");
+        alert("Please enter a secure password to encrypt your data file.");
         return;
     }
 
@@ -259,7 +286,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
       reader.readAsText(file);
   };
 
-  const handleEncryptedImport = () => {
+  const initiateRestore = () => {
       const file = backupFileRef.current?.files?.[0];
       if (!file || !encryptionKey) {
           alert("Please select a file and enter the decryption password.");
@@ -293,6 +320,19 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         ptDeductionCycle: PT_STATE_PRESETS[state].cycle as 'Monthly' | 'HalfYearly',
         ptSlabs: [...PT_STATE_PRESETS[state].slabs]
       });
+    }
+  };
+
+  const handleLWFStateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const state = e.target.value as keyof typeof LWF_STATE_PRESETS;
+    if (LWF_STATE_PRESETS[state]) {
+        setSelectedLWFState(state);
+        setFormData({
+            ...formData,
+            lwfDeductionCycle: LWF_STATE_PRESETS[state].cycle as any,
+            lwfEmployeeContribution: LWF_STATE_PRESETS[state].emp,
+            lwfEmployerContribution: LWF_STATE_PRESETS[state].emplr
+        });
     }
   };
 
@@ -350,7 +390,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   };
 
   const executeFactoryReset = () => {
-      if (resetPassword === SUPERVISOR_PASSWORD) {
+      // Validate against the currently logged-in user's password instead of hardcoded 'admin@123'
+      if (resetPassword === currentUser?.password) {
           const keysToRemove = [
             'app_employees',
             'app_config', 
@@ -374,7 +415,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
           alert("System has been successfully reset. The application will now restart.");
           onRestore();
       } else {
-          setResetError("Incorrect Password. Access Denied.");
+          setResetError("Incorrect Login Password. Access Denied.");
       }
   };
 
@@ -585,24 +626,48 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 <ScrollText className="text-amber-500" size={24} />
                 <h3 className="font-bold text-sky-400">Professional Tax (PT) Rules</h3>
                 </div>
-                <div className="flex gap-4 items-center">
-                <div className="flex items-center gap-2">
-                    <MapPin size={16} className="text-slate-400" />
-                    <select 
-                    onChange={handleStatePresetChange} 
-                    className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
-                    defaultValue=""
-                    >
-                    <option value="" disabled>Select State Preset</option>
-                    {Object.keys(PT_STATE_PRESETS).map(state => (
-                        <option key={state} value={state}>{state}</option>
-                    ))}
-                    </select>
-                </div>
+                
+                {/* Global Enable/Disable Toggle */}
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <div className="relative">
+                            <input 
+                                type="checkbox" 
+                                className="sr-only" 
+                                checked={formData.enableProfessionalTax !== false} // Default true
+                                onChange={(e) => setFormData({...formData, enableProfessionalTax: e.target.checked})}
+                            />
+                            <div className={`w-10 h-5 rounded-full transition-colors ${formData.enableProfessionalTax !== false ? 'bg-emerald-600' : 'bg-slate-700'}`}></div>
+                            <div className={`absolute left-1 top-1 w-3 h-3 bg-white rounded-full transition-transform ${formData.enableProfessionalTax !== false ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                        </div>
+                        <span className={`text-[10px] font-bold uppercase tracking-wide ${formData.enableProfessionalTax !== false ? 'text-emerald-400' : 'text-slate-500'}`}>
+                            {formData.enableProfessionalTax !== false ? 'PT Enabled' : 'PT Disabled'}
+                        </span>
+                    </label>
                 </div>
             </div>
 
+            {/* Conditionally Render PT Controls or Disabled Message */}
+            {formData.enableProfessionalTax !== false ? (
             <div className="p-8 space-y-6">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex gap-4 items-center">
+                        <div className="flex items-center gap-2">
+                            <MapPin size={16} className="text-slate-400" />
+                            <select 
+                            onChange={handleStatePresetChange} 
+                            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
+                            defaultValue=""
+                            >
+                            <option value="" disabled>Select State Preset</option>
+                            {Object.keys(PT_STATE_PRESETS).map(state => (
+                                <option key={state} value={state}>{state}</option>
+                            ))}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <div className="flex items-center gap-6 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
                 <div className="flex-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Deduction Frequency</label>
@@ -669,12 +734,119 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 </table>
                 </div>
             </div>
+            ) : (
+                <div className="p-8 flex flex-col items-center justify-center text-center space-y-3 opacity-50">
+                    <div className="p-4 bg-slate-900 rounded-full text-slate-500 border border-slate-800">
+                        <ScrollText size={32} />
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-400">Professional Tax Calculation Disabled</h4>
+                    <p className="text-xs text-slate-500 max-w-sm">
+                        Professional tax will not be calculated for any employee, regardless of their work location or state. Enable the toggle above to configure rules.
+                    </p>
+                </div>
+            )}
+            </div>
+
+            {/* NEW: Labour Welfare Fund (LWF) Module */}
+            <div className="bg-[#1e293b] rounded-2xl border border-slate-800 shadow-xl overflow-hidden lg:col-span-2">
+                <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <HandCoins className="text-pink-500" size={24} />
+                        <h3 className="font-bold text-sky-400">Labour Welfare Fund (LWF) Rules</h3>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <div className="relative">
+                                <input 
+                                    type="checkbox" 
+                                    className="sr-only" 
+                                    checked={formData.enableLWF !== false} // Default true
+                                    onChange={(e) => setFormData({...formData, enableLWF: e.target.checked})}
+                                />
+                                <div className={`w-10 h-5 rounded-full transition-colors ${formData.enableLWF !== false ? 'bg-emerald-600' : 'bg-slate-700'}`}></div>
+                                <div className={`absolute left-1 top-1 w-3 h-3 bg-white rounded-full transition-transform ${formData.enableLWF !== false ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                            </div>
+                            <span className={`text-[10px] font-bold uppercase tracking-wide ${formData.enableLWF !== false ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                {formData.enableLWF !== false ? 'LWF Enabled' : 'LWF Disabled'}
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                {formData.enableLWF !== false ? (
+                <div className="p-8 space-y-6">
+                    <div className="flex items-center gap-4 mb-4">
+                        <div className="flex items-center gap-2">
+                            <MapPin size={16} className="text-slate-400" />
+                            <select 
+                                onChange={handleLWFStateChange} 
+                                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-pink-500"
+                                defaultValue=""
+                            >
+                                <option value="" disabled>Select State Preset</option>
+                                {Object.keys(LWF_STATE_PRESETS).map(state => (
+                                    <option key={state} value={state}>{state}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Deduction Cycle</label>
+                            <select 
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none focus:ring-2 focus:ring-pink-500 text-sm"
+                                value={formData.lwfDeductionCycle}
+                                onChange={e => setFormData({...formData, lwfDeductionCycle: e.target.value as any})}
+                            >
+                                <option value="Monthly">Monthly</option>
+                                <option value="HalfYearly">Half-Yearly (June & Dec)</option>
+                                <option value="Yearly">Yearly (December)</option>
+                            </select>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Employee Contribution (₹)</label>
+                            <input 
+                                type="number" 
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none focus:ring-2 focus:ring-pink-500 font-mono"
+                                value={formData.lwfEmployeeContribution}
+                                onChange={e => setFormData({...formData, lwfEmployeeContribution: +e.target.value})}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Employer Contribution (₹)</label>
+                            <input 
+                                type="number" 
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none focus:ring-2 focus:ring-pink-500 font-mono"
+                                value={formData.lwfEmployerContribution}
+                                onChange={e => setFormData({...formData, lwfEmployerContribution: +e.target.value})}
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-xs text-slate-400 italic">
+                        <p>Note: LWF is deducted based on the cycle selected. "Half-Yearly" deducts in June and December. "Yearly" deducts in December.</p>
+                    </div>
+                </div>
+                ) : (
+                    <div className="p-8 flex flex-col items-center justify-center text-center space-y-3 opacity-50">
+                        <div className="p-4 bg-slate-900 rounded-full text-slate-500 border border-slate-800">
+                            <HandCoins size={32} />
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-400">LWF Deductions Disabled</h4>
+                        <p className="text-xs text-slate-500 max-w-sm">
+                            Labour Welfare Fund will not be deducted for any employee. Enable the toggle above to configure rules.
+                        </p>
+                    </div>
+                )}
             </div>
 
         </div>
       </>
       )}
 
+      {/* Other Tabs (COMPANY, DATA) remain unchanged ... */}
       {activeTab === 'COMPANY' && (
         <div className="bg-[#1e293b] rounded-2xl border border-slate-800 shadow-xl overflow-hidden p-8 animate-in fade-in slide-in-from-right-4 duration-300">
             <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4">
@@ -688,8 +860,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 gap-y-8">
-                {/* NEW: Flash News Configuration - Restricted to Admin/Developer */}
-                {userRole === 'Admin' && (
+                {userRole === 'Developer' && (
                     <div className="md:col-span-3 bg-amber-900/10 p-4 rounded-xl border border-amber-900/30">
                         <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-2 flex items-center gap-2">
                             <Lock size={10} /> Developer Control: News Ticker
@@ -832,6 +1003,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         </div>
       )}
 
+      {/* Rest of the component (DATA Tab & Modals) remains unchanged */}
+      {/* ... (DATA Tab content from previous version) ... */}
       {activeTab === 'DATA' && (
         <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
             <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
@@ -903,6 +1076,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         </div>
       )}
 
+      {/* Save Button */}
       {activeTab !== 'DATA' && (
       <div className="flex justify-between items-center p-2 pt-6 border-t border-slate-800">
         <div></div>
@@ -918,6 +1092,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
       </div>
       )}
 
+       {/* All Modals (Reset, Backup, Auth, Overwrite) included below... */}
        {showResetModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
@@ -937,11 +1112,11 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
                     <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
                         <KeyRound size={16} />
-                        <span>Supervisor Authorization</span>
+                        <span>Confirm Identity</span>
                     </div>
                     <input 
                         type="password" 
-                        placeholder="Enter Admin Password" 
+                        placeholder="Enter Login Password" 
                         autoFocus
                         className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all`}
                         value={resetPassword}
@@ -971,7 +1146,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 )}
                 
                 <div className="flex flex-col items-center gap-2">
-                    {/* VISUAL SUCCESS INDICATOR */}
                     <div className={`p-4 rounded-full border mb-2 transition-all duration-500 ${processProgress === 100 ? 'bg-emerald-900/30 text-emerald-400 border-emerald-500/50' : isProcessing ? 'bg-indigo-900/30 text-indigo-400 border-indigo-500/50' : 'bg-blue-900/20 text-blue-400 border-blue-900/50'}`}>
                         {processProgress === 100 ? <CheckCircle2 size={32} /> : isProcessing ? <Loader2 size={32} className="animate-spin" /> : <Lock size={32} />}
                     </div>
@@ -1030,7 +1204,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
                         <div className="space-y-1">
                             <label className="text-[10px] font-bold text-slate-500 uppercase">
-                                {backupMode === 'EXPORT' ? 'Set Encryption Password' : 'Enter Decryption Password'}
+                                {backupMode === 'EXPORT' ? 'Set File Encryption Password' : 'Enter File Decryption Password'}
                             </label>
                             <input 
                                 type="password" 
@@ -1042,18 +1216,14 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                         
                         <button 
-                            onClick={backupMode === 'EXPORT' ? handleEncryptedExport : () => {
-                                // Check for file and key before showing warning logic
+                            onClick={backupMode === 'EXPORT' ? () => requireAuth(handleEncryptedExport) : () => {
+                                // Validate first before asking for Auth
                                 const file = backupFileRef.current?.files?.[0];
                                 if (!file || !encryptionKey) {
                                     alert("Please select a file and enter the decryption password.");
                                     return;
                                 }
-                                if (hasData) {
-                                    setShowOverwriteConfirm(true);
-                                } else {
-                                    executeImport();
-                                }
+                                requireAuth(initiateRestore);
                             }}
                             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
                         >
@@ -1061,6 +1231,50 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </button>
                     </div>
                 )}
+            </div>
+        </div>
+       )}
+
+       {/* AUTH MODAL FOR BACKUP/RESTORE - Z-Index Higher than Backup Modal */}
+       {showAuthModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-indigo-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+                    <X size={20} />
+                </button>
+                <div className="flex flex-col items-center gap-2">
+                    <div className="p-4 bg-indigo-900/20 text-indigo-500 rounded-full border border-indigo-900/50 mb-2">
+                        <KeyRound size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-white text-center">AUTHORIZE ACTION</h3>
+                    <p className="text-xs text-indigo-300 text-center leading-relaxed">
+                        Security Verification Required. Please enter your login credentials to proceed with {backupMode === 'EXPORT' ? 'Data Backup' : 'Data Restoration'}.
+                    </p>
+                </div>
+                
+                <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+                        <KeyRound size={16} />
+                        <span>Login Password</span>
+                    </div>
+                    <input 
+                        type="password" 
+                        placeholder="Enter your login password" 
+                        autoFocus
+                        className={`w-full bg-[#0f172a] border ${authError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all`}
+                        value={authPassword}
+                        onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAuthSubmit()}
+                    />
+                    {authError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{authError}</p>}
+                </div>
+                
+                <button 
+                    onClick={handleAuthSubmit}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-900/20 transition-all flex items-center justify-center gap-2"
+                >
+                    <CheckCircle2 size={18} /> VERIFY & PROCEED
+                </button>
             </div>
         </div>
        )}

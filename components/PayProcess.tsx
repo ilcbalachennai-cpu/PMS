@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw } from 'lucide-react';
-import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile } from '../types';
+import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User } from '../types';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
 import PayrollProcessor from './PayrollProcessor';
@@ -24,6 +24,7 @@ interface PayProcessProps {
   setMonth: (m: string) => void;
   year: number;
   setYear: (y: number) => void;
+  currentUser?: User;
 }
 
 const PayProcess: React.FC<PayProcessProps> = (props) => {
@@ -144,6 +145,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 setLeaveLedgers={props.setLeaveLedgers}
                 setAdvanceLedgers={props.setAdvanceLedgers}
                 hideContextSelector={true}
+                currentUser={props.currentUser}
             />
         )}
       </div>

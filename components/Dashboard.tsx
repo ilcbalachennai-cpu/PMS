@@ -1,23 +1,31 @@
 
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { IndianRupee, Users, Building, ShieldCheck, TrendingUp, Database } from 'lucide-react';
-import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, View } from '../types';
+import { IndianRupee, Users, Building, ShieldCheck, TrendingUp, Database, Calendar } from 'lucide-react';
+import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, View, CompanyProfile } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
 
 interface DashboardProps {
   employees: Employee[];
   config: StatutoryConfig;
+  companyProfile: CompanyProfile;
   attendances: Attendance[];
   leaveLedgers: LeaveLedger[];
   advanceLedgers: AdvanceLedger[];
   month: string;
   year: number;
+  setMonth: (m: string) => void;
+  setYear: (y: number) => void;
   onNavigate: (view: View, tab?: string) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ employees, config, attendances, leaveLedgers, advanceLedgers, month, year, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers, month, year, setMonth, setYear, onNavigate }) => {
   
+  // Dynamic Year Range
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
   if (employees.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-10rem)] space-y-8 animate-in fade-in duration-700">
@@ -95,10 +103,33 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, attendances, l
     <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
       
       {/* Date Header for Dashboard */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
          <h2 className="text-lg font-bold text-white flex items-center gap-2">
             Overview <span className="text-slate-500 text-sm font-normal">for {month} {year}</span>
          </h2>
+         <div className="flex items-center gap-2">
+             <div className="flex items-center gap-2 bg-[#1e293b] p-1 rounded-lg border border-slate-700">
+                 <select 
+                    value={month} 
+                    onChange={e => setMonth(e.target.value)} 
+                    className="bg-[#0f172a] border border-slate-700 rounded-md px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-bold"
+                 >
+                    {months.map(m => (<option key={m} value={m}>{m}</option>))}
+                 </select>
+                 <select 
+                    value={year} 
+                    onChange={e => setYear(+e.target.value)} 
+                    className="bg-[#0f172a] border border-slate-700 rounded-md px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-bold"
+                 >
+                    {yearOptions.map(y => (
+                        <option key={y} value={y}>{y}</option>
+                    ))}
+                 </select>
+                 <div className="px-2 text-slate-500">
+                     <Calendar size={14} />
+                 </div>
+             </div>
+         </div>
       </div>
 
       {/* Stats Grid */}

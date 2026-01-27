@@ -21,7 +21,9 @@ import {
   CalendarClock,
   IndianRupee,
   Megaphone,
-  Youtube
+  Youtube,
+  Maximize,
+  Minimize
 } from 'lucide-react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
@@ -55,11 +57,19 @@ import {
 
 // Internal Shell Component that holds all logic
 const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
-  // Initialize User from Session Storage to persist across reloads (e.g. after Data Restore)
+  // Initialize User from Session Storage to persist across reloads
+  // FIX: Added validation to ensure role exists, otherwise force logout (clears stale sessions)
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const savedUser = localStorage.getItem('app_session_user');
-      return savedUser ? JSON.parse(savedUser) : null;
+      if (savedUser) {
+          const parsed = JSON.parse(savedUser);
+          // Validation: Ensure role is present
+          if (parsed && parsed.role) {
+              return parsed;
+          }
+      }
+      return null;
     } catch (e) {
       return null;
     }
@@ -69,11 +79,49 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const mainContentRef = useRef<HTMLElement>(null);
   
   // --- GLOBAL DATE STATE (To ensure persistence across views) ---
-  const [globalMonth, setGlobalMonth] = useState<string>('April');
-  const [globalYear, setGlobalYear] = useState<number>(2025);
+  // Smart Initialization: Defaults to latest payroll record found, or current real-time month
+  const [globalMonth, setGlobalMonth] = useState<string>(() => {
+      try {
+          const savedHistory = localStorage.getItem('app_payroll_history');
+          if (savedHistory) {
+              const parsed: PayrollResult[] = JSON.parse(savedHistory);
+              if (parsed.length > 0) {
+                  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                  const sorted = parsed.sort((a, b) => {
+                      if (a.year !== b.year) return b.year - a.year;
+                      return months.indexOf(b.month) - months.indexOf(a.month);
+                  });
+                  return sorted[0].month;
+              }
+          }
+      } catch(e) {}
+      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      return months[new Date().getMonth()];
+  });
+
+  const [globalYear, setGlobalYear] = useState<number>(() => {
+      try {
+          const savedHistory = localStorage.getItem('app_payroll_history');
+          if (savedHistory) {
+              const parsed: PayrollResult[] = JSON.parse(savedHistory);
+              if (parsed.length > 0) {
+                  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                  const sorted = parsed.sort((a, b) => {
+                      if (a.year !== b.year) return b.year - a.year;
+                      return months.indexOf(b.month) - months.indexOf(a.month);
+                  });
+                  return sorted[0].year;
+              }
+          }
+      } catch(e) {}
+      return new Date().getFullYear();
+  });
 
   // New State for controlling Settings Tab
   const [settingsTab, setSettingsTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA'>('STATUTORY');
+  
+  // Full Screen State
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   // --- SAFE STORAGE HELPER ---
   const safeSave = (key: string, data: any) => {
@@ -244,6 +292,27 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   }, [activeView, currentUser]);
 
+  // Handle Full Screen Change Event
+  useEffect(() => {
+    const handleFullScreenChange = () => {
+      setIsFullScreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullScreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
+  }, []);
+
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {
+            console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+        });
+    } else {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        }
+    }
+  };
+
   // --- PERSISTENCE LOGIC END ---
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -371,19 +440,25 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
      isSidebarOpen ? <div className="px-4 mt-6 mb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">{title}</div> : <div className="mt-4 mb-2 border-t border-slate-800"></div>
   );
 
+  const isSettingsAccessible = currentUser.role === 'Developer' || currentUser.role === 'Administrator';
+
   return (
-    <div className="flex h-screen overflow-hidden bg-[#020617] text-white">
+    <div className="flex h-[100dvh] overflow-hidden bg-[#020617] text-white">
       <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} transition-all duration-300 bg-[#0f172a] border-r border-slate-800 flex flex-col`}>
         <div className="p-6 flex items-center gap-3 border-b border-slate-800">
           <div className="bg-[#4169E1] p-2 rounded-lg text-white shrink-0 shadow-lg shadow-blue-500/20">
             <IndianRupee size={24} className="text-[#FF9933]" />
           </div>
           {isSidebarOpen && (
-            <span className="text-xl font-black tracking-tight">
-                <span className="text-[#FF9933]">Bharat</span>
-                <span className="text-white">Pay</span>
-                <span className="text-[#4ADE80] ml-0.5">{BRAND_CONFIG.appNameSuffix}</span>
-            </span>
+            <div className="flex flex-col">
+                <span className="text-2xl font-black tracking-tight leading-none">
+                    <span className="text-[#FF9933]">Bharat</span>
+                    <span className="text-white">Pay</span>
+                    <span className="text-[#4ADE80] ml-0.5">Pro</span>
+                </span>
+                {/* Updated font color to white with opacity for professional look */}
+                <span className="text-[10px] font-bold text-white mt-1.5 tracking-wider uppercase opacity-80">Powered by ILCbala</span>
+            </div>
           )}
         </div>
         
@@ -401,22 +476,13 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           <SidebarHeader title="System" />
           <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" />
           <NavigationItem view={View.AI_Assistant} icon={Bot} label="Compliance AI" />
-          <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" />
+          
+          {isSettingsAccessible && (
+            <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" />
+          )}
         </nav>
 
-        {isSidebarOpen && (
-          <div className="px-6 py-4 border-t border-slate-800 bg-[#0b1120]">
-            <div className="flex items-center gap-3 opacity-80 hover:opacity-100 transition-opacity">
-              <div className="w-8 h-8 rounded-full bg-white overflow-hidden shrink-0 border border-slate-600">
-                 <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
-              </div>
-              <div className="leading-tight overflow-hidden">
-                <span className="text-[10px] text-slate-400 block tracking-widest">POWERED By</span>
-                <span className="text-xs font-bold text-[#FF9933] block truncate">{BRAND_CONFIG.companyName}</span>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Removed the Footer ESTABLISHMENT section as requested */}
 
         <div className="p-4 border-t border-slate-800 bg-[#0b1120]">
           {isSidebarOpen ? (
@@ -453,13 +519,15 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
       <main ref={mainContentRef} className="flex-1 overflow-y-auto">
         <header className="bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 h-20 flex items-center justify-between px-8 sticky top-0 z-10 gap-6">
-          {/* Left: Company Name & Location */}
+          {/* Left: Company Name & Location - UPDATED WITH ROUNDED FULL LOGO */}
           <div className="shrink-0 max-w-[30%]">
             <h2 className="text-xl font-black text-white tracking-wide flex items-center gap-2 truncate">
-               <Building2 size={20} className="text-blue-500 shrink-0" />
+               <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center overflow-hidden shrink-0 border border-slate-600">
+                  <img src={logoUrl} alt="Establishment Logo" className="w-full h-full object-cover" />
+               </div>
                <span className="truncate">{companyProfile.establishmentName || BRAND_CONFIG.companyName}</span>
             </h2>
-            <p className="text-[10px] text-slate-400 font-bold pl-7 flex items-center gap-1.5 mt-1 truncate">
+            <p className="text-[10px] text-slate-400 font-bold pl-11 flex items-center gap-1.5 mt-1 truncate">
                <MapPin size={10} className="text-slate-500 shrink-0" />
                {companyProfile.city ? `${companyProfile.city}, ${companyProfile.state}` : 'Corporate HQ • Industrial Estate, Chennai, TN'}
             </p>
@@ -493,8 +561,17 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
              </a>
           </div>
 
-          {/* Right: Financial Year Badge */}
+          {/* Right: Financial Year Badge & Full Screen Toggle */}
           <div className="flex items-center gap-4 shrink-0">
+            {/* Full Screen Toggle */}
+            <button 
+                onClick={toggleFullScreen}
+                className="p-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-full border border-slate-700 transition-all hover:scale-105 shadow-lg"
+                title={isFullScreen ? "Exit Full Screen" : "Enter Full Screen"}
+            >
+                {isFullScreen ? <Minimize size={18} /> : <Maximize size={18} />}
+            </button>
+
             <div className="relative group overflow-hidden rounded-full p-[1px]">
               <span className="absolute inset-[-1000%] animate-[spin_3s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#059669_0%,#3b82f6_50%,#059669_100%)]" />
               <div className="inline-flex h-full w-full items-center justify-center rounded-full bg-[#0f172a] px-5 py-2 backdrop-blur-3xl">
@@ -518,12 +595,13 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               employees={employees} 
               config={config} 
               companyProfile={companyProfile}
-              setCompanyProfile={setCompanyProfile}
               attendances={attendances} 
               leaveLedgers={leaveLedgers} 
               advanceLedgers={advanceLedgers}
               month={globalMonth}
               year={globalYear} 
+              setMonth={setGlobalMonth} // Pass setter
+              setYear={setGlobalYear}   // Pass setter
               onNavigate={handleDashboardNavigation}
             />
           )}
@@ -552,6 +630,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               divisions={divisions}
               branches={branches}
               sites={sites}
+              currentUser={currentUser}
             />
           )}
           
@@ -573,6 +652,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 setMonth={setGlobalMonth}
                 year={globalYear}
                 setYear={setGlobalYear}
+                currentUser={currentUser}
             />
           )}
 
@@ -592,6 +672,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 setLeaveLedgers={setLeaveLedgers}
                 advanceLedgers={advanceLedgers}
                 setAdvanceLedgers={setAdvanceLedgers}
+                currentUser={currentUser}
             />
           )}
           {activeView === View.Utilities && (
@@ -602,7 +683,8 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               sites={sites} setSites={setSites}
             />
           )}
-          {activeView === View.Settings && <Settings 
+          {/* Restrict Settings View access completely if not authorized, though sidebar hides it */}
+          {activeView === View.Settings && isSettingsAccessible && <Settings 
               config={config} 
               setConfig={setConfig} 
               companyProfile={companyProfile}
@@ -614,6 +696,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               onRestore={onRefresh}
               initialTab={settingsTab}
               userRole={currentUser?.role}
+              currentUser={currentUser} // Pass currentUser to Settings
           />}
           {activeView === View.AI_Assistant && <AIAssistant />}
         </div>

@@ -23,9 +23,9 @@ import {
   ClipboardList,
   Eye
 } from 'lucide-react';
-import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile } from '../types';
+import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile, User } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
-import { generateExcelReport, generatePDFTableReport, generatePaySlipsPDF, generateSimplePaySheetPDF } from '../services/reportService';
+import { generateExcelReport, generatePDFTableReport, generatePaySlipsPDF, generateSimplePaySheetPDF, generateLeaveLedgerReport } from '../services/reportService';
 import LedgerManager from './LedgerManager';
 import { DEFAULT_LEAVE_POLICY } from '../constants'; // Fallback
 
@@ -46,6 +46,7 @@ interface ReportsProps {
   setLeaveLedgers?: React.Dispatch<React.SetStateAction<LeaveLedger[]>>;
   advanceLedgers?: AdvanceLedger[];
   setAdvanceLedgers?: React.Dispatch<React.SetStateAction<AdvanceLedger[]>>;
+  currentUser?: User;
 }
 
 const Reports: React.FC<ReportsProps> = ({ 
@@ -62,7 +63,8 @@ const Reports: React.FC<ReportsProps> = ({
     leaveLedgers = [],
     setLeaveLedgers = (_val) => {},
     advanceLedgers = [],
-    setAdvanceLedgers = (_val) => {}
+    setAdvanceLedgers = (_val) => {},
+    currentUser
 }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isFreezing, setIsFreezing] = useState(false);
@@ -70,10 +72,10 @@ const Reports: React.FC<ReportsProps> = ({
   // Ledger Modal State
   const [showLedgerModal, setShowLedgerModal] = useState(false);
 
-  // Unlock Modal State
-  const [showUnlockModal, setShowUnlockModal] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
-  const [passwordError, setPasswordError] = useState('');
+  // Unlock Auth Modal State
+  const [showUnlockAuth, setShowUnlockAuth] = useState(false);
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
 
   // General Notification/Confirmation Modal State
   const [modalState, setModalState] = useState<{
@@ -120,11 +122,16 @@ const Reports: React.FC<ReportsProps> = ({
                 throw new Error("No payroll data found to freeze. Please 'Run Payroll' and 'Save Draft' first.");
             }
 
-            // 2. Prepare FINALIZED Data (Synchronous)
-            const finalPayrollData: PayrollResult[] = currentData.map(r => ({
-                ...r,
-                status: 'Finalized' as const
-            }));
+            // 2. Prepare FINALIZED Data with SNAPSHOTS
+            const finalPayrollData: PayrollResult[] = currentData.map(r => {
+                const ledger = leaveLedgers.find(l => l.employeeId === r.employeeId);
+                return {
+                    ...r,
+                    status: 'Finalized' as const,
+                    // Capture SNAPSHOT of the ledger as it stands for this month (before Rollover)
+                    leaveSnapshot: ledger ? JSON.parse(JSON.stringify(ledger)) : undefined
+                };
+            });
 
             // 3. Update Payroll History (Save to Persistence)
             setSavedRecords(prev => {
@@ -188,9 +195,6 @@ const Reports: React.FC<ReportsProps> = ({
                     const recovery = payroll ? payroll.deductions.advanceRecovery : 0;
                     
                     // True Closing = Current Balance (which includes manual payments) - Payroll Recovery
-                    // Note: Advance Ledger "balance" is robustly calculated as "Open + Grant - Paid" in LedgerManager.
-                    // However, here we need to capture the state. 
-                    // Best approach: Use the calculated balance from ledger state and subtract recovery.
                     const closingBalance = (ledger.balance || 0) - recovery;
 
                     return {
@@ -253,34 +257,85 @@ const Reports: React.FC<ReportsProps> = ({
       });
   };
 
-  const handleUnlockVerify = () => {
-    // Allows either 'admin' or standard default 'password'
-    if (passwordInput === 'admin' || passwordInput === 'password') {
-        setSavedRecords(prev => prev.map(r => {
-            if (r.month === month && r.year === year) {
-                return { ...r, status: 'Draft' as const };
-            }
-            return r;
-        }));
-        
-        setShowUnlockModal(false);
-        setPasswordInput('');
-        setPasswordError('');
-        setModalState({
-            isOpen: true,
-            type: 'success',
-            title: 'Data Unlocked',
-            message: "Payroll Unlocked. You can now edit attendance and re-calculate in 'Run Payroll'."
-        });
-    } else {
-        setPasswordError("Incorrect Password. Try 'admin' or 'password'.");
-    }
+  const userRole = currentUser?.role;
+  const canUnlock = userRole === 'Developer' || userRole === 'Administrator';
+
+  const initiateUnlock = () => {
+      // Validation: Check if future records exist
+      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const currentMonthIdx = months.indexOf(month);
+      const currentVal = year * 12 + currentMonthIdx;
+
+      // Find the specific future record to show in error message
+      const futureRecord = savedRecords.find(r => {
+          const rMonthIdx = months.indexOf(r.month);
+          const rVal = r.year * 12 + rMonthIdx;
+          return rVal > currentVal;
+      });
+
+      if (futureRecord) {
+          setModalState({
+              isOpen: true,
+              type: 'error',
+              title: 'Sequential Lock Active',
+              message: `Cannot unlock payroll for ${month} ${year}.\n\nData for a subsequent month (${futureRecord.month} ${futureRecord.year}) is already processed/pending.\n\nYou must remove the later data first to maintain ledger integrity.`
+          });
+          return;
+      }
+
+      setAuthPassword('');
+      setAuthError('');
+      setShowUnlockAuth(true);
+  };
+
+  const handleConfirmUnlock = () => {
+      if (authPassword === currentUser?.password) {
+          setShowUnlockAuth(false);
+          setSavedRecords(prev => prev.map(r => {
+              if (r.month === month && r.year === year) {
+                  return { ...r, status: 'Draft' as const };
+              }
+              return r;
+          }));
+          
+          setModalState({
+              isOpen: true,
+              type: 'success',
+              title: 'Data Unlocked',
+              message: "Payroll Unlocked. You can now edit attendance and re-calculate in 'Run Payroll'."
+          });
+      } else {
+          setAuthError('Incorrect Password');
+      }
   };
 
   const handleDownload = async (reportType: string, format: 'PDF' | 'Excel') => {
     setIsGenerating(true);
     await new Promise(resolve => setTimeout(resolve, 500));
-    const results = getPayrollData();
+    
+    // FETCH DATA SPECIFIC TO SELECTED MONTH
+    const results = getPayrollData(); 
+
+    // For Ledger Reports, use existing props but prefer Snapshot if available
+    if (reportType.includes('Leave Ledger')) {
+        let ledgersToUse = leaveLedgers;
+
+        // Try to find historical snapshot from results
+        if (results && results.length > 0) {
+             // Check if the first result has a snapshot (assuming uniformity)
+             if (results[0].leaveSnapshot) {
+                 // Reconstruct ledger array from snapshots for accurate historical reporting
+                 ledgersToUse = employees.map(emp => {
+                     const res = results.find(r => r.employeeId === emp.id);
+                     return res?.leaveSnapshot || leaveLedgers.find(l => l.employeeId === emp.id)!;
+                 });
+             }
+        }
+
+        generateLeaveLedgerReport(employees, ledgersToUse, attendances, month, year, reportType.includes('BC') ? 'BC' : 'AC', companyProfile);
+        setIsGenerating(false);
+        return;
+    }
 
     if (!results || results.length === 0) {
         setIsGenerating(false);
@@ -295,11 +350,17 @@ const Reports: React.FC<ReportsProps> = ({
 
     try {
       if (reportType === 'Pay Sheet') {
+        let hasCode88 = false;
+        let hasESICode = false;
+
         const flatData = results.map(r => {
           const emp = employees.find(e => e.id === r.employeeId);
           const special = r.earnings.special1 + r.earnings.special2 + r.earnings.special3;
           const other = r.earnings.washing + r.earnings.attire;
           
+          if (r.isCode88) hasCode88 = true;
+          if (r.isESICodeWagesUsed) hasESICode = true;
+
           return {
             'Emp ID': r.employeeId,
             'Name': emp?.name,
@@ -322,12 +383,17 @@ const Reports: React.FC<ReportsProps> = ({
             'LWF': r.deductions.lwf,
             'Adv Recovery': r.deductions.advanceRecovery,
             'Total Ded': r.deductions.total,
-            'NET PAY': r.netPay
+            'NET PAY': r.netPay,
+            // Internal flags used for PDF formatting
+            _isCode88: r.isCode88,
+            _isESICode: r.isESICodeWagesUsed
           };
         });
 
         if (format === 'Excel') {
-          generateExcelReport(flatData, 'Pay Sheet', `PaySheet_${month}_${year}`);
+          // Remove internal flags for Excel export to keep it clean
+          const excelData = flatData.map(({ _isCode88, _isESICode, ...rest }) => rest);
+          generateExcelReport(excelData, 'Pay Sheet', `PaySheet_${month}_${year}`);
         } else {
           const headers = [
              'ID', 'Name', 'Days', 
@@ -338,10 +404,18 @@ const Reports: React.FC<ReportsProps> = ({
           const pdfData = flatData.map(d => [
             d['Emp ID'], d['Name'], d['Days Paid'], 
             d['Basic'], d['DA'], d['Retaining'], d['HRA'], d['Conveyance'], d['Special Allw'], d['Other Allw'], d['Leave Encash'], d['Gross Pay'],
-            d['EPF'], d['VPF'], d['ESI'], d['PT'], d['TDS'], d['LWF'], d['Adv Recovery'], d['Total Ded'], 
+            d._isCode88 ? `${d['EPF']}*` : d['EPF'], // Add asterisk for Code 88 PF
+            d['VPF'], 
+            d._isESICode ? `${d['ESI']}**` : d['ESI'], // Add double asterisk for Code Wages ESI
+            d['PT'], d['TDS'], d['LWF'], d['Adv Recovery'], d['Total Ded'], 
             d['NET PAY']
           ]);
-          generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, pdfData as any[][], `PaySheet_${month}_${year}`, 'l', undefined, companyProfile);
+          
+          let footnote = '';
+          if (hasCode88) footnote += '* PF calculated on Code Wages (Social Security Code 2020). ';
+          if (hasESICode) footnote += '** ESI calculated on Code Wages (Social Security Code 2020).';
+
+          generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, pdfData as any[][], `PaySheet_${month}_${year}`, 'l', footnote || undefined, companyProfile);
         }
       } 
       else if (reportType === 'Pay Slips') {
@@ -398,6 +472,8 @@ const Reports: React.FC<ReportsProps> = ({
       setIsGenerating(false);
     }
   };
+
+  const isFinalized = currentMonthStatus === 'Finalized';
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 text-white relative">
@@ -472,9 +548,9 @@ const Reports: React.FC<ReportsProps> = ({
                 )}
                 
                 {/* Scenario 3: Finalized (Show Unlock) */}
-                {currentMonthStatus === 'Finalized' && (
+                {currentMonthStatus === 'Finalized' && canUnlock && (
                     <button 
-                        onClick={() => { setShowUnlockModal(true); setPasswordInput(''); setPasswordError(''); }}
+                        onClick={initiateUnlock}
                         className="flex items-center gap-2 px-6 py-3 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold rounded-lg border border-slate-600 transition-colors"
                     >
                         <Unlock size={18} /> Unlock Data
@@ -496,8 +572,8 @@ const Reports: React.FC<ReportsProps> = ({
 
       <div className={`space-y-8 animate-in fade-in duration-300 ${currentMonthStatus === 'Unsaved' ? 'opacity-50 pointer-events-none' : ''}`}>
         
-        {/* Section 1: Core Payroll Documents */}
-        <div>
+        {/* Section 1: Core Payroll Documents - DISABLED IF NOT FINALIZED */}
+        <div className={!isFinalized ? 'opacity-50 pointer-events-none grayscale' : ''}>
           <h3 className="text-xs font-bold text-sky-400 uppercase tracking-widest mb-4">Core Payroll Documents</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Pay Sheet */}
@@ -545,8 +621,8 @@ const Reports: React.FC<ReportsProps> = ({
         <div>
           <h3 className="text-xs font-bold text-sky-400 uppercase tracking-widest mb-4">Banking Transactions & Leave Ledger</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-             {/* Payment of Wages */}
-             <div className="bg-[#1e293b] border border-slate-800 p-6 rounded-2xl shadow-xl hover:border-blue-500/50 transition-all">
+             {/* Payment of Wages - DISABLED IF NOT FINALIZED */}
+             <div className={`bg-[#1e293b] border border-slate-800 p-6 rounded-2xl shadow-xl hover:border-blue-500/50 transition-all ${!isFinalized ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
               <div className="flex gap-4">
                 <div className="p-3 rounded-xl bg-emerald-900/30 text-emerald-400 h-fit"><CreditCard size={24} /></div>
                 <div className="flex-1 space-y-3">
@@ -566,21 +642,36 @@ const Reports: React.FC<ReportsProps> = ({
               </div>
             </div>
 
-            {/* Leave Ledger - New Card Placement */}
+            {/* Leave Ledger - Updated for BC/AC Reports (REMAINS ACTIVE) */}
             <div className="bg-[#1e293b] border border-slate-800 p-6 rounded-2xl shadow-xl hover:border-blue-500/50 transition-all">
               <div className="flex gap-4">
                 <div className="p-3 rounded-xl bg-amber-900/30 text-amber-400 h-fit"><ClipboardList size={24} /></div>
                 <div className="flex-1 space-y-3">
                   <div>
-                    <h4 className="font-bold text-white">Leave Ledger</h4>
-                    <p className="text-xs text-slate-400">View comprehensive leave balances and history.</p>
+                    <h4 className="font-bold text-white">Leave Ledger Reports</h4>
+                    <p className="text-xs text-slate-400">Generate Before & After Confirmation ledgers.</p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
+                    <button 
+                        onClick={() => handleDownload('Leave Ledger BC', 'PDF')} 
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-xs font-medium border border-slate-700 transition-colors"
+                        title="Before Confirmation (Opening + Credit)"
+                    >
+                      <FileText size={14} /> Report (BC)
+                    </button>
+                    <button 
+                        onClick={() => handleDownload('Leave Ledger AC', 'PDF')} 
+                        disabled={!isFinalized}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border border-slate-700 transition-colors ${!isFinalized ? 'bg-slate-800/50 text-slate-500 cursor-not-allowed opacity-50' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'}`}
+                        title={!isFinalized ? "Locked until Payroll is Finalized" : "After Confirmation (Closing Balance)"}
+                    >
+                      <FileText size={14} /> Report (AC)
+                    </button>
                     <button 
                         onClick={() => setShowLedgerModal(true)} 
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-xs font-medium border border-slate-700 transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-900/20 hover:bg-amber-900/40 text-amber-400 rounded text-xs font-medium border border-amber-900/50 transition-colors"
                     >
-                      <Eye size={14} /> View Ledger History
+                      <Eye size={14} /> View History
                     </button>
                   </div>
                 </div>
@@ -589,8 +680,8 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         </div>
 
-        {/* Section 3: Analytical Summaries */}
-        <div>
+        {/* Section 3: Analytical Summaries - DISABLED IF NOT FINALIZED */}
+        <div className={!isFinalized ? 'opacity-50 pointer-events-none grayscale' : ''}>
           <h3 className="text-xs font-bold text-sky-400 uppercase tracking-widest mb-4">Cost Center Summaries</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
@@ -670,44 +761,6 @@ const Reports: React.FC<ReportsProps> = ({
         </div>
       )}
 
-      {/* UNLOCK MODAL */}
-      {showUnlockModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                <button onClick={() => setShowUnlockModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
-                    <X size={20} />
-                </button>
-                <div className="flex flex-col items-center gap-2">
-                    <div className="p-3 bg-red-900/30 text-red-500 rounded-full border border-red-900/50">
-                        <KeyRound size={24} />
-                    </div>
-                    <h3 className="text-lg font-bold text-white">Supervisor Access</h3>
-                    <p className="text-xs text-slate-400 text-center">Unlocking finalized payroll requires authorization.</p>
-                </div>
-                
-                <div className="space-y-3 mt-2">
-                    <input 
-                        type="password" 
-                        placeholder="Enter Supervisor Password" 
-                        autoFocus
-                        className={`w-full bg-[#0f172a] border ${passwordError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500`}
-                        value={passwordInput}
-                        onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(''); }}
-                        onKeyDown={(e) => e.key === 'Enter' && handleUnlockVerify()}
-                    />
-                    {passwordError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{passwordError}</p>}
-                    
-                    <button 
-                        onClick={handleUnlockVerify}
-                        className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg shadow-lg transition-colors mt-2"
-                    >
-                        UNLOCK DATA
-                    </button>
-                </div>
-            </div>
-        </div>
-      )}
-
       {/* GENERAL NOTIFICATION / CONFIRMATION MODAL */}
       {modalState.isOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
@@ -754,6 +807,44 @@ const Reports: React.FC<ReportsProps> = ({
                         </button>
                     )}
                 </div>
+            </div>
+        </div>
+      )}
+
+      {/* Unlock Auth Modal */}
+      {showUnlockAuth && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-blue-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                <button onClick={() => setShowUnlockAuth(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                <div className="flex flex-col items-center gap-2">
+                    <div className="p-4 bg-blue-900/20 text-blue-500 rounded-full border border-blue-900/50 mb-2">
+                        <KeyRound size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-white text-center">Unlock Data</h3>
+                    <p className="text-xs text-blue-300 text-center leading-relaxed">
+                        Data for this period is currently Frozen. Enter your password to UNLOCK it for editing.
+                    </p>
+                </div>
+                
+                <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                    <input 
+                        type="password" 
+                        placeholder="Enter your password" 
+                        autoFocus
+                        className={`w-full bg-[#0f172a] border ${authError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all`}
+                        value={authPassword}
+                        onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }}
+                        onKeyDown={(e) => e.key === 'Enter' && handleConfirmUnlock()}
+                    />
+                    {authError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{authError}</p>}
+                </div>
+                
+                <button 
+                    onClick={handleConfirmUnlock}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
+                >
+                    <Unlock size={18} /> CONFIRM UNLOCK
+                </button>
             </div>
         </div>
       )}
