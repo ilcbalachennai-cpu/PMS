@@ -233,9 +233,9 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
                               <th className="px-4 py-3 text-right whitespace-nowrap text-blue-400">EPF</th>
                               <th className="px-4 py-3 text-right whitespace-nowrap text-amber-400">EPS</th>
                               <th className="px-4 py-3 text-right whitespace-nowrap text-pink-400">EDLI</th>
-                              <th className="px-4 py-3 text-right whitespace-nowrap">EE_Share</th>
-                              <th className="px-4 py-3 text-right whitespace-nowrap">ER_Share_</th>
-                              <th className="px-4 py-3 text-right whitespace-nowrap">ER_Share_</th>
+                              <th className="px-4 py-3 text-right whitespace-nowrap">EE_EPF_Share</th>
+                              <th className="px-4 py-3 text-right whitespace-nowrap">ER_EPS_Share</th>
+                              <th className="px-4 py-3 text-right whitespace-nowrap">ER_EPF_Share</th>
                               <th className="px-4 py-3 text-center whitespace-nowrap">NCP_Days</th>
                               <th className="px-4 py-3 text-center whitespace-nowrap">Refund</th>
                           </tr>
