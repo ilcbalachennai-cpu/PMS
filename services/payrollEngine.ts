@@ -46,11 +46,41 @@ export const calculatePayroll = (
   const monthIdx = months.indexOf(month);
   const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
   
+  // --- DOL CHECK ---
+  if (employee.dol) {
+      const periodStart = new Date(year, monthIdx, 1);
+      periodStart.setHours(0,0,0,0);
+      
+      const dolDate = new Date(employee.dol);
+      dolDate.setHours(0,0,0,0);
+
+      if (dolDate < periodStart) {
+          return {
+            employeeId: employee.id,
+            month,
+            year,
+            daysInMonth,
+            payableDays: 0,
+            earnings: { 
+                basic: 0, da: 0, retainingAllowance: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, 
+                special1: 0, special2: 0, special3: 0, bonus: 0, leaveEncashment: 0, total: 0 
+            },
+            deductions: { epf: 0, vpf: 0, esi: 0, pt: 0, it: 0, lwf: 0, advanceRecovery: 0, total: 0 },
+            employerContributions: { epf: 0, eps: 0, esi: 0, lwf: 0 },
+            gratuityAccrual: 0,
+            netPay: 0,
+            isCode88: false,
+            isESICodeWagesUsed: false,
+            esiRemark: 'Left Service'
+          };
+      }
+  }
+
   const lop = Math.min(attendance.lopDays, daysInMonth);
   const payableDays = daysInMonth - lop;
   const factor = payableDays / daysInMonth;
 
-  // Prorated Earnings for all 10 components (Earned Wages)
+  // Prorated Earnings
   const basic = Math.round(employee.basicPay * factor);
   const da = Math.round((employee.da || 0) * factor);
   const retaining = Math.round((employee.retainingAllowance || 0) * factor);
@@ -62,18 +92,11 @@ export const calculatePayroll = (
   const special2 = Math.round((employee.specialAllowance2 || 0) * factor);
   const special3 = Math.round((employee.specialAllowance3 || 0) * factor);
   
-  // Bonus is payable annually, not monthly. 
   const bonus = 0; 
-  
-  // Updated Leave Encashment Calculation using attendance.encashedDays
-  // Formula: (Basic + DA) / DaysInMonth * EncashedDays
   const encashedDays = attendance.encashedDays || 0;
   const leaveEncashment = Math.round(((employee.basicPay + (employee.da || 0)) / daysInMonth) * encashedDays);
-  
-  // Total Earned Gross for this specific month
   const grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
 
-  // Standard Monthly Gross (Master Salary) - Used for Half-Yearly Projections
   const standardMonthlyGross = employee.basicPay + 
     (employee.da || 0) + 
     (employee.retainingAllowance || 0) + 
@@ -85,61 +108,51 @@ export const calculatePayroll = (
     (employee.specialAllowance2 || 0) + 
     (employee.specialAllowance3 || 0);
 
-  // --- PF Calculation Logic (New 6-Step Logic) ---
-  
-  // Step 1: Basic + DA + Retaining Allowance = A
+  // --- PF Calculation Logic ---
   const wageA = basic + da + retaining;
-  
-  // Step 2: Gross wages including all components = B
   const wageB = grossEarnings;
-
-  // Step 3: Gross wages - A = C (Allowances)
   const wageC = wageB - wageA;
 
-  // Step 4: If C/B > 50%, then excess amount D = C - (50% of B)
   let wageD = 0;
   if (wageB > 0) {
       const allowancePercentage = wageC / wageB;
       if (allowancePercentage > 0.50) {
-          // Calculate the excess amount
           const fiftyPercentOfGross = Math.round(wageB * 0.50);
           wageD = wageC - fiftyPercentOfGross;
       }
   }
 
-  // Step 5: Gross PF wages = A + D
-  let grossPFWage = wageA + wageD;
-  grossPFWage = Math.round(grossPFWage);
-
-  const isCode88 = wageD > 0;
+  let grossPFWage = Math.round(wageA + wageD);
+  let isCode88 = wageD > 0;
 
   let epfEmployee = 0;
   let vpfEmployee = 0;
   let epfEmployer = 0;
   let epsEmployer = 0;
   
-  if (!employee.isPFExempt) {
-    // Determine Logic Basis
+  // OPT OUT LOGIC (AGE 58+)
+  const isOptOut = employee.isDeferredPension && employee.deferredPensionOption === 'OptOut';
+
+  if (!employee.isPFExempt && !isOptOut) {
     const higherPension = employee.pfHigherPension;
     const isHigherPensionEnabled = higherPension?.enabled;
 
     // 1. Employee Statutory Contribution
     let pfWageForEmployee = 0;
     if (isHigherPensionEnabled && higherPension.employeeContribution === 'Higher') {
-       pfWageForEmployee = grossPFWage;
+        pfWageForEmployee = grossPFWage;
     } else {
-       pfWageForEmployee = employee.isPFHigherWages ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
+        pfWageForEmployee = employee.isPFHigherWages ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
     }
     
-    const baseRate = 0.12; 
-    epfEmployee = Math.round(pfWageForEmployee * baseRate);
+    epfEmployee = Math.round(pfWageForEmployee * 0.12);
     
-    // 2. VPF (Voluntary PF by Employee)
+    // 2. VPF
     if (employee.employeeVPFRate > 0) {
-      vpfEmployee = Math.round(pfWageForEmployee * (employee.employeeVPFRate / 100));
+        vpfEmployee = Math.round(pfWageForEmployee * (employee.employeeVPFRate / 100));
     }
 
-    // 3. Employer Contribution Logic (Splitting into EPS and EPF)
+    // 3. Employer Contribution
     let pfWageForEmployer = 0;
     if (isHigherPensionEnabled && higherPension.employerContribution === 'Higher') {
         pfWageForEmployer = grossPFWage;
@@ -147,80 +160,71 @@ export const calculatePayroll = (
         pfWageForEmployer = employee.isEmployerPFHigher ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
     }
 
-    // EPS Calculation
-    let epsWage = 0;
-    if (isHigherPensionEnabled && higherPension.isHigherPensionOpted === 'Yes') {
-        // Impact: EPS calculated on Full Wages (or Employer PF Wages if capped differently, but usually implies full for higher pension)
-        epsWage = grossPFWage; 
-    } else {
-        // Standard: Capped at Ceiling (15000)
-        epsWage = Math.min(pfWageForEmployer, config.epfCeiling);
-    }
-    
-    epsEmployer = Math.round(epsWage * 0.0833);
-    
-    // Total Employer Share is 12% of (Employer PF Wage)
     const totalEmployerPF = Math.round(pfWageForEmployer * 0.12);
-    
-    // EPF (Employer) = Total Share - EPS Share
-    // If EPS > Total due to high wage calculation (unlikely with 8.33 vs 12, but safe check), handle appropriately
-    epfEmployer = Math.max(0, totalEmployerPF - epsEmployer);
+
+    // EPS Logic
+    if (employee.isDeferredPension && employee.deferredPensionOption === 'WithoutEPS') {
+        // Option B: Redirect EPS Share to EPF (A/c No. 1)
+        epsEmployer = 0;
+        epfEmployer = totalEmployerPF;
+    } else {
+        // Standard Logic OR Deferred Pension WITH Contribution (Option A)
+        let epsWage = 0;
+        if (isHigherPensionEnabled && higherPension.isHigherPensionOpted === 'Yes') {
+            epsWage = grossPFWage; 
+        } else {
+            epsWage = Math.min(pfWageForEmployer, config.epfCeiling);
+        }
+        
+        epsEmployer = Math.round(epsWage * 0.0833);
+        epfEmployer = Math.max(0, totalEmployerPF - epsEmployer);
+    }
+  } else if (isOptOut) {
+      // FOR OPT OUT: Ensure Wages and Flags are zeroed for reporting
+      grossPFWage = 0;
+      isCode88 = false;
+      epfEmployee = 0;
+      vpfEmployee = 0;
+      epfEmployer = 0;
+      epsEmployer = 0;
   }
 
-  // --- ESI Calculation (Updated for Social Security Code 2020) ---
+  // --- ESI Calculation ---
   let esiEmployee = 0;
   let esiEmployer = 0;
   let isESICodeWagesUsed = false;
   let esiRemark = '';
 
   if (!employee.isESIExempt) {
-    // 1. Determine Effective ESI Wages
-    // As per Code on Social Security 2020, "Wages" definition is consistent with Code on Wages.
-    // Therefore, ESI Wage should be the same as 'grossPFWage' (A + D), not Gross Earnings.
-    
-    let effectiveESIWage = grossPFWage;
-    
-    // Flag if Code Wages differs from Actual Gross (for reporting purposes)
+    // ESI Wage logic remains separate if opted out of PF
+    const esiWageBase = isOptOut ? Math.round(wageA + wageD) : grossPFWage;
+    let effectiveESIWage = esiWageBase;
+
     if (Math.abs(effectiveESIWage - grossEarnings) > 1) {
         isESICodeWagesUsed = true;
     }
 
-    // 2. Ceiling Check (21000) with Cycle Logic (April/Oct)
     if (effectiveESIWage > config.esiCeiling) {
-        // Exceeds ceiling (21000)
-        
-        // Check if current month is start of contribution period (April or October)
-        // Rule: "if it exceed continue to contribute till the following month if April or October whichever is earlier"
-        // "then if the month is April or October, no more ESI contribution allowed"
-        
         if (month === 'April' || month === 'October') {
-             // Employee goes OUT OF COVERAGE for this new period
              esiEmployee = 0;
              esiEmployer = 0;
              esiRemark = 'IP is out of coverage';
-             isESICodeWagesUsed = false; // Reset flag as no contribution is made
+             isESICodeWagesUsed = false;
         } else {
-             // Continue contributing (Employee was covered at start of period or coverage continues)
              esiEmployee = Math.ceil(effectiveESIWage * config.esiEmployeeRate);
              esiEmployer = Math.ceil(effectiveESIWage * config.esiEmployerRate);
         }
-
     } else {
-        // Within Ceiling -> Standard Calculation
         esiEmployee = Math.ceil(effectiveESIWage * config.esiEmployeeRate);
         esiEmployer = Math.ceil(effectiveESIWage * config.esiEmployerRate);
     }
   }
 
-  // --- Professional Tax Calculation (Dynamic based on Branch/Work Location) ---
+  // --- Professional Tax ---
   let pt = 0;
-  
   if (config.enableProfessionalTax !== false) {
-      // Default to global config
       let ptCycle = config.ptDeductionCycle;
       let ptSlabs = config.ptSlabs;
-
-      // OVERRIDE: Determine State based on Branch (Organization Hierarchy)
       const branchState = getBranchState(employee.branch);
 
       if (branchState && PT_STATE_PRESETS[branchState as keyof typeof PT_STATE_PRESETS]) {
@@ -230,32 +234,19 @@ export const calculatePayroll = (
       }
 
       if (ptCycle === 'HalfYearly') {
-        // --- Half-Yearly Logic (e.g. Tamil Nadu) ---
         let blockStartYear = year;
         let blockStartMonthIdx = 3; 
-        
         if (monthIdx >= 3 && monthIdx <= 8) {
-           blockStartMonthIdx = 3; 
-           blockStartYear = year;
+           blockStartMonthIdx = 3; blockStartYear = year;
         } else {
            blockStartMonthIdx = 9; 
-           if (monthIdx <= 2) { 
-              blockStartYear = year - 1;
-           } else { 
-              blockStartYear = year;
-           }
+           blockStartYear = (monthIdx <= 2) ? year - 1 : year;
         }
-        
         const blockStartDate = new Date(blockStartYear, blockStartMonthIdx, 1);
         const blockEndYear = blockStartMonthIdx === 3 ? blockStartYear : blockStartYear + 1;
         const blockEndMonthIdx = blockStartMonthIdx === 3 ? 8 : 2;
         const blockEndDate = new Date(blockEndYear, blockEndMonthIdx + 1, 0); 
-
         const dojDate = new Date(employee.doj);
-        dojDate.setHours(0,0,0,0);
-        blockStartDate.setHours(0,0,0,0);
-        blockEndDate.setHours(0,0,0,0);
-
         const effectiveStartDate = dojDate > blockStartDate ? dojDate : blockStartDate;
 
         let monthsWorked = 0;
@@ -264,41 +255,24 @@ export const calculatePayroll = (
                            (blockEndDate.getMonth() - effectiveStartDate.getMonth()) + 1;
         }
         monthsWorked = Math.max(1, Math.min(6, monthsWorked));
-        const projectedHalfYearlyIncome = standardMonthlyGross * monthsWorked;
-        const slab = ptSlabs.find(s => projectedHalfYearlyIncome >= s.min && projectedHalfYearlyIncome <= s.max);
-        
-        if (slab && slab.amount > 0) {
-            pt = Math.round(slab.amount / monthsWorked);
-        }
-
+        const slab = ptSlabs.find(s => (standardMonthlyGross * monthsWorked) >= s.min && (standardMonthlyGross * monthsWorked) <= s.max);
+        if (slab && slab.amount > 0) pt = Math.round(slab.amount / monthsWorked);
       } else {
-        // --- Monthly Logic ---
         if (grossEarnings > 0) {
             const slab = ptSlabs.find(s => grossEarnings >= s.min && grossEarnings <= s.max);
-            if (slab) {
-                pt = slab.amount;
-            }
+            if (slab) pt = slab.amount;
         }
       }
   }
 
-  // --- Labour Welfare Fund (LWF) Calculation ---
+  // --- LWF ---
   let lwfEmployee = 0;
   let lwfEmployer = 0;
-
   if (config.enableLWF !== false) {
       let isLWFDeductionMonth = false;
-      
-      // Determine Cycle Logic
-      if (config.lwfDeductionCycle === 'Monthly') {
-          isLWFDeductionMonth = true;
-      } else if (config.lwfDeductionCycle === 'HalfYearly') {
-          // Typically June and December
-          isLWFDeductionMonth = month === 'June' || month === 'December';
-      } else if (config.lwfDeductionCycle === 'Yearly') {
-          // Typically December
-          isLWFDeductionMonth = month === 'December';
-      }
+      if (config.lwfDeductionCycle === 'Monthly') isLWFDeductionMonth = true;
+      else if (config.lwfDeductionCycle === 'HalfYearly') isLWFDeductionMonth = month === 'June' || month === 'December';
+      else if (config.lwfDeductionCycle === 'Yearly') isLWFDeductionMonth = month === 'December';
 
       if (isLWFDeductionMonth && grossEarnings > 0) {
           lwfEmployee = config.lwfEmployeeContribution;
@@ -312,7 +286,6 @@ export const calculatePayroll = (
   if (annualTaxable > 700000) incomeTax = Math.round(((annualTaxable - 700000) * 0.1) / 12);
 
   const advanceRecovery = Math.min(advance.monthlyInstallment, advance.balance);
-
   const totalDeductions = epfEmployee + vpfEmployee + esiEmployee + pt + incomeTax + lwfEmployee + advanceRecovery;
 
   return {
@@ -322,36 +295,11 @@ export const calculatePayroll = (
     daysInMonth,
     payableDays,
     earnings: { 
-      basic, 
-      da, 
-      retainingAllowance: retaining, 
-      hra, 
-      conveyance, 
-      washing, 
-      attire, 
-      special1, 
-      special2, 
-      special3, 
-      bonus, 
-      leaveEncashment, 
-      total: grossEarnings 
+      basic, da, retainingAllowance: retaining, hra, conveyance, washing, attire, 
+      special1, special2, special3, bonus, leaveEncashment, total: grossEarnings 
     },
-    deductions: { 
-        epf: epfEmployee, 
-        vpf: vpfEmployee, 
-        esi: esiEmployee, 
-        pt, 
-        it: incomeTax, 
-        lwf: lwfEmployee, 
-        advanceRecovery, 
-        total: totalDeductions 
-    },
-    employerContributions: { 
-        epf: epfEmployer, 
-        eps: epsEmployer, 
-        esi: esiEmployer,
-        lwf: lwfEmployer 
-    },
+    deductions: { epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf: lwfEmployee, advanceRecovery, total: totalDeductions },
+    employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer, lwf: lwfEmployer },
     gratuityAccrual: Math.round(((basic + da) * 15 / 26) / 12),
     netPay: grossEarnings - totalDeductions,
     isCode88,

@@ -1,8 +1,25 @@
 
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, FileSpreadsheet, FileCode, FileText, Download, Eye, ScrollText, Landmark, Lock, AlertTriangle, Scale, BookOpen, X, Book, ClipboardList, Building, Calendar, User, LogOut } from 'lucide-react';
+import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile } from '../types';
-import { generatePFECR, generateESIReturn, generatePTReport, generateTDSReport, generateCodeOnWagesReport, generatePFForm12A, generatePFForm12, generateFormB, generateCentralWageSlip, generateFormC, generateTNFormR, generateTNFormT, generateTNFormP, generatePFForm3A, generatePFForm6A, generateESIExitReport, generateESICodeWagesReport } from '../services/reportService';
+import { 
+  generatePFECR, 
+  generateESIReturn, 
+  generatePTReport, 
+  generateTDSReport, 
+  generateCodeOnWagesReport, 
+  generatePFForm12A, 
+  generateFormB, 
+  generateFormC, 
+  generateTNFormR, 
+  generateTNFormT, 
+  generateTNFormP, 
+  generatePFForm3A, 
+  generatePFForm6A, 
+  generateESIExitReport, 
+  generateESICodeWagesReport, 
+  generateGratuityReport 
+} from '../services/reportService';
 
 interface StatutoryReportsProps {
   payrollHistory: PayrollResult[];
@@ -13,7 +30,6 @@ interface StatutoryReportsProps {
   setGlobalMonth: (m: string) => void;
   globalYear: number;
   setGlobalYear: (y: number) => void;
-  // Added optional props for extended reports
   attendances?: Attendance[];
   leaveLedgers?: LeaveLedger[];
   advanceLedgers?: AdvanceLedger[];
@@ -32,9 +48,15 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     leaveLedgers = [],
     advanceLedgers = []
 }) => {
-  const [showCode88Modal, setShowCode88Modal] = useState(false);
-  
-  // Date Range Modal State
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  const isFinalized = useMemo(() => {
+    const records = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
+    return records.length > 0 && records[0].status === 'Finalized';
+  }, [payrollHistory, globalMonth, globalYear]);
+
   const [rangeModal, setRangeModal] = useState({
     isOpen: false,
     reportType: '',
@@ -42,36 +64,12 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     startYear: globalYear,
     endMonth: 'March',
     endYear: globalYear + 1,
-    selectedEmployee: 'ALL' // New field for individual selection
+    selectedEmployee: 'ALL'
   });
-  
-  // Dynamic Year Range: Current Year - 5 to Current Year + 1
-  const currentYear = new Date().getFullYear();
-  const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-  // Check if current month is finalized
-  const isFinalized = useMemo(() => {
-    const records = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
-    return records.length > 0 && records[0].status === 'Finalized';
-  }, [payrollHistory, globalMonth, globalYear]);
-
-  // Hacky way to get attendance for Form C if not passed (though now it should be passed)
-  const getAttendanceData = (): Attendance[] => {
-      if (attendances.length > 0) return attendances;
-      try {
-          const saved = localStorage.getItem('app_attendance');
-          if (saved) return JSON.parse(saved);
-      } catch (e) { console.error(e); }
-      return [];
-  };
 
   const openRangeModal = (reportType: string) => {
-    // Determine Financial Year based on global selection for default
-    // If selected Jan 2025, default range should be Apr 2024 - Mar 2025
     const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
     const fyStartYear = isJanToMar ? globalYear - 1 : globalYear;
-
     setRangeModal({
         isOpen: true,
         reportType,
@@ -86,523 +84,300 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
   const handleGenerateRange = () => {
     try {
         if (rangeModal.reportType === 'Form 3A') {
-            generatePFForm3A(
-                payrollHistory, 
-                employees, 
-                config, 
-                rangeModal.startMonth, 
-                rangeModal.startYear, 
-                rangeModal.endMonth, 
-                rangeModal.endYear,
-                rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee,
-                companyProfile
-            );
+            generatePFForm3A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
         } else if (rangeModal.reportType === 'Form 6A') {
-            generatePFForm6A(
-                payrollHistory, 
-                employees, 
-                config, 
-                rangeModal.startMonth, 
-                rangeModal.startYear, 
-                rangeModal.endMonth, 
-                rangeModal.endYear,
-                companyProfile
-            );
+            generatePFForm6A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile);
         }
-    } catch (e: any) {
-        alert(`Error generating report: ${e.message}`);
-    }
+    } catch (e: any) { alert(`Error: ${e.message}`); }
     setRangeModal({ ...rangeModal, isOpen: false });
   };
 
   const handleDownload = (reportName: string, format: string) => {
-    // 1. Basic Filter for Monthly Reports
     const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
     const fileName = `${reportName.replace(/ /g, '_')}_${globalMonth}_${globalYear}`;
-    const attData = getAttendanceData();
 
     try {
         if (reportName.includes('ECR')) {
-             if (currentData.length === 0) throw new Error("No finalized data for this month.");
              generatePFECR(currentData, employees, format as any, fileName);
         } else if (reportName.includes('ESI Code Wages')) {
              generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile);
         } else if (reportName.includes('ESI Exit')) {
              generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('ESI')) {
-             if (currentData.length === 0) throw new Error("No finalized data for this month.");
              generateESIReturn(currentData, employees, format as any, fileName, companyProfile);
-        } else if (reportName.includes('PT') || reportName.includes('Professional')) {
+        } else if (reportName.includes('PT')) {
              generatePTReport(currentData, employees, fileName, companyProfile);
-        } else if (reportName.includes('Form 16A') || reportName.includes('Income Tax')) {
+        } else if (reportName.includes('TDS')) {
              generateTDSReport(currentData, employees, fileName, companyProfile);
-        } else if (reportName.includes('Code 88') || reportName.includes('Social Security')) {
+        } else if (reportName.includes('Gratuity')) {
+             generateGratuityReport(employees, companyProfile);
+        } else if (reportName.includes('Social Security')) {
              generateCodeOnWagesReport(currentData, employees, format as any, fileName, companyProfile);
-        } else if (reportName.includes('Form 12A (Revised)')) {
-             if (currentData.length === 0) throw new Error("No finalized data for this month.");
+        } else if (reportName.includes('Form 12A')) {
              generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
-        } else if (reportName.includes('Form 12 (Old)')) {
-             if (currentData.length === 0) throw new Error("No finalized data for this month.");
-             generatePFForm12(currentData, employees, config, globalMonth, globalYear, companyProfile);
-        } else if (reportName.includes('Form B') || reportName.includes('Pay Sheet (Central)')) {
+        } else if (reportName.includes('Form B')) {
              generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
-        } else if (reportName.includes('Pay Slip (Central)')) {
-             generateCentralWageSlip(currentData, employees, globalMonth, globalYear);
-        } else if (reportName.includes('Form C') || reportName.includes('Muster Roll')) {
-             generateFormC(currentData, employees, attData, globalMonth, globalYear, companyProfile);
+        } else if (reportName.includes('Form C')) {
+             generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('TN Form R')) {
              generateTNFormR(currentData, employees, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('TN Form T')) {
-             generateTNFormT(currentData, employees, attData, leaveLedgers, globalMonth, globalYear, companyProfile);
+             generateTNFormT(currentData, employees, attendances, leaveLedgers, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('TN Form P')) {
              generateTNFormP(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('Form 3A')) {
              openRangeModal('Form 3A');
         } else if (reportName.includes('Form 6A')) {
              openRangeModal('Form 6A');
-        } else if (reportName.includes('Form')) {
-             alert(`${reportName} generation is a premium feature coming soon. Please use ECR/Returns for filing.`);
-        } else {
-            alert("Report generation not implemented for this type yet.");
         }
-    } catch (e: any) {
-        console.error("Report Generation Error", e);
-        alert(`Failed to generate report: ${e.message}`);
-    }
+    } catch (e: any) { alert(`Failed: ${e.message}`); }
   };
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 relative">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#1e293b] p-6 rounded-xl border border-slate-800">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#1e293b] p-6 rounded-xl border border-slate-800 shadow-xl">
         <div>
-           <h2 className="text-2xl font-black text-white">Statutory Reports</h2>
-           <p className="text-slate-400 text-sm">Mandatory compliance forms for PF, ESI, Professional Tax, and Income Tax.</p>
+            <h2 className="text-2xl font-black text-white">Statutory Returns & Registers</h2>
+            <p className="text-slate-400 text-sm">Lawful compliance reporting for EPF, ESI, PT, and State Acts.</p>
         </div>
         <div className="flex items-center gap-3">
-             <select 
-                value={globalMonth} 
-                onChange={e => setGlobalMonth(e.target.value)} 
-                className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500"
-             >
+             <select value={globalMonth} onChange={e => setGlobalMonth(e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
                 {months.map(m => (<option key={m} value={m}>{m}</option>))}
              </select>
-             <select value={globalYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white">
-                {yearOptions.map(y => (
-                    <option key={y} value={y}>{y}</option>
-                ))}
+             <select value={globalYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
+                {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
              </select>
         </div>
       </div>
 
       {!isFinalized ? (
           <div className="flex flex-col items-center justify-center p-12 bg-[#1e293b] rounded-2xl border border-slate-800 text-center space-y-4">
-              <div className="p-4 bg-slate-900 rounded-full text-slate-500">
-                  <Lock size={48} />
-              </div>
-              <h3 className="text-xl font-bold text-white">Reports Locked</h3>
-              <p className="text-slate-400 max-w-md">
-                  Statutory reports can only be generated after the payroll for 
-                  <span className="text-blue-400 font-bold"> {globalMonth} {globalYear} </span> 
-                  has been confirmed and frozen.
-              </p>
-              <p className="text-xs text-slate-500">Go to "Run Payroll" &gt; "Calculate" &gt; "Confirm & Freeze Data"</p>
+              <div className="p-4 bg-slate-900 rounded-full text-slate-500"><Lock size={48} /></div>
+              <h3 className="text-xl font-bold text-white">Compliance View Locked</h3>
+              <p className="text-slate-400">Payroll for {globalMonth} {globalYear} must be frozen to generate official reports.</p>
           </div>
       ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pb-10">
         
-        {/* NEW: Tamil Nadu Shops & Establishment Act Reports */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl col-span-1 md:col-span-2">
-          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-            <Building className="text-emerald-500" size={20} />
-            <h3 className="font-bold text-white text-sm">Tamil Nadu Shops & Establishment Act Reports</h3>
-          </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-             {/* 1. Register of Wages (Form R) */}
-             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-emerald-500/30 transition-all group">
-                <div className="flex items-center gap-3 mb-2">
-                    <FileText size={24} className="text-emerald-400" />
-                    <div>
-                        <h4 className="font-bold text-slate-200">1. Form R</h4>
-                        <p className="text-xs text-slate-500">Register of Wages</p>
-                    </div>
-                </div>
-                <button onClick={() => handleDownload('TN Form R', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-emerald-900/20 text-emerald-300 font-bold text-xs rounded-lg hover:bg-emerald-900/40 transition-colors">
-                    <Eye size={14} /> View PDF
-                </button>
-             </div>
-
-             {/* 2. Wage Slip (Form T) */}
-             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-emerald-500/30 transition-all group">
-                <div className="flex items-center gap-3 mb-2">
-                    <ScrollText size={24} className="text-emerald-400" />
-                    <div>
-                        <h4 className="font-bold text-slate-200">2. Form T</h4>
-                        <p className="text-xs text-slate-500">Wage Slip / Leave Card</p>
-                    </div>
-                </div>
-                <button onClick={() => handleDownload('TN Form T', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-emerald-900/20 text-emerald-300 font-bold text-xs rounded-lg hover:bg-emerald-900/40 transition-colors">
-                    <Download size={14} /> Download PDF
-                </button>
-             </div>
-
-             {/* 3. Register of Advance (Form P) */}
-             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-emerald-500/30 transition-all group">
-                <div className="flex items-center gap-3 mb-2">
-                    <ClipboardList size={24} className="text-emerald-400" />
-                    <div>
-                        <h4 className="font-bold text-slate-200">3. Form P</h4>
-                        <p className="text-xs text-slate-500">Register of Advances & Fines</p>
-                    </div>
-                </div>
-                <button onClick={() => handleDownload('TN Form P', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-emerald-900/20 text-emerald-300 font-bold text-xs rounded-lg hover:bg-emerald-900/40 transition-colors">
-                    <Eye size={14} /> View PDF
-                </button>
-             </div>
-          </div>
-        </div>
-
-        {/* Existing Central Law Reports */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl col-span-1 md:col-span-2">
-          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-            <Book className="text-purple-500" size={20} />
-            <h3 className="font-bold text-white text-sm">Central Law Report (Small Establishments / Central Rules)</h3>
-          </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-             {/* 1. Pay Sheet (Form B) */}
-             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-purple-500/30 transition-all group">
-                <div className="flex items-center gap-3 mb-2">
-                    <FileText size={24} className="text-purple-400" />
-                    <div>
-                        <h4 className="font-bold text-slate-200">1. Register of Wages (Form B)</h4>
-                        <p className="text-xs text-slate-500">Wage Register</p>
-                    </div>
-                </div>
-                <button onClick={() => handleDownload('Form B', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-purple-900/20 text-purple-300 font-bold text-xs rounded-lg hover:bg-purple-900/40 transition-colors">
-                    <Eye size={14} /> View PDF
-                </button>
-             </div>
-
-             {/* 2. Pay Slip (Form XIX) */}
-             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-purple-500/30 transition-all group">
-                <div className="flex items-center gap-3 mb-2">
-                    <ScrollText size={24} className="text-purple-400" />
-                    <div>
-                        <h4 className="font-bold text-slate-200">2. Pay Slip (Form XIX)</h4>
-                        <p className="text-xs text-slate-500">Wage Slips [Rule 78(1)(b)]</p>
-                    </div>
-                </div>
-                <button onClick={() => handleDownload('Pay Slip (Central)', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-purple-900/20 text-purple-300 font-bold text-xs rounded-lg hover:bg-purple-900/40 transition-colors">
-                    <Download size={14} /> Download PDF
-                </button>
-             </div>
-
-             {/* 3. Muster Roll (Form C) */}
-             <div className="flex-1 p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-purple-500/30 transition-all group">
-                <div className="flex items-center gap-3 mb-2">
-                    <ClipboardList size={24} className="text-purple-400" />
-                    <div>
-                        <h4 className="font-bold text-slate-200">3. Muster Roll (Form C)</h4>
-                        <p className="text-xs text-slate-500">Attendance Register</p>
-                    </div>
-                </div>
-                <button onClick={() => handleDownload('Form C', 'PDF')} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-purple-900/20 text-purple-300 font-bold text-xs rounded-lg hover:bg-purple-900/40 transition-colors">
-                    <Eye size={14} /> View PDF
-                </button>
-             </div>
-          </div>
-        </div>
-
-        {/* 1. Provident Fund (EPF) - SPLIT: Now col-span-1 */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl col-span-1">
+        {/* EPF SECTION */}
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
           <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
             <ShieldCheck className="text-blue-500" size={20} />
-            <h3 className="font-bold text-white text-sm">Provident Fund (EPF)</h3>
+            <h3 className="font-bold text-white text-sm">Employees' Provident Fund (EPF)</h3>
           </div>
-          {/* Changed internal grid to grid-cols-1 to stack vertically since card is narrower */}
-          <div className="p-6 grid grid-cols-1 gap-6">
-            
-            {/* Returns & Analytics */}
-            <div className="space-y-4">
-               <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Electronic Returns & Impact</h4>
-               
-               {/* ECR */}
-               <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-200">ECR (Electronic Challan)</span>
-                    <span className="text-[9px] px-2 py-0.5 bg-green-900/30 text-green-400 rounded border border-green-900/50">Monthly</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleDownload('PF ECR', 'Excel')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-slate-800 text-slate-300 px-2 py-2 rounded hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all">
-                      <FileSpreadsheet size={12} /> Excel
-                    </button>
-                    <button onClick={() => handleDownload('PF ECR', 'Text')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-slate-800 text-slate-300 px-2 py-2 rounded hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all">
-                      <FileCode size={12} /> Text
-                    </button>
-                  </div>
-               </div>
-
-               {/* Code on Wages */}
-               <div className="p-4 rounded-xl bg-amber-900/10 border border-amber-900/30 space-y-3">
-                  <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Scale size={14} className="text-amber-400" />
-                        <span className="text-xs font-bold text-amber-300">Code on Social Security</span>
-                      </div>
-                      <button 
-                        onClick={() => setShowCode88Modal(true)}
-                        className="text-[9px] font-bold text-amber-400 hover:text-white bg-amber-900/40 px-2 py-1 rounded transition-colors flex items-center gap-1"
-                      >
-                        <BookOpen size={10} /> Read
-                      </button>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleDownload('Code 88 Impact Report', 'Excel')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-amber-900/20 text-amber-400 px-2 py-2 rounded hover:bg-amber-900/40 border border-amber-900/30 transition-all">
-                      <FileSpreadsheet size={12} /> Excel
-                    </button>
-                    <button onClick={() => handleDownload('Code 88 Impact Report', 'PDF')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-amber-900/20 text-amber-400 px-2 py-2 rounded hover:bg-amber-900/40 border border-amber-900/30 transition-all">
-                      <FileText size={12} /> PDF
-                    </button>
-                  </div>
-               </div>
-            </div>
-
-            {/* Statutory Forms */}
-            <div className="space-y-4">
-                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Statutory Registers</h4>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 transition-colors border border-slate-800/50">
-                    <span className="text-xs font-medium text-slate-300">Form 12A (Revised) - Calculation Sheet</span>
-                    <button onClick={() => handleDownload('Form 12A (Revised)', 'PDF')} className="text-blue-400 hover:text-white transition-colors p-1.5 bg-blue-900/20 rounded">
-                      <FileText size={14} />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 transition-colors border border-slate-800/50">
-                    <span className="text-xs font-medium text-slate-300">Form 12 (Old) - Monthly Statement</span>
-                    <button onClick={() => handleDownload('Form 12 (Old)', 'PDF')} className="text-blue-400 hover:text-white transition-colors p-1.5 bg-blue-900/20 rounded">
-                      <FileText size={14} />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 transition-colors border border-slate-800/50">
-                    <span className="text-xs font-medium text-slate-300">Form 3A (Annual Contribution Card)</span>
-                    <button onClick={() => handleDownload('Form 3A', 'PDF')} className="text-blue-400 hover:text-white transition-colors p-1.5 bg-blue-900/20 rounded">
-                      <FileText size={14} />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 transition-colors border border-slate-800/50">
-                    <span className="text-xs font-medium text-slate-300">Form 6A (Annual Consolidated)</span>
-                    <button onClick={() => handleDownload('Form 6A', 'PDF')} className="text-blue-400 hover:text-white transition-colors p-1.5 bg-blue-900/20 rounded">
-                      <FileText size={14} />
-                    </button>
-                  </div>
-                </div>
-            </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+             <button onClick={() => handleDownload('PF ECR', 'Excel')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
+                <FileSpreadsheet size={16} className="group-hover:scale-110" /> Monthly ECR (Excel)
+             </button>
+             <button onClick={() => handleDownload('PF ECR', 'Text')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
+                <FileText size={16} className="group-hover:scale-110" /> ECR (Text File)
+             </button>
+             <button onClick={() => handleDownload('Form 12A', 'PDF')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
+                <FileText size={16} className="group-hover:scale-110" /> Form 12A (Revised)
+             </button>
+             <div className="grid grid-cols-2 gap-2">
+                 <button onClick={() => openRangeModal('Form 3A')} className="w-full py-3 bg-blue-900/10 hover:bg-blue-900/20 text-blue-300 font-bold text-[10px] rounded-xl border border-blue-900/30 flex flex-col items-center justify-center gap-1 transition-all">
+                    <Calendar size={14} /> Form 3A (Annual)
+                 </button>
+                 <button onClick={() => openRangeModal('Form 6A')} className="w-full py-3 bg-blue-900/10 hover:bg-blue-900/20 text-blue-300 font-bold text-[10px] rounded-xl border border-blue-900/30 flex flex-col items-center justify-center gap-1 transition-all">
+                    <Calendar size={14} /> Form 6A (Annual)
+                 </button>
+             </div>
           </div>
         </div>
 
-        {/* 2. Employee State Insurance (ESI) - SPLIT: Now col-span-1 */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl col-span-1">
-          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-            <ShieldCheck className="text-pink-500" size={20} />
-            <h3 className="font-bold text-white text-sm">ESI Corporation</h3>
-          </div>
-          {/* Changed internal grid to grid-cols-1 to stack vertically */}
-          <div className="p-6 grid grid-cols-1 gap-6">
-            
-            {/* Monthly Return & Impact - MOVED UP */}
-            <div className="space-y-4">
-                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Online Contribution & Impact</h4>
-                <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/50 space-y-3">
-                    <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-200">Monthly ESI Return</span>
-                        <span className="text-[9px] px-2 py-0.5 bg-pink-900/30 text-pink-400 rounded border border-pink-900/50">Mandatory</span>
-                    </div>
-                    <div className="flex gap-2">
-                        <button onClick={() => handleDownload('Monthly ESI', 'Excel')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-slate-800 text-slate-300 px-2 py-2 rounded hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all">
-                        <FileSpreadsheet size={14} /> Excel (Upload)
-                        </button>
-                        <button onClick={() => handleDownload('Monthly ESI View', 'PDF')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-slate-800 text-slate-300 px-4 py-2 rounded hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all">
-                        <Eye size={14} /> View PDF
-                        </button>
-                    </div>
-                    
-                    {/* Exit Report Button */}
-                    <button onClick={() => handleDownload('ESI Exit Report', 'PDF')} className="w-full flex items-center justify-center gap-2 text-[10px] font-bold bg-red-900/10 text-red-400 px-4 py-2 rounded hover:bg-red-900/20 border border-red-900/30 transition-all">
-                        <LogOut size={14} /> List of Employees Out of Coverage
-                    </button>
-                </div>
-
-                {/* ESI on Code Wages Report Block */}
-                <div className="p-4 rounded-xl bg-pink-900/10 border border-pink-900/30 space-y-3">
-                  <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Scale size={14} className="text-pink-400" />
-                        <span className="text-xs font-bold text-pink-300">ESI on Code Wages</span>
-                      </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleDownload('ESI Code Wages', 'Excel')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-pink-900/20 text-pink-400 px-2 py-2 rounded hover:bg-pink-900/40 border border-pink-900/30 transition-all">
-                      <FileSpreadsheet size={12} /> Excel
-                    </button>
-                    <button onClick={() => handleDownload('ESI Code Wages', 'PDF')} className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold bg-pink-900/20 text-pink-400 px-2 py-2 rounded hover:bg-pink-900/40 border border-pink-900/30 transition-all">
-                      <FileText size={12} /> PDF
-                    </button>
-                  </div>
-               </div>
-            </div>
-
-            {/* Registers - MOVED DOWN */}
-            <div className="space-y-4">
-                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Registers & Declaration</h4>
-                <div className="space-y-2">
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-slate-800/50">
-                    <span className="text-xs font-medium text-slate-300">Form 1 (Declaration)</span>
-                    <button onClick={() => handleDownload('ESI Form 1', 'PDF')} className="flex items-center gap-2 text-xs font-bold bg-pink-900/20 text-pink-400 px-3 py-1.5 rounded hover:bg-pink-900/40 transition-colors">
-                        <Eye size={14} /> View
-                    </button>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-slate-800/50">
-                    <span className="text-xs font-medium text-slate-300">Form 6 (Register of Employees)</span>
-                    <button onClick={() => handleDownload('ESI Form 6', 'PDF')} className="flex items-center gap-2 text-xs font-bold bg-pink-900/20 text-pink-400 px-3 py-1.5 rounded hover:bg-pink-900/40 transition-colors">
-                        <Eye size={14} /> View
-                    </button>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-slate-800/50">
-                    <span className="text-xs font-medium text-slate-300">Form 7 (Register of Contributions)</span>
-                    <button onClick={() => handleDownload('ESI Form 7', 'PDF')} className="flex items-center gap-2 text-xs font-bold bg-pink-900/20 text-pink-400 px-3 py-1.5 rounded hover:bg-pink-900/40 transition-colors">
-                        <Eye size={14} /> View
-                    </button>
-                    </div>
-                </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* 3. Professional Tax */}
+        {/* ESI SECTION */}
         <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
           <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-            <ScrollText className="text-amber-500" size={20} />
-            <h3 className="font-bold text-white text-sm">Professional Tax</h3>
+            <Landmark className="text-pink-500" size={20} />
+            <h3 className="font-bold text-white text-sm">ESIC Compliance</h3>
           </div>
-          <div className="p-4 flex gap-3">
-            <button onClick={() => handleDownload('PT Half-Yearly', 'PDF')} className="flex-1 flex flex-col items-center justify-center gap-2 p-4 bg-slate-900/50 rounded-xl hover:bg-slate-800 border border-slate-800 transition-all group">
-              <FileText size={24} className="text-amber-400 group-hover:scale-110 transition-transform" />
-              <span className="text-xs font-medium text-slate-300">Half-yearly Return</span>
-            </button>
-            <button onClick={() => handleDownload('PT Annual', 'PDF')} className="flex-1 flex flex-col items-center justify-center gap-2 p-4 bg-slate-900/50 rounded-xl hover:bg-slate-800 border border-slate-800 transition-all group">
-              <FileText size={24} className="text-amber-400 group-hover:scale-110 transition-transform" />
-              <span className="text-xs font-medium text-slate-300">Annual Return</span>
-            </button>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+             <button onClick={() => handleDownload('ESI Return', 'Excel')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-pink-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
+                <FileSpreadsheet size={16} className="group-hover:scale-110" /> ESI Return (Excel)
+             </button>
+             <button onClick={() => handleDownload('ESI Code Wages', 'PDF')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-pink-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
+                <Scale size={16} className="group-hover:scale-110" /> Social Security Code
+             </button>
+             <button onClick={() => handleDownload('ESI Exit Report', 'Excel')} className="w-full py-3 bg-red-900/10 hover:bg-red-900/20 text-red-400 font-bold text-xs rounded-xl border border-red-900/30 flex items-center justify-center gap-2 transition-all group" title="Employees who crossed ESI ceiling or left service">
+                <LogOut size={16} className="group-hover:scale-110" /> ESI Exit List
+             </button>
+             <button disabled className="w-full py-3 bg-slate-800/50 text-slate-500 font-bold text-xs rounded-xl border border-slate-800 flex items-center justify-center gap-2 cursor-not-allowed">
+                <ShieldCheck size={16} /> Form 5 (Half-Yearly)
+             </button>
           </div>
         </div>
 
-        {/* 4. Income Tax */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-            <Landmark className="text-emerald-500" size={20} />
-            <h3 className="font-bold text-white text-sm">Income Tax (TDS)</h3>
-          </div>
-          <div className="p-4">
-            <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-              <div>
-                 <h4 className="font-bold text-sm text-white">Form 16A</h4>
-                 <p className="text-[10px] text-slate-500">Employee-wise TDS Certificate</p>
-              </div>
-              <button onClick={() => handleDownload('Form 16A', 'PDF')} className="bg-emerald-600 hover:bg-emerald-700 text-white p-2.5 rounded-lg transition-colors shadow-lg">
-                <Download size={18} />
-              </button>
+        {/* TAXATION & DEDUCTIONS */}
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl lg:col-span-2">
+            <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
+                <ReceiptText className="text-amber-500" size={20} />
+                <h3 className="font-bold text-white text-sm">Professional Tax & Income Tax Recovery</h3>
             </div>
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between group">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-900/20 text-amber-500 rounded-lg border border-amber-900/30">
+                            <ScrollText size={24} />
+                        </div>
+                        <div>
+                            <h4 className="font-bold text-slate-200">Professional Tax (PT)</h4>
+                            <p className="text-[10px] text-slate-500 uppercase">State-wise Deduction Register</p>
+                        </div>
+                    </div>
+                    <button onClick={() => handleDownload('PT Report', 'Excel')} className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg transition-colors shadow-lg">Download Excel</button>
+                </div>
+                <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between group">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-sky-900/20 text-sky-500 rounded-lg border border-sky-900/30">
+                            <Landmark size={24} />
+                        </div>
+                        <div>
+                            <h4 className="font-bold text-slate-200">Income Tax (TDS)</h4>
+                            <p className="text-[10px] text-slate-500 uppercase">Monthly TDS Recovery Summary</p>
+                        </div>
+                    </div>
+                    <button onClick={() => handleDownload('TDS Report', 'Excel')} className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-lg transition-colors shadow-lg">Download Excel</button>
+                </div>
+            </div>
+        </div>
+
+        {/* CENTRAL LABOR LAWS - FORM B & C */}
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl lg:col-span-2">
+            <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
+                <BookOpen className="text-emerald-500" size={20} />
+                <h3 className="font-bold text-white text-sm">Central Labor Law Registers</h3>
+            </div>
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between hover:border-emerald-500/30 transition-all">
+                    <div className="flex items-center gap-3">
+                        <FileText size={24} className="text-emerald-400" />
+                        <div><h4 className="font-bold text-slate-200">Form B</h4><p className="text-[10px] text-slate-500 uppercase">Register of Wages</p></div>
+                    </div>
+                    <button onClick={() => handleDownload('Form B', 'PDF')} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-900/50 font-bold text-xs rounded-lg">Download PDF</button>
+                </div>
+                <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between hover:border-emerald-500/30 transition-all">
+                    <div className="flex items-center gap-3">
+                        <ClipboardList size={24} className="text-emerald-400" />
+                        <div><h4 className="font-bold text-slate-200">Form C</h4><p className="text-[10px] text-slate-500 uppercase">Muster Roll / Attendance</p></div>
+                    </div>
+                    <button onClick={() => handleDownload('Form C', 'PDF')} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-900/50 font-bold text-xs rounded-lg">Download PDF</button>
+                </div>
+            </div>
+        </div>
+
+        {/* TAMIL NADU STATE ACTS */}
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl lg:col-span-2">
+          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
+            <Building className="text-indigo-500" size={20} />
+            <h3 className="font-bold text-white text-sm">Tamil Nadu Shops & Establishments Act</h3>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-indigo-500/30 transition-all">
+                <div className="flex items-center gap-3 mb-2">
+                    <FileText size={24} className="text-indigo-400" />
+                    <div><h4 className="font-bold text-slate-200">Form R</h4><p className="text-[10px] text-slate-500 uppercase">Register of Wages</p></div>
+                </div>
+                <button onClick={() => handleDownload('TN Form R', 'PDF')} className="w-full mt-4 py-2 bg-indigo-900/20 text-indigo-300 font-bold text-xs rounded-lg hover:bg-indigo-900/40">Download PDF</button>
+             </div>
+             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-indigo-500/30 transition-all">
+                <div className="flex items-center gap-3 mb-2">
+                    <ScrollText size={24} className="text-indigo-400" />
+                    <div><h4 className="font-bold text-slate-200">Form T</h4><p className="text-[10px] text-slate-500 uppercase">Wage Slip/Leave Card</p></div>
+                </div>
+                <button onClick={() => handleDownload('TN Form T', 'PDF')} className="w-full mt-4 py-2 bg-indigo-900/20 text-indigo-300 font-bold text-xs rounded-lg hover:bg-indigo-900/40">Download PDF</button>
+             </div>
+             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-indigo-500/30 transition-all">
+                <div className="flex items-center gap-3 mb-2">
+                    <HandCoins size={24} className="text-indigo-400" />
+                    <div><h4 className="font-bold text-slate-200">Form P</h4><p className="text-[10px] text-slate-500 uppercase">Register of Advances</p></div>
+                </div>
+                <button onClick={() => handleDownload('TN Form P', 'PDF')} className="w-full mt-4 py-2 bg-indigo-900/20 text-indigo-300 font-bold text-xs rounded-lg hover:bg-indigo-900/40">Download PDF</button>
+             </div>
           </div>
         </div>
+
+        {/* WELFARE & GRATUITY */}
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl lg:col-span-2">
+          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
+            <Heart className="text-red-500" size={20} />
+            <h3 className="font-bold text-white text-sm">Employee Welfare & Gratuity</h3>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between group">
+                <div className="flex items-center gap-3">
+                    <HandCoins size={32} className="text-amber-500 group-hover:scale-110 transition-transform" />
+                    <div>
+                        <h4 className="font-bold text-slate-200 text-sm">LIC Gratuity Policy</h4>
+                        <p className="text-[10px] text-slate-500 uppercase">Monthly Accrual Report</p>
+                    </div>
+                </div>
+                <button onClick={() => handleDownload('Gratuity Statement', 'PDF')} className="px-6 py-2 bg-amber-900/20 text-amber-400 font-bold text-xs rounded-lg hover:bg-amber-900/40 transition-colors">Download PDF</button>
+             </div>
+             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between opacity-50 cursor-not-allowed">
+                <div className="flex items-center gap-3">
+                    <Percent size={32} className="text-blue-500" />
+                    <div>
+                        <h4 className="font-bold text-slate-400 text-sm">Bonus Return (Form C)</h4>
+                        <p className="text-[10px] text-slate-500 uppercase">Annual Compliance Only</p>
+                    </div>
+                </div>
+                <span className="text-[10px] font-black text-slate-600 px-3 py-1 bg-slate-800 rounded">ANNUAL</span>
+             </div>
+          </div>
+        </div>
+
       </div>
       )}
 
-      {/* RANGE SELECTION MODAL */}
+      {/* RANGE MODAL FOR ANNUAL REPORTS */}
       {rangeModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                <button onClick={() => setRangeModal({ ...rangeModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+                <button onClick={() => setRangeModal({ ...rangeModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors">
                     <X size={20} />
                 </button>
-                <div className="flex flex-col items-center gap-2 mb-2">
-                    <div className="p-3 bg-blue-900/30 text-blue-400 rounded-full border border-blue-900/50">
-                        <Calendar size={24} />
-                    </div>
-                    <h3 className="text-lg font-bold text-white">Select Period Range</h3>
-                    <p className="text-xs text-slate-400 text-center">Define the Start and End period for <span className="text-sky-400 font-bold">{rangeModal.reportType}</span></p>
+                <div className="text-center space-y-1">
+                    <h3 className="text-xl font-black text-white">{rangeModal.reportType} Generator</h3>
+                    <p className="text-xs text-slate-400">Specify period range for annual returns</p>
                 </div>
                 
-                <div className="space-y-4">
-                    {/* FROM PERIOD */}
-                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">From Period</label>
-                        <div className="flex gap-2">
-                            <select 
-                                value={rangeModal.startMonth}
-                                onChange={(e) => setRangeModal({ ...rangeModal, startMonth: e.target.value })}
-                                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white"
-                            >
-                                {months.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
-                            <select 
-                                value={rangeModal.startYear}
-                                onChange={(e) => setRangeModal({ ...rangeModal, startYear: Number(e.target.value) })}
-                                className="w-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white"
-                            >
-                                {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
-                            </select>
-                        </div>
+                <div className="grid grid-cols-2 gap-4 mt-2">
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Start Period</label>
+                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startMonth} onChange={e => setRangeModal({...rangeModal, startMonth: e.target.value})} >
+                            {months.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
                     </div>
-
-                    {/* TO PERIOD */}
-                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">To Period</label>
-                        <div className="flex gap-2">
-                            <select 
-                                value={rangeModal.endMonth}
-                                onChange={(e) => setRangeModal({ ...rangeModal, endMonth: e.target.value })}
-                                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white"
-                            >
-                                {months.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
-                            <select 
-                                value={rangeModal.endYear}
-                                onChange={(e) => setRangeModal({ ...rangeModal, endYear: Number(e.target.value) })}
-                                className="w-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white"
-                            >
-                                {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
-                            </select>
-                        </div>
+                    <div className="space-y-1 flex flex-col justify-end">
+                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startYear} onChange={e => setRangeModal({...rangeModal, startYear: +e.target.value})} >
+                            {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                        </select>
                     </div>
-
-                    {/* Employee Selection for Form 3A */}
-                    {rangeModal.reportType === 'Form 3A' && (
-                        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">
-                                <span className="flex items-center gap-2"><User size={12} /> Select Employee</span>
-                            </label>
-                            <select 
-                                value={rangeModal.selectedEmployee}
-                                onChange={(e) => setRangeModal({ ...rangeModal, selectedEmployee: e.target.value })}
-                                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white"
-                            >
-                                <option value="ALL">ALL EMPLOYEES (Bulk)</option>
-                                {employees.map(emp => (
-                                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.id})</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-
-                    <button 
-                        onClick={handleGenerateRange}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-colors mt-2"
-                    >
-                        GENERATE REPORT
-                    </button>
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">End Period</label>
+                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endMonth} onChange={e => setRangeModal({...rangeModal, endMonth: e.target.value})} >
+                            {months.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                    </div>
+                    <div className="space-y-1 flex flex-col justify-end">
+                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endYear} onChange={e => setRangeModal({...rangeModal, endYear: +e.target.value})} >
+                            {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                        </select>
+                    </div>
                 </div>
+
+                <div className="space-y-1 mt-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Employee Filter</label>
+                    <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({...rangeModal, selectedEmployee: e.target.value})} >
+                        <option value="ALL">ALL Employees</option>
+                        {employees.map(e => <option key={e.id} value={e.id}>{e.id} - {e.name}</option>)}
+                    </select>
+                </div>
+
+                <button onClick={handleGenerateRange} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg mt-4 flex items-center justify-center gap-2 group">
+                    <Download size={18} className="group-hover:translate-y-0.5 transition-transform" /> GENERATE STATEMENT
+                </button>
             </div>
         </div>
       )}

@@ -66,21 +66,31 @@ export interface StatutoryConfig {
 export interface CompanyProfile {
   establishmentName: string;
   tradeName: string;
-  cin: string; // ID Proof
+  cin: string; // Corporate ID
   lin: string; // Labour Identification No
   pfCode: string;
   esiCode: string;
   gstNo: string;
   pan: string;
-  address: string; // Registered Office Address
-  state: string;
+  
+  // Granular Address
+  doorNo: string;
+  buildingName: string;
+  street: string;
+  locality: string;
+  area: string;
   city: string;
+  state: string;
+  pincode: string;
+  
+  // Contact
   mobile: string;
   telephone: string;
   email: string;
   website: string;
   natureOfBusiness: string;
   flashNews?: string; // New field for Flash News
+  postLoginMessage?: string; // New field for Post Login Popup Message
   externalAppUrl?: string; // New field for External App Link
 }
 
@@ -103,9 +113,11 @@ export interface Employee {
   fatherSpouseName: string;
   relationship: string;
   
-  // Address Breakdown
-  flatNumber: string;
-  streetAddress: string;
+  // GRANULAR ADDRESS Breakdown
+  doorNo: string;
+  buildingName: string;
+  street: string;
+  area: string;
   city: string;
   state: string;
   pincode: string;
@@ -115,6 +127,8 @@ export interface Employee {
   ifsc: string;
   doj: string;
   dol?: string;
+  leavingReason?: string; // New field for Reason of Leaving
+  
   // Wage Components
   basicPay: number;
   da: number;
@@ -143,6 +157,13 @@ export interface Employee {
     employerContribution: 'Regular' | 'Higher'; // Header 4
     isHigherPensionOpted: 'Yes' | 'No'; // Header 5
   };
+
+  // NEW: Deferred Pension (Age 58+)
+  isDeferredPension?: boolean;
+  // Added 'OptOut' to match UI options in EmployeeList.tsx
+  deferredPensionOption?: 'WithEPS' | 'WithoutEPS' | 'OptOut';
+  // Added 'epsMaturityConfigured' to resolve type error in EmployeeList.tsx line 46
+  epsMaturityConfigured?: boolean;
 
   photoUrl?: string;
   form1Url?: string;

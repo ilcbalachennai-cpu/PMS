@@ -20,15 +20,23 @@ export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
   esiCode: '',
   gstNo: '',
   pan: '',
-  address: '',
-  state: 'Tamil Nadu',
+  // Address
+  doorNo: '',
+  buildingName: '',
+  street: '',
+  locality: '',
+  area: '',
   city: '',
+  state: 'Tamil Nadu',
+  pincode: '',
+  // Contact
   mobile: '',
   telephone: '',
   email: '',
   website: '',
   natureOfBusiness: 'Manufacturing',
   flashNews: 'Welcome to BharatPay Pro! Ensure all PF ECRs are filed before the 15th. Check "Settings" to update this news.',
+  postLoginMessage: '# Labour Code  2020 implemented (21-11-2025)\n# Higher Wages , Higher Pension implemented',
   externalAppUrl: '' // Default empty
 };
 
