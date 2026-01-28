@@ -1,4 +1,5 @@
-import React, { useState, useRef } from 'react';
+
+import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Search, Edit2, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, Download, X, Save, MapPin, Trash2, Maximize2, UserPlus, CheckCircle2, AlertTriangle, Home, IndianRupee, ShieldCheck, MapPinned, CreditCard, Building2, UserMinus, Camera } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, User } from '../types';
@@ -39,6 +40,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     basicPay: 0, da: 0, retainingAllowance: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, 
     specialAllowance1: 0, specialAllowance2: 0, specialAllowance3: 0,
     isPFExempt: false, isESIExempt: false, employeeVPFRate: 0, isPFHigherWages: false, isEmployerPFHigher: false,
+    epfMembershipDate: '', jointDeclaration: false,
     pfHigherPension: { 
       enabled: false, contributedBefore2014: 'No', dojImpact: '', 
       employeeContribution: 'Regular', employerContribution: 'Regular', isHigherPensionOpted: 'No' 
@@ -48,6 +50,59 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   });
 
   const [newEmpForm, setNewEmpForm] = useState<Partial<Employee>>(getEmptyForm());
+
+  // Logic for Higher Pension Eligibility
+  const pfWages = (Number(newEmpForm.basicPay) || 0) + (Number(newEmpForm.da) || 0) + (Number(newEmpForm.retainingAllowance) || 0);
+  const epfDateStr = newEmpForm.epfMembershipDate;
+  const epfDate = epfDateStr ? new Date(epfDateStr) : null;
+  const cutoffDate = new Date('2014-09-01');
+
+  const isMemberAfter2014 = epfDate ? epfDate >= cutoffDate : false;
+  const isMemberBefore2014 = epfDate ? epfDate < cutoffDate : false;
+  const isWageAbove15k = pfWages > 15000;
+
+  // PF Exemption Logic: Active if Member > 31-08-2014 AND Wages > 15000
+  const enablePFExemption = isMemberAfter2014 && isWageAbove15k;
+
+  // Joint Declaration Logic: Active only if Member < 01-09-2014
+  const enableJointDeclaration = isMemberBefore2014;
+
+  // Higher Pension Logic: Active if Member < 01-09-2014 AND Joint Decl AND Wages > 15000
+  const enableHigherPension = isMemberBefore2014 && newEmpForm.jointDeclaration && isWageAbove15k;
+
+  // Auto-Select Logic and Eligibility Enforcement
+  useEffect(() => {
+    setNewEmpForm(prev => {
+        let updates: Partial<Employee> = {};
+        let hasUpdates = false;
+
+        // 1. Enforce Joint Declaration Eligibility
+        // If not member before 2014, Joint Declaration must be false (inactive means false in data too)
+        if (!isMemberBefore2014 && prev.jointDeclaration) {
+            updates.jointDeclaration = false;
+            hasUpdates = true;
+        }
+
+        // 2. Enforce Higher Pension Eligibility
+        const effectiveJointDecl = (hasUpdates && updates.jointDeclaration !== undefined) ? updates.jointDeclaration : prev.jointDeclaration;
+        const effectiveHigherPensionElig = isMemberBefore2014 && effectiveJointDecl && isWageAbove15k;
+
+        if (effectiveHigherPensionElig) {
+             if (prev.pfHigherPension?.isHigherPensionOpted !== 'Yes') {
+                 updates.pfHigherPension = { ...prev.pfHigherPension!, isHigherPensionOpted: 'Yes', enabled: true };
+                 hasUpdates = true;
+             }
+        } else {
+             // If not eligible, ensure it is OFF
+             if (prev.pfHigherPension?.isHigherPensionOpted === 'Yes' || prev.pfHigherPension?.enabled) {
+                 updates.pfHigherPension = { ...prev.pfHigherPension!, isHigherPensionOpted: 'No', enabled: false };
+                 hasUpdates = true;
+             }
+        }
+
+        return hasUpdates ? { ...prev, ...updates } : prev;
+    });
+  }, [isMemberBefore2014, isWageAbove15k, newEmpForm.jointDeclaration]);
 
   const filteredEmployees = employees.filter(emp => 
     emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || emp.id.toLowerCase().includes(searchTerm.toLowerCase())
@@ -247,7 +302,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
               <div>
                 <FormSectionHeader icon={User2} title="1. Personal & Employment Identity" />
                 <div className="flex flex-col md:flex-row gap-8">
-                    {/* PHOTO UPLOAD BOX (RESTORED & EDITABLE) */}
+                    {/* PHOTO UPLOAD BOX */}
                     <div className="flex flex-col items-center gap-4 shrink-0">
                         <div className="relative group w-32 h-32 bg-slate-900 rounded-2xl border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden transition-all hover:border-blue-500/50">
                             {newEmpForm.photoUrl ? (
@@ -276,7 +331,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Employee ID*</label><input required className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.id} onChange={e => setNewEmpForm({...newEmpForm, id: e.target.value})} /></div>
                         <div className="space-y-1.5 md:col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Full Legal Name*</label><input required className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.name} onChange={e => setNewEmpForm({...newEmpForm, name: e.target.value})} /></div>
                         
-                        {/* MOBILE MOVED TO IDENTITY */}
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-sky-400 uppercase tracking-widest ml-1">Mobile No*</label><input required className="w-full bg-slate-900 border border-sky-900/50 rounded-xl p-3 text-sm text-white font-mono focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.mobile} onChange={e => setNewEmpForm({...newEmpForm, mobile: e.target.value})} /></div>
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Gender</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.gender} onChange={e => setNewEmpForm({...newEmpForm, gender: e.target.value as any})}><option>Male</option><option>Female</option><option>Transgender</option><option>Others</option></select></div>
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Date of Birth</label><input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.dob} onChange={e => setNewEmpForm({...newEmpForm, dob: e.target.value})} /></div>
@@ -312,7 +366,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                  </div>
               </div>
 
-              {/* SECTION 4: BANKING (SHIFTED BEFORE WAGES & STATUTORY) */}
+              {/* SECTION 4: BANKING */}
               <div>
                 <FormSectionHeader icon={Landmark} title="4. Banking & Disbursement" color="text-indigo-400" />
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-indigo-900/5 p-6 rounded-2xl border border-indigo-900/20">
@@ -321,7 +375,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </div>
               </div>
 
-              {/* SECTION 5: WAGE MATRIX (SHIFTED BEFORE STATUTORY) */}
+              {/* SECTION 5: WAGE MATRIX */}
               <div>
                 <FormSectionHeader 
                     icon={IndianRupee} 
@@ -342,17 +396,58 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </div>
               </div>
 
-              {/* SECTION 6: STATUTORY & COMPLIANCE (MOVED TO END) */}
+              {/* SECTION 6: STATUTORY & COMPLIANCE */}
               <div>
                 <FormSectionHeader icon={ShieldCheck} title="6. Statutory IDs & Options" color="text-amber-400" />
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PAN Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none uppercase" value={newEmpForm.pan} onChange={e => setNewEmpForm({...newEmpForm, pan: e.target.value})} /></div>
                     <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Aadhaar No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.aadhaarNumber} onChange={e => setNewEmpForm({...newEmpForm, aadhaarNumber: e.target.value})} /></div>
                     <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">UAN Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.uanc} onChange={e => setNewEmpForm({...newEmpForm, uanc: e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ESI IP Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({...newEmpForm, esiNumber: e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ESI IP Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({...newEmpForm, esiNumber: e.target.value})} />
+                    </div>
                 </div>
 
-                <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 mt-8">
+                {/* NEW HIGHER PENSION ELIGIBILITY SECTION */}
+                <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 mt-8 mb-4">
+                    <h3 className="text-xs font-black text-amber-500 uppercase tracking-widest mb-4 flex items-center gap-2">HIGHER PENSION ELIGIBILITY</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Member of EPF Since</label>
+                            <input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.epfMembershipDate} onChange={e => setNewEmpForm({...newEmpForm, epfMembershipDate: e.target.value})} />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${enablePFExemption ? 'bg-slate-800 border-slate-600 cursor-pointer' : 'bg-slate-900/30 border-slate-800 cursor-not-allowed opacity-50'}`}>
+                                <input type="checkbox" className="w-4 h-4" disabled={!enablePFExemption} checked={newEmpForm.isPFExempt} onChange={e => setNewEmpForm({...newEmpForm, isPFExempt: e.target.checked})} />
+                                <span className="text-[10px] font-bold text-white uppercase">PF Exemption</span>
+                            </label>
+                            <p className="text-[9px] text-slate-500 px-1">PF Wages: <span className="font-mono font-bold text-slate-400">₹{pfWages}</span></p>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${enableJointDeclaration ? 'bg-slate-800 border-slate-600 cursor-pointer hover:bg-slate-700' : 'bg-slate-900/30 border-slate-800 cursor-not-allowed opacity-50'}`}>
+                                <input 
+                                    type="checkbox" 
+                                    className="w-4 h-4" 
+                                    disabled={!enableJointDeclaration}
+                                    checked={newEmpForm.jointDeclaration} 
+                                    onChange={e => setNewEmpForm({...newEmpForm, jointDeclaration: e.target.checked})} 
+                                />
+                                <span className="text-[10px] font-bold text-white uppercase">Joint Declaration given</span>
+                            </label>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${enableHigherPension ? 'bg-emerald-900/20 border-emerald-500/50 cursor-pointer' : 'bg-slate-900/30 border-slate-800 cursor-not-allowed opacity-50'}`}>
+                                <input type="checkbox" className="w-4 h-4 text-emerald-500 focus:ring-emerald-500 bg-slate-900" disabled={!enableHigherPension} checked={newEmpForm.pfHigherPension?.isHigherPensionOpted === 'Yes'} onChange={e => {
+                                    if(enableHigherPension) {
+                                        setNewEmpForm({...newEmpForm, pfHigherPension: { ...newEmpForm.pfHigherPension!, isHigherPensionOpted: e.target.checked ? 'Yes' : 'No', enabled: e.target.checked }})
+                                    }
+                                }} />
+                                <span className={`text-[10px] font-bold uppercase ${enableHigherPension ? 'text-emerald-400' : 'text-slate-500'}`}>Higher Pension</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 mt-4">
                   <div className="flex items-center justify-between mb-6">
                       <div className="flex flex-col">
                           <h3 className="text-xs font-black text-amber-500 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={18} /> EPS Maturity Control (Age 58+)</h3>

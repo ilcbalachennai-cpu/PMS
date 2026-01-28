@@ -148,6 +148,10 @@ export interface Employee {
   isPFHigherWages: boolean; // Contribute on full basic (no ceiling)
   isEmployerPFHigher: boolean; // Employer also contributes on full basic
   
+  // NEW: Higher Pension Eligibility Fields
+  epfMembershipDate?: string;
+  jointDeclaration?: boolean;
+
   // NEW: PF Higher Pension Option Impact
   pfHigherPension?: {
     enabled: boolean;
