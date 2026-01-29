@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, Search, Edit2, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, Download, X, Save, MapPin, Trash2, Maximize2, UserPlus, CheckCircle2, AlertTriangle, Home, IndianRupee, ShieldCheck, MapPinned, CreditCard, Building2, UserMinus, Camera, LogOut, RotateCcw, KeyRound, FileSpreadsheet, FileText, CheckSquare, Square, Filter, Loader2, DatabaseZap, ListPlus } from 'lucide-react';
+import { Plus, Search, Edit2, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, Download, X, Save, MapPin, Trash2, Maximize2, UserPlus, CheckCircle, CheckCircle2, AlertTriangle, Home, IndianRupee, ShieldCheck, MapPinned, CreditCard, Building2, UserMinus, Camera, LogOut, RotateCcw, KeyRound, FileSpreadsheet, FileText, CheckSquare, Square, Filter, Loader2, DatabaseZap, ListPlus, FileX } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, User, CompanyProfile } from '../types';
 import { INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS } from '../constants';
@@ -52,6 +52,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   const [showRejoinPanel, setShowRejoinPanel] = useState(false);
   const [rejoinSearchTerm, setRejoinSearchTerm] = useState('');
   const [authModal, setAuthModal] = useState({ isOpen: false, password: '', error: '', targetEmp: null as Employee | null });
+
+  // New State for Import Report
+  const [importSummary, setImportSummary] = useState<{
+      total: number;
+      success: number;
+      failed: number;
+      errors: { row: number; name: string; id: string; reason: string }[]
+  } | null>(null);
 
   const [exportModal, setExportModal] = useState({ 
       isOpen: false, 
@@ -358,9 +366,25 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
             });
             // --- SORT LOGIC END ---
 
-            const newEmployees: Employee[] = [];
-            const errors: string[] = [];
+            const validNewEmployees: Employee[] = [];
+            const rejectedRecords: { row: number; name: string; id: string; reason: string }[] = [];
             
+            // Build Quick Lookup Sets for Existing Data to detect duplicates
+            const existingUAN = new Set(employees.filter(e => e.uanc).map(e => String(e.uanc).trim()));
+            const existingAadhaar = new Set(employees.filter(e => e.aadhaarNumber).map(e => String(e.aadhaarNumber).trim()));
+            const existingPAN = new Set(employees.filter(e => e.pan).map(e => String(e.pan).trim().toLowerCase()));
+            const existingESI = new Set(employees.filter(e => e.esiNumber).map(e => String(e.esiNumber).trim()));
+            const existingPF = new Set(employees.filter(e => e.pfNumber).map(e => String(e.pfNumber).trim()));
+            const existingID = new Set(employees.map(e => e.id.toLowerCase()));
+
+            // Sets for current batch to avoid self-duplication within the file
+            const batchUAN = new Set();
+            const batchAadhaar = new Set();
+            const batchPAN = new Set();
+            const batchESI = new Set();
+            const batchPF = new Set();
+            const batchID = new Set();
+
             // Calculate current max ID to auto-generate IDs for missing ones
             let currentMaxId = 0;
             employees.forEach(e => {
@@ -382,43 +406,81 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     return null;
                 };
 
+                // ID LOGIC: Check provided ID
+                let id = String(getVal(['Employee ID', 'ID', 'Emp ID', 'EmpID']) || '').trim();
+                
+                // NAME LOGIC: Mandatory
+                const name = String(getVal(['Full Name', 'Name', 'Employee Name']) || '').trim();
+                if (!name || name === 'Unknown') {
+                    rejectedRecords.push({ row: rowNum, name: 'Unknown', id: '', reason: "Missing 'Full Name'. Skipped." });
+                    return; 
+                }
+
+                // IDENTIFIERS Extraction
+                const uan = String(getVal(['UAN Number', 'UAN', 'UAN No']) || '').trim();
+                const aadhaar = String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No']) || '').trim();
+                const pan = String(getVal(['PAN Number', 'PAN', 'PAN No']) || '').trim().toLowerCase();
+                const esi = String(getVal(['ESI Number', 'ESI IP Number', 'ESI No']) || '').trim();
+                const pf = String(getVal(['PF Member ID', 'PF ID', 'PF Number']) || '').trim();
+
+                // DUPLICATE CHECKS
+                const duplicateReasons: string[] = [];
+                if (uan) {
+                    if (existingUAN.has(uan) || batchUAN.has(uan)) duplicateReasons.push(`Duplicate UAN (${uan})`);
+                }
+                if (aadhaar) {
+                    if (existingAadhaar.has(aadhaar) || batchAadhaar.has(aadhaar)) duplicateReasons.push(`Duplicate Aadhaar (${aadhaar})`);
+                }
+                if (pan) {
+                    if (existingPAN.has(pan) || batchPAN.has(pan)) duplicateReasons.push(`Duplicate PAN (${pan.toUpperCase()})`);
+                }
+                if (esi) {
+                    if (existingESI.has(esi) || batchESI.has(esi)) duplicateReasons.push(`Duplicate ESI (${esi})`);
+                }
+                if (pf) {
+                    if (existingPF.has(pf) || batchPF.has(pf)) duplicateReasons.push(`Duplicate PF (${pf})`);
+                }
+                if (id) {
+                    if (existingID.has(id.toLowerCase()) || batchID.has(id.toLowerCase())) duplicateReasons.push(`Duplicate ID (${id})`);
+                }
+
+                if (duplicateReasons.length > 0) {
+                    rejectedRecords.push({ row: rowNum, name, id, reason: duplicateReasons.join(', ') });
+                    return;
+                }
+
+                // If valid, reserve identifiers in batch sets
+                if (uan) batchUAN.add(uan);
+                if (aadhaar) batchAadhaar.add(aadhaar);
+                if (pan) batchPAN.add(pan);
+                if (esi) batchESI.add(esi);
+                if (pf) batchPF.add(pf);
+
+                // Auto-generate ID if missing
+                if (!id) {
+                    currentMaxId++;
+                    id = `EMP${String(currentMaxId).padStart(3, '0')}`;
+                }
+                batchID.add(id.toLowerCase());
+
                 const parseIndDate = (val: any) => {
                     if (!val) return '';
-                    
                     if (val instanceof Date) {
-                        // Adjust for timezone offset if needed, but usually toISOString split works for pure dates
                         const offset = val.getTimezoneOffset() * 60000;
                         const localDate = new Date(val.getTime() - offset);
                         return localDate.toISOString().split('T')[0];
                     }
-
                     const str = String(val).trim();
-                    // Handle DD-MM-YYYY format string
                     if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
                         const [d, m, y] = str.split('-');
                         return `${y}-${m}-${d}`;
                     }
-                    // Handle Excel serial numeric date
                     if (/^\d+$/.test(str) && Number(str) > 20000) {
                         const excelDate = new Date((Number(str) - 25569) * 86400 * 1000);
                         return excelDate.toISOString().split('T')[0];
                     }
                     return str;
                 };
-
-                // ID LOGIC: If ID is missing, auto-generate based on sequence
-                let id = String(getVal(['Employee ID', 'ID', 'Emp ID', 'EmpID']) || '');
-                if (!id) {
-                    currentMaxId++;
-                    id = `EMP${String(currentMaxId).padStart(3, '0')}`;
-                }
-
-                // NAME LOGIC: Mandatory
-                const name = String(getVal(['Full Name', 'Name', 'Employee Name']) || '');
-                if (!name || name === 'Unknown') {
-                    errors.push(`Row ${rowNum}: Missing 'Full Name'. Skipped.`);
-                    return; // Skip this row
-                }
 
                 const importedEmp: Employee = {
                     ...getEmptyForm() as Employee,
@@ -442,11 +504,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     city: String(getVal(['City', 'Town']) || ''),
                     state: String(getVal(['State']) || 'Tamil Nadu'),
                     pincode: String(getVal(['Pincode', 'Zip']) || ''),
-                    pan: String(getVal(['PAN Number', 'PAN', 'PAN No']) || ''),
-                    aadhaarNumber: String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No']) || ''),
-                    uanc: String(getVal(['UAN Number', 'UAN', 'UAN No']) || ''),
-                    pfNumber: String(getVal(['PF Member ID', 'PF ID', 'PF Number']) || ''),
-                    esiNumber: String(getVal(['ESI Number', 'ESI IP Number', 'ESI No']) || ''),
+                    pan: pan.toUpperCase(),
+                    aadhaarNumber: aadhaar,
+                    uanc: uan,
+                    pfNumber: pf,
+                    esiNumber: esi,
                     bankAccount: String(getVal(['Bank Account Number', 'Account No', 'Bank A/c']) || ''),
                     ifsc: String(getVal(['IFSC Code', 'IFSC']) || ''),
                     basicPay: Number(getVal(['Basic Pay', 'Basic']) || 0),
@@ -466,31 +528,27 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     serviceRecords: [{ date: parseIndDate(getVal(['Date of Joining', 'DOJ'])) || new Date().toISOString().split('T')[0], type: 'Appointment', description: 'Imported from Excel' }]
                 };
 
-                newEmployees.push(importedEmp);
+                validNewEmployees.push(importedEmp);
             });
 
             // Process Results
-            if (newEmployees.length > 0) {
+            if (validNewEmployees.length > 0) {
                 if (onBulkAddEmployees) {
-                    onBulkAddEmployees(newEmployees);
+                    onBulkAddEmployees(validNewEmployees);
                 } else {
                     const existingMap = new Map(employees.map(e => [e.id, e]));
-                    newEmployees.forEach(ne => existingMap.set(ne.id, ne));
+                    validNewEmployees.forEach(ne => existingMap.set(ne.id, ne));
                     setEmployees(Array.from(existingMap.values()));
                 }
-                
-                let msg = `Successfully processed ${newEmployees.length} employee records.`;
-                if (errors.length > 0) {
-                    msg += `\n\n⚠️ ${errors.length} records failed to import:\n` + errors.slice(0, 10).join('\n') + (errors.length > 10 ? '\n...and more.' : '');
-                }
-                alert(msg);
-            } else {
-                let msg = "No valid employee records were imported.";
-                if (errors.length > 0) {
-                    msg += `\n\nErrors encountered:\n` + errors.join('\n');
-                }
-                alert(msg);
             }
+
+            // Set Import Summary to trigger Report Modal
+            setImportSummary({
+                total: data.length,
+                success: validNewEmployees.length,
+                failed: rejectedRecords.length,
+                errors: rejectedRecords
+            });
 
         } catch (err: any) {
             console.error("Excel Import Error:", err);
@@ -736,6 +794,88 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
               )}
           </div>
       </div>
+
+      {/* IMPORT SUMMARY MODAL */}
+      {importSummary && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl border border-slate-700 shadow-2xl">
+                {/* Header */}
+                <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-[#0f172a] rounded-t-2xl">
+                    <div>
+                        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                            <Upload size={20} className="text-blue-400" /> Import Result
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                            Processed {importSummary.total} rows from Excel file.
+                        </p>
+                    </div>
+                    <button onClick={() => setImportSummary(null)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                </div>
+                
+                {/* Body */}
+                <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                        <div className="bg-emerald-900/20 border border-emerald-500/30 p-4 rounded-xl flex items-center justify-between">
+                            <div>
+                                <p className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider">Successful</p>
+                                <h4 className="text-2xl font-black text-emerald-300">{importSummary.success}</h4>
+                            </div>
+                            <CheckCircle className="text-emerald-500 opacity-50" size={32} />
+                        </div>
+                        <div className="bg-red-900/20 border border-red-500/30 p-4 rounded-xl flex items-center justify-between">
+                            <div>
+                                <p className="text-[10px] text-red-400 uppercase font-bold tracking-wider">Failed / Duplicate</p>
+                                <h4 className="text-2xl font-black text-red-300">{importSummary.failed}</h4>
+                            </div>
+                            <FileX className="text-red-500 opacity-50" size={32} />
+                        </div>
+                    </div>
+
+                    {importSummary.failed > 0 && (
+                        <div className="bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden">
+                            <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 text-xs font-bold text-slate-300 uppercase">
+                                Error Details ({importSummary.failed})
+                            </div>
+                            <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-800 text-slate-400 sticky top-0">
+                                        <tr>
+                                            <th className="px-4 py-2 w-16">Row</th>
+                                            <th className="px-4 py-2">Employee</th>
+                                            <th className="px-4 py-2 text-red-300">Reason for Failure</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-700 text-slate-300">
+                                        {importSummary.errors.map((err, i) => (
+                                            <tr key={i} className="hover:bg-slate-800/50">
+                                                <td className="px-4 py-2 font-mono text-slate-500">{err.row}</td>
+                                                <td className="px-4 py-2">
+                                                    <div className="font-bold text-white">{err.name}</div>
+                                                    <div className="text-[10px] text-slate-500">{err.id}</div>
+                                                </td>
+                                                <td className="px-4 py-2 text-red-400">{err.reason}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                    {importSummary.failed === 0 && (
+                        <div className="flex flex-col items-center justify-center py-8 text-emerald-400">
+                            <CheckCircle size={48} className="mb-2" />
+                            <p className="font-bold">All records imported successfully!</p>
+                        </div>
+                    )}
+                </div>
+                
+                {/* Footer */}
+                <div className="p-4 border-t border-slate-700 bg-[#1e293b] flex justify-end rounded-b-2xl">
+                    <button onClick={() => setImportSummary(null)} className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold text-sm transition-colors">Close Report</button>
+                </div>
+            </div>
+        </div>
+      )}
 
       {/* DELETE CONFIRMATION MODAL */}
       {deleteModal.isOpen && deleteModal.targetEmp && (
