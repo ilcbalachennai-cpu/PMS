@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList } from 'lucide-react';
+import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList, Info } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile } from '../types';
 import { 
   generatePFECR, 
@@ -159,6 +159,18 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
       ) : (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pb-10">
         
+        {/* CLAUSE 88 NOTE */}
+        <div className="lg:col-span-2 bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-xl flex items-start gap-3">
+            <Info className="text-indigo-400 shrink-0 mt-1" size={20} />
+            <div>
+                <h4 className="text-sm font-bold text-indigo-300">Code on Social Security, 2020 (Clause 88) Impact</h4>
+                <p className="text-xs text-indigo-200/70 mt-1 leading-relaxed">
+                    Per Section 142 of the Code on Social Security 2020 (Clause 88), if the aggregate of specified exclusions (allowances) exceeds 50% of the total remuneration, the excess amount shall be deemed as wages. 
+                    The system has automatically adjusted the PF & ESI calculations in the reports below where applicable.
+                </p>
+            </div>
+        </div>
+
         {/* EPF SECTION */}
         <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
           <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">

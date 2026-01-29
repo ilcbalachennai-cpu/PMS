@@ -46,14 +46,23 @@ export const calculatePayroll = (
   const monthIdx = months.indexOf(month);
   const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
   
-  // --- DOL CHECK ---
+  // --- DOL (Date of Leaving) LOGIC ---
+  let effectivePayableDays = 0;
+  let isLeftService = false;
+  let exitRemark = '';
+
   if (employee.dol) {
       const periodStart = new Date(year, monthIdx, 1);
       periodStart.setHours(0,0,0,0);
       
+      const periodEnd = new Date(year, monthIdx + 1, 0);
+      periodEnd.setHours(23,59,59,999);
+      
       const dolDate = new Date(employee.dol);
       dolDate.setHours(0,0,0,0);
 
+      // Case 1: Employee Left BEFORE this month started
+      // e.g., Month is Jan 2024, DOL is Dec 2023.
       if (dolDate < periodStart) {
           return {
             employeeId: employee.id,
@@ -74,11 +83,37 @@ export const calculatePayroll = (
             esiRemark: 'Left Service'
           };
       }
+
+      // Case 2: Employee Left DURING this month
+      // e.g., Month is Jan 2024, DOL is Jan 15th 2024.
+      if (dolDate >= periodStart && dolDate <= periodEnd) {
+          isLeftService = true;
+          exitRemark = `Left: ${employee.dol}`;
+          
+          // STRICT CAP: Valid days are 1st to DOL
+          // DOL Date itself is included as working day (usually)
+          const daysUntilDOL = dolDate.getDate(); 
+          
+          // Calculate requested payable days from attendance
+          const lop = Math.min(attendance.lopDays, daysInMonth);
+          const requestedPayable = daysInMonth - lop;
+
+          // Apply Cap: Payable days cannot exceed days until DOL
+          // Example: DOL 15th. Days in Month 31. LOP 0. Requested 31. Cap 15. Result 15.
+          // Example: DOL 15th. Days in Month 31. LOP 20 (absent after 11th). Requested 11. Cap 15. Result 11.
+          effectivePayableDays = Math.min(requestedPayable, daysUntilDOL);
+      } else {
+          // Case 3: DOL is in future (after this month) -> Normal processing
+          const lop = Math.min(attendance.lopDays, daysInMonth);
+          effectivePayableDays = daysInMonth - lop;
+      }
+  } else {
+      // Normal Active Employee
+      const lop = Math.min(attendance.lopDays, daysInMonth);
+      effectivePayableDays = daysInMonth - lop;
   }
 
-  const lop = Math.min(attendance.lopDays, daysInMonth);
-  const payableDays = daysInMonth - lop;
-  const factor = payableDays / daysInMonth;
+  const factor = effectivePayableDays / daysInMonth;
 
   // Prorated Earnings
   const basic = Math.round(employee.basicPay * factor);
@@ -122,6 +157,7 @@ export const calculatePayroll = (
       }
   }
 
+  // I5: PF Wages (Basic + DA + RA + Code88 Adjustment)
   let grossPFWage = Math.round(wageA + wageD);
   let isCode88 = wageD > 0;
 
@@ -134,51 +170,94 @@ export const calculatePayroll = (
   const isOptOut = employee.isDeferredPension && employee.deferredPensionOption === 'OptOut';
 
   if (!employee.isPFExempt && !isOptOut) {
-    const higherPension = employee.pfHigherPension;
-    const isHigherPensionEnabled = higherPension?.enabled;
-
-    // 1. Employee Statutory Contribution
-    let pfWageForEmployee = 0;
-    if (isHigherPensionEnabled && higherPension.employeeContribution === 'Higher') {
-        pfWageForEmployee = grossPFWage;
-    } else {
-        pfWageForEmployee = employee.isPFHigherWages ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
-    }
+    const hp = employee.pfHigherPension;
     
-    epfEmployee = Math.round(pfWageForEmployee * 0.12);
+    // Determine A5, B5, C5, D5, E5
+    const A5 = hp?.contributedBefore2014 === 'Yes';
+    const B5_Date = employee.epfMembershipDate ? new Date(employee.epfMembershipDate) : null;
+    const C5 = hp?.employeeContribution || (employee.isPFHigherWages ? 'Higher' : 'Regular');
+    const D5 = hp?.employerContribution || (employee.isEmployerPFHigher ? 'Higher' : 'Regular');
+    const E5 = hp?.isHigherPensionOpted === 'Yes';
     
-    // 2. VPF
-    if (employee.employeeVPFRate > 0) {
-        vpfEmployee = Math.round(pfWageForEmployee * (employee.employeeVPFRate / 100));
-    }
+    const CUTOFF_2014 = new Date('2014-09-01');
+    const isPost2014 = B5_Date && B5_Date >= CUTOFF_2014;
+    const isPre2014 = B5_Date && B5_Date < CUTOFF_2014;
 
-    // 3. Employer Contribution
-    let pfWageForEmployer = 0;
-    if (isHigherPensionEnabled && higherPension.employerContribution === 'Higher') {
-        pfWageForEmployer = grossPFWage;
+    // J5: EPF WAGES (Column J)
+    let J5_EPFWage = 0;
+    if (D5 === 'Higher') {
+        J5_EPFWage = grossPFWage;
     } else {
-        pfWageForEmployer = employee.isEmployerPFHigher ? grossPFWage : Math.min(grossPFWage, config.epfCeiling);
-    }
-
-    const totalEmployerPF = Math.round(pfWageForEmployer * 0.12);
-
-    // EPS Logic
-    if (employee.isDeferredPension && employee.deferredPensionOption === 'WithoutEPS') {
-        // Option B: Redirect EPS Share to EPF (A/c No. 1)
-        epsEmployer = 0;
-        epfEmployer = totalEmployerPF;
-    } else {
-        // Standard Logic OR Deferred Pension WITH Contribution (Option A)
-        let epsWage = 0;
-        if (isHigherPensionEnabled && higherPension.isHigherPensionOpted === 'Yes') {
-            epsWage = grossPFWage; 
+        // Employer is Regular
+        if (C5 === 'Regular') {
+            J5_EPFWage = Math.min(grossPFWage, config.epfCeiling);
         } else {
-            epsWage = Math.min(pfWageForEmployer, config.epfCeiling);
+            // Employee is Higher
+            J5_EPFWage = grossPFWage; 
         }
-        
-        epsEmployer = Math.round(epsWage * 0.0833);
-        epfEmployer = Math.max(0, totalEmployerPF - epsEmployer);
     }
+
+    // K5: EPS WAGES (Column K)
+    let K5_EPSWage = 0;
+    
+    // Condition 1: Higher Pension Eligible & Active Pre-2014
+    if (A5 && C5 === 'Higher' && D5 === 'Higher' && E5 && isPre2014) {
+        K5_EPSWage = J5_EPFWage;
+    } 
+    // Condition 2: New Joiner Post 2014 (Excluded from EPS if wages > 15k)
+    else if (!A5 && isPost2014 && grossPFWage > config.epfCeiling) {
+        K5_EPSWage = 0;
+    }
+    // Condition 3: Standard Rules
+    else {
+        if (J5_EPFWage > config.epfCeiling) {
+            if (D5 === 'Regular') K5_EPSWage = config.epfCeiling;
+            else if (!E5) K5_EPSWage = config.epfCeiling;
+            else if (!A5) K5_EPSWage = config.epfCeiling;
+            else K5_EPSWage = J5_EPFWage;
+        } else {
+            K5_EPSWage = J5_EPFWage;
+        }
+    }
+
+    // M5: EPF Remitted (Employee Share) (Column M)
+    epfEmployee = Math.round(J5_EPFWage * config.epfEmployeeRate);
+
+    // VPF
+    if (employee.employeeVPFRate > 0) {
+        vpfEmployee = Math.round(J5_EPFWage * (employee.employeeVPFRate / 100));
+    }
+
+    // N5: EPS Remitted (Pension Fund) (Column N)
+    if (!E5) {
+        if (K5_EPSWage === 0) epsEmployer = 0;
+        else {
+            const basis = Math.min(grossPFWage, config.epfCeiling);
+            epsEmployer = Math.round(basis * 0.0833);
+        }
+    } else {
+        epsEmployer = Math.round(K5_EPSWage * 0.0833);
+    }
+
+    // O5: EPF Employer Share (Diff) (Column O)
+    if (K5_EPSWage === 0) {
+        epfEmployer = Math.round(J5_EPFWage * config.epfEmployerRate);
+    } else if (D5 === 'Higher') {
+        const totalLiability = Math.round(J5_EPFWage * config.epfEmployerRate);
+        epfEmployer = totalLiability - epsEmployer;
+    } else {
+        const totalLiability = Math.round(K5_EPSWage * config.epfEmployerRate);
+        epfEmployer = totalLiability - epsEmployer;
+    }
+
+    // Deferred Pension Special Logic Override
+    if (employee.isDeferredPension && employee.deferredPensionOption === 'WithoutEPS') {
+       // All to EPF
+       const totalER = epfEmployer + epsEmployer;
+       epfEmployer = totalER;
+       epsEmployer = 0;
+    }
+
   } else if (isOptOut) {
       // FOR OPT OUT: Ensure Wages and Flags are zeroed for reporting
       grossPFWage = 0;
@@ -193,7 +272,7 @@ export const calculatePayroll = (
   let esiEmployee = 0;
   let esiEmployer = 0;
   let isESICodeWagesUsed = false;
-  let esiRemark = '';
+  let esiRemark = exitRemark || '';
 
   if (!employee.isESIExempt) {
     // ESI Wage logic remains separate if opted out of PF
@@ -293,7 +372,7 @@ export const calculatePayroll = (
     month,
     year,
     daysInMonth,
-    payableDays,
+    payableDays: effectivePayableDays,
     earnings: { 
       basic, da, retainingAllowance: retaining, hra, conveyance, washing, attire, 
       special1, special2, special3, bonus, leaveEncashment, total: grossEarnings 

@@ -1,9 +1,10 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Search, Edit2, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, Download, X, Save, MapPin, Trash2, Maximize2, UserPlus, CheckCircle2, AlertTriangle, Home, IndianRupee, ShieldCheck, MapPinned, CreditCard, Building2, UserMinus, Camera } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Plus, Search, Edit2, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, Download, X, Save, MapPin, Trash2, Maximize2, UserPlus, CheckCircle2, AlertTriangle, Home, IndianRupee, ShieldCheck, MapPinned, CreditCard, Building2, UserMinus, Camera, LogOut, RotateCcw, KeyRound, FileSpreadsheet, FileText, CheckSquare, Square, Filter } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Employee, User } from '../types';
+import { Employee, User, CompanyProfile } from '../types';
 import { INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS } from '../constants';
+import { generateExcelReport, generatePDFTableReport } from '../services/reportService';
 
 interface EmployeeListProps {
   employees: Employee[];
@@ -15,13 +16,61 @@ interface EmployeeListProps {
   branches: string[];
   sites: string[];
   currentUser?: User;
+  companyProfile?: CompanyProfile;
 }
 
-const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, onAddEmployee, onBulkAddEmployees, designations, divisions, branches, sites, currentUser }) => {
+const AVAILABLE_COLUMNS = [
+    { key: 'id', label: 'Employee ID' },
+    { key: 'name', label: 'Name' },
+    { key: 'designation', label: 'Designation' },
+    { key: 'department', label: 'Department' },
+    { key: 'branch', label: 'Branch' },
+    { key: 'doj', label: 'Date of Joining' },
+    { key: 'mobile', label: 'Mobile No' },
+    { key: 'uanc', label: 'UAN' },
+    { key: 'pfNumber', label: 'PF Number' },
+    { key: 'esiNumber', label: 'ESI Number' },
+    { key: 'pan', label: 'PAN' },
+    { key: 'aadhaarNumber', label: 'Aadhaar' },
+    { key: 'bankAccount', label: 'Bank Account' },
+    { key: 'ifsc', label: 'IFSC' },
+    { key: 'fatherSpouseName', label: 'Father/Spouse' },
+    { key: 'gender', label: 'Gender' },
+    { key: 'dob', label: 'Date of Birth' },
+    { key: 'grossPay', label: 'Gross Salary' },
+    { key: 'dol', label: 'Date of Leaving' },
+    { key: 'leavingReason', label: 'Reason for Leaving' },
+];
+
+const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, onAddEmployee, onBulkAddEmployees, designations, divisions, branches, sites, currentUser, companyProfile }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEmp, setSelectedEmp] = useState<Employee | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  
+  // Rejoin Module State
+  const [showRejoinPanel, setShowRejoinPanel] = useState(false);
+  const [rejoinSearchTerm, setRejoinSearchTerm] = useState('');
+  const [authModal, setAuthModal] = useState({ isOpen: false, password: '', error: '', targetEmp: null as Employee | null });
+
+  // Export Module State
+  const [exportModal, setExportModal] = useState({ 
+      isOpen: false, 
+      format: 'Excel' as 'Excel' | 'PDF', 
+      targetGroup: 'Active' as 'Active' | 'Left',
+      selectedColumns: [] as string[],
+      password: '', 
+      error: '' 
+  });
+
+  // Delete Module State
+  const [deleteModal, setDeleteModal] = useState({
+      isOpen: false,
+      targetEmp: null as Employee | null,
+      password: '',
+      error: ''
+  });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
@@ -29,6 +78,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     id: `EMP00${employees.length + 1}`,
     name: '', gender: 'Male', dob: '',
     doj: new Date().toISOString().split('T')[0],
+    dol: '', leavingReason: '', // Added DOL/Reason
     designation: designations[0] || '',
     division: divisions[0] || '',
     branch: branches[0] || '',
@@ -51,61 +101,21 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
 
   const [newEmpForm, setNewEmpForm] = useState<Partial<Employee>>(getEmptyForm());
 
-  // Logic for Higher Pension Eligibility
-  const pfWages = (Number(newEmpForm.basicPay) || 0) + (Number(newEmpForm.da) || 0) + (Number(newEmpForm.retainingAllowance) || 0);
-  const epfDateStr = newEmpForm.epfMembershipDate;
-  const epfDate = epfDateStr ? new Date(epfDateStr) : null;
-  const cutoffDate = new Date('2014-09-01');
+  const filteredEmployees = employees.filter(emp => {
+    // Basic filter: Search match AND NOT left (unless looking for specific ID)
+    const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || emp.id.toLowerCase().includes(searchTerm.toLowerCase());
+    // Only show active employees in main list unless searching specifically
+    const isActive = !emp.dol; 
+    return matchesSearch && (isActive || searchTerm.length > 2);
+  });
 
-  const isMemberAfter2014 = epfDate ? epfDate >= cutoffDate : false;
-  const isMemberBefore2014 = epfDate ? epfDate < cutoffDate : false;
-  const isWageAbove15k = pfWages > 15000;
+  const exEmployees = useMemo(() => {
+      return employees.filter(e => e.dol && e.dol !== '');
+  }, [employees]);
 
-  // PF Exemption Logic: Active if Member > 31-08-2014 AND Wages > 15000
-  const enablePFExemption = isMemberAfter2014 && isWageAbove15k;
-
-  // Joint Declaration Logic: Active only if Member < 01-09-2014
-  const enableJointDeclaration = isMemberBefore2014;
-
-  // Higher Pension Logic: Active if Member < 01-09-2014 AND Joint Decl AND Wages > 15000
-  const enableHigherPension = isMemberBefore2014 && newEmpForm.jointDeclaration && isWageAbove15k;
-
-  // Auto-Select Logic and Eligibility Enforcement
-  useEffect(() => {
-    setNewEmpForm(prev => {
-        let updates: Partial<Employee> = {};
-        let hasUpdates = false;
-
-        // 1. Enforce Joint Declaration Eligibility
-        // If not member before 2014, Joint Declaration must be false (inactive means false in data too)
-        if (!isMemberBefore2014 && prev.jointDeclaration) {
-            updates.jointDeclaration = false;
-            hasUpdates = true;
-        }
-
-        // 2. Enforce Higher Pension Eligibility
-        const effectiveJointDecl = (hasUpdates && updates.jointDeclaration !== undefined) ? updates.jointDeclaration : prev.jointDeclaration;
-        const effectiveHigherPensionElig = isMemberBefore2014 && effectiveJointDecl && isWageAbove15k;
-
-        if (effectiveHigherPensionElig) {
-             if (prev.pfHigherPension?.isHigherPensionOpted !== 'Yes') {
-                 updates.pfHigherPension = { ...prev.pfHigherPension!, isHigherPensionOpted: 'Yes', enabled: true };
-                 hasUpdates = true;
-             }
-        } else {
-             // If not eligible, ensure it is OFF
-             if (prev.pfHigherPension?.isHigherPensionOpted === 'Yes' || prev.pfHigherPension?.enabled) {
-                 updates.pfHigherPension = { ...prev.pfHigherPension!, isHigherPensionOpted: 'No', enabled: false };
-                 hasUpdates = true;
-             }
-        }
-
-        return hasUpdates ? { ...prev, ...updates } : prev;
-    });
-  }, [isMemberBefore2014, isWageAbove15k, newEmpForm.jointDeclaration]);
-
-  const filteredEmployees = employees.filter(emp => 
-    emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || emp.id.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredExEmployees = exEmployees.filter(emp => 
+      emp.name.toLowerCase().includes(rejoinSearchTerm.toLowerCase()) || 
+      emp.id.toLowerCase().includes(rejoinSearchTerm.toLowerCase())
   );
 
   const calculateGrossWage = (data: Partial<Employee> | Employee) => {
@@ -148,6 +158,126 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
       pfHigherPension: emp.pfHigherPension ? { ...emp.pfHigherPension } : getEmptyForm().pfHigherPension 
     });
     setIsAdding(true);
+  };
+
+  const initiateRejoin = (emp: Employee) => {
+      setAuthModal({ isOpen: true, password: '', error: '', targetEmp: emp });
+  };
+
+  const initiateDelete = (emp: Employee, e: React.MouseEvent) => {
+      e.stopPropagation();
+      setDeleteModal({ isOpen: true, targetEmp: emp, password: '', error: '' });
+  };
+
+  const handleDeleteSubmit = () => {
+      if (!deleteModal.targetEmp) return;
+      
+      if (deleteModal.password === currentUser?.password && (currentUser?.role === 'Developer' || currentUser?.role === 'Administrator')) {
+          const updatedList = employees.filter(e => e.id !== deleteModal.targetEmp!.id);
+          setEmployees(updatedList);
+          
+          if (selectedEmp?.id === deleteModal.targetEmp.id) {
+              setSelectedEmp(null);
+          }
+          
+          setDeleteModal({ isOpen: false, targetEmp: null, password: '', error: '' });
+      } else {
+          setDeleteModal({ ...deleteModal, error: 'Access Denied: Invalid credentials or insufficient privileges.' });
+      }
+  };
+
+  const confirmRejoinAuth = () => {
+      if (authModal.password === currentUser?.password && (currentUser?.role === 'Developer' || currentUser?.role === 'Administrator')) {
+          const target = authModal.targetEmp;
+          if (target) {
+              setAuthModal({ ...authModal, isOpen: false });
+              setShowRejoinPanel(false);
+              proceedToEdit(target); // Open Edit form
+          }
+      } else {
+          setAuthModal({ ...authModal, error: 'Access Denied: Invalid credentials or insufficient privileges.' });
+      }
+  };
+
+  const openExportModal = () => {
+      const defaultCols = AVAILABLE_COLUMNS.filter(c => !['dol', 'leavingReason'].includes(c.key)).map(c => c.key);
+      setExportModal({
+          isOpen: true,
+          format: 'Excel',
+          targetGroup: 'Active',
+          selectedColumns: defaultCols,
+          password: '',
+          error: ''
+      });
+  };
+
+  const toggleColumn = (key: string) => {
+      setExportModal(prev => {
+          const exists = prev.selectedColumns.includes(key);
+          return {
+              ...prev,
+              selectedColumns: exists 
+                  ? prev.selectedColumns.filter(c => c !== key)
+                  : [...prev.selectedColumns, key]
+          };
+      });
+  };
+
+  const toggleAllColumns = () => {
+      setExportModal(prev => {
+          const allRelevant = AVAILABLE_COLUMNS.map(c => c.key);
+          const isAllSelected = prev.selectedColumns.length === allRelevant.length;
+          return {
+              ...prev,
+              selectedColumns: isAllSelected ? [] : allRelevant
+          };
+      });
+  };
+
+  const handleExportSubmit = () => {
+      if (exportModal.password === currentUser?.password && (currentUser?.role === 'Developer' || currentUser?.role === 'Administrator')) {
+          const targetEmps = exportModal.targetGroup === 'Active' 
+              ? employees.filter(e => !e.dol)
+              : employees.filter(e => e.dol);
+          
+          const dateStr = new Date().toISOString().split('T')[0];
+          const fileName = `${exportModal.targetGroup}_Employees_${dateStr}`;
+          const columnsToExport = AVAILABLE_COLUMNS.filter(c => exportModal.selectedColumns.includes(c.key));
+
+          if (exportModal.format === 'Excel') {
+              const data = targetEmps.map(e => {
+                  const row: any = {};
+                  columnsToExport.forEach(col => {
+                      if (col.key === 'grossPay') {
+                          row[col.label] = calculateGrossWage(e);
+                      } else {
+                          row[col.label] = (e as any)[col.key];
+                      }
+                  });
+                  return row;
+              });
+              generateExcelReport(data, `${exportModal.targetGroup} List`, fileName);
+          } else {
+              const headers = columnsToExport.map(c => c.label);
+              const data = targetEmps.map(e => columnsToExport.map(col => {
+                  if (col.key === 'grossPay') return calculateGrossWage(e).toLocaleString();
+                  return (e as any)[col.key] || '-';
+              }));
+              
+              generatePDFTableReport(
+                  `${exportModal.targetGroup} Employee Master List`, 
+                  headers, 
+                  data, 
+                  fileName, 
+                  'l', 
+                  `Total Records: ${targetEmps.length}`, 
+                  companyProfile
+              );
+          }
+          setExportModal({ ...exportModal, isOpen: false, password: '' });
+      } else {
+          setExportModal({ ...exportModal, error: 'Authentication Failed: Invalid password or insufficient privileges.' });
+      }
   };
 
   const handleCloseModal = () => {
@@ -195,14 +325,22 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
           <input type="text" placeholder="Search Master Records..." className="w-full pl-10 pr-4 py-2.5 bg-[#0f172a] border border-slate-700 rounded-lg text-white outline-none focus:ring-2 focus:ring-blue-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </div>
         <div className="flex items-center gap-3">
-            <button onClick={() => { setEditingId(null); setNewEmpForm(getEmptyForm()); setIsAdding(true); }} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-lg font-bold"><Plus size={18} /> Add New Record</button>
+            <button onClick={openExportModal} className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all font-bold text-xs">
+                <Download size={16} /> Export Data
+            </button>
+            <button onClick={() => setShowRejoinPanel(true)} className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all font-bold text-xs">
+                <RotateCcw size={16} /> Rejoin Ex-Employee
+            </button>
+            <button onClick={() => { setEditingId(null); setNewEmpForm(getEmptyForm()); setIsAdding(true); }} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-lg font-bold">
+                <Plus size={18} /> Add New Record
+            </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl overflow-hidden h-fit max-h-[800px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-left">
-                <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-widest font-bold sticky top-0">
+                <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-widest font-bold sticky top-0 z-10">
                 <tr>
                     <th className="px-6 py-4 bg-[#0f172a]">Identity</th>
                     <th className="px-6 py-4 bg-[#0f172a]">Organization</th>
@@ -212,11 +350,12 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                 {filteredEmployees.map((emp) => (
-                    <tr key={emp.id} onClick={() => setSelectedEmp(emp)} className={`cursor-pointer hover:bg-slate-800/50 ${selectedEmp?.id === emp.id ? 'bg-blue-900/40 border-l-4 border-blue-500' : 'border-l-4 border-transparent'}`}>
+                    <tr key={emp.id} onClick={() => setSelectedEmp(emp)} className={`cursor-pointer hover:bg-slate-800/50 ${selectedEmp?.id === emp.id ? 'bg-blue-900/40 border-l-4 border-blue-500' : 'border-l-4 border-transparent'} ${emp.dol ? 'opacity-60 grayscale' : ''}`}>
                     <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center border border-slate-600 overflow-hidden">
+                            <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center border border-slate-600 overflow-hidden relative">
                                 {emp.photoUrl ? <img src={emp.photoUrl} className="w-full h-full object-cover" /> : <User2 size={18} className="text-slate-400" />}
+                                {emp.dol && <div className="absolute inset-0 bg-red-900/60 flex items-center justify-center font-black text-[8px] text-white">LEFT</div>}
                             </div>
                             <div>
                                 <div className="font-bold text-white text-sm">{emp.name}</div>
@@ -231,8 +370,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     <td className="px-6 py-4">
                         <div className="font-mono text-emerald-400 font-bold">₹{calculateGrossWage(emp).toLocaleString()}</div>
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-6 py-4 text-right flex justify-end gap-2 items-center h-full">
                         <button onClick={(e) => { e.stopPropagation(); proceedToEdit(emp); }} className="text-slate-400 hover:text-blue-400 p-2 hover:bg-blue-900/30 rounded-lg transition-all"><Edit2 size={16} /></button>
+                        {(currentUser?.role === 'Developer' || currentUser?.role === 'Administrator') && (
+                            <button onClick={(e) => initiateDelete(emp, e)} className="text-slate-400 hover:text-red-400 p-2 hover:bg-red-900/20 rounded-lg transition-all" title="Delete Record"><Trash2 size={16} /></button>
+                        )}
                     </td>
                     </tr>
                 ))}
@@ -243,7 +385,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
         <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-6 shadow-xl h-fit sticky top-24">
           {selectedEmp ? (
             <div className="space-y-6 animate-in fade-in duration-300">
-                <div className="flex flex-col items-center text-center">
+                <div className="flex flex-col items-center text-center relative">
+                    {selectedEmp.dol && (
+                        <div className="absolute top-0 right-0 bg-red-900 text-red-100 text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest border border-red-500/50">Ex-Employee</div>
+                    )}
                     <div className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center mb-4 border-2 border-slate-700 shadow-xl overflow-hidden">
                         {selectedEmp.photoUrl ? <img src={selectedEmp.photoUrl} className="w-full h-full object-cover" /> : <User2 size={48} className="text-slate-500" />}
                     </div>
@@ -260,6 +405,18 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                         <p className="text-white font-bold">{selectedEmp.doj}</p>
                     </div>
                 </div>
+                {selectedEmp.dol && (
+                    <div className="bg-red-900/10 border border-red-900/30 p-4 rounded-xl text-xs space-y-2">
+                        <div className="flex justify-between">
+                            <span className="text-red-400 font-bold uppercase">Date of Leaving</span>
+                            <span className="text-white font-mono">{selectedEmp.dol}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-red-400 font-bold uppercase">Reason</span>
+                            <span className="text-white text-right">{selectedEmp.leavingReason || 'N/A'}</span>
+                        </div>
+                    </div>
+                )}
                 <div className="space-y-4 pt-4 border-t border-slate-800">
                     <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500">UAN No (PF)</span>
@@ -279,6 +436,163 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
           )}
         </div>
       </div>
+
+      {/* REJOIN SLIDE-IN PANEL */}
+      <div className={`fixed inset-y-0 right-0 w-96 bg-[#1e293b] border-l border-slate-700 shadow-2xl transform transition-transform duration-300 z-40 flex flex-col ${showRejoinPanel ? 'translate-x-0' : 'translate-x-full'}`}>
+          <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-[#0f172a]">
+              <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-900/30 rounded text-amber-400"><RotateCcw size={20} /></div>
+                  <h3 className="font-bold text-white text-sm">Rejoin Ex-Employee</h3>
+              </div>
+              <button onClick={() => setShowRejoinPanel(false)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+          </div>
+          <div className="p-4 bg-[#0f172a] border-b border-slate-800">
+              <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                  <input type="text" placeholder="Search Ex-Employees..." className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white outline-none focus:ring-1 focus:ring-amber-500" value={rejoinSearchTerm} onChange={(e) => setRejoinSearchTerm(e.target.value)} />
+              </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {filteredExEmployees.length === 0 ? (
+                  <div className="text-center text-slate-500 text-xs py-10">No ex-employees found matching criteria.</div>
+              ) : (
+                  filteredExEmployees.map(emp => (
+                      <div key={emp.id} className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 hover:border-amber-500/50 transition-all group">
+                          <div className="flex justify-between items-start mb-2">
+                              <div>
+                                  <h4 className="font-bold text-white text-sm">{emp.name}</h4>
+                                  <p className="text-[10px] text-slate-400 font-mono">{emp.id}</p>
+                              </div>
+                              <span className="text-[9px] font-black text-red-400 bg-red-900/20 px-2 py-1 rounded border border-red-900/30">LEFT: {emp.dol}</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 line-clamp-1 mb-3">{emp.leavingReason || 'No reason specified'}</p>
+                          <button onClick={() => initiateRejoin(emp)} className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2">
+                              <Edit2 size={12} /> Rejoin / Edit Profile
+                          </button>
+                      </div>
+                  ))
+              )}
+          </div>
+      </div>
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {deleteModal.isOpen && deleteModal.targetEmp && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                <button onClick={() => setDeleteModal({ isOpen: false, targetEmp: null, password: '', error: '' })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                
+                <div className="flex flex-col items-center gap-2 mb-2">
+                    <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><Trash2 size={24} /></div>
+                    <h3 className="text-lg font-bold text-white text-center">Delete Employee?</h3>
+                    <p className="text-xs text-slate-400 text-center">
+                        Confirm deletion of <b>{deleteModal.targetEmp.name}</b> ({deleteModal.targetEmp.id}).<br/>
+                        <span className="text-red-400 font-bold">This action cannot be undone.</span>
+                    </p>
+                </div>
+
+                <div className="space-y-3 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-2 text-xs text-slate-400 mb-1"><KeyRound size={14} /> Admin Verification</div>
+                    <input type="password" placeholder="Enter Password" autoFocus className={`w-full bg-[#0f172a] border ${deleteModal.error ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all text-sm`} value={deleteModal.password} onChange={(e) => setDeleteModal({...deleteModal, password: e.target.value, error: ''})} onKeyDown={(e) => e.key === 'Enter' && handleDeleteSubmit()} />
+                    {deleteModal.error && <p className="text-[10px] text-red-400 font-bold text-center animate-pulse">{deleteModal.error}</p>}
+                </div>
+                <button onClick={handleDeleteSubmit} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-900/20 transition-all text-sm flex items-center justify-center gap-2">
+                    CONFIRM DELETE
+                </button>
+            </div>
+        </div>
+      )}
+
+      {/* EXPORT DATA MODAL */}
+      {exportModal.isOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-2xl rounded-2xl border border-slate-700 shadow-2xl flex flex-col relative max-h-[90vh]">
+                <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex justify-between items-center sticky top-0 z-10">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-900/30 rounded-lg text-blue-400"><Download size={20} /></div>
+                        <div>
+                            <h3 className="text-lg font-black text-white">Export Master Data</h3>
+                            <p className="text-xs text-slate-400">Select data filters and columns</p>
+                        </div>
+                    </div>
+                    <button onClick={() => setExportModal({...exportModal, isOpen: false, error: '', password: ''})} className="text-slate-400 hover:text-white transition-colors"><X size={24} /></button>
+                </div>
+                
+                <div className="p-6 flex-1 overflow-y-auto custom-scrollbar space-y-6">
+                    {/* Filter & Format */}
+                    <div className="grid grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Target Group</label>
+                            <div className="flex gap-2">
+                                <button onClick={() => setExportModal({...exportModal, targetGroup: 'Active'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${exportModal.targetGroup === 'Active' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>Active Employees</button>
+                                <button onClick={() => setExportModal({...exportModal, targetGroup: 'Left'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${exportModal.targetGroup === 'Left' ? 'bg-red-600 border-red-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>Ex-Employees</button>
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Format</label>
+                            <div className="flex gap-2">
+                                <button onClick={() => setExportModal({...exportModal, format: 'Excel'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2 ${exportModal.format === 'Excel' ? 'bg-emerald-900/40 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}><FileSpreadsheet size={14} /> Excel</button>
+                                <button onClick={() => setExportModal({...exportModal, format: 'PDF'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2 ${exportModal.format === 'PDF' ? 'bg-blue-900/40 border-blue-500 text-blue-400' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}><FileText size={14} /> PDF</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Columns Selection */}
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"><Filter size={12} /> Select Columns</label>
+                            <button onClick={toggleAllColumns} className="text-[10px] font-bold text-blue-400 hover:text-blue-300">
+                                {exportModal.selectedColumns.length === AVAILABLE_COLUMNS.length ? 'Deselect All' : 'Select All'}
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {AVAILABLE_COLUMNS.map(col => (
+                                <button 
+                                    key={col.key} 
+                                    onClick={() => toggleColumn(col.key)}
+                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all text-left ${exportModal.selectedColumns.includes(col.key) ? 'bg-blue-900/20 border-blue-500/50 text-white' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'}`}
+                                >
+                                    {exportModal.selectedColumns.includes(col.key) ? <CheckSquare size={14} className="text-blue-400 shrink-0" /> : <Square size={14} className="text-slate-600 shrink-0" />}
+                                    <span className="truncate">{col.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Security Check */}
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-3">
+                        <div className="flex items-center gap-2 text-xs text-slate-400"><KeyRound size={14} /> Security Verification</div>
+                        <input type="password" placeholder="Enter Admin Password" className={`w-full bg-[#0f172a] border ${exportModal.error ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm`} value={exportModal.password} onChange={(e) => setExportModal({...exportModal, password: e.target.value, error: ''})} onKeyDown={(e) => e.key === 'Enter' && handleExportSubmit()} />
+                        {exportModal.error && <p className="text-[10px] text-red-400 font-bold animate-pulse">{exportModal.error}</p>}
+                    </div>
+                </div>
+
+                <div className="p-6 bg-[#1e293b] border-t border-slate-800">
+                    <button onClick={handleExportSubmit} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-900/20 transition-all text-sm flex items-center justify-center gap-2">
+                        SECURE DOWNLOAD ({exportModal.selectedColumns.length} cols)
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* AUTH MODAL FOR REJOIN */}
+      {authModal.isOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
+                <button onClick={() => setAuthModal({...authModal, isOpen: false})} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                <div className="flex flex-col items-center gap-2">
+                    <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><KeyRound size={24} /></div>
+                    <h3 className="text-lg font-bold text-white text-center">Admin Access Required</h3>
+                    <p className="text-xs text-slate-400 text-center">Enter Developer/Admin password to modify ex-employee records.</p>
+                </div>
+                <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                    <input type="password" placeholder="Enter Password" autoFocus className={`w-full bg-[#0f172a] border ${authModal.error ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all text-sm`} value={authModal.password} onChange={(e) => setAuthModal({...authModal, password: e.target.value, error: ''})} onKeyDown={(e) => e.key === 'Enter' && confirmRejoinAuth()} />
+                    {authModal.error && <p className="text-[10px] text-red-400 font-bold text-center animate-pulse">{authModal.error}</p>}
+                </div>
+                <button onClick={confirmRejoinAuth} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-900/20 transition-all text-sm">CONFIRM ACCESS</button>
+            </div>
+        </div>
+      )}
 
       {isAdding && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -409,45 +723,103 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
 
                 {/* NEW HIGHER PENSION ELIGIBILITY SECTION */}
                 <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 mt-8 mb-4">
-                    <h3 className="text-xs font-black text-amber-500 uppercase tracking-widest mb-4 flex items-center gap-2">HIGHER PENSION ELIGIBILITY</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <h3 className="text-xs font-black text-amber-500 uppercase tracking-widest mb-4 flex items-center gap-2">PF COMPLIANCE & HIGHER PENSION</h3>
+                    
+                    {/* Row 1: Basic PF & History */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                         <div className="space-y-1.5">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Member of EPF Since</label>
-                            <input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.epfMembershipDate} onChange={e => setNewEmpForm({...newEmpForm, epfMembershipDate: e.target.value})} />
-                        </div>
-                        <div className="space-y-1.5">
-                            <label className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${enablePFExemption ? 'bg-slate-800 border-slate-600 cursor-pointer' : 'bg-slate-900/30 border-slate-800 cursor-not-allowed opacity-50'}`}>
-                                <input type="checkbox" className="w-4 h-4" disabled={!enablePFExemption} checked={newEmpForm.isPFExempt} onChange={e => setNewEmpForm({...newEmpForm, isPFExempt: e.target.checked})} />
-                                <span className="text-[10px] font-bold text-white uppercase">PF Exemption</span>
-                            </label>
-                            <p className="text-[9px] text-slate-500 px-1">PF Wages: <span className="font-mono font-bold text-slate-400">₹{pfWages}</span></p>
-                        </div>
-                        <div className="space-y-1.5">
-                            <label className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${enableJointDeclaration ? 'bg-slate-800 border-slate-600 cursor-pointer hover:bg-slate-700' : 'bg-slate-900/30 border-slate-800 cursor-not-allowed opacity-50'}`}>
-                                <input 
-                                    type="checkbox" 
-                                    className="w-4 h-4" 
-                                    disabled={!enableJointDeclaration}
-                                    checked={newEmpForm.jointDeclaration} 
-                                    onChange={e => setNewEmpForm({...newEmpForm, jointDeclaration: e.target.checked})} 
-                                />
-                                <span className="text-[10px] font-bold text-white uppercase">Joint Declaration given</span>
+                             <label className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${newEmpForm.isPFExempt ? 'bg-amber-900/20 border-amber-500/50' : 'bg-slate-800 border-slate-700'}`}>
+                                <input type="checkbox" className="w-4 h-4" checked={newEmpForm.isPFExempt} onChange={e => setNewEmpForm({...newEmpForm, isPFExempt: e.target.checked})} />
+                                <span className={`text-[10px] font-bold uppercase ${newEmpForm.isPFExempt ? 'text-amber-400' : 'text-white'}`}>PF Exempted</span>
                             </label>
                         </div>
                         <div className="space-y-1.5">
-                            <label className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${enableHigherPension ? 'bg-emerald-900/20 border-emerald-500/50 cursor-pointer' : 'bg-slate-900/30 border-slate-800 cursor-not-allowed opacity-50'}`}>
-                                <input type="checkbox" className="w-4 h-4 text-emerald-500 focus:ring-emerald-500 bg-slate-900" disabled={!enableHigherPension} checked={newEmpForm.pfHigherPension?.isHigherPensionOpted === 'Yes'} onChange={e => {
-                                    if(enableHigherPension) {
-                                        setNewEmpForm({...newEmpForm, pfHigherPension: { ...newEmpForm.pfHigherPension!, isHigherPensionOpted: e.target.checked ? 'Yes' : 'No', enabled: e.target.checked }})
-                                    }
-                                }} />
-                                <span className={`text-[10px] font-bold uppercase ${enableHigherPension ? 'text-emerald-400' : 'text-slate-500'}`}>Higher Pension</span>
-                            </label>
+                            <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.isPFExempt ? 'text-slate-600' : 'text-slate-500'}`}>Contributed Pre-2014?</label>
+                            <select 
+                                disabled={newEmpForm.isPFExempt}
+                                className={`w-full bg-slate-900 border rounded-xl p-3 text-sm outline-none transition-colors ${newEmpForm.isPFExempt ? 'border-slate-800 text-slate-600 cursor-not-allowed' : 'border-slate-700 text-white'}`}
+                                value={newEmpForm.pfHigherPension?.contributedBefore2014 || 'No'}
+                                onChange={e => setNewEmpForm({
+                                    ...newEmpForm, 
+                                    pfHigherPension: { ...newEmpForm.pfHigherPension!, contributedBefore2014: e.target.value as 'Yes'|'No' }
+                                })}
+                            >
+                                <option value="Yes">Yes</option>
+                                <option value="No">No</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.isPFExempt ? 'text-slate-600' : 'text-slate-500'}`}>DOJ Impact (EPF History)</label>
+                            <input 
+                                type="date" 
+                                disabled={newEmpForm.isPFExempt}
+                                className={`w-full bg-slate-900 border rounded-xl p-3 text-sm outline-none transition-colors ${newEmpForm.isPFExempt ? 'border-slate-800 text-slate-600 cursor-not-allowed' : 'border-slate-700 text-white'}`}
+                                value={newEmpForm.pfHigherPension?.dojImpact || ''} 
+                                onChange={e => setNewEmpForm({
+                                    ...newEmpForm, 
+                                    pfHigherPension: { ...newEmpForm.pfHigherPension!, dojImpact: e.target.value }
+                                })} 
+                            />
+                        </div>
+                    </div>
+
+                    {/* Row 2: Contributions & Option */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="space-y-1.5">
+                            <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.isPFExempt ? 'text-slate-600' : 'text-slate-500'}`}>Employee Contribution</label>
+                            <select 
+                                disabled={newEmpForm.isPFExempt}
+                                className={`w-full bg-slate-900 border rounded-xl p-3 text-sm outline-none transition-colors ${newEmpForm.isPFExempt ? 'border-slate-800 text-slate-600 cursor-not-allowed' : 'border-slate-700 text-white'}`}
+                                value={newEmpForm.pfHigherPension?.employeeContribution || 'Regular'}
+                                onChange={e => setNewEmpForm({
+                                    ...newEmpForm, 
+                                    pfHigherPension: { ...newEmpForm.pfHigherPension!, employeeContribution: e.target.value as 'Regular'|'Higher' }
+                                })}
+                            >
+                                <option value="Regular">Regular (Capped)</option>
+                                <option value="Higher">Higher (Actual)</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.isPFExempt ? 'text-slate-600' : 'text-slate-500'}`}>Employer Contribution</label>
+                            <select 
+                                disabled={newEmpForm.isPFExempt}
+                                className={`w-full bg-slate-900 border rounded-xl p-3 text-sm outline-none transition-colors ${newEmpForm.isPFExempt ? 'border-slate-800 text-slate-600 cursor-not-allowed' : 'border-slate-700 text-white'}`}
+                                value={newEmpForm.pfHigherPension?.employerContribution || 'Regular'}
+                                onChange={e => setNewEmpForm({
+                                    ...newEmpForm, 
+                                    pfHigherPension: { ...newEmpForm.pfHigherPension!, employerContribution: e.target.value as 'Regular'|'Higher' }
+                                })}
+                            >
+                                <option value="Regular">Regular (Capped)</option>
+                                <option value="Higher">Higher (Actual)</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.isPFExempt ? 'text-slate-600' : 'text-slate-500'}`}>Higher Pension Opted?</label>
+                            <select 
+                                disabled={newEmpForm.isPFExempt}
+                                className={`w-full border rounded-xl p-3 text-sm font-bold outline-none transition-colors ${
+                                    newEmpForm.isPFExempt 
+                                    ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed' 
+                                    : newEmpForm.pfHigherPension?.isHigherPensionOpted === 'Yes' 
+                                        ? 'bg-emerald-900/20 border-emerald-500 text-emerald-400' 
+                                        : 'bg-slate-900 border-slate-700 text-white'
+                                }`}
+                                value={newEmpForm.pfHigherPension?.isHigherPensionOpted || 'No'}
+                                onChange={e => setNewEmpForm({
+                                    ...newEmpForm, 
+                                    pfHigherPension: { ...newEmpForm.pfHigherPension!, isHigherPensionOpted: e.target.value as 'Yes'|'No' }
+                                })}
+                            >
+                                <option value="Yes">Yes</option>
+                                <option value="No">No</option>
+                            </select>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 mt-4">
+                <div className={`bg-slate-900/50 p-6 rounded-3xl border border-slate-800 mt-4 transition-all ${newEmpForm.isPFExempt ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
                   <div className="flex items-center justify-between mb-6">
                       <div className="flex flex-col">
                           <h3 className="text-xs font-black text-amber-500 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={18} /> EPS Maturity Control (Age 58+)</h3>

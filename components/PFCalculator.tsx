@@ -61,19 +61,61 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
       // Actual Wage (Basic + DA + Retaining)
       const actualWage = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
       
-      // Statutory Wage Caps - Forced to 0 if Opt Out
-      const epfWage = isOptOut ? 0 : (emp.isPFHigherWages ? actualWage : Math.min(actualWage, 15000));
-      const epsWage = isOptOut ? 0 : ((emp.pfHigherPension?.enabled && emp.pfHigherPension.isHigherPensionOpted === 'Yes') 
-          ? actualWage 
-          : Math.min(actualWage, 15000)); 
-      const edliWage = isOptOut ? 0 : Math.min(actualWage, 15000);
+      // Calculate Wages based on Rules (J5, K5, L5)
+      let epfWage = 0;
+      let epsWage = 0;
+      let edliWage = 0;
+
+      if (!isOptOut) {
+          const hp = emp.pfHigherPension;
+          const A5 = hp?.contributedBefore2014 === 'Yes';
+          const B5_Date = emp.epfMembershipDate ? new Date(emp.epfMembershipDate) : null;
+          const C5 = hp?.employeeContribution || (emp.isPFHigherWages ? 'Higher' : 'Regular');
+          const D5 = hp?.employerContribution || (emp.isEmployerPFHigher ? 'Higher' : 'Regular');
+          const E5 = hp?.isHigherPensionOpted === 'Yes';
+          const CUTOFF_2014 = new Date('2014-09-01');
+          const isPost2014 = B5_Date && B5_Date >= CUTOFF_2014;
+          const isPre2014 = B5_Date && B5_Date < CUTOFF_2014;
+
+          // J5: EPF Wage
+          if (D5 === 'Higher') {
+              epfWage = actualWage;
+          } else {
+              if (C5 === 'Regular') epfWage = Math.min(actualWage, config.epfCeiling);
+              else epfWage = actualWage;
+          }
+
+          // K5: EPS Wage
+          if (A5 && C5 === 'Higher' && D5 === 'Higher' && E5 && isPre2014) {
+              epsWage = epfWage;
+          } else if (!A5 && isPost2014 && actualWage > config.epfCeiling) {
+              epsWage = 0;
+          } else {
+              if (epfWage > config.epfCeiling) {
+                  if (D5 === 'Regular') epsWage = config.epfCeiling;
+                  else if (!E5) epsWage = config.epfCeiling;
+                  else if (!A5) epsWage = config.epfCeiling;
+                  else epsWage = epfWage;
+              } else {
+                  epsWage = epfWage;
+              }
+          }
+
+          // L5: EDLI Wage
+          edliWage = Math.min(epfWage, 15000);
+      }
+
+      // Rounding
+      epfWage = Math.round(epfWage);
+      epsWage = Math.round(epsWage);
+      edliWage = Math.round(edliWage);
 
       // Accumulate Wages
-      totalEPFWages += Math.round(epfWage);
-      totalEPSWages += Math.round(epsWage);
-      totalEDLIWages += Math.round(edliWage);
+      totalEPFWages += epfWage;
+      totalEPSWages += epsWage;
+      totalEDLIWages += edliWage;
 
-      // Accumulate Contributions
+      // Accumulate Contributions (From Engine Result)
       ac1_EE += (r.deductions.epf + r.deductions.vpf); 
       ac1_ER += r.employerContributions.epf;
       ac10 += r.employerContributions.eps;
@@ -82,12 +124,12 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
         uan: emp.uanc,
         name: emp.name,
         gross: r.earnings.total,
-        epfWage: Math.round(epfWage),
-        epsWage: Math.round(epsWage),
-        edliWage: Math.round(edliWage),
-        eeShare: Math.round(r.deductions.epf),
-        erShareEPS: Math.round(r.employerContributions.eps),
-        erShareEPFDiff: Math.round(r.employerContributions.epf),
+        epfWage,
+        epsWage,
+        edliWage,
+        eeShare: Math.round(r.deductions.epf), // M5
+        erShareEPS: Math.round(r.employerContributions.eps), // N5
+        erShareEPFDiff: Math.round(r.employerContributions.epf), // O5
         ncp: r.daysInMonth - r.payableDays,
         refund: 0,
         isOptOut 

@@ -1,4 +1,3 @@
-
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -91,7 +90,7 @@ export const generatePDFTableReport = (
   if (footnote) {
       doc.setFontSize(8);
       doc.setFont("helvetica", "italic");
-      doc.setTextColor(0);
+      doc.setTextColor(0, 0, 128); // Navy Blue
       const printY = finalY > doc.internal.pageSize.height - 20 ? doc.internal.pageSize.height - 20 : finalY;
       const splitFootnote = doc.splitTextToSize(footnote, 180);
       doc.text(splitFootnote, 14, printY);
@@ -296,9 +295,12 @@ export const generatePaySlipsPDF = (
     doc.text(`Amount in Words: ${numberToWords(Math.round(res.netPay))} Rupees Only`, 14, finalY + 25);
 
     // Footnotes (Italic, Smaller)
-    doc.setFontSize(8); doc.setFont("helvetica", "italic"); doc.setFont("normal");
+    doc.setFontSize(8); doc.setFont("helvetica", "italic");
     let noteY = finalY + 32;
     
+    // Set Navy Blue Color for footnotes
+    doc.setTextColor(0, 0, 128); 
+
     if (res.isCode88) {
         doc.text("* PF calculated on Code Wages (Social Security Code 2020)", 14, noteY);
         noteY += 4;
@@ -308,7 +310,7 @@ export const generatePaySlipsPDF = (
         noteY += 4;
     }
 
-    doc.setTextColor(150);
+    doc.setTextColor(150); // Reset to gray for system message
     doc.text("This is a computer-generated document and does not require a signature.", 105, noteY + 5, { align: 'center' });
     doc.setTextColor(0);
   });
@@ -821,131 +823,142 @@ export const generateCodeOnWagesReport = (data: PayrollResult[], employees: Empl
 };
 
 export const generateFormB = (data: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    // Standard Register of Wages format
-    const headers = ['Sl', 'Name', 'Designation', 'Work Days', 'Basic', 'DA', 'HRA', 'Other Allow', 'Gross', 'PF', 'ESI', 'PT', 'TDS', 'Total Ded', 'Net Pay'];
-    const rows = data.map((r, i) => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const otherAllow = r.earnings.retainingAllowance + r.earnings.conveyance + r.earnings.special1 + r.earnings.special2 + r.earnings.special3 + r.earnings.washing + r.earnings.attire + r.earnings.leaveEncashment + r.earnings.bonus;
-        return [
-            i + 1,
-            emp?.name || '',
-            emp?.designation || '',
-            r.payableDays,
-            r.earnings.basic,
-            r.earnings.da,
-            r.earnings.hra,
-            otherAllow,
-            r.earnings.total,
-            r.deductions.epf + r.deductions.vpf,
-            r.deductions.esi,
-            r.deductions.pt,
-            r.deductions.it,
-            r.deductions.total,
-            r.netPay
-        ];
-    });
-    generatePDFTableReport(`Form B - Register of Wages (${month} ${year})`, headers, rows as any[][], `FormB_${month}_${year}`, 'l', undefined, companyProfile);
+  const headers = ['Sl', 'Name', 'Designation', 'Total Days', 'Actual Wages', 'Total Earnings', 'Deductions', 'Net Paid', 'Sign'];
+  const tableData = data.map((r, i) => {
+    const emp = employees.find(e => e.id === r.employeeId);
+    return [
+      i + 1,
+      emp?.name || '',
+      emp?.designation || '',
+      r.payableDays,
+      (r.earnings.basic + r.earnings.da).toLocaleString(),
+      r.earnings.total.toLocaleString(),
+      r.deductions.total.toLocaleString(),
+      r.netPay.toLocaleString(),
+      ''
+    ];
+  });
+  generatePDFTableReport(`FORM B - Register of Wages - ${month} ${year}`, headers, tableData as any[][], `FormB_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateFormC = (data: PayrollResult[], employees: Employee[], attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile) => {
-    // Register of Attendance
-    const headers = ['Sl', 'Name', 'Designation', 'Total Days', 'Worked', 'Leave', 'Absent/LOP'];
-    const rows = data.map((r, i) => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const att = attendances.find(a => a.employeeId === r.employeeId && a.month === month && a.year === year);
-        const leave = (att?.earnedLeave || 0) + (att?.sickLeave || 0) + (att?.casualLeave || 0);
-        const lop = att?.lopDays || 0;
-        return [
-            i + 1,
-            emp?.name || '',
-            emp?.designation || '',
-            r.daysInMonth,
-            att?.presentDays || 0,
-            leave,
-            lop
-        ];
-    });
-    generatePDFTableReport(`Form C - Register of Attendance (${month} ${year})`, headers, rows as any[][], `FormC_${month}_${year}`, 'p', undefined, companyProfile);
+  const headers = ['Sl', 'Name', 'Designation', 'Attendance Summary', 'Present', 'Leaves', 'LOP'];
+  const tableData = data.map((r, i) => {
+    const emp = employees.find(e => e.id === r.employeeId);
+    const att = attendances.find(a => a.employeeId === r.employeeId && a.month === month && a.year === year);
+    return [
+      i + 1,
+      emp?.name || '',
+      emp?.designation || '',
+      'Detailed Daily Attendance Record N/A in Report',
+      att?.presentDays || 0,
+      (att?.earnedLeave || 0) + (att?.sickLeave || 0) + (att?.casualLeave || 0),
+      att?.lopDays || 0
+    ];
+  });
+  generatePDFTableReport(`FORM C - Muster Roll - ${month} ${year}`, headers, tableData as any[][], `FormC_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateTNFormR = (data: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-   generateFormB(data, employees, month, year, companyProfile); 
+  const headers = ['Sl', 'Name', 'Designation', 'Basic', 'DA', 'HRA', 'Gross', 'Deductions', 'Net', 'Sign'];
+  const tableData = data.map((r, i) => {
+    const emp = employees.find(e => e.id === r.employeeId);
+    return [
+      i + 1,
+      emp?.name || '',
+      emp?.designation || '',
+      r.earnings.basic,
+      r.earnings.da,
+      r.earnings.hra,
+      r.earnings.total,
+      r.deductions.total,
+      r.netPay,
+      ''
+    ];
+  });
+  generatePDFTableReport(`FORM R (TN) - Register of Wages - ${month} ${year}`, headers, tableData as any[][], `TN_FormR_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateTNFormT = (data: PayrollResult[], employees: Employee[], attendances: Attendance[], leaveLedgers: LeaveLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'Gross Wages', 'Deductions', 'Net Wages', 'Signature'];
-    const rows = data.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        return [
-            r.employeeId,
-            emp?.name || '',
-            r.earnings.total,
-            r.deductions.total,
-            r.netPay,
-            ''
-        ];
-    });
-    generatePDFTableReport(`Form T - Wage Slips Register (${month} ${year})`, headers, rows as any[][], `FormT_${month}_${year}`, 'p', undefined, companyProfile);
+  const headers = ['Sl', 'Name', 'Designation', 'Worked', 'Earned', 'Net Pay', 'EL Bal'];
+  const tableData = data.map((r, i) => {
+    const emp = employees.find(e => e.id === r.employeeId);
+    const ledger = leaveLedgers.find(l => l.employeeId === r.employeeId);
+    return [
+      i + 1,
+      emp?.name || '',
+      emp?.designation || '',
+      r.payableDays,
+      r.earnings.total,
+      r.netPay,
+      ledger?.el.balance || 0
+    ];
+  });
+  generatePDFTableReport(`FORM T (TN) - Wage Slip - ${month} ${year}`, headers, tableData as any[][], `TN_FormT_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateTNFormP = (data: PayrollResult[], employees: Employee[], advanceLedgers: AdvanceLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'Adv. Opening', 'Adv. Granted', 'Recovered', 'Balance'];
-    const rows = data.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
-        return [
-            r.employeeId,
-            emp?.name || '',
-            adv?.opening || 0,
-            adv?.totalAdvance || 0,
-            r.deductions.advanceRecovery,
-            adv?.balance || 0
-        ];
-    });
-    generatePDFTableReport(`Form P - Register of Advances (${month} ${year})`, headers, rows as any[][], `FormP_${month}_${year}`, 'p', undefined, companyProfile);
+  const headers = ['Sl', 'Name', 'Total Advance', 'Paid', 'Recovered (This Month)', 'Balance'];
+  const tableData = data.map((r, i) => {
+    const emp = employees.find(e => e.id === r.employeeId);
+    const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
+    if (!adv || (adv.balance <= 0 && r.deductions.advanceRecovery <= 0)) return null;
+    return [
+      i + 1,
+      emp?.name || '',
+      adv.totalAdvance,
+      adv.paidAmount,
+      r.deductions.advanceRecovery,
+      adv.balance
+    ];
+  }).filter(Boolean);
+  
+  if (tableData.length === 0) {
+      generatePDFTableReport(`FORM P (TN) - Register of Advances - ${month} ${year}`, headers, [['No active advances']], `TN_FormP_${month}_${year}`, 'l', undefined, companyProfile);
+  } else {
+      generatePDFTableReport(`FORM P (TN) - Register of Advances - ${month} ${year}`, headers, tableData as any[][], `TN_FormP_${month}_${year}`, 'l', undefined, companyProfile);
+  }
 };
 
 export const generateESIExitReport = (data: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'ESI No', 'Reason for Exit', 'Last Working Day'];
-    const rows = employees.filter(e => {
-        const r = data.find(d => d.employeeId === e.id);
-        const wage = r ? r.earnings.total : 0; 
-        const crossedCeiling = wage > 21000 && !e.isESIExempt;
-        let leftService = false;
-        if (e.dol) {
-            const dol = new Date(e.dol);
-            const mIdx = ['January','February','March','April','May','June','July','August','September','October','November','December'].indexOf(month);
-            if (dol.getMonth() === mIdx && dol.getFullYear() === year) {
-                leftService = true;
-            }
-        }
-        return crossedCeiling || leftService;
-    }).map(e => {
-        const r = data.find(d => d.employeeId === e.id);
-        const wage = r ? r.earnings.total : 0;
-        let reason = '';
-        if (wage > 21000) reason = 'Wage Limit Exceeded';
-        if (e.dol) {
-            const dol = new Date(e.dol);
-             const mIdx = ['January','February','March','April','May','June','July','August','September','October','November','December'].indexOf(month);
-            if (dol.getMonth() === mIdx && dol.getFullYear() === year) reason = 'Left Service';
-        }
-        return [
-            e.id,
-            e.name,
-            e.esiNumber || 'N/A',
-            reason,
-            e.dol || '-'
-        ];
-    });
-    
-    if (rows.length === 0) {
-        rows.push(['-', 'No Exits Found', '-', '-', '-']);
-    }
-
-    generatePDFTableReport(`ESI Exit Report (${month} ${year})`, headers, rows as any[][], `ESI_Exit_${month}_${year}`, 'p', undefined, companyProfile);
+  const dataRows = data.filter(r => {
+      const emp = employees.find(e => e.id === r.employeeId);
+      if (!emp) return false;
+      const isCrossed = r.earnings.total > 21000;
+      const isLeft = emp.dol && new Date(emp.dol).getMonth() === new Date(`${month} 1, ${year}`).getMonth();
+      return isCrossed || isLeft;
+  }).map(r => {
+      const emp = employees.find(e => e.id === r.employeeId);
+      return {
+          ID: r.employeeId,
+          Name: emp?.name,
+          ESI_No: emp?.esiNumber,
+          Gross_Wage: r.earnings.total,
+          Reason: r.earnings.total > 21000 ? 'Wage Limit Exceeded' : 'Left Service'
+      };
+  });
+  
+  generateExcelReport(dataRows, 'ESI Exit', `ESI_Exit_${month}_${year}`);
 };
 
 export const generateESICodeWagesReport = (data: PayrollResult[], employees: Employee[], format: 'Excel' | 'PDF', fileName: string, companyProfile: CompanyProfile) => {
-    generateCodeOnWagesReport(data, employees, format, fileName, companyProfile);
+  const reportData = data.map(r => {
+      const emp = employees.find(e => e.id === r.employeeId);
+      return {
+          ID: r.employeeId,
+          Name: emp?.name,
+          Actual_Gross: r.earnings.total,
+          ESI_Wages: r.earnings.total,
+          ESI_Deducted: r.deductions.esi,
+          Code_Wages_Flag: r.isESICodeWagesUsed ? 'YES' : 'NO'
+      };
+  });
+
+  if (format === 'Excel') {
+      generateExcelReport(reportData, 'ESI Wages', fileName);
+  } else {
+      const headers = ['ID', 'Name', 'Gross', 'ESI Wages', 'ESI Ded', 'Code Wage?'];
+      const rows = reportData.map(d => [d.ID, d.Name, d.Actual_Gross, d.ESI_Wages, d.ESI_Deducted, d.Code_Wages_Flag]);
+      generatePDFTableReport('ESI Code Wages Analysis', headers, rows as any[][], fileName, 'p', undefined, companyProfile);
+  }
 };

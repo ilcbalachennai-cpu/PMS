@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useMemo } from 'react';
-import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2 } from 'lucide-react';
+import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2, UserX } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy } from '../types';
 
@@ -52,6 +52,37 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
   const isLocked = useMemo(() => {
     return savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
   }, [savedRecords, month, year]);
+
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  const filteredEmployees = useMemo(() => {
+    const monthIdx = months.indexOf(month);
+    const periodStart = new Date(year, monthIdx, 1);
+    periodStart.setHours(0,0,0,0);
+
+    return employees.filter(emp => {
+        // 1. Determine if Active
+        let isActive = true;
+        if (emp.dol) {
+            const [y, m, d] = emp.dol.split('-').map(Number);
+            const dolDate = new Date(y, m - 1, d);
+            dolDate.setHours(0,0,0,0);
+            isActive = dolDate >= periodStart;
+        }
+
+        if (viewMode === 'leave') {
+            // For Leave: Only show active employees
+            return isActive;
+        } else {
+            // For Advance: Show Active OR (Inactive with Balance > 0)
+            if (isActive) return true;
+            
+            const ledger = advanceLedgers.find(a => a.employeeId === emp.id);
+            // Must have positive balance to appear
+            return ledger && ledger.balance > 0;
+        }
+    });
+  }, [employees, month, year, viewMode, advanceLedgers]);
 
   const handleLeaveUpdate = (empId: string, field: 'el' | 'sl' | 'cl', subField: string, value: number) => {
       if (isLocked || isReadOnly || justSaved || !setLeaveLedgers) return;
@@ -109,7 +140,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
       
       if (viewMode === 'leave') {
           const headers = ["Employee ID", "Name", "EL Opening", "SL Opening", "CL Opening"];
-          const data = employees.map(e => {
+          const data = filteredEmployees.map(e => {
               const l = leaveLedgers.find(led => led.employeeId === e.id);
               return [e.id, e.name, l?.el.opening || 0, l?.sl.eligible || 0, l?.cl.accumulation || 0]; 
           });
@@ -117,7 +148,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
           XLSX.utils.book_append_sheet(wb, ws, "Leave_Ledger");
       } else {
           const headers = ["Employee ID", "Name", "Advance Amount", "Monthly EMI", "Paid Amount"];
-          const data = employees.map(e => {
+          const data = filteredEmployees.map(e => {
               const a = advanceLedgers.find(adv => adv.employeeId === e.id);
               return [e.id, e.name, a?.totalAdvance || 0, a?.monthlyInstallment || 0, a?.paidAmount || 0];
           });
@@ -147,12 +178,15 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                   let count = 0;
                   data.forEach((row: any) => {
                       const id = row['Employee ID'] || row['ID'];
-                      const idx = newLedgers.findIndex(l => l.employeeId === id);
-                      if (idx >= 0) {
-                          newLedgers[idx].el.opening = Number(row['EL Opening'] || newLedgers[idx].el.opening);
-                          newLedgers[idx].sl.eligible = Number(row['SL Opening'] || newLedgers[idx].sl.eligible);
-                          newLedgers[idx].cl.accumulation = Number(row['CL Opening'] || newLedgers[idx].cl.accumulation);
-                          count++;
+                      // Only process if employee is in filtered list
+                      if (filteredEmployees.some(e => e.id === id)) {
+                          const idx = newLedgers.findIndex(l => l.employeeId === id);
+                          if (idx >= 0) {
+                              newLedgers[idx].el.opening = Number(row['EL Opening'] || newLedgers[idx].el.opening);
+                              newLedgers[idx].sl.eligible = Number(row['SL Opening'] || newLedgers[idx].sl.eligible);
+                              newLedgers[idx].cl.accumulation = Number(row['CL Opening'] || newLedgers[idx].cl.accumulation);
+                              count++;
+                          }
                       }
                   });
                   setLeaveLedgers(newLedgers);
@@ -163,13 +197,15 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                    let count = 0;
                    data.forEach((row: any) => {
                        const id = row['Employee ID'] || row['ID'];
-                       const idx = newLedgers.findIndex(l => l.employeeId === id);
-                       if (idx >= 0) {
-                           newLedgers[idx].totalAdvance = Number(row['Advance Amount'] || 0);
-                           newLedgers[idx].monthlyInstallment = Number(row['Monthly EMI'] || 0);
-                           newLedgers[idx].paidAmount = Number(row['Paid Amount'] || 0);
-                           newLedgers[idx].balance = (newLedgers[idx].opening || 0) + newLedgers[idx].totalAdvance - newLedgers[idx].paidAmount;
-                           count++;
+                       if (filteredEmployees.some(e => e.id === id)) {
+                           const idx = newLedgers.findIndex(l => l.employeeId === id);
+                           if (idx >= 0) {
+                               newLedgers[idx].totalAdvance = Number(row['Advance Amount'] || 0);
+                               newLedgers[idx].monthlyInstallment = Number(row['Monthly EMI'] || 0);
+                               newLedgers[idx].paidAmount = Number(row['Paid Amount'] || 0);
+                               newLedgers[idx].balance = (newLedgers[idx].opening || 0) + newLedgers[idx].totalAdvance - newLedgers[idx].paidAmount;
+                               count++;
+                           }
                        }
                    });
                    setAdvanceLedgers(newLedgers);
@@ -293,9 +329,9 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                    </tr>
                </thead>
                <tbody className="divide-y divide-slate-800">
-                   {employees.map(emp => {
+                   {filteredEmployees.map(emp => {
                        // Common disabled state for inputs
-                       const inputDisabled = isReadOnly || isLocked || justSaved;
+                       const baseDisabled = isReadOnly || isLocked || justSaved;
 
                        if (viewMode === 'leave') {
                            const l = leaveLedgers.find(led => led.employeeId === emp.id) || { el: { opening: 0, eligible: 0, balance: 0 }, sl: { balance: 0 }, cl: { balance: 0 } };
@@ -303,7 +339,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                <tr key={emp.id} className="hover:bg-slate-800/50">
                                    <td className="px-6 py-4"><div className="text-sm font-bold text-white">{emp.name}</div><div className="text-[10px] text-slate-500">{emp.id}</div></td>
                                    <td className="px-4 py-4 text-center text-slate-300 font-mono text-sm">{l.el.opening}</td>
-                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-white text-sm disabled:opacity-50" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
+                                   <td className="px-4 py-4 text-center"><input disabled={baseDisabled} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-white text-sm disabled:opacity-50" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
                                    <td className="px-4 py-4 text-center font-bold text-blue-400">{l.el.balance}</td>
                                    <td className="px-4 py-4 text-center text-emerald-400">{l.sl.balance}</td>
                                    <td className="px-4 py-4 text-center text-amber-400">{l.cl.balance}</td>
@@ -311,14 +347,39 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                            );
                        } else {
                            const a = advanceLedgers.find(adv => adv.employeeId === emp.id) || { opening: 0, totalAdvance: 0, paidAmount: 0, monthlyInstallment: 0, balance: 0 };
+                           
+                           // Determine if Ex-Employee with pending balance
+                           let isExPending = false;
+                           if (emp.dol) {
+                               const [y, m, d] = emp.dol.split('-').map(Number);
+                               const dolDate = new Date(y, m-1, d);
+                               dolDate.setHours(0,0,0,0);
+                               const periodStart = new Date(year, months.indexOf(month), 1);
+                               periodStart.setHours(0,0,0,0);
+                               // They are Ex if DOL < Start
+                               if (dolDate < periodStart) isExPending = true;
+                           }
+
+                           const rowClass = isExPending ? "bg-pink-900/20 hover:bg-pink-900/30" : "hover:bg-slate-800/50";
+                           const inputDisabled = baseDisabled || isExPending;
+
                            return (
-                               <tr key={emp.id} className="hover:bg-slate-800/50">
-                                   <td className="px-6 py-4"><div className="text-sm font-bold text-white">{emp.name}</div><div className="text-[10px] text-slate-500">{emp.id}</div></td>
+                               <tr key={emp.id} className={rowClass}>
+                                   <td className="px-6 py-4">
+                                       <div className="text-sm font-bold text-white">{emp.name}</div>
+                                       <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                                           {emp.id} 
+                                           {isExPending && <span className="bg-red-500/20 text-red-400 px-1.5 rounded-[2px] font-black uppercase text-[8px] flex items-center gap-1"><UserX size={8} /> Left</span>}
+                                       </div>
+                                   </td>
                                    <td className="px-4 py-4 text-center text-slate-400 font-mono">{a.opening || 0}</td>
-                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-emerald-400 font-bold text-sm disabled:opacity-50" value={a.totalAdvance} onChange={e => handleAdvanceUpdate(emp.id, 'totalAdvance', +e.target.value)} /></td>
-                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-amber-400 text-sm disabled:opacity-50" value={a.paidAmount} onChange={e => handleAdvanceUpdate(emp.id, 'paidAmount', +e.target.value)} /></td>
-                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-slate-300 text-sm disabled:opacity-50" value={a.monthlyInstallment} onChange={e => handleAdvanceUpdate(emp.id, 'monthlyInstallment', +e.target.value)} /></td>
-                                   <td className="px-4 py-4 text-center font-black text-white text-lg">{a.balance}</td>
+                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-emerald-400 font-bold text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent" value={a.totalAdvance} onChange={e => handleAdvanceUpdate(emp.id, 'totalAdvance', +e.target.value)} /></td>
+                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-amber-400 text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent" value={a.paidAmount} onChange={e => handleAdvanceUpdate(emp.id, 'paidAmount', +e.target.value)} /></td>
+                                   <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-slate-300 text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent" value={a.monthlyInstallment} onChange={e => handleAdvanceUpdate(emp.id, 'monthlyInstallment', +e.target.value)} /></td>
+                                   <td className="px-4 py-4 text-center font-black text-white text-lg">
+                                       {a.balance}
+                                       {isExPending && <div className="text-[8px] text-pink-400 uppercase tracking-widest mt-1">Recovery Pending</div>}
+                                   </td>
                                </tr>
                            );
                        }

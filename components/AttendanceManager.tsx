@@ -50,12 +50,32 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     onConfirm?: () => void;
   }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
-  const daysInMonth = new Date(year, ['January','February','March','April','May','June','July','August','September','October','November','December'].indexOf(month) + 1, 0).getDate();
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const daysInMonth = new Date(year, months.indexOf(month) + 1, 0).getDate();
 
   // Check if current month is locked
   const isLocked = useMemo(() => {
     return savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
   }, [savedRecords, month, year]);
+
+  // Filter Active Employees for Attendance
+  const activeEmployees = useMemo(() => {
+    const monthIdx = months.indexOf(month);
+    const periodStart = new Date(year, monthIdx, 1);
+    periodStart.setHours(0,0,0,0);
+
+    return employees.filter(emp => {
+      if (!emp.dol) return true;
+      // Parse DOL safely (YYYY-MM-DD)
+      const [y, m, d] = emp.dol.split('-').map(Number);
+      const dolDate = new Date(y, m - 1, d);
+      dolDate.setHours(0,0,0,0);
+      
+      // If DOL is BEFORE the start of this period, they are Ex-Employees for this month
+      // e.g., Left 31st Dec. Processing Jan 1st. 31 Dec < 1 Jan -> Exclude.
+      return dolDate >= periodStart;
+    });
+  }, [employees, month, year]);
 
   // Helper to get or create attendance record for current view
   const getAttendance = (empId: string) => {
@@ -111,7 +131,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     if (isLocked) return;
 
     // VALIDATION 1: Check if at least one employee has non-zero data
-    const hasData = employees.some(emp => {
+    const hasData = activeEmployees.some(emp => {
         const att = getAttendance(emp.id);
         const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0) + (att.encashedDays || 0);
         return total > 0;
@@ -129,7 +149,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
 
     // VALIDATION 2: Check Ledger Balances against CAPACITY (Opening + Eligible)
     // We check against Total Capacity because Balance might be reduced if we already saved once.
-    const ledgerErrors = employees.filter(emp => {
+    const ledgerErrors = activeEmployees.filter(emp => {
         const att = getAttendance(emp.id);
         const ledger = leaveLedgers.find(l => l.employeeId === emp.id);
         if (!ledger) return false;
@@ -162,6 +182,9 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     // 1. Sync Attendance to Leave Ledgers (Update Availed & Balance)
     if (setLeaveLedgers) {
         const updatedLedgers = leaveLedgers.map(ledger => {
+            // Only update ledger if employee is active for this period
+            if (!activeEmployees.some(e => e.id === ledger.employeeId)) return ledger;
+
             const att = getAttendance(ledger.employeeId);
             
             // Recalculate Balances based on Current Attendance
@@ -210,7 +233,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   const downloadTemplate = () => {
     const headers = ["Employee ID", "Name", "Present Days", "EL (Availed)", "EL Encash", "SL (Sick)", "CL (Casual)", "LOP"];
     // Pre-fill with current employees
-    const data = employees.map(emp => [
+    const data = activeEmployees.map(emp => [
         emp.id,
         emp.name,
         0, 0, 0, 0, 0, 0
@@ -318,12 +341,12 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     reader.readAsBinaryString(file);
   };
 
-  if (employees.length === 0) {
+  if (activeEmployees.length === 0) {
       return (
           <div className="flex flex-col items-center justify-center h-64 bg-[#1e293b] rounded-xl border border-slate-800 border-dashed text-slate-500">
               <Users size={48} className="mb-4 opacity-50" />
-              <h3 className="text-lg font-bold text-white">No Employees Found</h3>
-              <p className="text-sm">Please add employees in "Employee Master" to manage attendance.</p>
+              <h3 className="text-lg font-bold text-white">No Active Employees Found</h3>
+              <p className="text-sm">Employees who have left before {month} {year} are excluded.</p>
           </div>
       );
   }
@@ -371,7 +394,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                 onChange={e => setMonth(e.target.value)}
                 className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
             >
-                {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => (
+                {months.map(m => (
                 <option key={m} value={m}>{m}</option>
                 ))}
             </select>
@@ -458,7 +481,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
-            {employees.map(emp => {
+            {activeEmployees.map(emp => {
               const att = getAttendance(emp.id);
               const ledger = leaveLedgers.find(l => l.employeeId === emp.id) || { el: { balance: 0, opening: 0, eligible: 0 }, sl: { balance: 0, eligible: 0 }, cl: { balance: 0, accumulation: 0 } };
               
