@@ -1,10 +1,8 @@
-
 import { GoogleGenAI } from "@google/genai";
 
-// Initialize the GoogleGenAI client using the API key from environment variables
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const getPayrollAdvice = async (query: string) => {
+  // Initialize the GoogleGenAI client right before making an API call to ensure it always uses the most up-to-date API key
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     // Fix: Using gemini-3-pro-preview as labor law compliance queries are complex text tasks
     // requiring advanced reasoning and knowledge.

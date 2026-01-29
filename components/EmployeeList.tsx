@@ -1,10 +1,10 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, Search, Edit2, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, Download, X, Save, MapPin, Trash2, Maximize2, UserPlus, CheckCircle2, AlertTriangle, Home, IndianRupee, ShieldCheck, MapPinned, CreditCard, Building2, UserMinus, Camera, LogOut, RotateCcw, KeyRound, FileSpreadsheet, FileText, CheckSquare, Square, Filter } from 'lucide-react';
+import { Plus, Search, Edit2, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, Download, X, Save, MapPin, Trash2, Maximize2, UserPlus, CheckCircle2, AlertTriangle, Home, IndianRupee, ShieldCheck, MapPinned, CreditCard, Building2, UserMinus, Camera, LogOut, RotateCcw, KeyRound, FileSpreadsheet, FileText, CheckSquare, Square, Filter, Loader2, DatabaseZap, ListPlus } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, User, CompanyProfile } from '../types';
 import { INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS } from '../constants';
-import { generateExcelReport, generatePDFTableReport } from '../services/reportService';
+import { generateExcelReport, generatePDFTableReport, formatDateInd } from '../services/reportService';
 
 interface EmployeeListProps {
   employees: Employee[];
@@ -47,13 +47,12 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   const [selectedEmp, setSelectedEmp] = useState<Employee | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   
-  // Rejoin Module State
   const [showRejoinPanel, setShowRejoinPanel] = useState(false);
   const [rejoinSearchTerm, setRejoinSearchTerm] = useState('');
   const [authModal, setAuthModal] = useState({ isOpen: false, password: '', error: '', targetEmp: null as Employee | null });
 
-  // Export Module State
   const [exportModal, setExportModal] = useState({ 
       isOpen: false, 
       format: 'Excel' as 'Excel' | 'PDF', 
@@ -63,7 +62,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
       error: '' 
   });
 
-  // Delete Module State
   const [deleteModal, setDeleteModal] = useState({
       isOpen: false,
       targetEmp: null as Employee | null,
@@ -78,7 +76,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     id: `EMP00${employees.length + 1}`,
     name: '', gender: 'Male', dob: '',
     doj: new Date().toISOString().split('T')[0],
-    dol: '', leavingReason: '', // Added DOL/Reason
+    dol: '', leavingReason: '',
     designation: designations[0] || '',
     division: divisions[0] || '',
     branch: branches[0] || '',
@@ -102,9 +100,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   const [newEmpForm, setNewEmpForm] = useState<Partial<Employee>>(getEmptyForm());
 
   const filteredEmployees = employees.filter(emp => {
-    // Basic filter: Search match AND NOT left (unless looking for specific ID)
     const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || emp.id.toLowerCase().includes(searchTerm.toLowerCase());
-    // Only show active employees in main list unless searching specifically
     const isActive = !emp.dol; 
     return matchesSearch && (isActive || searchTerm.length > 2);
   });
@@ -119,16 +115,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   );
 
   const calculateGrossWage = (data: Partial<Employee> | Employee) => {
-    return (Number(data.basicPay) || 0) + 
-           (Number(data.da) || 0) + 
-           (Number(data.retainingAllowance) || 0) + 
-           (Number(data.hra) || 0) + 
-           (Number(data.conveyance) || 0) + 
-           (Number(data.washing) || 0) + 
-           (Number(data.attire) || 0) + 
-           (Number(data.specialAllowance1) || 0) + 
-           (Number(data.specialAllowance2) || 0) + 
-           (Number(data.specialAllowance3) || 0);
+    return (Number(data.basicPay) || 0) + (Number(data.da) || 0) + (Number(data.retainingAllowance) || 0) + (Number(data.hra) || 0) + (Number(data.conveyance) || 0) + (Number(data.washing) || 0) + (Number(data.attire) || 0) + (Number(data.specialAllowance1) || 0) + (Number(data.specialAllowance2) || 0) + (Number(data.specialAllowance3) || 0);
   };
 
   const calculateAge = (dobString: string | undefined) => {
@@ -192,7 +179,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
           if (target) {
               setAuthModal({ ...authModal, isOpen: false });
               setShowRejoinPanel(false);
-              proceedToEdit(target); // Open Edit form
+              proceedToEdit(target);
           }
       } else {
           setAuthModal({ ...authModal, error: 'Access Denied: Invalid credentials or insufficient privileges.' });
@@ -240,7 +227,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
               ? employees.filter(e => !e.dol)
               : employees.filter(e => e.dol);
           
-          const dateStr = new Date().toISOString().split('T')[0];
+          const dateStr = formatDateInd(new Date().toISOString());
           const fileName = `${exportModal.targetGroup}_Employees_${dateStr}`;
           const columnsToExport = AVAILABLE_COLUMNS.filter(c => exportModal.selectedColumns.includes(c.key));
 
@@ -250,6 +237,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                   columnsToExport.forEach(col => {
                       if (col.key === 'grossPay') {
                           row[col.label] = calculateGrossWage(e);
+                      } else if (['doj', 'dob', 'dol'].includes(col.key)) {
+                          row[col.label] = formatDateInd((e as any)[col.key]);
                       } else {
                           row[col.label] = (e as any)[col.key];
                       }
@@ -261,6 +250,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
               const headers = columnsToExport.map(c => c.label);
               const data = targetEmps.map(e => columnsToExport.map(col => {
                   if (col.key === 'grossPay') return calculateGrossWage(e).toLocaleString();
+                  if (['doj', 'dob', 'dol'].includes(col.key)) return formatDateInd((e as any)[col.key]);
                   return (e as any)[col.key] || '-';
               }));
               
@@ -270,7 +260,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                   data, 
                   fileName, 
                   'l', 
-                  `Total Records: ${targetEmps.length}`, 
+                  `Total Records: ${targetEmps.length} | Export Date: ${dateStr}`, 
                   companyProfile
               );
           }
@@ -278,6 +268,143 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
       } else {
           setExportModal({ ...exportModal, error: 'Authentication Failed: Invalid password or insufficient privileges.' });
       }
+  };
+
+  const handleDownloadTemplate = () => {
+    const templateHeaders = [
+        "Employee ID", "Full Name", "Gender", "Date of Birth (DD-MM-YYYY)", "Designation", 
+        "Department/Division", "Branch", "Site", "Date of Joining (DD-MM-YYYY)", 
+        "Mobile Number", "Father or Spouse Name", "Relationship",
+        "Door No", "Building Name", "Street", "Area", "City", "State", "Pincode",
+        "PAN Number", "Aadhaar Number", "UAN Number", "PF Member ID", "ESI Number",
+        "Bank Account Number", "IFSC Code",
+        "Basic Pay", "DA", "Retaining Allowance", "HRA", "Conveyance", 
+        "Washing Allowance", "Attire Allowance", "Special Allowance 1", 
+        "Special Allowance 2", "Special Allowance 3",
+        "PF Exempt (TRUE/FALSE)", "ESI Exempt (TRUE/FALSE)"
+    ];
+
+    const sampleRow = [
+        "EMP101", "John Doe", "Male", "15-05-1990", "Software Engineer", 
+        "Engineering", "Chennai", "Main Plant", "01-01-2024", 
+        "9876543210", "Jane Doe", "Spouse",
+        "12A", "Sun Villa", "Main Road", "Guindy", "Chennai", "Tamil Nadu", "600032",
+        "ABCDE1234F", "123456789012", "100234567890", "TN/MAS/0012345/000/0000101", "3112345678",
+        "50100012345678", "HDFC0000123",
+        "15000", "5000", "0", "8000", "1600",
+        "0", "0", "0", "0", "0",
+        "FALSE", "FALSE"
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet([templateHeaders, sampleRow]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "EmployeeMasterTemplate");
+    XLSX.writeFile(wb, "BharatPay_Employee_Master_Template.xlsx");
+  };
+
+  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+        try {
+            const bstr = evt.target?.result;
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            const wsname = wb.SheetNames[0];
+            const ws = wb.Sheets[wsname];
+            const data = XLSX.utils.sheet_to_json(ws);
+
+            const newEmployees: Employee[] = [];
+            
+            data.forEach((row: any) => {
+                const getVal = (keys: string[]) => {
+                    for (const k of keys) {
+                        const foundKey = Object.keys(row).find(rk => rk.trim().toLowerCase() === k.toLowerCase());
+                        if (foundKey && row[foundKey] !== undefined) return row[foundKey];
+                    }
+                    return null;
+                };
+
+                const parseIndDate = (val: any) => {
+                    if (!val) return '';
+                    const str = String(val).trim();
+                    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
+                        const [d, m, y] = str.split('-');
+                        return `${y}-${m}-${d}`;
+                    }
+                    return str;
+                };
+
+                const id = String(getVal(['Employee ID', 'ID', 'Emp ID', 'EmpID']) || '');
+                if (!id) return;
+
+                const importedEmp: Employee = {
+                    ...getEmptyForm() as Employee,
+                    id,
+                    name: String(getVal(['Full Name', 'Name', 'Employee Name']) || 'Unknown'),
+                    gender: (getVal(['Gender']) as any) || 'Male',
+                    dob: parseIndDate(getVal(['Date of Birth (DD-MM-YYYY)', 'Date of Birth', 'DOB'])),
+                    designation: String(getVal(['Designation']) || designations[0]),
+                    division: String(getVal(['Department/Division', 'Department', 'Division']) || divisions[0]),
+                    department: String(getVal(['Department/Division', 'Department', 'Division']) || divisions[0]),
+                    branch: String(getVal(['Branch']) || branches[0]),
+                    site: String(getVal(['Site']) || sites[0]),
+                    doj: parseIndDate(getVal(['Date of Joining (DD-MM-YYYY)', 'Date of Joining', 'DOJ', 'Joining Date'])) || new Date().toISOString().split('T')[0],
+                    mobile: String(getVal(['Mobile Number', 'Mobile', 'Mobile No']) || ''),
+                    fatherSpouseName: String(getVal(['Father or Spouse Name', 'Father Name', 'Spouse Name']) || ''),
+                    relationship: String(getVal(['Relationship']) || 'Father'),
+                    doorNo: String(getVal(['Door No', 'House No', 'Flat No']) || ''),
+                    buildingName: String(getVal(['Building Name', 'Apartment']) || ''),
+                    street: String(getVal(['Street']) || ''),
+                    area: String(getVal(['Area', 'Locality']) || ''),
+                    city: String(getVal(['City', 'Town']) || ''),
+                    state: String(getVal(['State']) || 'Tamil Nadu'),
+                    pincode: String(getVal(['Pincode', 'Zip']) || ''),
+                    pan: String(getVal(['PAN Number', 'PAN', 'PAN No']) || ''),
+                    aadhaarNumber: String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No']) || ''),
+                    uanc: String(getVal(['UAN Number', 'UAN', 'UAN No']) || ''),
+                    pfNumber: String(getVal(['PF Member ID', 'PF ID', 'PF Number']) || ''),
+                    esiNumber: String(getVal(['ESI Number', 'ESI IP Number', 'ESI No']) || ''),
+                    bankAccount: String(getVal(['Bank Account Number', 'Account No', 'Bank A/c']) || ''),
+                    ifsc: String(getVal(['IFSC Code', 'IFSC']) || ''),
+                    basicPay: Number(getVal(['Basic Pay', 'Basic']) || 0),
+                    da: Number(getVal(['DA', 'Dearness Allowance']) || 0),
+                    retainingAllowance: Number(getVal(['Retaining Allowance', 'RA']) || 0),
+                    hra: Number(getVal(['HRA', 'House Rent Allowance']) || 0),
+                    conveyance: Number(getVal(['Conveyance']) || 0),
+                    washing: Number(getVal(['Washing Allowance', 'Washing']) || 0),
+                    attire: Number(getVal(['Attire Allowance', 'Attire']) || 0),
+                    specialAllowance1: Number(getVal(['Special Allowance 1', 'Special 1']) || 0),
+                    specialAllowance2: Number(getVal(['Special Allowance 2', 'Special 2']) || 0),
+                    specialAllowance3: Number(getVal(['Special Allowance 3', 'Special 3']) || 0),
+                    isPFExempt: String(getVal(['PF Exempt', 'PF Exempted'])).toUpperCase() === 'TRUE',
+                    isESIExempt: String(getVal(['ESI Exempt', 'ESI Exempted'])).toUpperCase() === 'TRUE',
+                    serviceRecords: [{ date: parseIndDate(getVal(['Date of Joining', 'DOJ'])) || new Date().toISOString().split('T')[0], type: 'Appointment', description: 'Imported from Excel' }]
+                };
+
+                newEmployees.push(importedEmp);
+            });
+
+            if (onBulkAddEmployees) {
+                onBulkAddEmployees(newEmployees);
+            } else {
+                const existingMap = new Map(employees.map(e => [e.id, e]));
+                newEmployees.forEach(ne => existingMap.set(ne.id, ne));
+                setEmployees(Array.from(existingMap.values()));
+            }
+
+            alert(`Successfully processed ${newEmployees.length} records.`);
+        } catch (err) {
+            console.error(err);
+            alert("Error parsing file. Ensure it matches the template.");
+        } finally {
+            setIsImporting(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+    reader.readAsBinaryString(file);
   };
 
   const handleCloseModal = () => {
@@ -324,57 +451,85 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input type="text" placeholder="Search Master Records..." className="w-full pl-10 pr-4 py-2.5 bg-[#0f172a] border border-slate-700 rounded-lg text-white outline-none focus:ring-2 focus:ring-blue-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </div>
-        <div className="flex items-center gap-3">
-            <button onClick={openExportModal} className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all font-bold text-xs">
-                <Download size={16} /> Export Data
+        <div className="flex items-center flex-wrap gap-2">
+            <button onClick={handleDownloadTemplate} className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all font-bold text-xs" title="Download Excel Template">
+                <FileSpreadsheet size={16} /> Template
             </button>
-            <button onClick={() => setShowRejoinPanel(true)} className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all font-bold text-xs">
-                <RotateCcw size={16} /> Rejoin Ex-Employee
+            <button onClick={() => fileInputRef.current?.click()} disabled={isImporting} className="flex items-center gap-2 px-3 py-2 bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600/20 border border-emerald-600/30 rounded-lg transition-all font-bold text-xs" title="Bulk Import via Excel">
+                {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} Import
+            </button>
+            <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx, .xls" onChange={handleImportExcel} />
+            
+            <div className="w-[1px] h-6 bg-slate-700 mx-1 hidden md:block"></div>
+
+            <button onClick={openExportModal} className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all font-bold text-xs">
+                <Download size={16} /> Export
+            </button>
+            <button onClick={() => setShowRejoinPanel(true)} className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all font-bold text-xs">
+                <RotateCcw size={16} /> Rejoin
             </button>
             <button onClick={() => { setEditingId(null); setNewEmpForm(getEmptyForm()); setIsAdding(true); }} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-lg font-bold">
-                <Plus size={18} /> Add New Record
+                <Plus size={18} /> Add New
             </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl overflow-hidden h-fit max-h-[800px] overflow-y-auto custom-scrollbar">
-            <table className="w-full text-left">
+            <table className="w-full text-left table-fixed">
                 <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-widest font-bold sticky top-0 z-10">
                 <tr>
-                    <th className="px-6 py-4 bg-[#0f172a]">Identity</th>
-                    <th className="px-6 py-4 bg-[#0f172a]">Organization</th>
-                    <th className="px-6 py-4 bg-[#0f172a]">Standard Wages</th>
-                    <th className="px-6 py-4 text-right bg-[#0f172a]">Actions</th>
+                    <th className="px-3 py-4 bg-[#0f172a] w-2/6">Identity</th>
+                    <th className="px-2 py-4 bg-[#0f172a] w-1.5/6">Organization</th>
+                    <th className="px-2 py-4 bg-[#0f172a] w-[90px] text-center">Join Date</th>
+                    <th className="px-2 py-4 bg-[#0f172a] w-[100px] text-center">Wages</th>
+                    <th className="px-3 py-4 text-right bg-[#0f172a] w-[80px]">Actions</th>
                 </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                 {filteredEmployees.map((emp) => (
                     <tr key={emp.id} onClick={() => setSelectedEmp(emp)} className={`cursor-pointer hover:bg-slate-800/50 ${selectedEmp?.id === emp.id ? 'bg-blue-900/40 border-l-4 border-blue-500' : 'border-l-4 border-transparent'} ${emp.dol ? 'opacity-60 grayscale' : ''}`}>
-                    <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center border border-slate-600 overflow-hidden relative">
-                                {emp.photoUrl ? <img src={emp.photoUrl} className="w-full h-full object-cover" /> : <User2 size={18} className="text-slate-400" />}
-                                {emp.dol && <div className="absolute inset-0 bg-red-900/60 flex items-center justify-center font-black text-[8px] text-white">LEFT</div>}
+                    <td className="px-3 py-3 overflow-hidden">
+                        <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center border border-slate-600 overflow-hidden shrink-0 relative">
+                                {emp.photoUrl ? <img src={emp.photoUrl} className="w-full h-full object-cover" alt={emp.name} /> : <User2 size={16} className="text-slate-400" />}
+                                {emp.dol && <div className="absolute inset-0 bg-red-900/60 flex items-center justify-center font-black text-[7px] text-white">LEFT</div>}
                             </div>
-                            <div>
-                                <div className="font-bold text-white text-sm">{emp.name}</div>
-                                <div className="text-[10px] text-slate-500 font-mono">{emp.id}</div>
+                            <div className="min-w-0">
+                                <div className="font-bold text-white text-xs truncate uppercase leading-tight">{emp.name}</div>
+                                <div className="text-[9px] text-slate-500 font-mono truncate">{emp.id}</div>
                             </div>
                         </div>
                     </td>
-                    <td className="px-6 py-4">
-                        <div className="text-[10px] text-sky-400 font-bold uppercase">{emp.designation}</div>
-                        <div className="text-[9px] text-slate-500 uppercase">{emp.division} • {emp.branch}</div>
+                    <td className="px-2 py-3 overflow-hidden">
+                        <div className="text-[9px] text-sky-400 font-bold uppercase truncate">{emp.designation}</div>
+                        <div className="text-[8px] text-slate-500 uppercase truncate">{emp.branch}</div>
                     </td>
-                    <td className="px-6 py-4">
-                        <div className="font-mono text-emerald-400 font-bold">₹{calculateGrossWage(emp).toLocaleString()}</div>
+                    <td className="px-2 py-3 text-center">
+                        <div className="text-[10px] font-mono text-slate-300 whitespace-nowrap">{formatDateInd(emp.doj)}</div>
                     </td>
-                    <td className="px-6 py-4 text-right flex justify-end gap-2 items-center h-full">
-                        <button onClick={(e) => { e.stopPropagation(); proceedToEdit(emp); }} className="text-slate-400 hover:text-blue-400 p-2 hover:bg-blue-900/30 rounded-lg transition-all"><Edit2 size={16} /></button>
-                        {(currentUser?.role === 'Developer' || currentUser?.role === 'Administrator') && (
-                            <button onClick={(e) => initiateDelete(emp, e)} className="text-slate-400 hover:text-red-400 p-2 hover:bg-red-900/20 rounded-lg transition-all" title="Delete Record"><Trash2 size={16} /></button>
-                        )}
+                    <td className="px-2 py-3 text-center">
+                        <div className="font-mono text-emerald-400 font-bold text-xs">₹{calculateGrossWage(emp).toLocaleString()}</div>
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                        <div className="flex justify-end gap-1">
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); proceedToEdit(emp); }} 
+                                className="text-slate-400 hover:text-blue-400 p-1.5 hover:bg-blue-900/30 rounded-lg transition-all"
+                                title="Edit Profile"
+                            >
+                                <Edit2 size={14} />
+                            </button>
+                            {(currentUser?.role === 'Developer' || currentUser?.role === 'Administrator') && (
+                                <button 
+                                    onClick={(e) => initiateDelete(emp, e)} 
+                                    className="text-slate-400 hover:text-red-400 p-1.5 hover:bg-red-900/20 rounded-lg transition-all" 
+                                    title="Delete Record"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
+                            )}
+                        </div>
                     </td>
                     </tr>
                 ))}
@@ -390,7 +545,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                         <div className="absolute top-0 right-0 bg-red-900 text-red-100 text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest border border-red-500/50">Ex-Employee</div>
                     )}
                     <div className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center mb-4 border-2 border-slate-700 shadow-xl overflow-hidden">
-                        {selectedEmp.photoUrl ? <img src={selectedEmp.photoUrl} className="w-full h-full object-cover" /> : <User2 size={48} className="text-slate-500" />}
+                        {selectedEmp.photoUrl ? <img src={selectedEmp.photoUrl} className="w-full h-full object-cover" alt={selectedEmp.name} /> : <User2 size={48} className="text-slate-500" />}
                     </div>
                     <h3 className="text-2xl font-black">{selectedEmp.name}</h3>
                     <p className="text-blue-400 text-xs font-bold uppercase tracking-widest">{selectedEmp.designation}</p>
@@ -402,14 +557,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     </div>
                     <div className="p-3 bg-slate-900/50 rounded-xl border border-slate-800">
                         <p className="text-slate-500 uppercase font-bold text-[8px] mb-1">Date of Join</p>
-                        <p className="text-white font-bold">{selectedEmp.doj}</p>
+                        <p className="text-white font-bold">{formatDateInd(selectedEmp.doj)}</p>
                     </div>
                 </div>
                 {selectedEmp.dol && (
                     <div className="bg-red-900/10 border border-red-900/30 p-4 rounded-xl text-xs space-y-2">
                         <div className="flex justify-between">
                             <span className="text-red-400 font-bold uppercase">Date of Leaving</span>
-                            <span className="text-white font-mono">{selectedEmp.dol}</span>
+                            <span className="text-white font-mono">{formatDateInd(selectedEmp.dol)}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-red-400 font-bold uppercase">Reason</span>
@@ -419,11 +574,15 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 )}
                 <div className="space-y-4 pt-4 border-t border-slate-800">
                     <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500">UAN No (PF)</span>
+                        <span className="text-slate-500 font-bold uppercase text-[9px]">Date of Birth</span>
+                        <span className="font-mono font-bold text-slate-300">{formatDateInd(selectedEmp.dob)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 font-bold uppercase text-[9px]">UAN No (PF)</span>
                         <span className="font-mono font-bold text-sky-400">{selectedEmp.uanc || 'NOT SET'}</span>
                     </div>
                     <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500">Contact</span>
+                        <span className="text-slate-500 font-bold uppercase text-[9px]">Contact</span>
                         <span className="font-bold">{selectedEmp.mobile || 'N/A'}</span>
                     </div>
                 </div>
@@ -463,7 +622,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                                   <h4 className="font-bold text-white text-sm">{emp.name}</h4>
                                   <p className="text-[10px] text-slate-400 font-mono">{emp.id}</p>
                               </div>
-                              <span className="text-[9px] font-black text-red-400 bg-red-900/20 px-2 py-1 rounded border border-red-900/30">LEFT: {emp.dol}</span>
+                              <span className="text-[9px] font-black text-red-400 bg-red-900/20 px-2 py-1 rounded border border-red-900/30">LEFT: {formatDateInd(emp.dol)}</span>
                           </div>
                           <p className="text-[10px] text-slate-500 line-clamp-1 mb-3">{emp.leavingReason || 'No reason specified'}</p>
                           <button onClick={() => initiateRejoin(emp)} className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2">
@@ -518,7 +677,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </div>
                 
                 <div className="p-6 flex-1 overflow-y-auto custom-scrollbar space-y-6">
-                    {/* Filter & Format */}
                     <div className="grid grid-cols-2 gap-6">
                         <div className="space-y-2">
                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Target Group</label>
@@ -536,7 +694,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                         </div>
                     </div>
 
-                    {/* Columns Selection */}
                     <div className="space-y-3">
                         <div className="flex justify-between items-center border-b border-slate-800 pb-2">
                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"><Filter size={12} /> Select Columns</label>
@@ -558,7 +715,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                         </div>
                     </div>
 
-                    {/* Security Check */}
                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-3">
                         <div className="flex items-center gap-2 text-xs text-slate-400"><KeyRound size={14} /> Security Verification</div>
                         <input type="password" placeholder="Enter Admin Password" className={`w-full bg-[#0f172a] border ${exportModal.error ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm`} value={exportModal.password} onChange={(e) => setExportModal({...exportModal, password: e.target.value, error: ''})} onKeyDown={(e) => e.key === 'Enter' && handleExportSubmit()} />
@@ -611,16 +767,13 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
             </div>
             
             <form onSubmit={handleAddSubmit} className="p-8 space-y-12">
-              
-              {/* SECTION 1: IDENTITY & EMPLOYMENT */}
               <div>
                 <FormSectionHeader icon={User2} title="1. Personal & Employment Identity" />
                 <div className="flex flex-col md:flex-row gap-8">
-                    {/* PHOTO UPLOAD BOX */}
                     <div className="flex flex-col items-center gap-4 shrink-0">
                         <div className="relative group w-32 h-32 bg-slate-900 rounded-2xl border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden transition-all hover:border-blue-500/50">
                             {newEmpForm.photoUrl ? (
-                                <img src={newEmpForm.photoUrl} className="w-full h-full object-cover" />
+                                <img src={newEmpForm.photoUrl} className="w-full h-full object-cover" alt="Profile" />
                             ) : (
                                 <div className="text-center p-4">
                                     <Camera size={24} className="text-slate-600 mx-auto mb-1" />
@@ -656,7 +809,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </div>
               </div>
 
-              {/* SECTION 2 & 3: FAMILY & ADDRESS */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                  <div>
                     <FormSectionHeader icon={Home} title="2. Family Relations" />
@@ -680,7 +832,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                  </div>
               </div>
 
-              {/* SECTION 4: BANKING */}
               <div>
                 <FormSectionHeader icon={Landmark} title="4. Banking & Disbursement" color="text-indigo-400" />
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-indigo-900/5 p-6 rounded-2xl border border-indigo-900/20">
@@ -689,7 +840,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </div>
               </div>
 
-              {/* SECTION 5: WAGE MATRIX */}
               <div>
                 <FormSectionHeader 
                     icon={IndianRupee} 
@@ -710,7 +860,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </div>
               </div>
 
-              {/* SECTION 6: STATUTORY & COMPLIANCE */}
               <div>
                 <FormSectionHeader icon={ShieldCheck} title="6. Statutory IDs & Options" color="text-amber-400" />
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -721,11 +870,9 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     </div>
                 </div>
 
-                {/* NEW HIGHER PENSION ELIGIBILITY SECTION */}
                 <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 mt-8 mb-4">
                     <h3 className="text-xs font-black text-amber-500 uppercase tracking-widest mb-4 flex items-center gap-2">PF COMPLIANCE & HIGHER PENSION</h3>
                     
-                    {/* Row 1: Basic PF & History */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                         <div className="space-y-1.5">
                              <label className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${newEmpForm.isPFExempt ? 'bg-amber-900/20 border-amber-500/50' : 'bg-slate-800 border-slate-700'}`}>
@@ -763,7 +910,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                         </div>
                     </div>
 
-                    {/* Row 2: Contributions & Option */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="space-y-1.5">
                             <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.isPFExempt ? 'text-slate-600' : 'text-slate-500'}`}>Employee Contribution</label>
@@ -856,7 +1002,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </div>
               </div>
 
-              {/* ACTIONS */}
               <div className="flex justify-end gap-4 pt-8 border-t border-slate-800 sticky bottom-0 bg-[#1e293b] py-6 z-10">
                 <button type="button" onClick={handleCloseModal} className="px-8 py-3.5 border border-slate-700 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all font-bold uppercase tracking-widest text-xs">Cancel</button>
                 <button type="submit" className="px-12 py-3.5 bg-blue-600 text-white rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-900/20 font-black flex items-center gap-3 uppercase tracking-widest text-xs">
