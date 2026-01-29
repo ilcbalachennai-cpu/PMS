@@ -141,6 +141,113 @@ export const generateGratuityReport = (employees: Employee[], companyProfile: Co
     );
 };
 
+export const generateBonusReport = (
+  payrollHistory: PayrollResult[],
+  employees: Employee[],
+  config: StatutoryConfig,
+  startMonth: string,
+  startYear: number,
+  endMonth: string,
+  endYear: number,
+  companyProfile: CompanyProfile,
+  format: 'PDF' | 'Excel'
+) => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const startIdx = months.indexOf(startMonth) + (startYear * 12);
+    const endIdx = months.indexOf(endMonth) + (endYear * 12);
+
+    const bonusData = employees.map((emp, i) => {
+        let totalPaidDays = 0;
+        let totalCodeWages = 0;
+        let totalActualGross = 0;
+
+        // Iterate through all records in history
+        payrollHistory.forEach(r => {
+            // Check if record is within range and matches employee
+            const rIdx = months.indexOf(r.month) + (r.year * 12);
+            if (r.employeeId === emp.id && rIdx >= startIdx && rIdx <= endIdx) {
+                
+                // CLAUSE 88 WAGE CALCULATION LOGIC
+                const wageA = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
+                const gross = r.earnings.total;
+                const excluded = gross - wageA;
+                
+                let deemedWage = 0;
+                if (gross > 0) {
+                    const allowancePct = excluded / gross;
+                    if (allowancePct > 0.50) {
+                        const limit = Math.round(gross * 0.50);
+                        const excess = excluded - limit;
+                        deemedWage = excess > 0 ? excess : 0;
+                    }
+                }
+                
+                // For Bonus, we use the higher of (Min Wage or 7000). 
+                // But specifically requested "Based on Code of Wages Clause 88 Wages".
+                // So we sum up (Basic + DA + Retaining + Deemed Excess)
+                const monthWage = wageA + deemedWage;
+
+                totalPaidDays += r.payableDays;
+                totalCodeWages += monthWage;
+                totalActualGross += gross;
+            }
+        });
+
+        // Skip if no data
+        if (totalPaidDays === 0) return null;
+
+        const bonusPayable = Math.round(totalCodeWages * config.bonusRate);
+
+        return {
+            sl: i + 1,
+            id: emp.id,
+            name: emp.name,
+            designation: emp.designation,
+            days: totalPaidDays,
+            gross: totalActualGross,
+            codeWages: totalCodeWages,
+            bonusPct: (config.bonusRate * 100).toFixed(2) + '%',
+            bonusAmount: bonusPayable
+        };
+    }).filter(Boolean);
+
+    const fileName = `Bonus_Register_FormC_${startMonth}${startYear}_${endMonth}${endYear}`;
+
+    if (format === 'Excel') {
+        const excelData = bonusData.map((d: any) => ({
+            'Sl No': d.sl,
+            'Employee ID': d.id,
+            'Name': d.name,
+            'Designation': d.designation,
+            'Total Paid Days': d.days,
+            'Total Gross Wages': d.gross,
+            'Wages (Clause 88)': d.codeWages,
+            'Bonus Rate': d.bonusPct,
+            'Bonus Payable': d.bonusAmount
+        }));
+        generateExcelReport(excelData, 'Bonus Register', fileName);
+    } else {
+        const headers = ['Sl', 'Emp ID', 'Name', 'Designation', 'Pd Days', 'Gross (Actual)', 'Code Wages (Cl.88)', 'Rate', 'Bonus Payable'];
+        const tableData = bonusData.map((d: any) => [
+            d.sl, d.id, d.name, d.designation, d.days, 
+            d.gross.toLocaleString(), 
+            d.codeWages.toLocaleString(), 
+            d.bonusPct, 
+            d.bonusAmount.toLocaleString()
+        ]);
+
+        generatePDFTableReport(
+            `Bonus Register (Form C) - ${startMonth} ${startYear} to ${endMonth} ${endYear}`,
+            headers,
+            tableData,
+            fileName,
+            'l',
+            `* Wages calculated as per Code on Wages 2019, Clause 88 (50% Rule). Bonus Rate: ${(config.bonusRate * 100).toFixed(2)}%`,
+            companyProfile
+        );
+    }
+};
+
 export const generateSimplePaySheetPDF = (
   results: PayrollResult[],
   employees: Employee[],
@@ -823,142 +930,147 @@ export const generateCodeOnWagesReport = (data: PayrollResult[], employees: Empl
 };
 
 export const generateFormB = (data: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-  const headers = ['Sl', 'Name', 'Designation', 'Total Days', 'Actual Wages', 'Total Earnings', 'Deductions', 'Net Paid', 'Sign'];
-  const tableData = data.map((r, i) => {
-    const emp = employees.find(e => e.id === r.employeeId);
-    return [
-      i + 1,
-      emp?.name || '',
-      emp?.designation || '',
-      r.payableDays,
-      (r.earnings.basic + r.earnings.da).toLocaleString(),
-      r.earnings.total.toLocaleString(),
-      r.deductions.total.toLocaleString(),
-      r.netPay.toLocaleString(),
-      ''
-    ];
-  });
-  generatePDFTableReport(`FORM B - Register of Wages - ${month} ${year}`, headers, tableData as any[][], `FormB_${month}_${year}`, 'l', undefined, companyProfile);
+    const headers = ['Sl', 'Name', 'Designation', 'Total Days', 'Basic', 'DA', 'HRA', 'Others', 'Gross', 'PF', 'ESI', 'PT', 'TDS', 'Total Ded', 'Net Pay'];
+    const tableData = data.map((r, i) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        const others = r.earnings.total - (r.earnings.basic + r.earnings.da + r.earnings.hra);
+        return [
+            i + 1,
+            emp?.name || '',
+            emp?.designation || '',
+            r.payableDays,
+            r.earnings.basic,
+            r.earnings.da,
+            r.earnings.hra,
+            others,
+            r.earnings.total,
+            r.deductions.epf,
+            r.deductions.esi,
+            r.deductions.pt,
+            r.deductions.it,
+            r.deductions.total,
+            r.netPay
+        ];
+    });
+    generatePDFTableReport(`Form B - Register of Wages - ${month} ${year}`, headers, tableData as any[][], `FormB_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateFormC = (data: PayrollResult[], employees: Employee[], attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile) => {
-  const headers = ['Sl', 'Name', 'Designation', 'Attendance Summary', 'Present', 'Leaves', 'LOP'];
-  const tableData = data.map((r, i) => {
-    const emp = employees.find(e => e.id === r.employeeId);
-    const att = attendances.find(a => a.employeeId === r.employeeId && a.month === month && a.year === year);
-    return [
-      i + 1,
-      emp?.name || '',
-      emp?.designation || '',
-      'Detailed Daily Attendance Record N/A in Report',
-      att?.presentDays || 0,
-      (att?.earnedLeave || 0) + (att?.sickLeave || 0) + (att?.casualLeave || 0),
-      att?.lopDays || 0
-    ];
-  });
-  generatePDFTableReport(`FORM C - Muster Roll - ${month} ${year}`, headers, tableData as any[][], `FormC_${month}_${year}`, 'l', undefined, companyProfile);
+    const headers = ['Sl', 'Name', 'Father/Spouse', 'Gender', 'DOB', 'DOJ', 'Present', 'Leaves', 'Total Days'];
+    const tableData = data.map((r, i) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        const att = attendances.find(a => a.employeeId === r.employeeId && a.month === month && a.year === year);
+        const leaves = (att?.earnedLeave || 0) + (att?.sickLeave || 0) + (att?.casualLeave || 0) + (att?.lopDays || 0);
+        return [
+            i + 1,
+            emp?.name || '',
+            emp?.fatherSpouseName || '',
+            emp?.gender || '',
+            emp?.dob || '',
+            emp?.doj || '',
+            r.payableDays,
+            leaves,
+            r.daysInMonth
+        ];
+    });
+    generatePDFTableReport(`Form C - Register of Attendance - ${month} ${year}`, headers, tableData as any[][], `FormC_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateTNFormR = (data: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-  const headers = ['Sl', 'Name', 'Designation', 'Basic', 'DA', 'HRA', 'Gross', 'Deductions', 'Net', 'Sign'];
-  const tableData = data.map((r, i) => {
-    const emp = employees.find(e => e.id === r.employeeId);
-    return [
-      i + 1,
-      emp?.name || '',
-      emp?.designation || '',
-      r.earnings.basic,
-      r.earnings.da,
-      r.earnings.hra,
-      r.earnings.total,
-      r.deductions.total,
-      r.netPay,
-      ''
-    ];
-  });
-  generatePDFTableReport(`FORM R (TN) - Register of Wages - ${month} ${year}`, headers, tableData as any[][], `TN_FormR_${month}_${year}`, 'l', undefined, companyProfile);
+    generateFormB(data, employees, month, year, companyProfile);
 };
 
 export const generateTNFormT = (data: PayrollResult[], employees: Employee[], attendances: Attendance[], leaveLedgers: LeaveLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
-  const headers = ['Sl', 'Name', 'Designation', 'Worked', 'Earned', 'Net Pay', 'EL Bal'];
-  const tableData = data.map((r, i) => {
-    const emp = employees.find(e => e.id === r.employeeId);
-    const ledger = leaveLedgers.find(l => l.employeeId === r.employeeId);
-    return [
-      i + 1,
-      emp?.name || '',
-      emp?.designation || '',
-      r.payableDays,
-      r.earnings.total,
-      r.netPay,
-      ledger?.el.balance || 0
-    ];
-  });
-  generatePDFTableReport(`FORM T (TN) - Wage Slip - ${month} ${year}`, headers, tableData as any[][], `TN_FormT_${month}_${year}`, 'l', undefined, companyProfile);
+    const headers = ['Sl', 'Name', 'Gross Wage', 'Deductions', 'Net Wage', 'EL Bal', 'SL Bal', 'CL Bal'];
+    const tableData = data.map((r, i) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        const ledger = leaveLedgers.find(l => l.employeeId === r.employeeId);
+        return [
+            i + 1,
+            emp?.name || '',
+            r.earnings.total,
+            r.deductions.total,
+            r.netPay,
+            ledger?.el.balance || 0,
+            ledger?.sl.balance || 0,
+            ledger?.cl.balance || 0
+        ];
+    });
+    generatePDFTableReport(`TN Form T - Wage & Leave Register - ${month} ${year}`, headers, tableData as any[][], `TN_FormT_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateTNFormP = (data: PayrollResult[], employees: Employee[], advanceLedgers: AdvanceLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
-  const headers = ['Sl', 'Name', 'Total Advance', 'Paid', 'Recovered (This Month)', 'Balance'];
-  const tableData = data.map((r, i) => {
-    const emp = employees.find(e => e.id === r.employeeId);
-    const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
-    if (!adv || (adv.balance <= 0 && r.deductions.advanceRecovery <= 0)) return null;
-    return [
-      i + 1,
-      emp?.name || '',
-      adv.totalAdvance,
-      adv.paidAmount,
-      r.deductions.advanceRecovery,
-      adv.balance
-    ];
-  }).filter(Boolean);
-  
-  if (tableData.length === 0) {
-      generatePDFTableReport(`FORM P (TN) - Register of Advances - ${month} ${year}`, headers, [['No active advances']], `TN_FormP_${month}_${year}`, 'l', undefined, companyProfile);
-  } else {
-      generatePDFTableReport(`FORM P (TN) - Register of Advances - ${month} ${year}`, headers, tableData as any[][], `TN_FormP_${month}_${year}`, 'l', undefined, companyProfile);
-  }
+    const headers = ['Sl', 'Name', 'Adv. Opening', 'Adv. Given', 'Recovered', 'Balance'];
+    const tableData = data.map((r, i) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
+        const recovered = r.deductions.advanceRecovery;
+        
+        if ((!adv || adv.balance <= 0) && recovered <= 0) return null;
+
+        return [
+            i + 1,
+            emp?.name || '',
+            adv?.opening || 0,
+            adv?.totalAdvance || 0, 
+            recovered,
+            adv?.balance || 0
+        ];
+    }).filter(Boolean);
+
+    generatePDFTableReport(`TN Form P - Register of Advances - ${month} ${year}`, headers, tableData as any[][], `TN_FormP_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
 export const generateESIExitReport = (data: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-  const dataRows = data.filter(r => {
-      const emp = employees.find(e => e.id === r.employeeId);
-      if (!emp) return false;
-      const isCrossed = r.earnings.total > 21000;
-      const isLeft = emp.dol && new Date(emp.dol).getMonth() === new Date(`${month} 1, ${year}`).getMonth();
-      return isCrossed || isLeft;
-  }).map(r => {
-      const emp = employees.find(e => e.id === r.employeeId);
-      return {
-          ID: r.employeeId,
-          Name: emp?.name,
-          ESI_No: emp?.esiNumber,
-          Gross_Wage: r.earnings.total,
-          Reason: r.earnings.total > 21000 ? 'Wage Limit Exceeded' : 'Left Service'
-      };
-  });
-  
-  generateExcelReport(dataRows, 'ESI Exit', `ESI_Exit_${month}_${year}`);
+    const headers = ['Sl', 'Name', 'ESI No', 'DOL', 'Reason', 'Gross Wage'];
+    const tableData = data.map((r, i) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (!emp) return null;
+        
+        const isLeft = !!emp.dol && new Date(emp.dol).getMonth() === new Date(`${month} 1, ${year}`).getMonth() && new Date(emp.dol).getFullYear() === year;
+        const crossedCeiling = r.earnings.total > 21000 && !emp.isESIExempt;
+
+        if (isLeft || crossedCeiling) {
+            return [
+                i + 1,
+                emp.name,
+                emp.esiNumber || 'N/A',
+                emp.dol || '-',
+                crossedCeiling ? 'Crossed Wage Ceiling' : (emp.leavingReason || 'Resigned'),
+                r.earnings.total
+            ];
+        }
+        return null;
+    }).filter(Boolean);
+
+    generatePDFTableReport(`ESI Exit / Coverage End Report - ${month} ${year}`, headers, tableData as any[][], `ESI_Exit_${month}_${year}`, 'p', undefined, companyProfile);
 };
 
 export const generateESICodeWagesReport = (data: PayrollResult[], employees: Employee[], format: 'Excel' | 'PDF', fileName: string, companyProfile: CompanyProfile) => {
-  const reportData = data.map(r => {
-      const emp = employees.find(e => e.id === r.employeeId);
-      return {
-          ID: r.employeeId,
-          Name: emp?.name,
-          Actual_Gross: r.earnings.total,
-          ESI_Wages: r.earnings.total,
-          ESI_Deducted: r.deductions.esi,
-          Code_Wages_Flag: r.isESICodeWagesUsed ? 'YES' : 'NO'
-      };
-  });
+    const reportData = data.map(r => {
+       const emp = employees.find(e => e.id === r.employeeId);
+       const gross = r.earnings.total;
+       const excluded = gross - (r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance);
+       const limit = gross * 0.5;
+       const excess = excluded > limit ? excluded - limit : 0;
+       const wagesForESI = (r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance) + excess;
+       
+       return {
+           'Emp ID': r.employeeId,
+           'Name': emp?.name,
+           'Gross': gross,
+           'Excluded Allw': excluded,
+           '50% Limit': limit,
+           'Excess': excess,
+           'ESI Wages': wagesForESI,
+           'ESI Ded': r.deductions.esi
+       };
+   });
 
-  if (format === 'Excel') {
-      generateExcelReport(reportData, 'ESI Wages', fileName);
-  } else {
-      const headers = ['ID', 'Name', 'Gross', 'ESI Wages', 'ESI Ded', 'Code Wage?'];
-      const rows = reportData.map(d => [d.ID, d.Name, d.Actual_Gross, d.ESI_Wages, d.ESI_Deducted, d.Code_Wages_Flag]);
-      generatePDFTableReport('ESI Code Wages Analysis', headers, rows as any[][], fileName, 'p', undefined, companyProfile);
-  }
+   if (format === 'Excel') generateExcelReport(reportData, 'ESI Code Wages', fileName);
+   else {
+       const headers = ['ID', 'Name', 'Gross', 'Excl.', '50% Lim', 'Excess', 'ESI Wage', 'ESI Ded'];
+       const tableData = reportData.map(d => [d['Emp ID'], d['Name'], d['Gross'], d['Excluded Allw'], d['50% Limit'], d['Excess'], d['ESI Wages'], d['ESI Ded']]);
+       generatePDFTableReport('ESI Calculation on Code Wages', headers, tableData as any[][], fileName, 'l', undefined, companyProfile);
+   }
 };

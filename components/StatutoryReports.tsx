@@ -18,7 +18,8 @@ import {
   generatePFForm6A, 
   generateESIExitReport, 
   generateESICodeWagesReport, 
-  generateGratuityReport 
+  generateGratuityReport,
+  generateBonusReport
 } from '../services/reportService';
 
 interface StatutoryReportsProps {
@@ -64,7 +65,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     startYear: globalYear,
     endMonth: 'March',
     endYear: globalYear + 1,
-    selectedEmployee: 'ALL'
+    selectedEmployee: 'ALL',
+    format: 'PDF' as 'PDF' | 'Excel'
   });
 
   const openRangeModal = (reportType: string) => {
@@ -77,7 +79,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         startYear: fyStartYear,
         endMonth: 'March',
         endYear: fyStartYear + 1,
-        selectedEmployee: 'ALL'
+        selectedEmployee: 'ALL',
+        format: 'PDF'
     });
   };
 
@@ -87,6 +90,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             generatePFForm3A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
         } else if (rangeModal.reportType === 'Form 6A') {
             generatePFForm6A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile);
+        } else if (rangeModal.reportType === 'Bonus Statement') {
+            generateBonusReport(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile, rangeModal.format);
         }
     } catch (e: any) { alert(`Error: ${e.message}`); }
     setRangeModal({ ...rangeModal, isOpen: false });
@@ -326,15 +331,17 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 </div>
                 <button onClick={() => handleDownload('Gratuity Statement', 'PDF')} className="px-6 py-2 bg-amber-900/20 text-amber-400 font-bold text-xs rounded-lg hover:bg-amber-900/40 transition-colors">Download PDF</button>
              </div>
-             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between opacity-50 cursor-not-allowed">
+             
+             {/* BONUS REPORT CARD - ACTIVATED */}
+             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between hover:border-blue-500/30 transition-all group">
                 <div className="flex items-center gap-3">
-                    <Percent size={32} className="text-blue-500" />
+                    <Percent size={32} className="text-blue-500 group-hover:scale-110 transition-transform" />
                     <div>
-                        <h4 className="font-bold text-slate-400 text-sm">Bonus Return (Form C)</h4>
-                        <p className="text-[10px] text-slate-500 uppercase">Annual Compliance Only</p>
+                        <h4 className="font-bold text-slate-200 text-sm">Bonus Return (Form C)</h4>
+                        <p className="text-[10px] text-slate-500 uppercase">Clause 88 Code Wages Calc</p>
                     </div>
                 </div>
-                <span className="text-[10px] font-black text-slate-600 px-3 py-1 bg-slate-800 rounded">ANNUAL</span>
+                <button onClick={() => openRangeModal('Bonus Statement')} className="px-6 py-2 bg-blue-900/20 text-blue-400 font-bold text-xs rounded-lg hover:bg-blue-900/40 transition-colors border border-blue-900/50">GENERATE</button>
              </div>
           </div>
         </div>
@@ -351,7 +358,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 </button>
                 <div className="text-center space-y-1">
                     <h3 className="text-xl font-black text-white">{rangeModal.reportType} Generator</h3>
-                    <p className="text-xs text-slate-400">Specify period range for annual returns</p>
+                    <p className="text-xs text-slate-400">Specify period range for returns</p>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4 mt-2">
@@ -379,13 +386,23 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     </div>
                 </div>
 
-                <div className="space-y-1 mt-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Employee Filter</label>
-                    <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({...rangeModal, selectedEmployee: e.target.value})} >
-                        <option value="ALL">ALL Employees</option>
-                        {employees.map(e => <option key={e.id} value={e.id}>{e.id} - {e.name}</option>)}
-                    </select>
-                </div>
+                {rangeModal.reportType !== 'Bonus Statement' ? (
+                    <div className="space-y-1 mt-2">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Employee Filter</label>
+                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({...rangeModal, selectedEmployee: e.target.value})} >
+                            <option value="ALL">ALL Employees</option>
+                            {employees.map(e => <option key={e.id} value={e.id}>{e.id} - {e.name}</option>)}
+                        </select>
+                    </div>
+                ) : (
+                    <div className="space-y-1 mt-2">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Output Format</label>
+                        <div className="flex gap-2">
+                            <button onClick={() => setRangeModal({...rangeModal, format: 'PDF'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${rangeModal.format === 'PDF' ? 'bg-red-900/30 border-red-500 text-red-400' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>PDF Document</button>
+                            <button onClick={() => setRangeModal({...rangeModal, format: 'Excel'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${rangeModal.format === 'Excel' ? 'bg-emerald-900/30 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>Excel Sheet</button>
+                        </div>
+                    </div>
+                )}
 
                 <button onClick={handleGenerateRange} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg mt-4 flex items-center justify-center gap-2 group">
                     <Download size={18} className="group-hover:translate-y-0.5 transition-transform" /> GENERATE STATEMENT
