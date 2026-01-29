@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -152,8 +152,17 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        const dateStr = new Date().toISOString().split('T')[0];
-        a.download = `BharatPay_Secure_Backup_${dateStr}.enc`;
+        
+        // FINANCIAL YEAR CALCULATION
+        const today = new Date();
+        let fyStart = today.getFullYear();
+        if (today.getMonth() < 3) { // Jan, Feb, Mar
+            fyStart = fyStart - 1;
+        }
+        const fyEnd = fyStart + 1;
+        const compName = companyProfile.establishmentName ? companyProfile.establishmentName.replace(/\s+/g, '_') : 'Company';
+        
+        a.download = `${compName}_BPP_FY_${fyStart}-${fyEnd}.enc`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -209,10 +218,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
               await delay(400);
 
               const currentSession = localStorage.getItem('app_session_user');
+              const currentLicense = localStorage.getItem('app_license');
+              
               localStorage.clear();
-              if (currentSession) {
-                  localStorage.setItem('app_session_user', currentSession);
-              }
+              
+              if (currentSession) localStorage.setItem('app_session_user', currentSession);
+              if (currentLicense) localStorage.setItem('app_license', currentLicense);
 
               if (data.employees) localStorage.setItem('app_employees', JSON.stringify(data.employees));
               if (data.config) localStorage.setItem('app_config', JSON.stringify(data.config));
@@ -711,15 +722,18 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
       {activeTab === 'DEVELOPER' && userRole === 'Developer' && (
         <div className="bg-[#1e293b] rounded-2xl border border-indigo-900/40 shadow-xl overflow-hidden p-8 animate-in fade-in slide-in-from-bottom-4">
-            <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4">
-                <div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20">
-                    <Lock size={24} />
-                </div>
-                <div>
-                   <h3 className="font-bold text-indigo-400 uppercase tracking-widest text-sm">System & Developer Controls</h3>
-                   <p className="text-xs text-slate-400">Restricted parameters for application maintenance.</p>
+            <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20">
+                        <Lock size={24} />
+                    </div>
+                    <div>
+                    <h3 className="font-bold text-indigo-400 uppercase tracking-widest text-sm">System & Developer Controls</h3>
+                    <p className="text-xs text-slate-400">Restricted parameters for application maintenance.</p>
+                    </div>
                 </div>
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-1">
                     <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Megaphone size={12} className="text-amber-500" /> Dashboard News Ticker</label>

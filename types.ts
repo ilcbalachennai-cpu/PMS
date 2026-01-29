@@ -240,3 +240,18 @@ export enum View {
   Settings = 'settings',
   AI_Assistant = 'ai_assistant'
 }
+
+export interface LicenseData {
+  key: string;
+  status: 'Active' | 'Inactive' | 'Expired';
+  registeredTo: string;
+  expiryDate: string;
+  machineId: string;
+}
+
+export interface AppVersion {
+  version: string;
+  releaseDate: string;
+  features: string[];
+  statutoryUpdates?: string[];
+}

@@ -43,7 +43,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo, setLogo }) => {
     setError('');
     setIsLoading(true);
 
-    // Simulate network delay for realistic feel
     setTimeout(() => {
       const user = MOCK_USERS.find(
         (u) => u.username === username && u.password === password
