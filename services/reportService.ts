@@ -183,8 +183,8 @@ export const generateBonusReport = (
         payrollHistory.forEach(r => {
             const rIdx = months.indexOf(r.month) + (r.year * 12);
             if (r.employeeId === emp.id && rIdx >= startIdx && rIdx <= endIdx) {
-                const wageA = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
-                const gross = r.earnings.total;
+                const wageA = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
+                const gross = r?.earnings?.total || 0;
                 const excluded = gross - wageA;
                 
                 let deemedWage = 0;
@@ -268,10 +268,10 @@ export const generateSimplePaySheetPDF = (
   const headers = ['ID', 'Name', 'Days', 'Basic', 'DA', 'Retn', 'HRA', 'Conv', 'Spec', 'Othr', 'Encash', 'GROSS', 'PF', 'VPF', 'ESI', 'PT', 'TDS', 'LWF', 'Adv', 'DED', 'NET PAY'];
   const data = results.map(r => {
     const emp = employees.find(e => e.id === r.employeeId);
-    const special = r.earnings.special1 + r.earnings.special2 + r.earnings.special3;
-    const other = r.earnings.washing + r.earnings.attire;
+    const special = (r?.earnings?.special1 || 0) + (r?.earnings?.special2 || 0) + (r?.earnings?.special3 || 0);
+    const other = (r?.earnings?.washing || 0) + (r?.earnings?.attire || 0);
     return [
-      r.employeeId, emp?.name || '', r.payableDays, Math.round(r.earnings.basic), Math.round(r.earnings.da), Math.round(r.earnings.retainingAllowance), Math.round(r.earnings.hra), Math.round(r.earnings.conveyance), Math.round(special), Math.round(other), Math.round(r.earnings.leaveEncashment), Math.round(r.earnings.total), r.isCode88 ? `${Math.round(r.deductions.epf)}*` : Math.round(r.deductions.epf), Math.round(r.deductions.vpf), r.isESICodeWagesUsed ? `${Math.round(r.deductions.esi)}**` : Math.round(r.deductions.esi), Math.round(r.deductions.pt), Math.round(r.deductions.it), Math.round(r.deductions.lwf), Math.round(r.deductions.advanceRecovery), Math.round(r.deductions.total), Math.round(r.netPay)
+      r.employeeId, emp?.name || '', r.payableDays, Math.round(r?.earnings?.basic || 0), Math.round(r?.earnings?.da || 0), Math.round(r?.earnings?.retainingAllowance || 0), Math.round(r?.earnings?.hra || 0), Math.round(r?.earnings?.conveyance || 0), Math.round(special), Math.round(other), Math.round(r?.earnings?.leaveEncashment || 0), Math.round(r?.earnings?.total || 0), r.isCode88 ? `${Math.round(r?.deductions?.epf || 0)}*` : Math.round(r?.deductions?.epf || 0), Math.round(r?.deductions?.vpf || 0), r.isESICodeWagesUsed ? `${Math.round(r?.deductions?.esi || 0)}**` : Math.round(r?.deductions?.esi || 0), Math.round(r?.deductions?.pt || 0), Math.round(r?.deductions?.it || 0), Math.round(r?.deductions?.lwf || 0), Math.round(r?.deductions?.advanceRecovery || 0), Math.round(r?.deductions?.total || 0), Math.round(r.netPay)
     ];
   });
   let footnote = results.some(r => r.isCode88) ? "* PF calculated on Code Wages. " : "";
@@ -329,24 +329,24 @@ export const generatePaySlipsPDF = (
     });
 
     const earningRows = [
-        ['Basic Pay', res.earnings.basic.toFixed(2)],
-        ['DA', res.earnings.da.toFixed(2)],
-        ['Retaining Allowance', res.earnings.retainingAllowance.toFixed(2)],
-        ['HRA', res.earnings.hra.toFixed(2)],
-        ['Conveyance', res.earnings.conveyance.toFixed(2)],
-        ['Special Allowance', (res.earnings.special1 + res.earnings.special2 + res.earnings.special3).toFixed(2)],
-        ['Other Allowances', (res.earnings.washing + res.earnings.attire).toFixed(2)],
-        ['Leave Encashment', res.earnings.leaveEncashment.toFixed(2)]
+        ['Basic Pay', (res?.earnings?.basic || 0).toFixed(2)],
+        ['DA', (res?.earnings?.da || 0).toFixed(2)],
+        ['Retaining Allowance', (res?.earnings?.retainingAllowance || 0).toFixed(2)],
+        ['HRA', (res?.earnings?.hra || 0).toFixed(2)],
+        ['Conveyance', (res?.earnings?.conveyance || 0).toFixed(2)],
+        ['Special Allowance', ((res?.earnings?.special1 || 0) + (res?.earnings?.special2 || 0) + (res?.earnings?.special3 || 0)).toFixed(2)],
+        ['Other Allowances', ((res?.earnings?.washing || 0) + (res?.earnings?.attire || 0)).toFixed(2)],
+        ['Leave Encashment', (res?.earnings?.leaveEncashment || 0).toFixed(2)]
     ];
 
     const deductionRows = [
-        [res.isCode88 ? 'Provident Fund*' : 'Provident Fund', res.deductions.epf.toFixed(2)],
-        [res.isESICodeWagesUsed ? 'ESI**' : 'ESI', res.deductions.esi.toFixed(2)],
-        ['Professional Tax', res.deductions.pt.toFixed(2)],
-        ['Income Tax Recovery', res.deductions.it.toFixed(2)],
-        ['VPF', res.deductions.vpf.toFixed(2)],
-        ['LWF', res.deductions.lwf.toFixed(2)],
-        ['Advance Recovery', res.deductions.advanceRecovery.toFixed(2)],
+        [res.isCode88 ? 'Provident Fund*' : 'Provident Fund', (res?.deductions?.epf || 0).toFixed(2)],
+        [res.isESICodeWagesUsed ? 'ESI**' : 'ESI', (res?.deductions?.esi || 0).toFixed(2)],
+        ['Professional Tax', (res?.deductions?.pt || 0).toFixed(2)],
+        ['Income Tax Recovery', (res?.deductions?.it || 0).toFixed(2)],
+        ['VPF', (res?.deductions?.vpf || 0).toFixed(2)],
+        ['LWF', (res?.deductions?.lwf || 0).toFixed(2)],
+        ['Advance Recovery', (res?.deductions?.advanceRecovery || 0).toFixed(2)],
         ['', ''] 
     ];
 
@@ -357,9 +357,9 @@ export const generatePaySlipsPDF = (
 
     salaryBody.push([
         { content: 'Total Earnings', styles: { fontStyle: 'bold' } },
-        { content: res.earnings.total.toFixed(2), styles: { fontStyle: 'bold' } },
+        { content: (res?.earnings?.total || 0).toFixed(2), styles: { fontStyle: 'bold' } },
         { content: 'Total Deductions', styles: { fontStyle: 'bold' } },
-        { content: res.deductions.total.toFixed(2), styles: { fontStyle: 'bold' } }
+        { content: (res?.deductions?.total || 0).toFixed(2), styles: { fontStyle: 'bold' } }
     ]);
 
     autoTable(doc, {
@@ -500,7 +500,7 @@ export const generatePFForm12A = (data: PayrollResult[], employees: Employee[], 
         const emp = employees.find(e => e.id === r.employeeId);
         if (emp?.isDeferredPension && emp?.deferredPensionOption === 'OptOut') return;
         
-        const actualWage = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
+        const actualWage = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
         grossWagesPFMembers += actualWage;
 
         const epfWage = emp?.isPFHigherWages ? actualWage : Math.min(actualWage, config.epfCeiling);
@@ -511,9 +511,9 @@ export const generatePFForm12A = (data: PayrollResult[], employees: Employee[], 
         totalEPSWages += Math.round(epsWage);
         totalEDLIWages += Math.round(edliWage);
 
-        totalEE_Share += Math.round(r.deductions.epf);
-        totalER_EPS += Math.round(r.employerContributions.eps);
-        totalER_EPF_Diff += Math.round(r.employerContributions.epf);
+        totalEE_Share += Math.round(r?.deductions?.epf || 0);
+        totalER_EPS += Math.round(r?.employerContributions?.eps || 0);
+        totalER_EPF_Diff += Math.round(r?.employerContributions?.epf || 0);
     });
 
     const ac2_Amount = Math.max(500, Math.round(totalEPFWages * 0.005));
@@ -642,18 +642,18 @@ export const generatePFForm3A = (
             const isOptOut = emp.isDeferredPension && emp.deferredPensionOption === 'OptOut';
             if (isOptOut) return [m.substring(0, 3) + " '" + String(periodY).slice(-2), 0, 0, 0, 0, '', ''];
 
-            const wage = Math.round(emp.isPFHigherWages ? (record.earnings.basic + record.earnings.da) : Math.min(record.earnings.basic + record.earnings.da, config.epfCeiling));
+            const wage = Math.round(emp.isPFHigherWages ? ((record?.earnings?.basic || 0) + (record?.earnings?.da || 0)) : Math.min((record?.earnings?.basic || 0) + (record?.earnings?.da || 0), config.epfCeiling));
             totals.wages += wage;
-            totals.ee += record.deductions.epf;
-            totals.erpf += record.employerContributions.epf;
-            totals.eps += record.employerContributions.eps;
+            totals.ee += (record?.deductions?.epf || 0);
+            totals.erpf += (record?.employerContributions?.epf || 0);
+            totals.eps += (record?.employerContributions?.eps || 0);
 
             return [
                 m.substring(0, 3) + " '" + String(periodY).slice(-2),
                 wage.toLocaleString(),
-                record.deductions.epf.toLocaleString(),
-                record.employerContributions.epf.toLocaleString(),
-                record.employerContributions.eps.toLocaleString(),
+                (record?.deductions?.epf || 0).toLocaleString(),
+                (record?.employerContributions?.epf || 0).toLocaleString(),
+                (record?.employerContributions?.eps || 0).toLocaleString(),
                 '',
                 record.daysInMonth - record.payableDays
             ];
@@ -736,10 +736,11 @@ export const generatePFForm6A = (
         periods.forEach(p => {
              const record = payrollHistory.find(r => r.employeeId === emp.id && r.month === p.m && r.year === p.y);
              if (record) {
-                totalWages += Math.round(emp.isPFHigherWages ? (record.earnings.basic + record.earnings.da) : Math.min(record.earnings.basic + record.earnings.da, config.epfCeiling));
-                totalEE += record.deductions.epf;
-                totalER_EPS += record.employerContributions.eps;
-                totalER_PF_Diff += record.employerContributions.epf;
+                const epfBase = (record?.earnings?.basic || 0) + (record?.earnings?.da || 0);
+                totalWages += Math.round(emp.isPFHigherWages ? epfBase : Math.min(epfBase, config.epfCeiling));
+                totalEE += (record?.deductions?.epf || 0);
+                totalER_EPS += (record?.employerContributions?.eps || 0);
+                totalER_PF_Diff += (record?.employerContributions?.epf || 0);
              }
         });
         return [
@@ -773,9 +774,9 @@ export const generatePFForm6A = (
         monthRecords.forEach(r => {
             const emp = employees.find(e => e.id === r.employeeId);
             if (emp?.isDeferredPension && emp?.deferredPensionOption === 'OptOut') return;
-            epf += (r.deductions.epf + r.employerContributions.epf);
-            eps += r.employerContributions.eps;
-            const pfWage = Math.round(emp?.isPFHigherWages ? (r.earnings.basic + r.earnings.da) : Math.min(r.earnings.basic + r.earnings.da, config.epfCeiling));
+            epf += ((r?.deductions?.epf || 0) + (r?.employerContributions?.epf || 0));
+            eps += (r?.employerContributions?.eps || 0);
+            const pfWage = Math.round(emp?.isPFHigherWages ? ((r?.earnings?.basic || 0) + (r?.earnings?.da || 0)) : Math.min((r?.earnings?.basic || 0) + (r?.earnings?.da || 0), config.epfCeiling));
             edli += Math.round(Math.min(pfWage, 15000) * 0.005);
             admin += Math.round(pfWage * 0.005);
         });
@@ -809,20 +810,20 @@ export const generatePFECR = (data: PayrollResult[], employees: Employee[], form
         return !(emp?.isDeferredPension && emp?.deferredPensionOption === 'OptOut');
     }).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        const actualWage = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
+        const actualWage = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
         const epfWage = Math.round(emp?.isPFHigherWages ? actualWage : Math.min(actualWage, 15000));
         const epsWage = Math.round((emp?.pfHigherPension?.enabled && emp.pfHigherPension.isHigherPensionOpted === 'Yes') ? actualWage : Math.min(actualWage, 15000));
         const edliWage = Math.round(Math.min(actualWage, 15000));
         return {
             UAN: emp?.uanc || '',
             Name: emp?.name || '',
-            Gross: Math.round(r.earnings.total),
+            Gross: Math.round(r?.earnings?.total || 0),
             EPF: epfWage,
             EPS: epsWage,
             EDLI: edliWage,
-            EE_Share: Math.round(r.deductions.epf),
-            ER_Share_1: Math.round(r.employerContributions.eps), 
-            ER_Share_2: Math.round(r.employerContributions.epf), 
+            EE_Share: Math.round(r?.deductions?.epf || 0),
+            ER_Share_1: Math.round(r?.employerContributions?.eps || 0), 
+            ER_Share_2: Math.round(r?.employerContributions?.epf || 0), 
             NCP_Days: Math.round(r.daysInMonth - r.payableDays),
             Refund: 0
         };
@@ -841,23 +842,23 @@ export const generatePFECR = (data: PayrollResult[], employees: Employee[], form
 export const generateESIReturn = (data: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string, companyProfile: CompanyProfile) => {
     const esiData = data.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return { IP_Number: emp?.esiNumber, IP_Name: emp?.name, No_of_Days: r.payableDays, Total_Monthly_Wages: r.earnings.total, Reason_Code_Zero_Wages: r.payableDays === 0 ? 1 : 0, Last_Working_Day: emp?.dol ? formatDateInd(emp.dol) : '' };
+        return { IP_Number: emp?.esiNumber, IP_Name: emp?.name, No_of_Days: r.payableDays, Total_Monthly_Wages: (r?.earnings?.total || 0), Reason_Code_Zero_Wages: r.payableDays === 0 ? 1 : 0, Last_Working_Day: emp?.dol ? formatDateInd(emp.dol) : '' };
     });
     generateExcelReport(esiData, 'ESI_Return', fileName);
 };
 
 export const generatePTReport = (data: PayrollResult[], employees: Employee[], fileName: string, companyProfile: CompanyProfile) => {
-     const ptData = data.filter(r => r.deductions.pt > 0).map(r => {
+     const ptData = data.filter(r => (r?.deductions?.pt || 0) > 0).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return { Emp_ID: r.employeeId, Name: emp?.name, Gross_Wages: r.earnings.total, PT_Deducted: r.deductions.pt };
+        return { Emp_ID: r.employeeId, Name: emp?.name, Gross_Wages: (r?.earnings?.total || 0), PT_Deducted: (r?.deductions?.pt || 0) };
     });
     generateExcelReport(ptData, 'Professional Tax', fileName);
 };
 
 export const generateTDSReport = (data: PayrollResult[], employees: Employee[], fileName: string, companyProfile: CompanyProfile) => {
-     const tdsData = data.filter(r => r.deductions.it > 0).map(r => {
+     const tdsData = data.filter(r => (r?.deductions?.it || 0) > 0).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return { Emp_ID: r.employeeId, Name: emp?.name, PAN: emp?.pan, Gross_Wages: r.earnings.total, TDS_Deducted: r.deductions.it };
+        return { Emp_ID: r.employeeId, Name: emp?.name, PAN: emp?.pan, Gross_Wages: (r?.earnings?.total || 0), TDS_Deducted: (r?.deductions?.it || 0) };
     });
     generateExcelReport(tdsData, 'TDS Report', fileName);
 };
@@ -865,8 +866,8 @@ export const generateTDSReport = (data: PayrollResult[], employees: Employee[], 
 export const generateCodeOnWagesReport = (data: PayrollResult[], employees: Employee[], format: 'Excel' | 'PDF', fileName: string, companyProfile: CompanyProfile) => {
      const reportData = data.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        const basicWages = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
-        const totalWages = r.earnings.total;
+        const basicWages = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
+        const totalWages = r?.earnings?.total || 0;
         const excludedWages = totalWages - basicWages;
         const limit = totalWages * 0.5;
         const excess = excludedWages > limit ? excludedWages - limit : 0;
@@ -884,8 +885,12 @@ export const generateFormB = (data: PayrollResult[], employees: Employee[], mont
     const headers = ['Sl', 'Name', 'Designation', 'Total Days', 'Basic', 'DA', 'HRA', 'Others', 'Gross', 'PF', 'ESI', 'PT', 'TDS', 'Total Ded', 'Net Pay'];
     const tableData = data.map((r, i) => {
         const emp = employees.find(e => e.id === r.employeeId);
-        const others = r.earnings.total - (r.earnings.basic + r.earnings.da + r.earnings.hra);
-        return [i + 1, emp?.name || '', emp?.designation || '', r.payableDays, r.earnings.basic, r.earnings.da, r.earnings.hra, others, r.earnings.total, r.deductions.epf, r.deductions.esi, r.deductions.pt, r.deductions.it, r.deductions.total, r.netPay];
+        const basic = r?.earnings?.basic || 0;
+        const da = r?.earnings?.da || 0;
+        const hra = r?.earnings?.hra || 0;
+        const totalEarn = r?.earnings?.total || 0;
+        const others = totalEarn - (basic + da + hra);
+        return [i + 1, emp?.name || '', emp?.designation || '', r.payableDays, basic, da, hra, others, totalEarn, (r?.deductions?.epf || 0), (r?.deductions?.esi || 0), (r?.deductions?.pt || 0), (r?.deductions?.it || 0), (r?.deductions?.total || 0), (r?.netPay || 0)];
     });
     generatePDFTableReport(`Form B - Register of Wages - ${month} ${year}`, headers, tableData as any[][], `FormB_${month}_${year}`, 'l', undefined, companyProfile);
 };
@@ -910,7 +915,7 @@ export const generateTNFormT = (data: PayrollResult[], employees: Employee[], at
     const tableData = data.map((r, i) => {
         const emp = employees.find(e => e.id === r.employeeId);
         const ledger = leaveLedgers.find(l => l.employeeId === r.employeeId);
-        return [i + 1, emp?.name || '', r.earnings.total, r.deductions.total, r.netPay, ledger?.el.balance || 0, ledger?.sl.balance || 0, ledger?.cl.balance || 0];
+        return [i + 1, emp?.name || '', (r?.earnings?.total || 0), (r?.deductions?.total || 0), (r?.netPay || 0), ledger?.el.balance || 0, ledger?.sl.balance || 0, ledger?.cl.balance || 0];
     });
     generatePDFTableReport(`TN Form T - Wage & Leave Register - ${month} ${year}`, headers, tableData as any[][], `TN_FormT_${month}_${year}`, 'l', undefined, companyProfile);
 };
@@ -920,7 +925,7 @@ export const generateTNFormP = (data: PayrollResult[], employees: Employee[], ad
     const tableData = data.map((r, i) => {
         const emp = employees.find(e => e.id === r.employeeId);
         const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
-        const recovered = r.deductions.advanceRecovery;
+        const recovered = (r?.deductions?.advanceRecovery || 0);
         if ((!adv || adv.balance <= 0) && recovered <= 0) return null;
         return [i + 1, emp?.name || '', adv?.opening || 0, adv?.totalAdvance || 0, recovered, adv?.balance || 0];
     }).filter(Boolean);
@@ -933,9 +938,10 @@ export const generateESIExitReport = (data: PayrollResult[], employees: Employee
         const emp = employees.find(e => e.id === r.employeeId);
         if (!emp) return null;
         const isLeft = !!emp.dol && new Date(emp.dol).getMonth() === new Date(`${month} 1, ${year}`).getMonth() && new Date(emp.dol).getFullYear() === year;
-        const crossedCeiling = r.earnings.total > 21000 && !emp.isESIExempt;
+        const gross = (r?.earnings?.total || 0);
+        const crossedCeiling = gross > 21000 && !emp.isESIExempt;
         if (isLeft || crossedCeiling) {
-            return [i + 1, emp.name, emp.esiNumber || 'N/A', emp.dol ? formatDateInd(emp.dol) : '-', crossedCeiling ? 'Crossed Wage Ceiling' : (emp.leavingReason || 'Resigned'), r.earnings.total];
+            return [i + 1, emp.name, emp.esiNumber || 'N/A', emp.dol ? formatDateInd(emp.dol) : '-', crossedCeiling ? 'Crossed Wage Ceiling' : (emp.leavingReason || 'Resigned'), gross];
         }
         return null;
     }).filter(Boolean);
@@ -945,12 +951,13 @@ export const generateESIExitReport = (data: PayrollResult[], employees: Employee
 export const generateESICodeWagesReport = (data: PayrollResult[], employees: Employee[], format: 'Excel' | 'PDF', fileName: string, companyProfile: CompanyProfile) => {
     const reportData = data.map(r => {
        const emp = employees.find(e => e.id === r.employeeId);
-       const gross = r.earnings.total;
-       const excluded = gross - (r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance);
+       const gross = (r?.earnings?.total || 0);
+       const wageA = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
+       const excluded = gross - wageA;
        const limit = gross * 0.5;
        const excess = excluded > limit ? excluded - limit : 0;
-       const wagesForESI = (r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance) + excess;
-       return { 'Emp ID': r.employeeId, 'Name': emp?.name, 'Gross': gross, 'Excluded Allw': excluded, '50% Limit': limit, 'Excess': excess, 'ESI Wages': wagesForESI, 'ESI Ded': r.deductions.esi };
+       const wagesForESI = wageA + excess;
+       return { 'Emp ID': r.employeeId, 'Name': emp?.name, 'Gross': gross, 'Excluded Allw': excluded, '50% Limit': limit, 'Excess': excess, 'ESI Wages': wagesForESI, 'ESI Ded': (r?.deductions?.esi || 0) };
    });
    if (format === 'Excel') generateExcelReport(reportData, 'ESI Code Wages', fileName);
    else {

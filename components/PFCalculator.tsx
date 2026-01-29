@@ -29,39 +29,33 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
 
-  // 1. Filter Data for Month
   const currentRecords = useMemo(() => {
     return payrollHistory.filter(r => r.month === month && r.year === year);
   }, [payrollHistory, month, year]);
 
-  // Check if finalized
   const isFinalized = useMemo(() => {
     return currentRecords.length > 0 && currentRecords[0].status === 'Finalized';
   }, [currentRecords]);
 
-  // 2. Calculate ECR Data & Challan Aggregates
   const { ecrData, challan } = useMemo(() => {
     let totalEPFWages = 0;
     let totalEPSWages = 0;
     let totalEDLIWages = 0;
     
     let ac1_EE = 0;
-    let ac1_ER = 0; // EPF Difference
-    let ac10 = 0;   // EPS
-    let ac21 = 0;   // EDLI Contribution
-    let ac2 = 0;    // Admin Charges
+    let ac1_ER = 0; 
+    let ac10 = 0;   
+    let ac21 = 0;   
+    let ac2 = 0;    
     
     const rows = currentRecords.map(r => {
       const emp = employees.find(e => e.id === r.employeeId);
       if (!emp) return null;
 
-      // OPT OUT CHECK
       const isOptOut = emp.isDeferredPension && emp.deferredPensionOption === 'OptOut';
 
-      // Actual Wage (Basic + DA + Retaining)
-      const actualWage = r.earnings.basic + r.earnings.da + r.earnings.retainingAllowance;
+      const actualWage = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
       
-      // Calculate Wages based on Rules (J5, K5, L5)
       let epfWage = 0;
       let epsWage = 0;
       let edliWage = 0;
@@ -77,7 +71,6 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
           const isPost2014 = B5_Date && B5_Date >= CUTOFF_2014;
           const isPre2014 = B5_Date && B5_Date < CUTOFF_2014;
 
-          // J5: EPF Wage
           if (D5 === 'Higher') {
               epfWage = actualWage;
           } else {
@@ -85,7 +78,6 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
               else epfWage = actualWage;
           }
 
-          // K5: EPS Wage
           if (A5 && C5 === 'Higher' && D5 === 'Higher' && E5 && isPre2014) {
               epsWage = epfWage;
           } else if (!A5 && isPost2014 && actualWage > config.epfCeiling) {
@@ -101,49 +93,40 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
               }
           }
 
-          // L5: EDLI Wage
           edliWage = Math.min(epfWage, 15000);
       }
 
-      // Rounding
       epfWage = Math.round(epfWage);
       epsWage = Math.round(epsWage);
       edliWage = Math.round(edliWage);
 
-      // Accumulate Wages
       totalEPFWages += epfWage;
       totalEPSWages += epsWage;
       totalEDLIWages += edliWage;
 
-      // Accumulate Contributions (From Engine Result)
-      ac1_EE += (r.deductions.epf + r.deductions.vpf); 
-      ac1_ER += r.employerContributions.epf;
-      ac10 += r.employerContributions.eps;
+      ac1_EE += ((r?.deductions?.epf || 0) + (r?.deductions?.vpf || 0)); 
+      ac1_ER += (r?.employerContributions?.epf || 0);
+      ac10 += (r?.employerContributions?.eps || 0);
 
       return {
         uan: emp.uanc,
         name: emp.name,
-        gross: r.earnings.total,
+        gross: r?.earnings?.total || 0,
         epfWage,
         epsWage,
         edliWage,
-        eeShare: Math.round(r.deductions.epf), // M5
-        erShareEPS: Math.round(r.employerContributions.eps), // N5
-        erShareEPFDiff: Math.round(r.employerContributions.epf), // O5
+        eeShare: Math.round(r?.deductions?.epf || 0), 
+        erShareEPS: Math.round(r?.employerContributions?.eps || 0), 
+        erShareEPFDiff: Math.round(r?.employerContributions?.epf || 0), 
         ncp: r.daysInMonth - r.payableDays,
         refund: 0,
         isOptOut 
       };
     }).filter(Boolean) as any[];
 
-    // Final Challan Calculations
     const adminCharges = Math.round(totalEPFWages * 0.005);
     ac2 = Math.max(500, adminCharges); 
-    
     ac21 = Math.round(totalEDLIWages * 0.005);
-
-    // Total Remittance
-    const totalRemittance = ac1_EE + ac1_ER + ac10 + ac2 + ac21; 
 
     return {
       ecrData: rows,
@@ -158,7 +141,7 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
         ac10,
         ac21,
         ac22: 0,
-        totalRemittance
+        totalRemittance: ac1_EE + ac1_ER + ac10 + ac2 + ac21
       }
     };
   }, [currentRecords, employees, config]);

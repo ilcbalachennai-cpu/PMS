@@ -61,6 +61,21 @@ export interface StatutoryConfig {
   
   bonusRate: number;
   pfComplianceType: PFComplianceType; // Company-level compliance
+
+  // NEW: Higher Contribution Logic
+  enableHigherContribution: boolean;
+  higherContributionType: 'By Employee' | 'By Employee & Employer';
+  higherContributionComponents: {
+    basic: boolean;
+    da: boolean;
+    retaining: boolean;
+    conveyance: boolean;
+    washing: boolean;
+    attire: boolean;
+    special1: boolean;
+    special2: boolean;
+    special3: boolean;
+  };
 }
 
 export interface CompanyProfile {

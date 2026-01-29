@@ -80,7 +80,22 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
   lwfEmployerContribution: 20,
   
   bonusRate: 0.0833,
-  pfComplianceType: 'Statutory' // Default for 20+ employees
+  pfComplianceType: 'Statutory',
+
+  // NEW: Higher Contribution Rules
+  enableHigherContribution: false,
+  higherContributionType: 'By Employee',
+  higherContributionComponents: {
+    basic: true,
+    da: true,
+    retaining: true,
+    conveyance: false,
+    washing: false,
+    attire: false,
+    special1: false,
+    special2: false,
+    special3: false
+  }
 };
 
 export const DEFAULT_LEAVE_POLICY: LeavePolicy = {

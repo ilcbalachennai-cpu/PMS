@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
-import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS } from '../constants';
+import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
 import CryptoJS from 'crypto-js';
 
 interface SettingsProps {
@@ -22,7 +22,19 @@ interface SettingsProps {
 
 const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, initialTab = 'STATUTORY', userRole, currentUser }) => {
   const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER'>(initialTab);
-  const [formData, setFormData] = useState(config);
+  
+  // SCHEMA MIGRATION: Merge current config with defaults to prevent crashes on new features
+  const [formData, setFormData] = useState<StatutoryConfig>(() => {
+    return {
+        ...INITIAL_STATUTORY_CONFIG,
+        ...config,
+        higherContributionComponents: {
+            ...INITIAL_STATUTORY_CONFIG.higherContributionComponents,
+            ...(config.higherContributionComponents || {})
+        }
+    };
+  });
+
   const [profileData, setProfileData] = useState(companyProfile);
   const [localLeavePolicy, setLocalLeavePolicy] = useState(leavePolicy);
   const [saved, setSaved] = useState(false);
@@ -112,7 +124,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         setProcessProgress(20);
         await delay(300);
 
-        // FIX: Ensure logo is retrieved cleanly for export
         const rawLogo = localStorage.getItem('app_logo');
         let processedLogo = rawLogo;
         if (rawLogo && rawLogo.startsWith('"')) {
@@ -153,10 +164,9 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         const a = document.createElement('a');
         a.href = url;
         
-        // FINANCIAL YEAR CALCULATION
         const today = new Date();
         let fyStart = today.getFullYear();
-        if (today.getMonth() < 3) { // Jan, Feb, Mar
+        if (today.getMonth() < 3) {
             fyStart = fyStart - 1;
         }
         const fyEnd = fyStart + 1;
@@ -232,8 +242,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
               if (data.leaveLedgers) localStorage.setItem('app_leave_ledgers', JSON.stringify(data.leaveLedgers));
               if (data.advanceLedgers) localStorage.setItem('app_advance_ledgers', JSON.stringify(data.advanceLedgers));
               if (data.payrollHistory) localStorage.setItem('app_payroll_history', JSON.stringify(data.payrollHistory));
-              
-              // FIX: Ensure logo is saved cleanly as a string (App.tsx loader will handle parsing)
               if (data.logo) localStorage.setItem('app_logo', JSON.stringify(data.logo));
               
               if (data.masters) {
@@ -330,6 +338,19 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     setFormData({ ...formData, ptSlabs: newSlabs });
   };
 
+  const handleHigherContributionToggle = (key: keyof StatutoryConfig['higherContributionComponents']) => {
+    // Defensive check to ensure higherContributionComponents exists
+    const currentComponents = formData.higherContributionComponents || INITIAL_STATUTORY_CONFIG.higherContributionComponents;
+    
+    setFormData({
+        ...formData,
+        higherContributionComponents: {
+            ...currentComponents,
+            [key]: !currentComponents[key]
+        }
+    });
+  };
+
   const handleSave = () => {
     setConfig(formData);
     setCompanyProfile(profileData);
@@ -378,30 +399,103 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
             <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 space-y-6">
-                <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-                    <Landmark className="text-blue-400" size={20} />
-                    <h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">Provident Fund (EPF)</h3>
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-3">
+                        <Landmark className="text-blue-400" size={20} />
+                        <h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">Provident Fund (EPF)</h3>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer p-1.5 bg-blue-900/10 rounded-lg border border-blue-500/20 hover:bg-blue-900/20 transition-all">
+                        <input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900" checked={formData.enableHigherContribution || false} onChange={e => setFormData({...formData, enableHigherContribution: e.target.checked})} />
+                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Enable Higher Contribution Rules</span>
+                    </label>
                 </div>
-                <div className="space-y-4">
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Compliance Basis</label>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button onClick={() => handlePFTypeChange('Statutory')} className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Statutory' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>Statutory (12%)</button>
-                            <button onClick={() => handlePFTypeChange('Voluntary')} className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Voluntary' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>Voluntary (10%)</button>
+                
+                <div className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Compliance Basis</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={() => handlePFTypeChange('Statutory')} className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Statutory' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>Statutory (12%)</button>
+                                    <button onClick={() => handlePFTypeChange('Voluntary')} className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Voluntary' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>Voluntary (10%)</button>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Statutory Ceiling (₹)</label>
+                                    <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfCeiling} onChange={e => setFormData({...formData, epfCeiling: +e.target.value})} />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Employee Rate (%)</label>
+                                    <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfEmployeeRate * 100} onChange={e => setFormData({...formData, epfEmployeeRate: +e.target.value / 100})} />
+                                </div>
+                            </div>
                         </div>
+
+                        {formData.enableHigherContribution && (
+                            <div className="bg-blue-900/5 p-4 rounded-xl border border-blue-500/20 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Higher Applicability</label>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {['By Employee', 'By Employee & Employer'].map(type => (
+                                            <button 
+                                                key={type}
+                                                onClick={() => setFormData({...formData, higherContributionType: type as any})}
+                                                className={`py-2 px-4 text-left text-xs font-bold rounded-lg border transition-all flex items-center justify-between ${formData.higherContributionType === type ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}
+                                            >
+                                                {type}
+                                                {formData.higherContributionType === type ? <CheckCircle2 size={14} /> : <div className="w-3.5 h-3.5 rounded-full border border-slate-700" />}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <p className="text-[9px] text-blue-300 italic leading-relaxed">
+                                    * PF Wages will be taken from Higher Contribution Base only if it exceeds Code Wages (Clause 88).
+                                </p>
+                            </div>
+                        )}
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Statutory Ceiling (₹)</label>
-                            <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfCeiling} onChange={e => setFormData({...formData, epfCeiling: +e.target.value})} />
+
+                    {formData.enableHigherContribution && (
+                        <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                <Table size={12} className="text-blue-400" />
+                                Selected Wage Components for Higher Contribution
+                            </label>
+                            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
+                                {[
+                                    { key: 'basic', label: 'Basic Pay' },
+                                    { key: 'da', label: 'DA' },
+                                    { key: 'retaining', label: 'Retn Allow' },
+                                    { key: 'conveyance', label: 'Conveyance' },
+                                    { key: 'washing', label: 'Washing' },
+                                    { key: 'attire', label: 'Attire' },
+                                    { key: 'special1', label: 'Allow 1' },
+                                    { key: 'special2', label: 'Allow 2' },
+                                    { key: 'special3', label: 'Allow 3' },
+                                ].map(comp => {
+                                    const components = formData.higherContributionComponents || INITIAL_STATUTORY_CONFIG.higherContributionComponents;
+                                    const isActive = components[comp.key as keyof typeof components];
+                                    return (
+                                        <button
+                                            key={comp.key}
+                                            onClick={() => handleHigherContributionToggle(comp.key as any)}
+                                            className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${
+                                                isActive
+                                                ? 'bg-blue-600 border-blue-400 text-white'
+                                                : 'bg-slate-800 border-slate-700 text-slate-500'
+                                            }`}
+                                        >
+                                            {isActive ? <CheckSquare size={14} /> : <Square size={14} />}
+                                            <span className="truncate">{comp.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Employee Rate (%)</label>
-                            <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfEmployeeRate * 100} onChange={e => setFormData({...formData, epfEmployeeRate: +e.target.value / 100})} />
-                        </div>
-                    </div>
+                    )}
                 </div>
             </div>
 
@@ -672,7 +766,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.area} onChange={e => setProfileData({...profileData, area: e.target.value})} />
                             </div>
                             <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label flash
                                 <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.city} onChange={e => setProfileData({...profileData, city: e.target.value})} />
                             </div>
                             <div className="space-y-1">
@@ -815,7 +909,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
        {showResetModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+            <div className="bg-[#1e293b] w-full max-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
                 <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                 <div className="flex flex-col items-center gap-2">
                     <div className="p-4 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2">

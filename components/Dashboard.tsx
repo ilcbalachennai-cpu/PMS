@@ -21,15 +21,12 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers, month, year, setMonth, setYear, onNavigate }) => {
   
-  // Dynamic Year Range
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-  // Reusable Quick Links Component
   const QuickLinks = ({ centered = false }: { centered?: boolean }) => (
     <div className={`grid grid-cols-1 ${centered ? 'md:grid-cols-2 max-w-3xl' : 'md:grid-cols-3'} gap-4 w-full`}>
-         {/* Internal App Module Link */}
          <button 
             onClick={() => onNavigate(View.PFCalculator)}
             className="col-span-1 bg-gradient-to-r from-blue-900/30 to-[#1e293b] p-4 rounded-xl border border-blue-800/30 flex items-center justify-between group hover:border-blue-500/50 transition-all shadow-lg cursor-pointer text-left"
@@ -48,7 +45,6 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
             </div>
          </button>
 
-         {/* External App Link */}
          <a 
             href={companyProfile.externalAppUrl || '#'} 
             target="_blank"
@@ -90,7 +86,6 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
             </div>
         </div>
 
-        {/* Show Quick Links even in Empty State */}
         <div className="w-full flex flex-col items-center gap-4 mt-8 pt-8 border-t border-slate-800/50">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Quick Access Tools</h3>
             <QuickLinks centered={true} />
@@ -101,8 +96,6 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
 
   const payrollResults = employees.map(emp => {
     const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { employeeId: emp.id, month, year, presentDays: 31, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
-    
-    // SAFE ACCESS: Defaults for missing ledgers to prevent crash
     const leave = leaveLedgers.find(l => l.employeeId === emp.id) || {
       employeeId: emp.id,
       el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
@@ -121,8 +114,8 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
     return calculatePayroll(emp, config, att, leave, advance, month, year);
   });
   
-  const totalGross = payrollResults.reduce((acc, curr) => acc + curr.earnings.total, 0);
-  const totalEPF = payrollResults.reduce((acc, curr) => acc + curr.deductions.epf + curr.employerContributions.epf + curr.employerContributions.eps, 0);
+  const totalGross = payrollResults.reduce((acc, curr) => acc + (curr?.earnings?.total || 0), 0);
+  const totalEPF = payrollResults.reduce((acc, curr) => acc + (curr?.deductions?.epf || 0) + (curr?.employerContributions?.epf || 0) + (curr?.employerContributions?.eps || 0), 0);
   const totalLOP = payrollResults.reduce((acc, emp) => {
       const att = attendances.find(a => a.employeeId === emp.employeeId && a.month === month && a.year === year);
       return acc + (att ? att.lopDays : 0);
@@ -136,24 +129,22 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
   ];
 
   const chartData = payrollResults.map(res => ({
-    name: employees.find(e => e.id === res.employeeId)?.name.split(' ')[0],
-    Net: res.netPay,
-    Deductions: res.deductions.total,
+    name: employees.find(e => e.id === res.employeeId)?.name.split(' ')[0] || 'Emp',
+    Net: res?.netPay || 0,
+    Deductions: res?.deductions?.total || 0,
   }));
 
   const pieData = [
     { name: 'EPF', value: totalEPF },
-    { name: 'ESI', value: payrollResults.reduce((a,c) => a+c.deductions.esi, 0) },
-    { name: 'PT/Tax', value: payrollResults.reduce((a,c) => a+c.deductions.pt + c.deductions.it, 0) },
-    { name: 'Bonus/Prov', value: payrollResults.reduce((a,c) => a+c.earnings.bonus + c.gratuityAccrual, 0) },
+    { name: 'ESI', value: payrollResults.reduce((a,c) => a + (c?.deductions?.esi || 0), 0) },
+    { name: 'PT/Tax', value: payrollResults.reduce((a,c) => a + (c?.deductions?.pt || 0) + (c?.deductions?.it || 0), 0) },
+    { name: 'Bonus/Prov', value: payrollResults.reduce((a,c) => a + (c?.earnings?.bonus || 0) + (c?.gratuityAccrual || 0), 0) },
   ];
 
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
 
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
-      
-      {/* Date Header for Dashboard */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
          <h2 className="text-lg font-bold text-white flex items-center gap-2">
             Overview <span className="text-slate-500 text-sm font-normal">for {month} {year}</span>
@@ -183,7 +174,6 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
          </div>
       </div>
 
-      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         {stats.map((stat, i) => (
           <div key={i} className="bg-[#1e293b] p-4 rounded-xl border border-slate-800 shadow-lg hover:bg-slate-800/80 transition-all">
@@ -200,13 +190,11 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
         ))}
       </div>
 
-      {/* Quick Access Tools & External Apps */}
       <QuickLinks />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-[#1e293b] p-5 rounded-xl border border-slate-800 shadow-lg">
           <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Net Pay vs Deductions per Employee</h3>
-          {/* Reduced height from h-64 to h-56 to make it very compact */}
           <div className="h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData}>
