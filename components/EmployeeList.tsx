@@ -278,6 +278,37 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
       }
   };
 
+  const handleDownloadImportReport = (format: 'PDF' | 'Excel') => {
+    if (!importSummary) return;
+
+    const data = importSummary.errors.map(err => ({
+        'Row No': err.row,
+        'Employee Name': err.name,
+        'Employee ID': err.id,
+        'Reason for Rejection': err.reason
+    }));
+
+    const fileName = `Import_Rejection_Report_${formatDateInd(new Date().toISOString())}`;
+
+    if (format === 'Excel') {
+        generateExcelReport(data, 'Import Errors', fileName);
+    } else {
+        const headers = ['Row', 'Employee Name', 'ID', 'Reason for Rejection'];
+        const rows = data.map(d => [d['Row No'], d['Employee Name'], d['Employee ID'], d['Reason for Rejection']]);
+        const summaryText = `Total Processed: ${importSummary.total} | Successful: ${importSummary.success} | Failed: ${importSummary.failed}`;
+        
+        generatePDFTableReport(
+            'Import Exception Report',
+            headers,
+            rows,
+            fileName,
+            'p', 
+            summaryText,
+            companyProfile
+        );
+    }
+  };
+
   const handleDownloadTemplate = () => {
     const templateHeaders = [
         "Employee ID", "Full Name", "Gender", "Date of Birth (DD-MM-YYYY)", "Designation", 
@@ -870,8 +901,18 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </div>
                 
                 {/* Footer */}
-                <div className="p-4 border-t border-slate-700 bg-[#1e293b] flex justify-end rounded-b-2xl">
-                    <button onClick={() => setImportSummary(null)} className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold text-sm transition-colors">Close Report</button>
+                <div className="p-4 border-t border-slate-700 bg-[#1e293b] flex justify-end gap-3 rounded-b-2xl">
+                    {importSummary.failed > 0 && (
+                        <>
+                            <button onClick={() => handleDownloadImportReport('PDF')} className="px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/50 rounded-lg font-bold text-xs transition-colors flex items-center gap-2">
+                                <FileText size={16} /> PDF Report
+                            </button>
+                            <button onClick={() => handleDownloadImportReport('Excel')} className="px-4 py-2 bg-emerald-900/20 hover:bg-emerald-900/40 text-emerald-400 border border-emerald-900/50 rounded-lg font-bold text-xs transition-colors flex items-center gap-2">
+                                <FileSpreadsheet size={16} /> Excel Report
+                            </button>
+                        </>
+                    )}
+                    <button onClick={() => setImportSummary(null)} className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold text-sm transition-colors">Close</button>
                 </div>
             </div>
         </div>
