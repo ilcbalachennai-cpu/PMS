@@ -291,6 +291,10 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   };
 
   const handleBulkAddEmployees = (newEmps: Employee[]) => {
+    // Identify truly new employees who don't exist in current state
+    const currentIds = new Set(employees.map(e => e.id));
+    const trulyNewEmps = newEmps.filter(e => !currentIds.has(e.id));
+
     setEmployees(currentEmployees => {
       const empMap = new Map<string, Employee>();
       currentEmployees.forEach(e => empMap.set(e.id, e));
@@ -308,6 +312,43 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       });
       return Array.from(empMap.values());
     });
+
+    // Initialize ledgers and attendance for new bulk employees
+    if (trulyNewEmps.length > 0) {
+        setAttendances(prev => {
+            const newAtts = trulyNewEmps.map(e => ({ 
+                employeeId: e.id, 
+                month: globalMonth, 
+                year: globalYear, 
+                presentDays: 30, 
+                earnedLeave: 0, 
+                sickLeave: 0, 
+                casualLeave: 0, 
+                lopDays: 0 
+            }));
+            return [...prev, ...newAtts];
+        });
+        setLeaveLedgers(prev => {
+            const newLeaves = trulyNewEmps.map(e => ({
+                employeeId: e.id,
+                el: { opening: 0, eligible: 1.5, encashed: 0, availed: 0, balance: 1.5 },
+                sl: { eligible: 1, availed: 0, balance: 1 },
+                cl: { availed: 0, accumulation: 0, balance: 0 }
+            }));
+            return [...prev, ...newLeaves];
+        });
+        setAdvanceLedgers(prev => {
+            const newAdvs = trulyNewEmps.map(e => ({ 
+                employeeId: e.id, 
+                opening: 0, 
+                totalAdvance: 0, 
+                monthlyInstallment: 0, 
+                paidAmount: 0, 
+                balance: 0 
+            }));
+            return [...prev, ...newAdvs];
+        });
+    }
   };
 
   const handleLogin = (user: User) => {
@@ -507,7 +548,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         <div className="p-8 max-w-7xl mx-auto">
           {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={handleDashboardNavigation} />}
           {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} />}
-          {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={currentUser} companyProfile={companyProfile} />}
+          {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={currentUser} companyProfile={companyProfile} />}
           {activeView === View.PayProcess && <PayProcess employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={currentUser} />}
           {activeView === View.Reports && <Reports employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={currentUser} />}
           {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} />}

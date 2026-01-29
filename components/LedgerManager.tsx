@@ -87,36 +87,75 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
   const handleLeaveUpdate = (empId: string, field: 'el' | 'sl' | 'cl', subField: string, value: number) => {
       if (isLocked || isReadOnly || justSaved || !setLeaveLedgers) return;
 
-      const updated = leaveLedgers.map(l => {
-          if (l.employeeId === empId) {
-             return {
-                 ...l,
-                 [field]: {
-                     ...l[field],
-                     [subField]: value
-                 }
-             };
-          }
-          return l;
-      });
-      setLeaveLedgers(updated);
+      const exists = leaveLedgers.some(l => l.employeeId === empId);
+
+      if (exists) {
+        const updated = leaveLedgers.map(l => {
+            if (l.employeeId === empId) {
+               return {
+                   ...l,
+                   [field]: {
+                       ...l[field],
+                       [subField]: value
+                   }
+               };
+            }
+            return l;
+        });
+        setLeaveLedgers(updated);
+      } else {
+        // Create new record if missing
+        const newRecord: LeaveLedger = {
+            employeeId: empId,
+            el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
+            sl: { eligible: 0, availed: 0, balance: 0 },
+            cl: { availed: 0, accumulation: 0, balance: 0 },
+            [field]: { ...{ opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0, accumulation: 0 }, [subField]: value }
+        };
+        // Ensure structure consistency for nested object spread above
+        if (field === 'el') newRecord.el[subField as keyof typeof newRecord.el] = value;
+        if (field === 'sl') newRecord.sl[subField as keyof typeof newRecord.sl] = value;
+        if (field === 'cl') newRecord.cl[subField as keyof typeof newRecord.cl] = value;
+
+        setLeaveLedgers([...leaveLedgers, newRecord]);
+      }
   };
 
   const handleAdvanceUpdate = (empId: string, field: keyof AdvanceLedger, value: number) => {
       if (isLocked || isReadOnly || justSaved || !setAdvanceLedgers) return;
       
-      const updated = advanceLedgers.map(a => {
-          if (a.employeeId === empId) {
-             const newRecord = { ...a, [field]: value };
-             // Auto-calc balance
-             if (field === 'totalAdvance' || field === 'paidAmount' || field === 'opening') {
-                 newRecord.balance = (newRecord.opening || 0) + (newRecord.totalAdvance || 0) - (newRecord.paidAmount || 0);
-             }
-             return newRecord;
-          }
-          return a;
-      });
-      setAdvanceLedgers(updated);
+      const exists = advanceLedgers.some(a => a.employeeId === empId);
+
+      if (exists) {
+        const updated = advanceLedgers.map(a => {
+            if (a.employeeId === empId) {
+               const newRecord = { ...a, [field]: value };
+               // Auto-calc balance
+               if (field === 'totalAdvance' || field === 'paidAmount' || field === 'opening') {
+                   newRecord.balance = (newRecord.opening || 0) + (newRecord.totalAdvance || 0) - (newRecord.paidAmount || 0);
+               }
+               return newRecord;
+            }
+            return a;
+        });
+        setAdvanceLedgers(updated);
+      } else {
+        // Create new record
+        const newRecord: AdvanceLedger = {
+            employeeId: empId,
+            opening: 0,
+            totalAdvance: 0,
+            monthlyInstallment: 0,
+            paidAmount: 0,
+            balance: 0,
+            [field]: value
+        };
+        // Auto-calc balance
+        if (field === 'totalAdvance' || field === 'paidAmount' || field === 'opening') {
+            newRecord.balance = (newRecord.opening || 0) + (newRecord.totalAdvance || 0) - (newRecord.paidAmount || 0);
+        }
+        setAdvanceLedgers([...advanceLedgers, newRecord]);
+      }
   };
 
   const handleSave = () => {
@@ -178,15 +217,21 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                   let count = 0;
                   data.forEach((row: any) => {
                       const id = row['Employee ID'] || row['ID'];
-                      // Only process if employee is in filtered list
                       if (filteredEmployees.some(e => e.id === id)) {
                           const idx = newLedgers.findIndex(l => l.employeeId === id);
                           if (idx >= 0) {
                               newLedgers[idx].el.opening = Number(row['EL Opening'] || newLedgers[idx].el.opening);
                               newLedgers[idx].sl.eligible = Number(row['SL Opening'] || newLedgers[idx].sl.eligible);
                               newLedgers[idx].cl.accumulation = Number(row['CL Opening'] || newLedgers[idx].cl.accumulation);
-                              count++;
+                          } else {
+                              newLedgers.push({
+                                  employeeId: id,
+                                  el: { opening: Number(row['EL Opening'] || 0), eligible: 0, encashed: 0, availed: 0, balance: Number(row['EL Opening'] || 0) },
+                                  sl: { eligible: Number(row['SL Opening'] || 0), availed: 0, balance: Number(row['SL Opening'] || 0) },
+                                  cl: { accumulation: Number(row['CL Opening'] || 0), availed: 0, balance: Number(row['CL Opening'] || 0) }
+                              });
                           }
+                          count++;
                       }
                   });
                   setLeaveLedgers(newLedgers);
@@ -199,13 +244,27 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                        const id = row['Employee ID'] || row['ID'];
                        if (filteredEmployees.some(e => e.id === id)) {
                            const idx = newLedgers.findIndex(l => l.employeeId === id);
+                           
+                           const totalAdvance = Number(row['Advance Amount'] || 0);
+                           const monthlyInstallment = Number(row['Monthly EMI'] || 0);
+                           const paidAmount = Number(row['Paid Amount'] || 0);
+
                            if (idx >= 0) {
-                               newLedgers[idx].totalAdvance = Number(row['Advance Amount'] || 0);
-                               newLedgers[idx].monthlyInstallment = Number(row['Monthly EMI'] || 0);
-                               newLedgers[idx].paidAmount = Number(row['Paid Amount'] || 0);
+                               newLedgers[idx].totalAdvance = totalAdvance;
+                               newLedgers[idx].monthlyInstallment = monthlyInstallment;
+                               newLedgers[idx].paidAmount = paidAmount;
                                newLedgers[idx].balance = (newLedgers[idx].opening || 0) + newLedgers[idx].totalAdvance - newLedgers[idx].paidAmount;
-                               count++;
+                           } else {
+                               newLedgers.push({
+                                   employeeId: id,
+                                   opening: 0,
+                                   totalAdvance,
+                                   monthlyInstallment,
+                                   paidAmount,
+                                   balance: totalAdvance - paidAmount
+                               });
                            }
+                           count++;
                        }
                    });
                    setAdvanceLedgers(newLedgers);
@@ -334,7 +393,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                        const baseDisabled = isReadOnly || isLocked || justSaved;
 
                        if (viewMode === 'leave') {
-                           const l = leaveLedgers.find(led => led.employeeId === emp.id) || { el: { opening: 0, eligible: 0, balance: 0 }, sl: { balance: 0 }, cl: { balance: 0 } };
+                           const l = leaveLedgers.find(led => led.employeeId === emp.id) || { el: { opening: 0, eligible: 0, balance: 0 }, sl: { balance: 0, eligible: 0 }, cl: { balance: 0, accumulation: 0 } };
                            return (
                                <tr key={emp.id} className="hover:bg-slate-800/50">
                                    <td className="px-6 py-4"><div className="text-sm font-bold text-white">{emp.name}</div><div className="text-[10px] text-slate-500">{emp.id}</div></td>

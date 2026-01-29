@@ -46,8 +46,16 @@ export const calculatePayroll = (
   const monthIdx = months.indexOf(month);
   const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
   
-  // --- DOL (Date of Leaving) LOGIC ---
-  let effectivePayableDays = 0;
+  // --- Calculation of Payable Days ---
+  // Logic: Pay for Present Days + Paid Leaves (EL, SL, CL)
+  // LOP is implicitly handled because it reduces the Present Days count in Attendance Entry.
+  const paidLeaveDays = (attendance.earnedLeave || 0) + 
+                        (attendance.sickLeave || 0) + 
+                        (attendance.casualLeave || 0);
+  
+  let effectivePayableDays = (attendance.presentDays || 0) + paidLeaveDays;
+
+  // --- DOL (Date of Leaving) Logic Checks ---
   let isLeftService = false;
   let exitRemark = '';
 
@@ -61,43 +69,43 @@ export const calculatePayroll = (
       const dolDate = new Date(employee.dol);
       dolDate.setHours(0,0,0,0);
 
-      // Case 1: Employee Left BEFORE this month started
+      // Case 1: Employee Left BEFORE this month started -> No Pay
       if (dolDate < periodStart) {
-          return {
-            employeeId: employee.id,
-            month,
-            year,
-            daysInMonth,
-            payableDays: 0,
-            earnings: { 
-                basic: 0, da: 0, retainingAllowance: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, 
-                special1: 0, special2: 0, special3: 0, bonus: 0, leaveEncashment: 0, total: 0 
-            },
-            deductions: { epf: 0, vpf: 0, esi: 0, pt: 0, it: 0, lwf: 0, advanceRecovery: 0, total: 0 },
-            employerContributions: { epf: 0, eps: 0, esi: 0, lwf: 0 },
-            gratuityAccrual: 0,
-            netPay: 0,
-            isCode88: false,
-            isESICodeWagesUsed: false,
-            esiRemark: 'Left Service'
-          };
+          effectivePayableDays = 0;
+          exitRemark = 'Left Service (Previous Period)';
       }
-
       // Case 2: Employee Left DURING this month
-      if (dolDate >= periodStart && dolDate <= periodEnd) {
+      else if (dolDate >= periodStart && dolDate <= periodEnd) {
           isLeftService = true;
           exitRemark = `Left: ${employee.dol}`;
-          const daysUntilDOL = dolDate.getDate(); 
-          const lop = Math.min(attendance.lopDays, daysInMonth);
-          const requestedPayable = daysInMonth - lop;
-          effectivePayableDays = Math.min(requestedPayable, daysUntilDOL);
-      } else {
-          const lop = Math.min(attendance.lopDays, daysInMonth);
-          effectivePayableDays = daysInMonth - lop;
+          // For mid-month exit, we strictly trust the attendance entered by the user
+          // which should ideally end at DOL.
       }
-  } else {
-      const lop = Math.min(attendance.lopDays, daysInMonth);
-      effectivePayableDays = daysInMonth - lop;
+  }
+
+  // Safety Cap: Cannot exceed days in month (unless arrears, but this engine is for current month standard pay)
+  effectivePayableDays = Math.min(effectivePayableDays, daysInMonth);
+
+  // Stop if 0 days
+  if (effectivePayableDays <= 0) {
+      return {
+        employeeId: employee.id,
+        month,
+        year,
+        daysInMonth,
+        payableDays: 0,
+        earnings: { 
+            basic: 0, da: 0, retainingAllowance: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, 
+            special1: 0, special2: 0, special3: 0, bonus: 0, leaveEncashment: 0, total: 0 
+        },
+        deductions: { epf: 0, vpf: 0, esi: 0, pt: 0, it: 0, lwf: 0, advanceRecovery: 0, total: 0 },
+        employerContributions: { epf: 0, eps: 0, esi: 0, lwf: 0 },
+        gratuityAccrual: 0,
+        netPay: 0,
+        isCode88: false,
+        isESICodeWagesUsed: false,
+        esiRemark: exitRemark || 'No Payable Days'
+      };
   }
 
   const factor = effectivePayableDays / daysInMonth;
