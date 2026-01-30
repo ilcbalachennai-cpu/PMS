@@ -59,6 +59,8 @@ import {
 
 // Internal Shell Component that holds all logic
 const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
+  const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
   // Initialize User from Session Storage to persist across reloads
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
@@ -78,42 +80,70 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const [activeView, setActiveView] = useState<View>(View.Dashboard);
   const mainContentRef = useRef<HTMLElement>(null);
   
-  const [globalMonth, setGlobalMonth] = useState<string>(() => {
-      try {
-          const savedHistory = localStorage.getItem('app_payroll_history');
-          if (savedHistory) {
-              const parsed: PayrollResult[] = JSON.parse(savedHistory);
-              if (parsed.length > 0) {
-                  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-                  const sorted = parsed.sort((a, b) => {
-                      if (a.year !== b.year) return b.year - a.year;
-                      return months.indexOf(b.month) - months.indexOf(a.month);
-                  });
-                  return sorted[0].month;
-              }
-          }
-      } catch(e) {}
-      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-      return months[new Date().getMonth()];
-  });
+  // --- SMART DATE INITIALIZATION LOGIC ---
+  const getDefaultPeriod = () => {
+    try {
+        const historyData = localStorage.getItem('app_payroll_history');
+        const attendanceData = localStorage.getItem('app_attendance');
+        
+        const history = historyData ? JSON.parse(historyData) : [];
+        const attendance = attendanceData ? JSON.parse(attendanceData) : [];
 
-  const [globalYear, setGlobalYear] = useState<number>(() => {
-      try {
-          const savedHistory = localStorage.getItem('app_payroll_history');
-          if (savedHistory) {
-              const parsed: PayrollResult[] = JSON.parse(savedHistory);
-              if (parsed.length > 0) {
-                  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-                  const sorted = parsed.sort((a, b) => {
-                      if (a.year !== b.year) return b.year - a.year;
-                      return months.indexOf(b.month) - months.indexOf(a.month);
-                  });
-                  return sorted[0].year;
-              }
-          }
-      } catch(e) {}
-      return new Date().getFullYear();
-  });
+        const getMonthValue = (m: string, y: number) => {
+            const idx = monthsArr.indexOf(m.trim());
+            return (y * 12) + (idx === -1 ? 0 : idx);
+        };
+
+        // 1. Check if ACTIVE Attendance Data is present (ignoring auto-generated blank records)
+        if (Array.isArray(attendance) && attendance.length > 0) {
+            // Filter only records where some days are actually entered
+            const activeAttendance = attendance.filter((a: any) => 
+                (a.presentDays || 0) > 0 || 
+                (a.earnedLeave || 0) > 0 || 
+                (a.sickLeave || 0) > 0 || 
+                (a.casualLeave || 0) > 0 || 
+                (a.lopDays || 0) > 0 ||
+                (a.encashedDays || 0) > 0
+            );
+
+            if (activeAttendance.length > 0) {
+                const sortedAttendance = [...activeAttendance].sort((a, b) => {
+                    return getMonthValue(b.month, b.year) - getMonthValue(a.month, a.year);
+                });
+                return { month: sortedAttendance[0].month, year: sortedAttendance[0].year };
+            }
+        }
+
+        // 2. Check if Confirmed Payroll exists - Use NEXT month after latest confirmed
+        if (Array.isArray(history) && history.length > 0) {
+            const confirmed = history.filter((h: any) => h.status === 'Finalized');
+            if (confirmed.length > 0) {
+                const sortedConfirmed = [...confirmed].sort((a, b) => {
+                    return getMonthValue(b.month, b.year) - getMonthValue(a.month, a.year);
+                });
+                const last = sortedConfirmed[0];
+                const lastIdx = monthsArr.indexOf(last.month);
+                
+                if (lastIdx === 11) { // December
+                    return { month: 'January', year: last.year + 1 };
+                } else {
+                    return { month: monthsArr[lastIdx + 1], year: last.year };
+                }
+            }
+        }
+
+        // 3. Absolute Fallback: April 2025 (Start of FY 25-26)
+        return { month: 'April', year: 2025 };
+    } catch (e) {
+        console.error("Error determining default period:", e);
+        return { month: 'April', year: 2025 };
+    }
+  };
+
+  const initialPeriod = getDefaultPeriod();
+
+  const [globalMonth, setGlobalMonth] = useState<string>(initialPeriod.month);
+  const [globalYear, setGlobalYear] = useState<number>(initialPeriod.year);
 
   const [settingsTab, setSettingsTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER'>('STATUTORY');
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -152,12 +182,10 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     } catch (e) { return INITIAL_COMPANY_PROFILE; }
   });
   
-  // FIX: Updated loader to handle stringified strings (safely handling data restoration bugs)
   const [logoUrl, setLogoUrl] = useState<string>(() => {
     try {
       const savedLogo = localStorage.getItem('app_logo');
       if (savedLogo) {
-          // If stored via safeSave (JSON.stringify), it will start with a quote
           if (savedLogo.startsWith('"')) {
               try {
                   return JSON.parse(savedLogo);
@@ -280,7 +308,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const handleAddEmployee = (newEmp: Employee) => {
     const updatedEmployees = [...employees, newEmp];
     setEmployees(updatedEmployees);
-    setAttendances(prev => [...prev, { employeeId: newEmp.id, month: globalMonth, year: globalYear, presentDays: 30, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 }]);
+    setAttendances(prev => [...prev, { employeeId: newEmp.id, month: globalMonth, year: globalYear, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 }]);
     setLeaveLedgers(prev => [...prev, {
         employeeId: newEmp.id,
         el: { opening: 0, eligible: 1.5, encashed: 0, availed: 0, balance: 1.5 },
@@ -291,7 +319,6 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   };
 
   const handleBulkAddEmployees = (newEmps: Employee[]) => {
-    // Identify truly new employees who don't exist in current state
     const currentIds = new Set(employees.map(e => e.id));
     const trulyNewEmps = newEmps.filter(e => !currentIds.has(e.id));
 
@@ -313,14 +340,13 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       return Array.from(empMap.values());
     });
 
-    // Initialize ledgers and attendance for new bulk employees
     if (trulyNewEmps.length > 0) {
         setAttendances(prev => {
             const newAtts = trulyNewEmps.map(e => ({ 
                 employeeId: e.id, 
                 month: globalMonth, 
                 year: globalYear, 
-                presentDays: 30, 
+                presentDays: 0, 
                 earnedLeave: 0, 
                 sickLeave: 0, 
                 casualLeave: 0, 

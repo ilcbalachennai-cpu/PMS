@@ -76,6 +76,20 @@ export interface StatutoryConfig {
     special2: boolean;
     special3: boolean;
   };
+
+  // NEW: Leave Wages Calculation Components
+  leaveWagesComponents: {
+    basic: boolean;
+    da: boolean;
+    retaining: boolean;
+    hra: boolean;
+    conveyance: boolean;
+    washing: boolean;
+    attire: boolean;
+    special1: boolean;
+    special2: boolean;
+    special3: boolean;
+  };
 }
 
 export interface CompanyProfile {

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -31,6 +31,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         higherContributionComponents: {
             ...INITIAL_STATUTORY_CONFIG.higherContributionComponents,
             ...(config.higherContributionComponents || {})
+        },
+        leaveWagesComponents: {
+            ...INITIAL_STATUTORY_CONFIG.leaveWagesComponents,
+            ...(config.leaveWagesComponents || {})
         }
     };
   });
@@ -108,22 +112,17 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     }
   };
 
-  const handleEncryptedExport = async () => {
+  const handleEncryptedExport = () => {
     if (!encryptionKey) {
         alert("Please enter a secure password to encrypt your data file.");
         return;
     }
 
     setIsProcessing(true);
-    setProcessProgress(0);
-    setProcessStatus('Initializing export process...');
+    setProcessProgress(50);
+    setProcessStatus('Processing...');
 
     try {
-        await delay(500);
-        setProcessStatus('Gathering system data...');
-        setProcessProgress(20);
-        await delay(300);
-
         const rawLogo = localStorage.getItem('app_logo');
         let processedLogo = rawLogo;
         if (rawLogo && rawLogo.startsWith('"')) {
@@ -148,16 +147,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             timestamp: new Date().toISOString()
         };
 
-        setProcessStatus('Encrypting sensitive information...');
-        setProcessProgress(50);
-        await delay(400);
-
         const jsonString = JSON.stringify(dataBundle);
         const encrypted = CryptoJS.AES.encrypt(jsonString, encryptionKey).toString();
-
-        setProcessStatus('Generating secure backup file...');
-        setProcessProgress(80);
-        await delay(400);
 
         const blob = new Blob([encrypted], { type: 'text/plain' });
         const url = window.URL.createObjectURL(blob);
@@ -170,21 +161,23 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             fyStart = fyStart - 1;
         }
         const fyEnd = fyStart + 1;
-        const compName = companyProfile.establishmentName ? companyProfile.establishmentName.replace(/\s+/g, '_') : 'Company';
+        const compName = companyProfile.establishmentName ? companyProfile.establishmentName.replace(/[^a-zA-Z0-9]/g, '_') : 'Company';
         
-        a.download = `${compName}_BPP_FY_${fyStart}-${fyEnd}.enc`;
+        a.download = `${compName}_Backup_${fyStart}-${fyEnd}.enc`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
         
         setProcessProgress(100);
-        setProcessStatus('Data Exported Successfully!');
-        await delay(2000); 
+        setProcessStatus('Export Complete');
         
-        setShowBackupModal(false);
-        setEncryptionKey('');
-        setIsProcessing(false);
+        setTimeout(() => {
+            setShowBackupModal(false);
+            setEncryptionKey('');
+            setIsProcessing(false);
+        }, 1000);
+
     } catch (e) {
         console.error(e);
         setIsProcessing(false);
@@ -339,12 +332,21 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   };
 
   const handleHigherContributionToggle = (key: keyof StatutoryConfig['higherContributionComponents']) => {
-    // Defensive check to ensure higherContributionComponents exists
     const currentComponents = formData.higherContributionComponents || INITIAL_STATUTORY_CONFIG.higherContributionComponents;
-    
     setFormData({
         ...formData,
         higherContributionComponents: {
+            ...currentComponents,
+            [key]: !currentComponents[key]
+        }
+    });
+  };
+
+  const handleLeaveWagesToggle = (key: keyof StatutoryConfig['leaveWagesComponents']) => {
+    const currentComponents = formData.leaveWagesComponents || INITIAL_STATUTORY_CONFIG.leaveWagesComponents;
+    setFormData({
+        ...formData,
+        leaveWagesComponents: {
             ...currentComponents,
             [key]: !currentComponents[key]
         }
@@ -553,6 +555,54 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                         <p className="text-[9px] text-slate-500 mt-2">Calculated as per LIC Master Policy for Statutory Gratuity (Act 1972).</p>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        {/* NEW: Leave Wages Calculation Policy Section */}
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+            <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <Calculator className="text-emerald-400" size={20} />
+                    <h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Leave Encashment Wages Policy</h3>
+                </div>
+            </div>
+            
+            <div className="p-6 space-y-4">
+                <p className="text-xs text-slate-400 mb-2">Select the wage components to include for Leave Encashment Calculation (EL/SL/CL).</p>
+                <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
+                    {[
+                        { key: 'basic', label: 'Basic Pay' },
+                        { key: 'da', label: 'DA' },
+                        { key: 'retaining', label: 'Retn Allow' },
+                        { key: 'hra', label: 'HRA' },
+                        { key: 'conveyance', label: 'Conveyance' },
+                        { key: 'washing', label: 'Washing' },
+                        { key: 'attire', label: 'Attire' },
+                        { key: 'special1', label: 'Special 1' },
+                        { key: 'special2', label: 'Special 2' },
+                        { key: 'special3', label: 'Special 3' },
+                    ].map(comp => {
+                        const components = formData.leaveWagesComponents || INITIAL_STATUTORY_CONFIG.leaveWagesComponents;
+                        const isActive = components[comp.key as keyof typeof components];
+                        return (
+                            <button
+                                key={comp.key}
+                                onClick={() => handleLeaveWagesToggle(comp.key as any)}
+                                className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${
+                                    isActive
+                                    ? 'bg-emerald-600 border-emerald-400 text-white'
+                                    : 'bg-slate-800 border-slate-700 text-slate-500'
+                                }`}
+                            >
+                                {isActive ? <CheckSquare size={14} /> : <Square size={14} />}
+                                <span className="truncate">{comp.label}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+                <div className="flex justify-end">
+                    <span className="text-[10px] text-slate-500 italic">* Default logic uses Basic + DA. Adjust according to company policy.</span>
                 </div>
             </div>
         </div>
@@ -766,7 +816,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.area} onChange={e => setProfileData({...profileData, area: e.target.value})} />
                             </div>
                             <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label flash
+                                <label className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label>
                                 <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.city} onChange={e => setProfileData({...profileData, city: e.target.value})} />
                             </div>
                             <div className="space-y-1">

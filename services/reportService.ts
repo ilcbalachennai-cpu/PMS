@@ -126,6 +126,50 @@ export const generatePDFTableReport = (
   doc.save(`${fileName}.pdf`);
 };
 
+export const generateAdvanceShortfallReport = (
+  shortfalls: any[],
+  month: string,
+  year: number,
+  format: 'PDF' | 'Excel',
+  companyProfile: CompanyProfile
+) => {
+  const fileName = `Advance_Recovery_Shortfall_${month}_${year}`;
+
+  if (format === 'Excel') {
+    const data = shortfalls.map(s => ({
+        'Employee ID': s.id,
+        'Name': s.name,
+        'Paid Days': s.days,
+        'Gross Wages': s.gross,
+        'Target Advance': s.target,
+        'Recovered': s.recovered,
+        'Shortfall': s.shortfall,
+        'Reason': s.days === 0 ? 'Zero Days Worked' : 'Insufficient Wages'
+    }));
+    generateExcelReport(data, 'Shortfalls', fileName);
+  } else {
+    const headers = ['ID', 'Name', 'Days', 'Gross', 'Target', 'Recvd', 'Shortfall', 'Remark'];
+    const rows = shortfalls.map(s => [
+        s.id, s.name, s.days, 
+        s.gross.toLocaleString(), 
+        s.target.toLocaleString(), 
+        s.recovered.toLocaleString(), 
+        s.shortfall.toLocaleString(),
+        s.days === 0 ? 'Zero Days' : 'Low Wage'
+    ]);
+    
+    generatePDFTableReport(
+        `Advance Recovery Shortfall - ${month} ${year}`,
+        headers,
+        rows,
+        fileName,
+        'p',
+        "Note: These advances could not be recovered fully due to lack of sufficient net wages or attendance.",
+        companyProfile
+    );
+  }
+};
+
 export const generateGratuityReport = (employees: Employee[], companyProfile: CompanyProfile) => {
     const headers = ['Sl', 'Emp ID', 'Name', 'DOJ', 'Yrs Service', 'Monthly Wage (Basic+DA)', 'Gratuity Payable'];
     const today = new Date();

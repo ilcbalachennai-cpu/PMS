@@ -1,4 +1,3 @@
-
 import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger } from '../types';
 import { PT_STATE_PRESETS } from '../constants';
 
@@ -124,7 +123,36 @@ export const calculatePayroll = (
   
   const bonus = 0; 
   const encashedDays = attendance.encashedDays || 0;
-  const leaveEncashment = Math.round(((employee.basicPay + (employee.da || 0)) / daysInMonth) * encashedDays);
+
+  // --- NEW: Configurable Leave Wages Calculation ---
+  let leaveWageBase = 0;
+  // Fallback to default { basic: true, da: true } if config is missing (backward compatibility)
+  const lwComponents = config.leaveWagesComponents || { 
+    basic: true, 
+    da: true, 
+    retaining: false,
+    hra: false,
+    conveyance: false,
+    washing: false,
+    attire: false,
+    special1: false,
+    special2: false,
+    special3: false
+  };
+
+  if (lwComponents.basic) leaveWageBase += employee.basicPay;
+  if (lwComponents.da) leaveWageBase += (employee.da || 0);
+  if (lwComponents.retaining) leaveWageBase += (employee.retainingAllowance || 0);
+  if (lwComponents.hra) leaveWageBase += (employee.hra || 0);
+  if (lwComponents.conveyance) leaveWageBase += (employee.conveyance || 0);
+  if (lwComponents.washing) leaveWageBase += (employee.washing || 0);
+  if (lwComponents.attire) leaveWageBase += (employee.attire || 0);
+  if (lwComponents.special1) leaveWageBase += (employee.specialAllowance1 || 0);
+  if (lwComponents.special2) leaveWageBase += (employee.specialAllowance2 || 0);
+  if (lwComponents.special3) leaveWageBase += (employee.specialAllowance3 || 0);
+
+  const leaveEncashment = Math.round((leaveWageBase / daysInMonth) * encashedDays);
+  
   const grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
 
   const standardMonthlyGross = employee.basicPay + 

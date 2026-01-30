@@ -21,11 +21,12 @@ import {
   FileCheck,
   HelpCircle,
   ClipboardList,
-  Eye
+  Eye,
+  HandCoins
 } from 'lucide-react';
 import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile, User } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
-import { generateExcelReport, generatePDFTableReport, generatePaySlipsPDF, generateSimplePaySheetPDF, generateLeaveLedgerReport } from '../services/reportService';
+import { generateExcelReport, generatePDFTableReport, generatePaySlipsPDF, generateSimplePaySheetPDF, generateLeaveLedgerReport, generateAdvanceShortfallReport } from '../services/reportService';
 import LedgerManager from './LedgerManager';
 import { DEFAULT_LEAVE_POLICY } from '../constants'; 
 
@@ -72,6 +73,12 @@ const Reports: React.FC<ReportsProps> = ({
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
+  // Shortfall Modal State
+  const [shortfallModal, setShortfallModal] = useState<{
+      isOpen: boolean;
+      data: any[];
+  }>({ isOpen: false, data: [] });
+
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
     type: 'confirm' | 'success' | 'error';
@@ -99,6 +106,7 @@ const Reports: React.FC<ReportsProps> = ({
 
   const executeFreeze = () => {
     setModalState(prev => ({ ...prev, isOpen: false })); 
+    setShortfallModal({ isOpen: false, data: [] }); // Close shortfall modal if open
     setIsFreezing(true);
 
     setTimeout(() => {
@@ -177,7 +185,7 @@ const Reports: React.FC<ReportsProps> = ({
     }, 500);
   };
 
-  const initiateFreeze = () => {
+  const confirmFreeze = () => {
       setModalState({
           isOpen: true,
           type: 'confirm',
@@ -196,6 +204,47 @@ const Reports: React.FC<ReportsProps> = ({
           ),
           onConfirm: executeFreeze
       });
+  };
+
+  // CHECK FOR SHORTFALLS BEFORE FREEZING
+  const initiateFreeze = () => {
+      const currentData = getPayrollData();
+      if (!currentData) {
+          setModalState({ isOpen: true, type: 'error', title: 'No Data', message: 'No payroll data found to freeze.' });
+          return;
+      }
+
+      const detectedShortfalls: any[] = [];
+
+      currentData.forEach(record => {
+          const emp = employees.find(e => e.id === record.employeeId);
+          const adv = advanceLedgers.find(a => a.employeeId === record.employeeId);
+          
+          // Check if there was an active advance with scheduled payment
+          if (adv && adv.balance > 0 && adv.monthlyInstallment > 0) {
+              const target = Math.min(adv.monthlyInstallment, adv.balance);
+              const recovered = record.deductions.advanceRecovery || 0;
+              
+              // If recovery is LESS than target, it's a shortfall
+              if (recovered < target) {
+                  detectedShortfalls.push({
+                      id: emp?.id,
+                      name: emp?.name,
+                      days: record.payableDays,
+                      gross: record.earnings.total,
+                      target: target,
+                      recovered: recovered,
+                      shortfall: target - recovered
+                  });
+              }
+          }
+      });
+
+      if (detectedShortfalls.length > 0) {
+          setShortfallModal({ isOpen: true, data: detectedShortfalls });
+      } else {
+          confirmFreeze();
+      }
   };
 
   const userRole = currentUser?.role;
@@ -335,8 +384,8 @@ const Reports: React.FC<ReportsProps> = ({
             d['NET PAY']
           ]);
           let footnote = '';
-          if (hasCode88) footnote += '* PF calculated on Code Wages (Social Security Code 2020). ';
-          if (hasESICode) footnote += '** ESI calculated on Code Wages (Social Security Code 2020).';
+          if (hasCode88) footnote += '* PF calculated on Code Wages. ';
+          if (hasESICode) footnote += '** ESI calculated on Code Wages.';
           generatePDFTableReport(`Pay Sheet - ${month} ${year}`, headers, pdfData as any[][], `PaySheet_${month}_${year}`, 'l', footnote || undefined, companyProfile);
         }
       } 
@@ -459,6 +508,69 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         </div>
       </div>
+      
+      {/* SHORTFALL ALERT MODAL */}
+      {shortfallModal.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl p-0 flex flex-col relative overflow-hidden">
+                <div className="bg-red-600 p-6 flex justify-between items-start">
+                    <div className="flex gap-4">
+                        <div className="p-3 bg-white/20 rounded-full text-white shadow-lg"><AlertTriangle size={24} /></div>
+                        <div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-wide">Advance Recovery Alert</h3>
+                            <p className="text-xs text-red-100 mt-1 font-medium">The following employees have unrecovered advances due to <b>insufficient wages</b> or <b>zero days</b>.</p>
+                        </div>
+                    </div>
+                    <button onClick={() => setShortfallModal({ isOpen: false, data: [] })} className="text-white/70 hover:text-white"><X size={20} /></button>
+                </div>
+                
+                <div className="p-6 bg-[#0f172a] max-h-60 overflow-y-auto custom-scrollbar">
+                    <table className="w-full text-left text-xs">
+                        <thead className="text-slate-500 uppercase font-bold border-b border-slate-700">
+                            <tr>
+                                <th className="pb-2">Employee</th>
+                                <th className="pb-2 text-right">Target</th>
+                                <th className="pb-2 text-right text-emerald-400">Recovered</th>
+                                <th className="pb-2 text-right text-red-400">Shortfall</th>
+                            </tr>
+                        </thead>
+                        <tbody className="text-slate-300 divide-y divide-slate-800">
+                            {shortfallModal.data.map((r: any) => (
+                                <tr key={r.id}>
+                                    <td className="py-2">
+                                        <span className="font-bold text-white">{r.name}</span><br/>
+                                        <span className="text-slate-500 text-[10px]">{r.id}</span>
+                                        {r.days === 0 && <span className="ml-2 text-[8px] bg-red-900/50 text-red-200 px-1 rounded uppercase">Zero Days</span>}
+                                    </td>
+                                    <td className="py-2 text-right font-mono">{r.target.toLocaleString()}</td>
+                                    <td className="py-2 text-right font-mono text-emerald-400">{r.recovered.toLocaleString()}</td>
+                                    <td className="py-2 text-right font-mono text-red-400 font-bold">{r.shortfall.toLocaleString()}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div className="p-6 bg-[#1e293b] border-t border-slate-800 flex flex-col gap-4">
+                    <div className="flex justify-between items-center">
+                        <div className="flex gap-2">
+                            <button onClick={() => generateAdvanceShortfallReport(shortfallModal.data, month, year, 'PDF', companyProfile)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-xs border border-slate-600 flex items-center gap-2"><FileText size={14} /> PDF</button>
+                            <button onClick={() => generateAdvanceShortfallReport(shortfallModal.data, month, year, 'Excel', companyProfile)} className="px-3 py-2 bg-emerald-900/20 hover:bg-emerald-900/40 text-emerald-400 rounded-lg font-bold text-xs border border-emerald-900/50 flex items-center gap-2"><FileSpreadsheet size={14} /> Excel</button>
+                        </div>
+                    </div>
+                    <div className="flex gap-3 pt-2 border-t border-slate-700/50">
+                        <button onClick={() => setShortfallModal({ isOpen: false, data: [] })} className="flex-1 py-3 border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl font-bold text-xs uppercase tracking-widest transition-colors">
+                            Unlock / Cancel
+                        </button>
+                        <button onClick={executeFreeze} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg flex items-center justify-center gap-2">
+                            Continue & Freeze <Lock size={14} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
       {showLedgerModal && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"><div className="bg-[#1e293b] w-full max-w-6xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 shadow-2xl flex flex-col relative"><div className="p-6 bg-[#0f172a] border-b border-slate-700 flex justify-between items-center sticky top-0 z-10"><div><h2 className="text-xl font-black text-white">Leave Ledger History</h2><p className="text-xs text-slate-400">View comprehensive leave balances, accruals, and monthly history.</p></div><button onClick={() => setShowLedgerModal(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-lg transition-colors"><X size={24} /></button></div><div className="p-6"><LedgerManager employees={employees} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} leavePolicy={DEFAULT_LEAVE_POLICY} month={month} year={year} setMonth={setMonth} setYear={setYear} savedRecords={savedRecords} hideContextSelector={true} viewMode="leave" isReadOnly={true} /></div></div></div>
       )}

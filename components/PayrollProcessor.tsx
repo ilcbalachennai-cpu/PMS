@@ -157,9 +157,53 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
   const handleExportDraft = () => {
     if (results.length === 0) return;
-    const data = results.map(r => {
+    
+    // Filter to exclude records with 0 Net Pay (Zero Wages)
+    const exportableResults = results.filter(r => r.netPay > 0);
+
+    if (exportableResults.length === 0) {
+        setModalState({ isOpen: true, type: 'error', title: 'No Data', message: 'No employees with positive wages found to export.' });
+        return;
+    }
+
+    const data = exportableResults.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return { 'ID': r.employeeId, 'Name': emp?.name, 'Days': r.payableDays, 'Basic': r?.earnings?.basic || 0, 'DA': r?.earnings?.da || 0, 'HRA': r?.earnings?.hra || 0, 'Gross': r?.earnings?.total || 0, 'PF': r?.deductions?.epf || 0, 'ESI': r?.deductions?.esi || 0, 'PT': r?.deductions?.pt || 0, 'TDS': r?.deductions?.it || 0, 'Net Pay': r.netPay };
+        return { 
+            'Employee ID': r.employeeId, 
+            'Name': emp?.name || '', 
+            'Designation': emp?.designation || '',
+            'Department': emp?.division || emp?.department || '',
+            'Total Days': r.daysInMonth,
+            'Paid Days': r.payableDays,
+            
+            // Earnings
+            'Basic Pay': r?.earnings?.basic || 0, 
+            'DA': r?.earnings?.da || 0, 
+            'Retaining Allw': r?.earnings?.retainingAllowance || 0,
+            'HRA': r?.earnings?.hra || 0, 
+            'Conveyance': r?.earnings?.conveyance || 0,
+            'Washing Allw': r?.earnings?.washing || 0,
+            'Attire Allw': r?.earnings?.attire || 0,
+            'Special Allw 1': r?.earnings?.special1 || 0,
+            'Special Allw 2': r?.earnings?.special2 || 0,
+            'Special Allw 3': r?.earnings?.special3 || 0,
+            'Bonus': r?.earnings?.bonus || 0,
+            'Leave Encashment': r?.earnings?.leaveEncashment || 0,
+            'Gross Earnings': r?.earnings?.total || 0, 
+            
+            // Deductions
+            'PF (Employee)': r?.deductions?.epf || 0, 
+            'VPF': r?.deductions?.vpf || 0,
+            'ESI (Employee)': r?.deductions?.esi || 0, 
+            'Professional Tax': r?.deductions?.pt || 0, 
+            'Income Tax (TDS)': r?.deductions?.it || 0, 
+            'LWF (Employee)': r?.deductions?.lwf || 0,
+            'Advance Recovery': r?.deductions?.advanceRecovery || 0,
+            'Total Deductions': r?.deductions?.total || 0, 
+            
+            // Net Pay
+            'Net Pay': r.netPay
+        };
     });
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
