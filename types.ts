@@ -22,6 +22,14 @@ export interface AdvanceLedger {
   balance: number;
 }
 
+export interface FineRecord {
+  employeeId: string;
+  month: string;
+  year: number;
+  amount: number;
+  reason: string;
+}
+
 export interface LeavePolicy {
   el: { maxPerYear: number; maxCarryForward: number; label: string };
   sl: { maxPerYear: number; maxCarryForward: number; label: string };
@@ -233,6 +241,7 @@ export interface PayrollResult {
     it: number;
     lwf: number;
     advanceRecovery: number;
+    fine: number; // New field for Fine / Damages
     total: number;
   };
   employerContributions: {
@@ -248,6 +257,7 @@ export interface PayrollResult {
   isESICodeWagesUsed?: boolean;
   esiRemark?: string;
   leaveSnapshot?: LeaveLedger; // Snapshot of ledger at the time of freezing
+  fineReason?: string; // Store reason for fine in result for reporting
 }
 
 export interface User {

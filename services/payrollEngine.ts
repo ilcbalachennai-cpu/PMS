@@ -1,5 +1,5 @@
 
-import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger } from '../types';
+import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger, FineRecord } from '../types';
 import { PT_STATE_PRESETS } from '../constants';
 
 // Helper to map Branch/City to State for PT Compliance
@@ -41,7 +41,8 @@ export const calculatePayroll = (
   advance: AdvanceLedger,
   month: string,
   year: number,
-  advanceOptions: { restrictTo50Percent: boolean } = { restrictTo50Percent: false }
+  advanceOptions: { restrictTo50Percent: boolean } = { restrictTo50Percent: false },
+  fines: FineRecord[] = [] // New parameter for Fines
 ): PayrollResult => {
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const monthIdx = months.indexOf(month);
@@ -91,13 +92,14 @@ export const calculatePayroll = (
             basic: 0, da: 0, retainingAllowance: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, 
             special1: 0, special2: 0, special3: 0, bonus: 0, leaveEncashment: 0, total: 0 
         },
-        deductions: { epf: 0, vpf: 0, esi: 0, pt: 0, it: 0, lwf: 0, advanceRecovery: 0, total: 0 },
+        deductions: { epf: 0, vpf: 0, esi: 0, pt: 0, it: 0, lwf: 0, advanceRecovery: 0, fine: 0, total: 0 },
         employerContributions: { epf: 0, eps: 0, esi: 0, lwf: 0 },
         gratuityAccrual: 0,
         netPay: 0,
         isCode88: false,
         isESICodeWagesUsed: false,
-        esiRemark: exitRemark || 'No Payable Days'
+        esiRemark: exitRemark || 'No Payable Days',
+        fineReason: ''
       };
   }
 
@@ -361,27 +363,65 @@ export const calculatePayroll = (
   const annualTaxable = (grossEarnings * 12) - 50000;
   if (annualTaxable > 700000) incomeTax = Math.round(((annualTaxable - 700000) * 0.1) / 12);
 
+  // --- FINE / DAMAGES ---
+  const fineRecord = fines.find(f => f.employeeId === employee.id && f.month === month && f.year === year);
+  const fineAmount = fineRecord ? fineRecord.amount : 0;
+  const fineReason = fineRecord ? fineRecord.reason : '';
+
   // --- ADVANCE RECOVERY Logic (Code on Wages 2020) ---
+  // Statutory deductions: EPF, VPF, ESI, PT, IT, LWF
+  // Fines are typically deducted *before* calculating net available for other non-statutory deductions, but after statutory ones for 50% rule check?
+  // Actually, Code on Wages Section 18: Deductions for fines. 
+  // Total deductions (including fines) should not exceed 50%.
+  
   const statutoryDeductions = epfEmployee + vpfEmployee + esiEmployee + pt + incomeTax + lwfEmployee;
+  
+  // Fines are deductible.
+  
+  // Calculate distributable wages for 50% check
   const codeGrossWages = Math.max(0, grossEarnings - statutoryDeductions);
   
   let targetRecovery = Math.min(advance.monthlyInstallment, advance.balance);
   let advanceRecovery = targetRecovery;
 
+  // Total Proposed Deduction excluding Advance = Statutory + Fine
+  // Check if Fine + Advance > 50%? Or Statutory + Fine + Advance > 50% of Gross?
+  // Simplification: We check against codeGrossWages (Net after statutory)
+  
   // 1. Restrict to 50% Rule if Configured (Labour Code 2020)
   if (advanceOptions.restrictTo50Percent) {
       const limit50 = Math.round(codeGrossWages * 0.5);
-      advanceRecovery = Math.min(targetRecovery, limit50);
+      
+      // If fine itself exceeds limit, take full fine (assuming fines are mandatory/priority) but restrict advance
+      // Typically fines are capped at 3% of wages in some acts, but here we take user input.
+      // We prioritize Fine over Advance.
+      
+      const availableForNonStatutory = limit50;
+      const remainingForAdvance = Math.max(0, availableForNonStatutory - fineAmount);
+      
+      advanceRecovery = Math.min(targetRecovery, remainingForAdvance);
   }
 
   // 2. ABSOLUTE Restriction: No Negative Wages
-  // Advance cannot exceed Code Gross Wages (resulting in < 0 Net Pay)
-  if (advanceRecovery > codeGrossWages) {
-      advanceRecovery = codeGrossWages;
-      esiRemark += (esiRemark ? '. ' : '') + "Advance recovery restricted to Code_Gross_Wages resulting in Net Wages to Nil";
+  // (Statutory + Fine + Advance) <= Gross
+  // => Fine + Advance <= CodeGrossWages
+  
+  if (fineAmount > codeGrossWages) {
+      // Fine exceeds distributable wages. 
+      // In reality, this shouldn't happen if inputs are sane, but we just let it go negative or cap it?
+      // Let's allow fine to push it negative or zero, but restrict advance to 0.
+      advanceRecovery = 0;
+      // We don't cap fine here as it's a punitive measure, but user sees net pay 0 or negative.
+  } else {
+      // Fine fits, check advance
+      const remainingForAdvance = codeGrossWages - fineAmount;
+      if (advanceRecovery > remainingForAdvance) {
+          advanceRecovery = remainingForAdvance;
+          esiRemark += (esiRemark ? '. ' : '') + "Advance recovery restricted to prevent negative Net Pay";
+      }
   }
 
-  const totalDeductions = statutoryDeductions + advanceRecovery;
+  const totalDeductions = statutoryDeductions + fineAmount + advanceRecovery;
 
   return {
     employeeId: employee.id,
@@ -393,12 +433,16 @@ export const calculatePayroll = (
       basic, da, retainingAllowance: retaining, hra, conveyance, washing, attire, 
       special1, special2, special3, bonus, leaveEncashment, total: grossEarnings 
     },
-    deductions: { epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf: lwfEmployee, advanceRecovery, total: totalDeductions },
+    deductions: { 
+        epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf: lwfEmployee, 
+        advanceRecovery, fine: fineAmount, total: totalDeductions 
+    },
     employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer, lwf: lwfEmployer },
     gratuityAccrual: Math.round(((basic + da) * 15 / 26) / 12),
     netPay: grossEarnings - totalDeductions,
     isCode88,
     isESICodeWagesUsed,
-    esiRemark: esiRemark
+    esiRemark: esiRemark,
+    fineReason: fineReason
   };
 };

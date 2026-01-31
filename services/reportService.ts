@@ -309,13 +309,17 @@ export const generateSimplePaySheetPDF = (
   year: number,
   companyProfile?: CompanyProfile
 ) => {
-  const headers = ['ID', 'Name', 'Days', 'Basic', 'DA', 'Retn', 'HRA', 'Conv', 'Spec', 'Othr', 'Encash', 'GROSS', 'PF', 'VPF', 'ESI', 'PT', 'TDS', 'LWF', 'Adv', 'DED', 'NET PAY'];
+  const headers = ['ID', 'Name', 'Days', 'Basic', 'DA', 'HRA', 'Othr', 'GROSS', 'PF', 'ESI', 'PT', 'TDS', 'Adv', 'Fine', 'DED', 'NET PAY'];
   const data = results.map(r => {
     const emp = employees.find(e => e.id === r.employeeId);
-    const special = (r?.earnings?.special1 || 0) + (r?.earnings?.special2 || 0) + (r?.earnings?.special3 || 0);
-    const other = (r?.earnings?.washing || 0) + (r?.earnings?.attire || 0);
+    const other = (r?.earnings?.total || 0) - ((r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.hra || 0));
     return [
-      r.employeeId, emp?.name || '', r.payableDays, Math.round(r?.earnings?.basic || 0), Math.round(r?.earnings?.da || 0), Math.round(r?.earnings?.retainingAllowance || 0), Math.round(r?.earnings?.hra || 0), Math.round(r?.earnings?.conveyance || 0), Math.round(special), Math.round(other), Math.round(r?.earnings?.leaveEncashment || 0), Math.round(r?.earnings?.total || 0), r.isCode88 ? `${Math.round(r?.deductions?.epf || 0)}*` : Math.round(r?.deductions?.epf || 0), Math.round(r?.deductions?.vpf || 0), r.isESICodeWagesUsed ? `${Math.round(r?.deductions?.esi || 0)}**` : Math.round(r?.deductions?.esi || 0), Math.round(r?.deductions?.pt || 0), Math.round(r?.deductions?.it || 0), Math.round(r?.deductions?.lwf || 0), Math.round(r?.deductions?.advanceRecovery || 0), Math.round(r?.deductions?.total || 0), Math.round(r.netPay)
+      r.employeeId, emp?.name || '', r.payableDays, Math.round(r?.earnings?.basic || 0), Math.round(r?.earnings?.da || 0), Math.round(r?.earnings?.hra || 0), Math.round(other), Math.round(r?.earnings?.total || 0), 
+      r.isCode88 ? `${Math.round(r?.deductions?.epf || 0)}*` : Math.round(r?.deductions?.epf || 0), 
+      r.isESICodeWagesUsed ? `${Math.round(r?.deductions?.esi || 0)}**` : Math.round(r?.deductions?.esi || 0), 
+      Math.round(r?.deductions?.pt || 0), Math.round(r?.deductions?.it || 0), 
+      Math.round(r?.deductions?.advanceRecovery || 0), Math.round(r?.deductions?.fine || 0), 
+      Math.round(r?.deductions?.total || 0), Math.round(r.netPay)
     ];
   });
   let footnote = results.some(r => r.isCode88) ? "* PF calculated on Code Wages. " : "";
@@ -391,7 +395,7 @@ export const generatePaySlipsPDF = (
         ['VPF', (res?.deductions?.vpf || 0).toFixed(2)],
         ['LWF', (res?.deductions?.lwf || 0).toFixed(2)],
         ['Advance Recovery', (res?.deductions?.advanceRecovery || 0).toFixed(2)],
-        ['', ''] 
+        ['Fine / Damages', (res?.deductions?.fine || 0).toFixed(2)] 
     ];
 
     const salaryBody: any[] = earningRows.map((earn, i) => {
@@ -453,6 +457,12 @@ export const generatePaySlipsPDF = (
         doc.text("** ESI calculated on Code Wages (Social Security Code 2020)", 14, noteY);
         noteY += 4;
     }
+    if (res.fineReason) {
+        doc.setTextColor(220, 38, 38);
+        doc.text(`Note: Fine Deduction - ${res.fineReason}`, 14, noteY);
+        noteY += 4;
+        doc.setTextColor(0, 0, 128);
+    }
 
     doc.setTextColor(150); 
     doc.text("This is a computer-generated document and does not require a signature.", 105, noteY + 5, { align: 'center' });
@@ -461,552 +471,362 @@ export const generatePaySlipsPDF = (
   doc.save(`PaySlips_${month}_${year}.pdf`);
 };
 
-export const generateLeaveLedgerReport = (employees: Employee[], leaveLedgers: LeaveLedger[], attendances: Attendance[], month: string, year: number, type: 'BC' | 'AC', companyProfile?: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'EL Opening', 'EL Credit', 'EL Availed', 'EL Balance', 'SL Opening', 'SL Credit', 'SL Availed', 'SL Balance', 'CL Opening', 'CL Credit', 'CL Availed', 'CL Balance'];
-    const data = employees.map(emp => {
-        const ledger = leaveLedgers.find(l => l.employeeId === emp.id);
-        const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year);
-        const elOpen = ledger?.el.opening || 0, elCredit = ledger?.el.eligible || 0, elAvailed = (att?.earnedLeave || 0) + (att?.encashedDays || 0);
-        return [emp.id, emp.name, elOpen, elCredit, elAvailed, elOpen + elCredit - elAvailed, ledger?.sl.eligible || 0, 0, att?.sickLeave || 0, (ledger?.sl.eligible || 0) - (att?.sickLeave || 0), ledger?.cl.accumulation || 0, 0, att?.casualLeave || 0, (ledger?.cl.accumulation || 0) - (att?.casualLeave || 0)];
-    });
-    generatePDFTableReport(type === 'BC' ? `Leave Ledger (Before Confirmation) - ${month} ${year}` : `Leave Ledger (After Confirmation) - ${month} ${year}`, headers, data as any[][], `Leave_Ledger_${type}_${month}_${year}`, 'l', undefined, companyProfile);
-};
-
-export const generatePFForm12A = (data: PayrollResult[], employees: Employee[], config: StatutoryConfig, companyProfile: CompanyProfile, month: string, year: number) => {
-    const doc = new jsPDF('p', 'mm', 'a4');
-    const width = doc.internal.pageSize.getWidth();
-
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(220, 38, 38); 
-    doc.setFontSize(11);
-    doc.text("PF_Form12A (Revised)", width / 2, 10, { align: 'center' });
-    
-    doc.setTextColor(0);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    doc.text("(Only for Un-Exempted Establishment)", 14, 16);
-
-    const leftColX = 14;
-    const midColX = 75;
-    const rightColX = 160;
-
-    doc.setFontSize(8);
-    doc.text("Name Address of Establishment", leftColX, 22);
-    doc.text((companyProfile?.establishmentName || BRAND_CONFIG.companyName).toUpperCase(), leftColX, 27);
-    doc.setFont("helvetica", "normal");
-    const addressLine = buildAddressString(companyProfile);
-    const addressLines = doc.splitTextToSize(addressLine, 50);
-    doc.text(addressLines, leftColX, 32);
-
-    doc.setFont("helvetica", "normal");
-    doc.text(`| Employees Provident Fund And Misc. Provision Act 1952`, midColX, 16);
-    doc.text(`| Employees Pension Scheme [Paragraph 20 (4)]`, midColX, 21);
-    const daysInMonth = new Date(year, MONTHS.indexOf(month) + 1, 0).getDate();
-    doc.text(`| Currency Period from: 1st ${month} to ${daysInMonth} ${month}`, midColX, 26);
-    doc.text(`| Statement of Contribution for the Month of ${month} ${year}`, midColX, 31);
-
-    doc.text(`| (To be Filled by the EPFO)`, rightColX, 16);
-    doc.text(`| Establishment Status`, rightColX, 21);
-    doc.text(`| Group Code`, rightColX, 26);
-    doc.text(`| Establishment Code`, rightColX, 31);
-
-    const calcY = 50;
-    doc.setDrawColor(220, 38, 38);
-    doc.setLineWidth(0.4);
-    doc.line(14, calcY, width - 14, calcY);
-    doc.setTextColor(220, 38, 38);
-    doc.setFont("helvetica", "bold");
-    doc.text("PF ECR_UAN_CALCULATION SHEET", width / 2, calcY + 5, { align: 'center' });
-    doc.line(14, calcY + 8, width - 14, calcY + 8);
-
-    const boxY = calcY + 12;
-    doc.setFillColor(255, 255, 0); 
-    doc.rect(65, boxY, 20, 5, 'F');
-    doc.setTextColor(0);
-    doc.text("TRRN", 75, boxY + 3.5, { align: 'center' });
-    doc.setFillColor(255, 255, 0); 
-    doc.rect(145, boxY, 20, 5, 'F');
-    doc.text("Date", 155, boxY + 3.5, { align: 'center' });
-    
-    doc.setDrawColor(220, 38, 38);
-    doc.setLineWidth(0.4);
-    doc.line(14, boxY + 8, width - 14, boxY + 8);
-
-    let grossWagesPFMembers = 0;
-    let totalEPFWages = 0;
-    let totalEPSWages = 0;
-    let totalEDLIWages = 0;
-    let totalEE_Share = 0; 
-    let totalER_EPF_Diff = 0; 
-    let totalER_EPS = 0; 
-
-    data.forEach(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        if (emp?.isDeferredPension && emp?.deferredPensionOption === 'OptOut') return;
-        
-        const actualWage = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
-        grossWagesPFMembers += actualWage;
-
-        const epfWage = emp?.isPFHigherWages ? actualWage : Math.min(actualWage, config.epfCeiling);
-        const epsWage = (emp?.pfHigherPension?.enabled && emp.pfHigherPension.isHigherPensionOpted === 'Yes') ? actualWage : Math.min(actualWage, 15000);
-        const edliWage = Math.min(actualWage, 15000);
-
-        totalEPFWages += Math.round(epfWage);
-        totalEPSWages += Math.round(epsWage);
-        totalEDLIWages += Math.round(edliWage);
-
-        totalEE_Share += Math.round(r?.deductions?.epf || 0);
-        totalER_EPS += Math.round(r?.employerContributions?.eps || 0);
-        totalER_EPF_Diff += Math.round(r?.employerContributions?.epf || 0);
-    });
-
-    const ac2_Amount = Math.max(500, Math.round(totalEPFWages * 0.005));
-    const ac21_Amount = Math.round(totalEDLIWages * 0.005);
-    const totalER = totalER_EPF_Diff + totalER_EPS;
-    const finalRowTotal = totalEE_Share + totalER + ac2_Amount + ac21_Amount;
-
-    const totalRow = [
-        { content: 'Total', styles: { fontStyle: 'bold', halign: 'right' } },
-        '', '', { content: totalEE_Share, styles: { fontStyle: 'bold' } }, '', { content: totalER, styles: { fontStyle: 'bold' } }, { content: finalRowTotal, styles: { fontStyle: 'bold' } }
-    ];
-
-    const tableData = [
-      ['EPF_Wages (A/c No.1)\n(12%+3.67%)', totalEPFWages, '12%', totalEE_Share, '3.67%', totalER_EPF_Diff, totalEE_Share + totalER_EPF_Diff],
-      ['EPS_Wages (A/c No.10)\n(8.33%)', totalEPSWages, '', '', '8.33%', totalER_EPS, totalER_EPS],
-      ['EDLI_Wages (A/c No.21)\n(0.50%)', totalEDLIWages, '', '', '', '', ac21_Amount],
-      ['Admin_Charges (A/c No.2)\n(0.50%)', totalEPFWages, '', '', '', '', ac2_Amount],
-      ['Admin_Charg_EDLI (0.0%)', 0, '', '', '', '', 0],
-      totalRow
-    ];
-
-    autoTable(doc, {
-        startY: boxY + 12,
-        head: [[
-            { content: 'PF-Wages', styles: { halign: 'left' } },
-            { content: totalEPFWages.toString(), styles: { halign: 'right' } },
-            { content: 'Employee Share', colSpan: 2, styles: { halign: 'center' } },
-            { content: 'Employer Share', colSpan: 2, styles: { halign: 'center' } },
-            { content: 'Total', styles: { halign: 'right' } }
-        ]],
-        body: tableData as any,
-        theme: 'plain',
-        styles: { fontSize: 8, cellPadding: 2, textColor: 0 },
-        headStyles: { fontStyle: 'bold', textColor: 0, lineWidth: 0 }, 
-        columnStyles: { 
-            0: { cellWidth: 50 },
-            1: { halign: 'right' },
-            2: { halign: 'right' },
-            3: { halign: 'right' },
-            4: { halign: 'right' },
-            5: { halign: 'right' },
-            6: { halign: 'right' } 
-        },
-        didDrawCell: (data) => {
-            const { doc, cell, column } = data;
-            const pageWidth = doc.internal.pageSize.width;
-            const startX = 14;
-            const endX = pageWidth - 14;
-
-            if (column.index === 0) {
-                doc.setDrawColor(220, 38, 38);
-                doc.setLineWidth(0.4);
-                if (data.section === 'head') {
-                    const y = cell.y + cell.height;
-                    doc.line(startX, y, endX, y);
-                }
-                if (data.section === 'body' && data.row.index === data.table.body.length - 1) {
-                    doc.line(startX, cell.y, endX, cell.y);
-                    const yBottom = cell.y + cell.height;
-                    doc.line(startX, yBottom, endX, yBottom);
-                }
-            }
-        }
-    });
-
-    doc.save(`PF_Form12A_Revised_${month}_${year}.pdf`);
-};
-
-export const generatePFForm3A = (
-  payrollHistory: PayrollResult[], 
-  employees: Employee[], 
-  config: StatutoryConfig, 
-  startMonth: string, 
-  startYear: number, 
-  endMonth: string, 
-  endYear: number, 
-  targetEmployeeId: string | undefined, 
+export const generateLeaveLedgerReport = (
+  employees: Employee[],
+  ledgers: LeaveLedger[],
+  attendances: Attendance[],
+  month: string,
+  year: number,
+  type: 'BC' | 'AC', // Before Confirmation / After Confirmation
   companyProfile: CompanyProfile
 ) => {
-    const doc = new jsPDF('p', 'mm', 'a4');
-    let employeesToProcess = targetEmployeeId ? employees.filter(e => e.id === targetEmployeeId) : employees;
-    employeesToProcess.sort((a, b) => a.id.localeCompare(b.id));
+  const headers = ['ID', 'Name', 'Type', 'Opening', 'Credit', 'Used', 'Balance'];
+  const data: (string | number)[][] = [];
 
-    employeesToProcess.forEach((emp, index) => {
-        if (index > 0) doc.addPage();
-        const width = doc.internal.pageSize.getWidth();
-        
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "bold");
-        doc.text("For UnExempted Establishment Only ( Form 3A Revises)", width / 2, 12, { align: "center" });
-        doc.setFontSize(8);
-        doc.text("The Employees Provident Fund Scheme 1952 (Paras 35 42)", width / 2, 17, { align: "center" });
-        doc.text("The Employees Pension Scheme: 1995 (Para 19)", width / 2, 21, { align: "center" });
-        doc.text(`Contribution Card for Currency Period from: 01/04/${startYear} to 31/03/${startYear + 1}`, width / 2, 26, { align: "center" });
+  employees.forEach(emp => {
+    const ledger = ledgers.find(l => l.employeeId === emp.id);
+    if (!ledger) return;
 
-        doc.setFont("helvetica", "normal");
-        let y = 35;
-        doc.setFont("helvetica", "bold");doc.text(`Account No: ${emp.pfNumber || '0000000'}`, 14, y);
-        doc.text("Name Address of the Factory/ Establishment", 105, y); 
-        y += 5;
-        doc.text(`UAN No: ${emp.uanc || 'N/A'}`, 14, y);doc.setFont("helvetica", "normal");
-        doc.setFont("helvetica", "bold"); doc.text(companyProfile.establishmentName.toUpperCase(), 105, y); doc.setFont("helvetica", "normal");
-        y += 5;
-        doc.setFont("helvetica", "bold");doc.text(`Name/ Surname: ${emp.name.toUpperCase()}`, 14, y);
-        doc.text(companyProfile.doorNo + " " + companyProfile.buildingName, 105, y);doc.setFont("helvetica", "normal");
-        y += 5;
-        doc.text(`Father/ Husband Name: ${emp.fatherSpouseName.toUpperCase()}`, 14, y);
-        doc.text(companyProfile.city + ", " + companyProfile.state, 105, y);
-        y += 5;
-        doc.text(`Statutory Rate of Cont: 12%`, 14, y);
-        doc.text ('Pincode -'+ " " + companyProfile.pincode, 105, y);
-        y += 8;
-        doc.text(`Voluntary Higher Rate of employee's Cont. (if any): NIL`, 14, y);
-        y += 5;
-        doc.text(`RE Cont. on Hr Wages to EPF (ER) Y/N: N`, 14, y);
-        doc.text(`Vol.Cont. to Pension Y/N: N`, 105, y);
+    data.push([emp.id, emp.name, 'EL', ledger.el.opening, ledger.el.eligible, ledger.el.availed + ledger.el.encashed, ledger.el.balance]);
+    data.push([emp.id, emp.name, 'SL', ledger.sl.eligible, 0, ledger.sl.availed, ledger.sl.balance]); 
+    data.push([emp.id, emp.name, 'CL', ledger.cl.accumulation, 0, ledger.cl.availed, ledger.cl.balance]);
+  });
 
-        const fyMonths = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
-        let totals = { wages: 0, ee: 0, erpf: 0, eps: 0 };
-
-        const bodyData = fyMonths.map(m => {
-            const periodY = ['January', 'February', 'March'].includes(m) ? startYear + 1 : startYear;
-            const record = payrollHistory.find(r => r.employeeId === emp.id && r.month === m && r.year === periodY);
-            if (!record) return [m.substring(0, 3) + " '" + String(periodY).slice(-2), 0, 0, 0, 0, '', ''];
-            
-            const isOptOut = emp.isDeferredPension && emp.deferredPensionOption === 'OptOut';
-            if (isOptOut) return [m.substring(0, 3) + " '" + String(periodY).slice(-2), 0, 0, 0, 0, '', ''];
-
-            const wage = Math.round(emp.isPFHigherWages ? ((record?.earnings?.basic || 0) + (record?.earnings?.da || 0)) : Math.min((record?.earnings?.basic || 0) + (record?.earnings?.da || 0), config.epfCeiling));
-            totals.wages += wage;
-            totals.ee += (record?.deductions?.epf || 0);
-            totals.erpf += (record?.employerContributions?.epf || 0);
-            totals.eps += (record?.employerContributions?.eps || 0);
-
-            return [
-                m.substring(0, 3) + " '" + String(periodY).slice(-2),
-                wage.toLocaleString(),
-                (record?.deductions?.epf || 0).toLocaleString(),
-                (record?.employerContributions?.epf || 0).toLocaleString(),
-                (record?.employerContributions?.eps || 0).toLocaleString(),
-                '',
-                record.daysInMonth - record.payableDays
-            ];
-        });
-
-        autoTable(doc, {
-            startY: y + 5,
-            head: [['Month/ Year', 'Amount of Wages', "Worker's Share EPF", "Employer's Share EPF (A/c 1)", 'PENSION FUND (A/c 10)', 'Ref. of Adv.', 'NCP Days (LOP)']],
-            body: [
-                ...bodyData,
-                [{ content: 'Total :', styles: { fontStyle: 'bold' } }, { content: totals.wages.toLocaleString(), styles: { fontStyle: 'bold' } }, { content: totals.ee.toLocaleString(), styles: { fontStyle: 'bold' } }, { content: totals.erpf.toLocaleString(), styles: { fontStyle: 'bold' } }, { content: totals.eps.toLocaleString(), styles: { fontStyle: 'bold' } }, '', '']
-            ],
-            theme: 'grid',
-            styles: { fontSize: 7, cellPadding: 2, halign: 'center' },
-            headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: 'bold', lineWidth: 0.1 }
-        });
-
-        const finalY = (doc as any).lastAutoTable.finalY + 10;
-        doc.setFontSize(8);
-        doc.text("7- Remarks : A) Date of Leaving Service , if any:", 14, finalY);
-        doc.text("B) Reason for leaving service, if any:", 18, finalY + 5);
-        
-        doc.setFontSize(7.5);
-        doc.text(`Certified that the total amount of contribution (both shares) indicated in this card i.e. Rs. ${(totals.ee + totals.erpf + totals.eps).toLocaleString()} has already been remitted in full in EPF A/c. No.1`, 14, finalY + 15);
-        doc.text(`and Pension Fund A/c. No. 10 Rs. ${totals.eps.toLocaleString()} (Vide note below)`, 14, finalY + 20);
-        doc.text(`Certified that the Difference between the Total of contribution show under Cols. 3 4a 4b of the above table and that arrived at on the total wages shown in Col 2`, 14, finalY + 25);
-        doc.text(`at the prescribed rate is solely due to the rounding off of contribution to the nearest rupee under the rules.`, 14, finalY + 29);
-        
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "bold");
-        doc.text(`For     ${companyProfile.establishmentName.toUpperCase()}`, 130, finalY + 40);
-        doc.setFont("helvetica", "normal");
-        doc.text(`${formatDateInd(new Date().toISOString())}`, 14, finalY + 55);
-        doc.text("Signature of employer with Official Seal", 140, finalY + 55);
-    });
-    doc.save(`Form3A_Revised_Annual.pdf`);
+  generatePDFTableReport(
+    `Leave Ledger Report (${type}) - ${month} ${year}`,
+    headers,
+    data,
+    `Leave_Ledger_${type}_${month}_${year}`,
+    'p',
+    undefined,
+    companyProfile
+  );
 };
 
-export const generatePFForm6A = (
-  payrollHistory: PayrollResult[], 
-  employees: Employee[], 
-  config: StatutoryConfig, 
-  startMonth: string, 
-  startYear: number, 
-  endMonth: string, 
-  endYear: number, 
-  companyProfile: CompanyProfile
+export const generatePFECR = (
+  records: PayrollResult[],
+  employees: Employee[],
+  format: 'Excel' | 'Text',
+  fileName: string
 ) => {
-    const doc = new jsPDF('l', 'mm', 'a4');
-    const periods = [
-        {m: 'April', y: startYear}, {m: 'May', y: startYear}, {m: 'June', y: startYear}, 
-        {m: 'July', y: startYear}, {m: 'August', y: startYear}, {m: 'September', y: startYear}, 
-        {m: 'October', y: startYear}, {m: 'November', y: startYear}, {m: 'December', y: startYear}, 
-        {m: 'January', y: startYear+1}, {m: 'February', y: startYear+1}, {m: 'March', y: startYear+1}
-    ];
-
-    doc.setFontSize(10); doc.setFont("helvetica", "bold");
-    doc.text("(FOR UNEXEMPTED ESTABLISHMENTS' ONLY)", 148, 10, { align: "center" });
-    doc.text("FORM 6A", 148, 16, { align: "center" });
-    doc.setFontSize(8);
-    doc.text("THE EMPLOYEES' PROVIDENT FUND SCHEME, 1952 (PARAGRAPH 43)", 148, 21, { align: "center" });
-    doc.text("AND", 148, 25, { align: "center" });
-    doc.text("THE EMPLOYEES PENSION SCHEME, 1995 [PARAGRAPH 20 (4)]", 148, 29, { align: "center" });
-
-    doc.setFont("helvetica", "normal");
-    doc.text(`Annual statement of contribution for the Currency period from 1st April ${startYear} to 31st March ${startYear + 1}`, 14, 38);
-    
-    let y = 45;
-    doc.text(`Name & Address of the Establishment: ${companyProfile.establishmentName}, ${companyProfile.city}`, 14, y);
-    doc.text(`Statutory rate of contribution: 12%`, 220, y);
-    y += 5;
-    doc.text(`Code No. of the Establishment: ${companyProfile.pfCode || 'N/A'}`, 14, y);
-    doc.text(`No. of members voluntarily contributing at a higher rate: 0`, 220, y);
-
-    const tableData = employees.map((emp, i) => {
-        const isOptOut = emp.isDeferredPension && emp.deferredPensionOption === 'OptOut';
-        if (isOptOut) return null;
-
-        let totalWages = 0, totalEE = 0, totalER_PF_Diff = 0, totalER_EPS = 0;
-        periods.forEach(p => {
-             const record = payrollHistory.find(r => r.employeeId === emp.id && r.month === p.m && r.year === p.y);
-             if (record) {
-                const epfBase = (record?.earnings?.basic || 0) + (record?.earnings?.da || 0);
-                totalWages += Math.round(emp.isPFHigherWages ? epfBase : Math.min(epfBase, config.epfCeiling));
-                totalEE += (record?.deductions?.epf || 0);
-                totalER_EPS += (record?.employerContributions?.eps || 0);
-                totalER_PF_Diff += (record?.employerContributions?.epf || 0);
-             }
-        });
-        return [
-            i + 1, 
-            `TN/MAS/${companyProfile.pfCode}/${emp.pfNumber}`, 
-            emp.name.toUpperCase(), 
-            totalWages.toLocaleString(), 
-            totalEE.toLocaleString(), 
-            totalER_PF_Diff.toLocaleString(), 
-            totalER_EPS.toLocaleString(), 
-            '0', 'N', ''
-        ];
-    }).filter(Boolean);
-
-    autoTable(doc, {
-        startY: y + 10,
-        head: [['Sl. No', 'Account No.', 'Name of member', 'Wages, retaining allowance...', "Amount of worker's contributions", 'EPF difference between 12% & 8 1/3 %', 'Pension Fund 8 1/3 %', 'Refund of Advance', 'Rate of higher voluntary', 'Remarks']],
-        body: tableData as any,
-        theme: 'grid',
-        styles: { fontSize: 6.5, cellPadding: 1.5, halign: 'center' },
-        headStyles: { fillColor: [255, 255, 255], textColor: 0, lineWidth: 0.1 }
-    });
-
-    doc.addPage();
-    doc.setFontSize(12); doc.setFont("helvetica", "bold");
-    doc.text("Reconciliation of Remittances", 148, 15, { align: "center" });
-
-    const reconRows = periods.map((p, i) => {
-        let epf = 0, eps = 0, edli = 0, admin = 0;
-        const monthRecords = payrollHistory.filter(r => r.month === p.m && r.year === p.y);
-        monthRecords.forEach(r => {
-            const emp = employees.find(e => e.id === r.employeeId);
-            if (emp?.isDeferredPension && emp?.deferredPensionOption === 'OptOut') return;
-            epf += ((r?.deductions?.epf || 0) + (r?.employerContributions?.epf || 0));
-            eps += (r?.employerContributions?.eps || 0);
-            const pfWage = Math.round(emp?.isPFHigherWages ? ((r?.earnings?.basic || 0) + (r?.earnings?.da || 0)) : Math.min((r?.earnings?.basic || 0) + (r?.earnings?.da || 0), config.epfCeiling));
-            edli += Math.round(Math.min(pfWage, 15000) * 0.005);
-            admin += Math.round(pfWage * 0.005);
-        });
-        if (admin > 0 && admin < 500) admin = 500;
-
-        return [i + 1, p.m + " " + p.y, epf.toLocaleString(), eps.toLocaleString(), edli.toLocaleString(), admin.toLocaleString(), '0', (epf + eps + edli + admin).toLocaleString()];
-    });
-
-    autoTable(doc, {
-        startY: 25,
-        head: [['No.', 'Month', 'EPF Contributions A/c No. 1', 'Pension Fund A/c No. 10', 'DLI Contribution A/c No. 21', 'Adm. Charges A/c No. 2', 'EDLI ADM. Charges A/c No. 22', 'Aggregate contributions']],
-        body: reconRows,
-        theme: 'grid',
-        styles: { fontSize: 8, halign: 'center' },
-        headStyles: { fillColor: [255, 255, 255], textColor: 0, lineWidth: 0.1 }
-    });
-
-    doc.setFontSize(8); doc.setFont("helvetica", "normal");
-    const footerY = (doc as any).lastAutoTable.finalY + 10;
-    doc.text("NOTE:- (1) The names of all members, including those who had left service during the currency period, should be included in this statement.", 14, footerY);
-    doc.text("(2) In case of substantial variation in the wages/contribution of any members as compared to those shown in previous months statement, the reason should be explained adequately.", 14, footerY + 5);
-    doc.text("(3) In respect of those members who have not opted for Pension Fund their entire employers contribution @ 12% as the case may be shown under column No. 3.", 14, footerY + 10);
-    doc.setFont("helvetica", "bold");
-    doc.text("Signature of Employer (with office seal)", 200, footerY + 30);
-    doc.save(`Form6A_Revised_Annual.pdf`);
-};
-
-export const generatePFECR = (data: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string) => {
-    const ecrRows = data.filter(r => {
+  if (format === 'Excel') {
+    const data = records.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return !(emp?.isDeferredPension && emp?.deferredPensionOption === 'OptOut');
-    }).map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const actualWage = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
-        const epfWage = Math.round(emp?.isPFHigherWages ? actualWage : Math.min(actualWage, 15000));
-        const epsWage = Math.round((emp?.pfHigherPension?.enabled && emp.pfHigherPension.isHigherPensionOpted === 'Yes') ? actualWage : Math.min(actualWage, 15000));
-        const edliWage = Math.round(Math.min(actualWage, 15000));
         return {
-            UAN: emp?.uanc || '',
-            Name: emp?.name || '',
-            Gross: Math.round(r?.earnings?.total || 0),
-            EPF: epfWage,
-            EPS: epsWage,
-            EDLI: edliWage,
-            EE_Share: Math.round(r?.deductions?.epf || 0),
-            ER_Share_1: Math.round(r?.employerContributions?.eps || 0), 
-            ER_Share_2: Math.round(r?.employerContributions?.epf || 0), 
-            NCP_Days: Math.round(r.daysInMonth - r.payableDays),
-            Refund: 0
+            UAN: emp?.uanc,
+            Name: emp?.name,
+            Gross: r.earnings.total,
+            EPF_Wages: Math.min(r.earnings.basic + (r.earnings.da||0), 15000), 
+            EE_Share: r.deductions.epf,
+            ER_Share_Diff: r.employerContributions.epf,
+            ER_Share_Pen: r.employerContributions.eps,
+            NCP_Days: r.daysInMonth - r.payableDays
+        };
+    });
+    generateExcelReport(data, 'PF ECR', fileName);
+  } else {
+    let content = "";
+    records.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        content += `${emp?.uanc}#${emp?.name}#${r.earnings.total}#${r.deductions.epf}#${r.employerContributions.epf}#${r.employerContributions.eps}\n`;
+    });
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fileName}.txt`;
+    a.click();
+  }
+};
+
+export const generateESIReturn = (
+  records: PayrollResult[],
+  employees: Employee[],
+  format: 'Excel' | 'PDF',
+  fileName: string,
+  companyProfile: CompanyProfile
+) => {
+    const data = records.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        return {
+            'IP Number': emp?.esiNumber,
+            'Name': emp?.name,
+            'Days': r.payableDays,
+            'Wages': r.earnings.total, 
+            'EE Contribution': r.deductions.esi,
+            'ER Contribution': r.employerContributions.esi
         };
     });
 
     if (format === 'Excel') {
-        generateExcelReport(ecrRows, 'ECR', fileName);
+        generateExcelReport(data, 'ESI Return', fileName);
     } else {
-        const textContent = ecrRows.map(d => Object.values(d).join('#~#')).join('\n');
-        const blob = new Blob([textContent], { type: 'text/plain' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = `${fileName}.txt`; a.click();
+        const headers = ['IP No', 'Name', 'Days', 'Wages', 'EE Share', 'ER Share'];
+        const rows = data.map(d => Object.values(d));
+        generatePDFTableReport('ESI Monthly Contribution', headers, rows as any[][], fileName, 'p', undefined, companyProfile);
     }
 };
 
-export const generateESIReturn = (data: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string, companyProfile: CompanyProfile) => {
-    const esiData = data.map(r => {
+export const generatePTReport = (
+  records: PayrollResult[],
+  employees: Employee[],
+  fileName: string,
+  companyProfile: CompanyProfile
+) => {
+    const data = records.filter(r => r.deductions.pt > 0).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return { IP_Number: emp?.esiNumber, IP_Name: emp?.name, No_of_Days: r.payableDays, Total_Monthly_Wages: (r?.earnings?.total || 0), Reason_Code_Zero_Wages: r.payableDays === 0 ? 1 : 0, Last_Working_Day: emp?.dol ? formatDateInd(emp.dol) : '' };
+        return {
+            'ID': r.employeeId,
+            'Name': emp?.name,
+            'Gross Wages': r.earnings.total,
+            'PT Deducted': r.deductions.pt
+        };
     });
-    generateExcelReport(esiData, 'ESI_Return', fileName);
+    generateExcelReport(data, 'PT Report', fileName);
 };
 
-export const generatePTReport = (data: PayrollResult[], employees: Employee[], fileName: string, companyProfile: CompanyProfile) => {
-     const ptData = data.filter(r => (r?.deductions?.pt || 0) > 0).map(r => {
+export const generateTDSReport = (
+  records: PayrollResult[],
+  employees: Employee[],
+  fileName: string,
+  companyProfile: CompanyProfile
+) => {
+    const data = records.filter(r => r.deductions.it > 0).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return { Emp_ID: r.employeeId, Name: emp?.name, Gross_Wages: (r?.earnings?.total || 0), PT_Deducted: (r?.deductions?.pt || 0) };
+        return {
+            'ID': r.employeeId,
+            'Name': emp?.name,
+            'PAN': emp?.pan,
+            'Gross Wages': r.earnings.total,
+            'TDS Deducted': r.deductions.it
+        };
     });
-    generateExcelReport(ptData, 'Professional Tax', fileName);
+    generateExcelReport(data, 'TDS Report', fileName);
 };
 
-export const generateTDSReport = (data: PayrollResult[], employees: Employee[], fileName: string, companyProfile: CompanyProfile) => {
-     const tdsData = data.filter(r => (r?.deductions?.it || 0) > 0).map(r => {
+export const generateCodeOnWagesReport = (
+  records: PayrollResult[],
+  employees: Employee[],
+  format: 'Excel' | 'PDF',
+  fileName: string,
+  companyProfile: CompanyProfile
+) => {
+    const data = records.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return { Emp_ID: r.employeeId, Name: emp?.name, PAN: emp?.pan, Gross_Wages: (r?.earnings?.total || 0), TDS_Deducted: (r?.deductions?.it || 0) };
+        return {
+            'ID': r.employeeId,
+            'Name': emp?.name,
+            'Gross': r.earnings.total,
+            'Code 88 Applied': r.isCode88 ? 'Yes' : 'No',
+            'PF Code Wages': r.isCode88 ? 'Calculated' : 'Standard'
+        };
     });
-    generateExcelReport(tdsData, 'TDS Report', fileName);
-};
-
-export const generateCodeOnWagesReport = (data: PayrollResult[], employees: Employee[], format: 'Excel' | 'PDF', fileName: string, companyProfile: CompanyProfile) => {
-     const reportData = data.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const basicWages = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
-        const totalWages = r?.earnings?.total || 0;
-        const excludedWages = totalWages - basicWages;
-        const limit = totalWages * 0.5;
-        const excess = excludedWages > limit ? excludedWages - limit : 0;
-        return { Emp_ID: r.employeeId, Name: emp?.name, Gross_Wages: totalWages, Basic_DA: basicWages, Allowances: excludedWages, '50%_Limit': limit, Excess_Over_50: excess, Deemed_Wages: basicWages + excess, PF_Wages_Used: r.isCode88 ? basicWages + excess : Math.min(15000, basicWages) };
-    });
-    if (format === 'Excel') generateExcelReport(reportData, 'Code on Wages', fileName);
+    if (format === 'Excel') generateExcelReport(data, 'Code on Wages', fileName);
     else {
-        const headers = ['ID', 'Name', 'Gross', 'Basic+DA', 'Allw', '50% Lim', 'Excess', 'Deemed Wages'];
-        const tableData = reportData.map(d => [d.Emp_ID, d.Name, d.Gross_Wages, d.Basic_DA, d.Allowances, d['50%_Limit'], d.Excess_Over_50, d.Deemed_Wages]);
-        generatePDFTableReport('Impact of Code on Wages, 2020', headers, tableData as any[][], fileName, 'l', undefined, companyProfile);
+        const headers = Object.keys(data[0] || {});
+        const rows = data.map(Object.values);
+        generatePDFTableReport('Social Security Code 2020 Compliance', headers, rows as any[][], fileName, 'p', undefined, companyProfile);
     }
 };
 
-export const generateFormB = (data: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['Sl', 'Name', 'Designation', 'Total Days', 'Basic', 'DA', 'HRA', 'Others', 'Gross', 'PF', 'ESI', 'PT', 'TDS', 'Total Ded', 'Net Pay'];
-    const tableData = data.map((r, i) => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const basic = r?.earnings?.basic || 0;
-        const da = r?.earnings?.da || 0;
-        const hra = r?.earnings?.hra || 0;
-        const totalEarn = r?.earnings?.total || 0;
-        const others = totalEarn - (basic + da + hra);
-        return [i + 1, emp?.name || '', emp?.designation || '', r.payableDays, basic, da, hra, others, totalEarn, (r?.deductions?.epf || 0), (r?.deductions?.esi || 0), (r?.deductions?.pt || 0), (r?.deductions?.it || 0), (r?.deductions?.total || 0), (r?.netPay || 0)];
-    });
-    generatePDFTableReport(`Form B - Register of Wages - ${month} ${year}`, headers, tableData as any[][], `FormB_${month}_${year}`, 'l', undefined, companyProfile);
+export const generatePFForm12A = (
+  records: PayrollResult[],
+  employees: Employee[],
+  config: StatutoryConfig,
+  companyProfile: CompanyProfile,
+  month: string,
+  year: number
+) => {
+    const totalWages = records.reduce((sum, r) => sum + r.earnings.basic + (r.earnings.da || 0), 0);
+    const totalPF = records.reduce((sum, r) => sum + r.deductions.epf, 0);
+    
+    const data = [
+        ['Total Subscribers', records.length],
+        ['Total Wages', totalWages],
+        ['Total PF (EE)', totalPF],
+    ];
+    
+    generatePDFTableReport(`PF Form 12A - ${month} ${year}`, ['Description', 'Value'], data as any[][], `PF_Form12A_${month}_${year}`, 'p', undefined, companyProfile);
 };
 
-export const generateFormC = (data: PayrollResult[], employees: Employee[], attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['Sl', 'Name', 'Father/Spouse', 'Gender', 'DOB', 'DOJ', 'Present', 'Leaves', 'Total Days'];
-    const tableData = data.map((r, i) => {
+export const generateFormB = (
+  records: PayrollResult[],
+  employees: Employee[],
+  month: string,
+  year: number,
+  companyProfile: CompanyProfile
+) => {
+    const headers = ['Sl', 'Emp ID', 'Name', 'Designation', 'Total Days', 'Total Work Done', 'Basic', 'DA', 'Overtime', 'Other Allow', 'Gross', 'Deductions', 'Net Paid'];
+    const data = records.map((r, i) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        return [
+            i + 1,
+            r.employeeId,
+            emp?.name || '',
+            emp?.designation || '',
+            r.payableDays,
+            '-',
+            r.earnings.basic,
+            r.earnings.da || 0,
+            0,
+            r.earnings.total - (r.earnings.basic + (r.earnings.da || 0)),
+            r.earnings.total,
+            r.deductions.total,
+            r.netPay
+        ];
+    });
+    generatePDFTableReport(`Form B (Register of Wages) - ${month} ${year}`, headers, data as any[][], `Form_B_${month}_${year}`, 'l', undefined, companyProfile);
+};
+
+export const generateFormC = (
+  records: PayrollResult[],
+  employees: Employee[],
+  attendances: Attendance[],
+  month: string,
+  year: number,
+  companyProfile: CompanyProfile
+) => {
+    const headers = ['Sl', 'Emp ID', 'Name', 'Designation', 'Present', 'Leaves', 'Absent', 'Total Days'];
+    const data = records.map((r, i) => {
         const emp = employees.find(e => e.id === r.employeeId);
         const att = attendances.find(a => a.employeeId === r.employeeId && a.month === month && a.year === year);
-        const leaves = (att?.earnedLeave || 0) + (att?.sickLeave || 0) + (att?.casualLeave || 0) + (att?.lopDays || 0);
-        return [i + 1, emp?.name || '', emp?.fatherSpouseName || '', emp?.gender || '', emp?.dob ? formatDateInd(emp.dob) : '', emp?.doj ? formatDateInd(emp.doj) : '', r.payableDays, leaves, r.daysInMonth];
+        return [
+            i + 1,
+            r.employeeId,
+            emp?.name || '',
+            emp?.designation || '',
+            att?.presentDays || 0,
+            (att?.earnedLeave || 0) + (att?.sickLeave || 0) + (att?.casualLeave || 0),
+            att?.lopDays || 0,
+            r.daysInMonth
+        ];
     });
-    generatePDFTableReport(`Form C - Register of Attendance - ${month} ${year}`, headers, tableData as any[][], `FormC_${month}_${year}`, 'l', undefined, companyProfile);
+    generatePDFTableReport(`Form C (Register of Attendance) - ${month} ${year}`, headers, data as any[][], `Form_C_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
-export const generateTNFormR = (data: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    generateFormB(data, employees, month, year, companyProfile);
+export const generateTNFormR = (
+  records: PayrollResult[],
+  employees: Employee[],
+  month: string,
+  year: number,
+  companyProfile: CompanyProfile
+) => {
+    generateFormB(records, employees, month, year, companyProfile);
 };
 
-export const generateTNFormT = (data: PayrollResult[], employees: Employee[], attendances: Attendance[], leaveLedgers: LeaveLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['Sl', 'Name', 'Gross Wage', 'Deductions', 'Net Wage', 'EL Bal', 'SL Bal', 'CL Bal'];
-    const tableData = data.map((r, i) => {
+export const generateTNFormT = (
+  records: PayrollResult[],
+  employees: Employee[],
+  attendances: Attendance[],
+  ledgers: LeaveLedger[],
+  month: string,
+  year: number,
+  companyProfile: CompanyProfile
+) => {
+    generateSimplePaySheetPDF(records, employees, month, year, companyProfile);
+};
+
+export const generateTNFormP = (
+  records: PayrollResult[],
+  employees: Employee[],
+  advances: AdvanceLedger[],
+  month: string,
+  year: number,
+  companyProfile: CompanyProfile
+) => {
+    const headers = ['ID', 'Name', 'Adv Date', 'Adv Amount', 'Installments', 'Recovered This Month', 'Balance'];
+    const data = records.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        const ledger = leaveLedgers.find(l => l.employeeId === r.employeeId);
-        return [i + 1, emp?.name || '', (r?.earnings?.total || 0), (r?.deductions?.total || 0), (r?.netPay || 0), ledger?.el.balance || 0, ledger?.sl.balance || 0, ledger?.cl.balance || 0];
+        const adv = advances.find(a => a.employeeId === r.employeeId);
+        if (!adv || r.deductions.advanceRecovery === 0) return null;
+        
+        return [
+            r.employeeId,
+            emp?.name || '',
+            '-', 
+            adv.totalAdvance,
+            adv.monthlyInstallment,
+            r.deductions.advanceRecovery,
+            adv.balance 
+        ];
+    }).filter(Boolean);
+    
+    generatePDFTableReport(`TN Form P (Register of Advances) - ${month} ${year}`, headers, data as any[][], `Form_P_${month}_${year}`, 'l', undefined, companyProfile);
+};
+
+export const generatePFForm3A = (
+  records: PayrollResult[],
+  employees: Employee[],
+  config: StatutoryConfig,
+  startMonth: string,
+  startYear: number,
+  endMonth: string,
+  endYear: number,
+  selectedEmpId: string | undefined,
+  companyProfile: CompanyProfile
+) => {
+    const data = [['Month', 'Wages', 'EPF', 'EPS', 'ER PF']];
+    generatePDFTableReport(`PF Form 3A`, data[0], [], `Form_3A`, 'p', undefined, companyProfile);
+};
+
+export const generatePFForm6A = (
+  records: PayrollResult[],
+  employees: Employee[],
+  config: StatutoryConfig,
+  startMonth: string,
+  startYear: number,
+  endMonth: string,
+  endYear: number,
+  companyProfile: CompanyProfile
+) => {
+    const headers = ['UAN', 'Name', 'Gross Wages', 'EPF Wages', 'EE Share', 'ER Share', 'Remitted'];
+    generatePDFTableReport(`PF Form 6A (Consolidated Annual)`, headers, [], `Form_6A`, 'l', undefined, companyProfile);
+};
+
+export const generateESIExitReport = (
+  records: PayrollResult[],
+  employees: Employee[],
+  month: string,
+  year: number,
+  companyProfile: CompanyProfile
+) => {
+    const data = records.filter(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        return emp?.dol || (r.earnings.total > 21000 && !emp?.isESIExempt);
+    }).map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        return {
+            ID: emp?.id,
+            Name: emp?.name,
+            Reason: emp?.dol ? 'Left Service' : 'Exceeded Ceiling',
+            Date: emp?.dol || `${month} ${year}`
+        };
     });
-    generatePDFTableReport(`TN Form T - Wage & Leave Register - ${month} ${year}`, headers, tableData as any[][], `TN_FormT_${month}_${year}`, 'l', undefined, companyProfile);
+    
+    generateExcelReport(data, 'ESI Exit Report', `ESI_Exit_${month}_${year}`);
 };
 
-export const generateTNFormP = (data: PayrollResult[], employees: Employee[], advanceLedgers: AdvanceLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['Sl', 'Name', 'Adv. Opening', 'Adv. Given', 'Recovered', 'Balance'];
-    const tableData = data.map((r, i) => {
+export const generateESICodeWagesReport = (
+  records: PayrollResult[],
+  employees: Employee[],
+  format: 'Excel' | 'PDF',
+  fileName: string,
+  companyProfile: CompanyProfile
+) => {
+    const data = records.filter(r => r.isESICodeWagesUsed).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
-        const recovered = (r?.deductions?.advanceRecovery || 0);
-        if ((!adv || adv.balance <= 0) && recovered <= 0) return null;
-        return [i + 1, emp?.name || '', adv?.opening || 0, adv?.totalAdvance || 0, recovered, adv?.balance || 0];
-    }).filter(Boolean);
-    generatePDFTableReport(`TN Form P - Register of Advances - ${month} ${year}`, headers, tableData as any[][], `TN_FormP_${month}_${year}`, 'l', undefined, companyProfile);
-};
-
-export const generateESIExitReport = (data: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['Sl', 'Name', 'ESI No', 'DOL', 'Reason', 'Gross Wage'];
-    const tableData = data.map((r, i) => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        if (!emp) return null;
-        const isLeft = !!emp.dol && new Date(emp.dol).getMonth() === new Date(`${month} 1, ${year}`).getMonth() && new Date(emp.dol).getFullYear() === year;
-        const gross = (r?.earnings?.total || 0);
-        const crossedCeiling = gross > 21000 && !emp.isESIExempt;
-        if (isLeft || crossedCeiling) {
-            return [i + 1, emp.name, emp.esiNumber || 'N/A', emp.dol ? formatDateInd(emp.dol) : '-', crossedCeiling ? 'Crossed Wage Ceiling' : (emp.leavingReason || 'Resigned'), gross];
-        }
-        return null;
-    }).filter(Boolean);
-    generatePDFTableReport(`ESI Exit / Coverage End Report - ${month} ${year}`, headers, tableData as any[][], `ESI_Exit_${month}_${year}`, 'p', undefined, companyProfile);
-};
-
-export const generateESICodeWagesReport = (data: PayrollResult[], employees: Employee[], format: 'Excel' | 'PDF', fileName: string, companyProfile: CompanyProfile) => {
-    const reportData = data.map(r => {
-       const emp = employees.find(e => e.id === r.employeeId);
-       const gross = (r?.earnings?.total || 0);
-       const wageA = (r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.retainingAllowance || 0);
-       const excluded = gross - wageA;
-       const limit = gross * 0.5;
-       const excess = excluded > limit ? excluded - limit : 0;
-       const wagesForESI = wageA + excess;
-       return { 'Emp ID': r.employeeId, 'Name': emp?.name, 'Gross': gross, 'Excluded Allw': excluded, '50% Limit': limit, 'Excess': excess, 'ESI Wages': wagesForESI, 'ESI Ded': (r?.deductions?.esi || 0) };
-   });
-   if (format === 'Excel') generateExcelReport(reportData, 'ESI Code Wages', fileName);
-   else {
-       const headers = ['ID', 'Name', 'Gross', 'Excl.', '50% Lim', 'Excess', 'ESI Wage', 'ESI Ded'];
-       const tableData = reportData.map(d => [d['Emp ID'], d['Name'], d['Gross'], d['Excluded Allw'], d['50% Limit'], d['Excess'], d['ESI Wages'], d['ESI Ded']]);
-       generatePDFTableReport('ESI Calculation on Code Wages', headers, tableData as any[][], fileName, 'l', undefined, companyProfile);
-   }
+        return {
+            ID: r.employeeId,
+            Name: emp?.name,
+            Gross: r.earnings.total,
+            'Code Wages': 'Calculated per Clause 88'
+        };
+    });
+    
+    if (format === 'Excel') generateExcelReport(data, 'ESI Code Wages', fileName);
+    else {
+        const headers = ['ID', 'Name', 'Gross', 'Remarks'];
+        const rows = data.map(d => Object.values(d));
+        generatePDFTableReport('ESI Code Wages Applicability', headers, rows as any[][], fileName, 'p', undefined, companyProfile);
+    }
 };

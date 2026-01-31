@@ -47,7 +47,8 @@ import {
   LeavePolicy, 
   Attendance, 
   LeaveLedger, 
-  AdvanceLedger 
+  AdvanceLedger,
+  FineRecord
 } from './types';
 import { 
   INITIAL_STATUTORY_CONFIG, 
@@ -283,6 +284,13 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     } catch (e) { return []; }
   });
 
+  const [fines, setFines] = useState<FineRecord[]>(() => {
+    try {
+        const saved = localStorage.getItem('app_fines');
+        return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
+  });
+
   useEffect(() => { safeSave('app_employees', employees); }, [employees]);
   useEffect(() => { safeSave('app_config', config); }, [config]);
   useEffect(() => { safeSave('app_company_profile', companyProfile); }, [companyProfile]);
@@ -295,6 +303,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   useEffect(() => { safeSave('app_master_divisions', divisions); }, [divisions]);
   useEffect(() => { safeSave('app_master_branches', branches); }, [branches]);
   useEffect(() => { safeSave('app_master_sites', sites); }, [sites]);
+  useEffect(() => { safeSave('app_fines', fines); }, [fines]);
 
   useLayoutEffect(() => {
     if (mainContentRef.current) {
@@ -600,7 +609,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={handleDashboardNavigation} />}
           {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} />}
           {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={currentUser} companyProfile={companyProfile} />}
-          {activeView === View.PayProcess && <PayProcess employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={currentUser} />}
+          {activeView === View.PayProcess && <PayProcess employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={currentUser} fines={fines} setFines={setFines} />}
           {activeView === View.Reports && <Reports employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={currentUser} />}
           {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} />}
           {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} />}

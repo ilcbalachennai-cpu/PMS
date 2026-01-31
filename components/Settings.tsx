@@ -353,6 +353,16 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     });
   };
 
+  const handleLeavePolicyChange = (type: 'el' | 'sl' | 'cl', field: 'maxPerYear' | 'maxCarryForward' | 'label', value: string | number) => {
+    setLocalLeavePolicy({
+      ...localLeavePolicy,
+      [type]: {
+        ...localLeavePolicy[type],
+        [field]: value
+      }
+    });
+  };
+
   const handleSave = () => {
     setConfig(formData);
     setCompanyProfile(profileData);
@@ -559,7 +569,85 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             </div>
         </div>
 
-        {/* NEW: Leave Wages Calculation Policy Section */}
+        {/* RESTORED: Annual Leave Policy Section */}
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+            <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center gap-3">
+                <CalendarClock className="text-emerald-400" size={20} />
+                <h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Annual Leave Policy</h3>
+            </div>
+            <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* EL */}
+                <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2">
+                        <span className="text-xs font-bold text-slate-300 uppercase">Earned Leave (EL)</span>
+                    </div>
+                    <div className="space-y-2">
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Label</label>
+                            <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.el.label} onChange={e => handleLeavePolicyChange('el', 'label', e.target.value)} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label>
+                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxPerYear} onChange={e => handleLeavePolicyChange('el', 'maxPerYear', +e.target.value)} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label>
+                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxCarryForward} onChange={e => handleLeavePolicyChange('el', 'maxCarryForward', +e.target.value)} />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* SL */}
+                <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2">
+                        <span className="text-xs font-bold text-slate-300 uppercase">Sick Leave (SL)</span>
+                    </div>
+                    <div className="space-y-2">
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Label</label>
+                            <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.sl.label} onChange={e => handleLeavePolicyChange('sl', 'label', e.target.value)} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label>
+                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxPerYear} onChange={e => handleLeavePolicyChange('sl', 'maxPerYear', +e.target.value)} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label>
+                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxCarryForward} onChange={e => handleLeavePolicyChange('sl', 'maxCarryForward', +e.target.value)} />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* CL */}
+                <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2">
+                        <span className="text-xs font-bold text-slate-300 uppercase">Casual Leave (CL)</span>
+                    </div>
+                    <div className="space-y-2">
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Label</label>
+                            <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.cl.label} onChange={e => handleLeavePolicyChange('cl', 'label', e.target.value)} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label>
+                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxPerYear} onChange={e => handleLeavePolicyChange('cl', 'maxPerYear', +e.target.value)} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label>
+                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxCarryForward} onChange={e => handleLeavePolicyChange('cl', 'maxCarryForward', +e.target.value)} />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {/* Leave Encashment Wages Policy Section */}
         <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
             <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-3">

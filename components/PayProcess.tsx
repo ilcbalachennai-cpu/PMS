@@ -1,11 +1,12 @@
 
 import React, { useState } from 'react';
-import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw } from 'lucide-react';
-import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User } from '../types';
+import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw, Gavel } from 'lucide-react';
+import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord } from '../types';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
 import PayrollProcessor from './PayrollProcessor';
 import PayCycleGateway from './PayCycleGateway';
+import FineManager from './FineManager';
 
 interface PayProcessProps {
   employees: Employee[];
@@ -25,10 +26,12 @@ interface PayProcessProps {
   year: number;
   setYear: (y: number) => void;
   currentUser?: User;
+  fines: FineRecord[];
+  setFines: (fines: FineRecord[]) => void;
 }
 
 const PayProcess: React.FC<PayProcessProps> = (props) => {
-  const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'payroll'>('attendance');
+  const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'fines' | 'payroll'>('attendance');
   const [isGatewayOpen, setIsGatewayOpen] = useState(true);
 
   const TabButton = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
@@ -88,7 +91,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         <div className="flex gap-2 mt-8 border-b border-slate-700 pb-1 overflow-x-auto">
             <TabButton id="attendance" label="1. Attendance" icon={CalendarDays} />
             <TabButton id="ledgers" label="2. Manage Advances" icon={Wallet} />
-            <TabButton id="payroll" label="3. Run Payroll" icon={Calculator} />
+            <TabButton id="fines" label="3. Fine Register" icon={Gavel} />
+            <TabButton id="payroll" label="4. Run Payroll" icon={Calculator} />
         </div>
       </div>
 
@@ -128,6 +132,18 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             />
         )}
 
+        {activeTab === 'fines' && (
+            <FineManager
+                employees={props.employees}
+                fines={props.fines}
+                setFines={props.setFines}
+                month={props.month}
+                year={props.year}
+                savedRecords={props.savedRecords}
+                hideContextSelector={true}
+            />
+        )}
+
         {activeTab === 'payroll' && (
             <PayrollProcessor 
                 employees={props.employees}
@@ -146,6 +162,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 setAdvanceLedgers={props.setAdvanceLedgers}
                 hideContextSelector={true}
                 currentUser={props.currentUser}
+                fines={props.fines}
             />
         )}
       </div>
