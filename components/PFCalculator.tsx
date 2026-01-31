@@ -122,7 +122,7 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
         refund: 0,
         isOptOut 
       };
-    }).filter(Boolean) as any[];
+    }).filter(r => r && r.gross > 0) as any[];
 
     const adminCharges = Math.round(totalEPFWages * 0.005);
     ac2 = Math.max(500, adminCharges); 

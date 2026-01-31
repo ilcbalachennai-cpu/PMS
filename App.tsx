@@ -91,49 +91,74 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
         const getMonthValue = (m: string, y: number) => {
             const idx = monthsArr.indexOf(m.trim());
-            return (y * 12) + (idx === -1 ? 0 : idx);
+            // Return a comparable integer (Year * 12 + MonthIndex)
+            if (idx === -1) return 0;
+            return (y * 12) + idx;
         };
 
-        // 1. Check if ACTIVE Attendance Data is present (ignoring auto-generated blank records)
-        if (Array.isArray(attendance) && attendance.length > 0) {
-            // Filter only records where some days are actually entered
-            const activeAttendance = attendance.filter((a: any) => 
-                (a.presentDays || 0) > 0 || 
-                (a.earnedLeave || 0) > 0 || 
-                (a.sickLeave || 0) > 0 || 
-                (a.casualLeave || 0) > 0 || 
-                (a.lopDays || 0) > 0 ||
-                (a.encashedDays || 0) > 0
-            );
+        // 1. Determine the baseline from Finalized Payroll History
+        // If no history, we assume start of FY 2025-26 (March 2025 value serves as baseline so next is April)
+        let lastLockedVal = getMonthValue('March', 2025); 
+        let hasHistory = false;
 
-            if (activeAttendance.length > 0) {
-                const sortedAttendance = [...activeAttendance].sort((a, b) => {
-                    return getMonthValue(b.month, b.year) - getMonthValue(a.month, a.year);
-                });
-                return { month: sortedAttendance[0].month, year: sortedAttendance[0].year };
-            }
-        }
-
-        // 2. Check if Confirmed Payroll exists - Use NEXT month after latest confirmed
         if (Array.isArray(history) && history.length > 0) {
-            const confirmed = history.filter((h: any) => h.status === 'Finalized');
-            if (confirmed.length > 0) {
-                const sortedConfirmed = [...confirmed].sort((a, b) => {
-                    return getMonthValue(b.month, b.year) - getMonthValue(a.month, a.year);
-                });
-                const last = sortedConfirmed[0];
-                const lastIdx = monthsArr.indexOf(last.month);
-                
-                if (lastIdx === 11) { // December
-                    return { month: 'January', year: last.year + 1 };
-                } else {
-                    return { month: monthsArr[lastIdx + 1], year: last.year };
+            history.filter((h: any) => h.status === 'Finalized').forEach((h: any) => {
+                const val = getMonthValue(h.month, h.year);
+                if (val > lastLockedVal) {
+                    lastLockedVal = val;
+                    hasHistory = true;
                 }
-            }
+            });
+        } else {
+            // If absolutely no history, verify if we default to April 2025
+            lastLockedVal = getMonthValue('March', 2025); 
         }
 
-        // 3. Absolute Fallback: April 2025 (Start of FY 25-26)
-        return { month: 'April', year: 2025 };
+        // 2. Check for Active Drafts (Attendance with Data) that are NEWER than the lock
+        let latestDraftVal = -1;
+        let latestDraftPeriod = null;
+
+        if (Array.isArray(attendance) && attendance.length > 0) {
+            attendance.forEach((a: any) => {
+                const val = getMonthValue(a.month, a.year);
+                
+                // Filter: Must be later than last finalized payroll
+                if (val > lastLockedVal) {
+                    // Filter: Must have non-zero data (implies active work)
+                    const hasData = (a.presentDays || 0) > 0 || 
+                                    (a.earnedLeave || 0) > 0 || 
+                                    (a.sickLeave || 0) > 0 || 
+                                    (a.casualLeave || 0) > 0 || 
+                                    (a.lopDays || 0) > 0 ||
+                                    (a.encashedDays || 0) > 0;
+                    
+                    // Filter: Must NOT be finalized (double check)
+                    const isFinalized = history.some((h:any) => h.month === a.month && h.year === a.year && h.status === 'Finalized');
+
+                    if (hasData && !isFinalized) {
+                        if (val > latestDraftVal) {
+                            latestDraftVal = val;
+                            latestDraftPeriod = { month: a.month, year: a.year };
+                        }
+                    }
+                }
+            });
+        }
+
+        // 3. Select Date
+        if (latestDraftPeriod) {
+            // Priority 1: User is working on a future/current draft
+            return latestDraftPeriod;
+        } else {
+            // Priority 2: Roll over to next month after last lock
+            // (e.g., if Nov 2025 is locked, default to Dec 2025)
+            // (e.g., if Baseline (Mar 2025) is used, default to April 2025)
+            const nextVal = lastLockedVal + 1;
+            const nextMonthIdx = nextVal % 12;
+            const nextYear = Math.floor(nextVal / 12);
+            return { month: monthsArr[nextMonthIdx], year: nextYear };
+        }
+
     } catch (e) {
         console.error("Error determining default period:", e);
         return { month: 'April', year: 2025 };

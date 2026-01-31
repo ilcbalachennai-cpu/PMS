@@ -583,7 +583,7 @@ export const generatePFForm12A = (data: PayrollResult[], employees: Employee[], 
         startY: boxY + 12,
         head: [[
             { content: 'PF-Wages', styles: { halign: 'left' } },
-            { content: grossWagesPFMembers.toString(), styles: { halign: 'right' } },
+            { content: totalEPFWages.toString(), styles: { halign: 'right' } },
             { content: 'Employee Share', colSpan: 2, styles: { halign: 'center' } },
             { content: 'Employer Share', colSpan: 2, styles: { halign: 'center' } },
             { content: 'Total', styles: { halign: 'right' } }

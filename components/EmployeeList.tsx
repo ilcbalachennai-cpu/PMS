@@ -80,6 +80,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  const totalActive = useMemo(() => employees.filter(e => !e.dol).length, [employees]);
+
   const getEmptyForm = (): Partial<Employee> => ({
     id: `EMP00${employees.length + 1}`,
     name: '', gender: 'Male', dob: '',
@@ -664,6 +666,18 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 <Plus size={18} /> Add New
             </button>
         </div>
+      </div>
+
+      <div className="flex justify-start px-2 -my-3">
+          <div className="flex items-center gap-2 bg-[#1e293b]/80 border border-slate-800 px-4 py-1.5 rounded-full shadow-lg z-0 backdrop-blur-sm">
+              <div className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  Active Employees: <span className="text-white text-xs ml-1 font-mono">{totalActive}</span>
+              </span>
+          </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
