@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Play, Save, RefreshCw, Lock, FileText, Table, Eye, Check, AlertCircle, ChevronLeft, ChevronRight, Printer, AlertTriangle, X, CheckCircle, Download } from 'lucide-react';
+import { Play, Save, RefreshCw, Lock, FileText, Table, Eye, Check, AlertCircle, ChevronLeft, ChevronRight, Printer, AlertTriangle, X, CheckCircle, Download, Scale, HandCoins } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
@@ -41,6 +41,10 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<PayrollResult | null>(null);
+
+  // Compliance Modal State
+  const [complianceConflicts, setComplianceConflicts] = useState<any[]>([]);
+  const [showComplianceModal, setShowComplianceModal] = useState(false);
 
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
@@ -124,9 +128,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     return true;
   };
 
-  const handleCalculate = () => {
-    if (isLocked) return;
-    if (!checkAgeMaturity()) return;
+  const executeCalculation = (restrictedMode = false) => {
     setIsProcessing(true);
     setTimeout(() => {
         try {
@@ -134,16 +136,79 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 const attendance = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { employeeId: emp.id, month, year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
                 const leave = leaveLedgers.find(l => l.employeeId === emp.id) || { employeeId: emp.id, el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 }, sl: { eligible: 0, availed: 0, balance: 0 }, cl: { availed: 0, accumulation: 0, balance: 0 } };
                 const advance = advanceLedgers.find(a => a.employeeId === emp.id) || { employeeId: emp.id, opening: 0, totalAdvance: 0, monthlyInstallment: 0, paidAmount: 0, balance: 0 };
-                return calculatePayroll(emp, config, attendance, leave, advance, month, year);
+                
+                // If restrictedMode is true, verify if THIS employee needs restriction
+                // However, simplest logic is to pass the flag if user chose "Restrict All" or handle per-employee logic
+                // For "Restrict All", pass true.
+                const shouldRestrict = restrictedMode && complianceConflicts.some(c => c.employeeId === emp.id);
+                
+                return calculatePayroll(emp, config, attendance, leave, advance, month, year, { restrictTo50Percent: shouldRestrict });
             });
             setResults(calculatedResults);
             setIsSaved(false);
+            setComplianceConflicts([]); // Clear conflicts after resolution
+            setShowComplianceModal(false);
         } catch (e) {
             console.error(e);
         } finally {
             setIsProcessing(false);
         }
     }, 800);
+  };
+
+  const handleCalculate = () => {
+    if (isLocked) return;
+    if (!checkAgeMaturity()) return;
+    
+    setIsProcessing(true);
+    // Initial Run - Standard Calculation
+    setTimeout(() => {
+        const initialResults = activeEmployees.map(emp => {
+            const attendance = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { employeeId: emp.id, month, year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
+            const leave = leaveLedgers.find(l => l.employeeId === emp.id) || { employeeId: emp.id, el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 }, sl: { eligible: 0, availed: 0, balance: 0 }, cl: { availed: 0, accumulation: 0, balance: 0 } };
+            const advance = advanceLedgers.find(a => a.employeeId === emp.id) || { employeeId: emp.id, opening: 0, totalAdvance: 0, monthlyInstallment: 0, paidAmount: 0, balance: 0 };
+            return calculatePayroll(emp, config, attendance, leave, advance, month, year, { restrictTo50Percent: false });
+        });
+
+        // CHECK CONDITION B: Advance > 50% of Code_Gross_Wages
+        const conflicts: any[] = [];
+        initialResults.forEach(r => {
+            const emp = activeEmployees.find(e => e.id === r.employeeId);
+            if (!emp) return;
+            
+            // Re-derive Statutory Deductions to get Code Gross (Not stored in result directly, so calculating)
+            const statDed = (r.deductions.epf || 0) + (r.deductions.vpf || 0) + (r.deductions.esi || 0) + (r.deductions.pt || 0) + (r.deductions.it || 0) + (r.deductions.lwf || 0);
+            const codeGross = Math.max(0, r.earnings.total - statDed);
+            const limit = Math.round(codeGross * 0.5);
+            const advance = r.deductions.advanceRecovery || 0;
+
+            // Only flag if:
+            // 1. Advance > Limit
+            // 2. Advance was NOT already restricted to 0 Net Pay (which means it's equal to Code Gross, which is definitely > 50%)
+            // Actually, if Advance == Code Gross, it triggered Condition D.
+            // But Condition B (50%) check happens before Condition D conceptually in the modal flow.
+            // So if Advance > Limit, we flag it.
+            if (advance > limit && advance > 0) {
+                conflicts.push({
+                    employeeId: r.employeeId,
+                    name: emp.name,
+                    codeGross: codeGross,
+                    limit: limit,
+                    proposed: advance
+                });
+            }
+        });
+
+        if (conflicts.length > 0) {
+            setComplianceConflicts(conflicts);
+            setShowComplianceModal(true);
+            setIsProcessing(false);
+        } else {
+            setResults(initialResults);
+            setIsSaved(false);
+            setIsProcessing(false);
+        }
+    }, 500);
   };
 
   const handleSaveDraft = () => {
@@ -158,15 +223,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
   const handleExportDraft = () => {
     if (results.length === 0) return;
     
-    // Filter to exclude records with 0 Net Pay (Zero Wages)
-    const exportableResults = results.filter(r => r.netPay > 0);
-
-    if (exportableResults.length === 0) {
-        setModalState({ isOpen: true, type: 'error', title: 'No Data', message: 'No employees with positive wages found to export.' });
-        return;
-    }
-
-    const data = exportableResults.map(r => {
+    // Use full results for export, including 0 wages employees
+    const data = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
         return { 
             'Employee ID': r.employeeId, 
@@ -188,7 +246,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             'Special Allw 2': r?.earnings?.special2 || 0,
             'Special Allw 3': r?.earnings?.special3 || 0,
             'Bonus': r?.earnings?.bonus || 0,
-            'Leave Encashment': r?.earnings?.leaveEncashment || 0,
+            'Leave Encash': r?.earnings?.leaveEncashment || 0,
             'Gross Earnings': r?.earnings?.total || 0, 
             
             // Deductions
@@ -235,7 +293,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                   <tr><th className="px-4 py-4 bg-[#0f172a]">Employee</th><th className="px-2 py-4 text-center bg-[#0f172a]">Days</th><th className="px-4 py-4 text-right bg-[#0f172a]">Basic</th><th className="px-4 py-4 text-right bg-[#0f172a]">DA</th><th className="px-4 py-4 text-right bg-[#0f172a]">HRA</th><th className="px-4 py-4 text-right bg-[#0f172a]">Others</th><th className="px-4 py-4 text-right text-white bg-[#0f172a]">Gross</th><th className="px-4 py-4 text-right text-blue-400 bg-[#0f172a]">PF</th><th className="px-4 py-4 text-right text-pink-400 bg-[#0f172a]">ESI</th><th className="px-4 py-4 text-right text-amber-400 bg-[#0f172a]">PT/TDS</th><th className="px-4 py-4 text-right text-red-300 bg-[#0f172a]">Deductions</th><th className="px-4 py-4 text-right text-emerald-400 bg-[#0f172a]">Net Pay</th><th className="px-2 py-4 text-center bg-[#0f172a] sticky right-0 z-20 shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.5)]">View</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {results.map(r => {
+                  {results.filter(r => !isSaved || r.netPay > 0).map(r => {
                     const emp = employees.find(e => e.id === r.employeeId);
                     const others = (r?.earnings?.total || 0) - ((r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.hra || 0));
                     return (<tr key={r.employeeId} className="hover:bg-slate-800/50 transition-colors"><td className="px-4 py-3"><div className="font-bold text-white text-xs">{emp?.name}</div><div className="text-[10px] text-slate-500 font-mono">{r.employeeId}</div></td><td className="px-2 py-3 text-center font-mono text-slate-300 text-xs">{r.payableDays}</td><td className="px-4 py-3 text-right font-mono text-slate-300 text-xs">{(r?.earnings?.basic || 0).toLocaleString()}</td><td className="px-4 py-3 text-right font-mono text-slate-300 text-xs">{(r?.earnings?.da || 0).toLocaleString()}</td><td className="px-4 py-3 text-right font-mono text-slate-300 text-xs">{(r?.earnings?.hra || 0).toLocaleString()}</td><td className="px-4 py-3 text-right font-mono text-slate-400 text-xs">{others.toLocaleString()}</td><td className="px-4 py-3 text-right font-mono font-bold text-white text-xs">{(r?.earnings?.total || 0).toLocaleString()}</td><td className="px-4 py-3 text-right font-mono text-blue-300 text-xs">{(r?.deductions?.epf || 0).toLocaleString()}</td><td className="px-4 py-3 text-right font-mono text-pink-300 text-xs">{(r?.deductions?.esi || 0).toLocaleString()}</td><td className="px-4 py-3 text-right font-mono text-amber-300 text-xs">{((r?.deductions?.pt || 0) + (r?.deductions?.it || 0)).toLocaleString()}</td><td className="px-4 py-3 text-right font-mono text-red-300 text-xs">{(r?.deductions?.total || 0).toLocaleString()}</td><td className="px-4 py-3 text-right font-mono font-black text-emerald-400 text-sm bg-emerald-900/10">{(r?.netPay || 0).toLocaleString()}</td><td className="px-2 py-3 text-center sticky right-0 bg-[#1e293b] shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.5)]"><button onClick={() => setPreviewRecord(r)} className="p-2 bg-blue-900/20 text-blue-400 hover:text-white hover:bg-blue-600 rounded-lg transition-colors" title="View Pay Slip"><Eye size={16} /></button></td></tr>);
@@ -243,6 +301,62 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 </tbody>
               </table>
           </div>
+        </div>
+      )}
+
+      {/* COMPLIANCE ALERT MODAL (ADVANCE RECOVERY) */}
+      {showComplianceModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-amber-500/50 shadow-2xl p-0 flex flex-col relative overflow-hidden">
+                <div className="bg-amber-600 p-6 flex justify-between items-start">
+                    <div className="flex gap-4">
+                        <div className="p-3 bg-white/20 rounded-full text-white shadow-lg"><Scale size={24} /></div>
+                        <div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-wide">Advance Recovery Limit Alert</h3>
+                            <p className="text-xs text-amber-100 mt-1 font-medium">As per Code on Wages 2020, total deductions generally should not exceed 50% of wages.</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div className="p-6 bg-[#0f172a] max-h-60 overflow-y-auto custom-scrollbar">
+                    <p className="text-xs text-slate-400 mb-4">Advance recovery for the following employees is above 50% of Code Gross Wages:</p>
+                    <table className="w-full text-left text-xs">
+                        <thead className="text-slate-500 uppercase font-bold border-b border-slate-700">
+                            <tr>
+                                <th className="pb-2">Employee</th>
+                                <th className="pb-2 text-right">Code Gross</th>
+                                <th className="pb-2 text-right text-amber-400">Proposed</th>
+                                <th className="pb-2 text-right text-emerald-400">50% Limit</th>
+                            </tr>
+                        </thead>
+                        <tbody className="text-slate-300 divide-y divide-slate-800">
+                            {complianceConflicts.map((c: any) => (
+                                <tr key={c.employeeId}>
+                                    <td className="py-2">
+                                        <span className="font-bold text-white">{c.name}</span><br/>
+                                        <span className="text-slate-500 text-[10px]">{c.employeeId}</span>
+                                    </td>
+                                    <td className="py-2 text-right font-mono">{c.codeGross.toLocaleString()}</td>
+                                    <td className="py-2 text-right font-mono text-amber-400 font-bold">{c.proposed.toLocaleString()}</td>
+                                    <td className="py-2 text-right font-mono text-emerald-400">{c.limit.toLocaleString()}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div className="p-6 bg-[#1e293b] border-t border-slate-800 flex flex-col gap-4">
+                    <div className="flex gap-3">
+                        <button onClick={() => executeCalculation(true)} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg flex items-center justify-center gap-2">
+                            <CheckCircle size={16} /> Restrict to 50%
+                        </button>
+                        <button onClick={() => executeCalculation(false)} className="flex-1 py-3 border border-amber-600 text-amber-400 hover:bg-amber-900/20 rounded-xl font-bold text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2">
+                            <HandCoins size={16} /> Ignore & Deduct Full
+                        </button>
+                    </div>
+                    <p className="text-[9px] text-center text-slate-500">Note: Even if 'Ignore' is selected, deduction will be automatically capped at Code Gross Wages to prevent negative Net Pay.</p>
+                </div>
+            </div>
         </div>
       )}
 
@@ -276,7 +390,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                 </div>
                                 <div className="border border-slate-800"><div className="grid grid-cols-4 bg-slate-800 text-white text-xs font-bold uppercase text-center divide-x divide-slate-600"><div className="p-2">Earnings</div><div className="p-2">Amount (₹)</div><div className="p-2">Deductions</div><div className="p-2">Amount (₹)</div></div><div className="grid grid-cols-4 text-xs divide-x divide-slate-300"><div className="space-y-1 p-2"><div className="text-slate-600">Basic Pay</div><div className="text-slate-600">DA</div><div className="text-slate-600">Retaining Allw</div><div className="text-slate-600">HRA</div><div className="text-slate-600">Conveyance</div><div className="text-slate-600">Special Allw</div><div className="text-slate-600">Other Allw</div><div className="text-slate-600">Leave Encash</div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.earnings?.basic || 0).toFixed(2)}</div><div>{(r?.earnings?.da || 0).toFixed(2)}</div><div>{(r?.earnings?.retainingAllowance || 0).toFixed(2)}</div><div>{(r?.earnings?.hra || 0).toFixed(2)}</div><div>{(r?.earnings?.conveyance || 0).toFixed(2)}</div><div>{special.toFixed(2)}</div><div>{other.toFixed(2)}</div><div>{(r?.earnings?.leaveEncashment || 0).toFixed(2)}</div></div><div className="space-y-1 p-2"><div className="text-slate-600">Provident Fund {r.isCode88 ? '*' : ''}</div><div className="text-slate-600">ESI {r.isESICodeWagesUsed ? '**' : ''}</div><div className="text-slate-600">Professional Tax</div><div className="text-slate-600">Income Tax</div><div className="text-slate-600">VPF</div><div className="text-slate-600">LWF</div><div className="text-slate-600">Adv Recovery</div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.deductions?.epf || 0).toFixed(2)}</div><div>{(r?.deductions?.esi || 0).toFixed(2)}</div><div>{(r?.deductions?.pt || 0).toFixed(2)}</div><div>{(r?.deductions?.it || 0).toFixed(2)}</div><div>{(r?.deductions?.vpf || 0).toFixed(2)}</div><div>{(r?.deductions?.lwf || 0).toFixed(2)}</div><div>{(r?.deductions?.advanceRecovery || 0).toFixed(2)}</div></div></div><div className="grid grid-cols-4 bg-slate-100 border-t border-slate-800 text-xs font-bold divide-x divide-slate-300"><div className="p-2 text-slate-800">Gross Earnings</div><div className="p-2 text-right text-slate-900">{(r?.earnings?.total || 0).toFixed(2)}</div><div className="p-2 text-slate-800">Total Deductions</div><div className="p-2 text-right text-slate-900">{(r?.deductions?.total || 0).toFixed(2)}</div></div></div>
                                 <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 flex flex-col md:flex-row justify-between items-center gap-4"><div><p className="text-xs font-bold text-blue-800 uppercase tracking-widest">Net Salary Payable</p><p className="text-[10px] text-blue-600 italic mt-1 max-w-sm">{numberToWords(Math.round(r?.netPay || 0))} Rupees Only</p></div><div className="text-3xl font-black text-blue-900">₹{Math.round(r?.netPay || 0).toLocaleString('en-IN')}</div></div>
-                                <div className="text-[10px] text-slate-400 space-y-1 pt-4 border-t border-slate-200">{r.isCode88 && <p>* PF calculated on Code Wages (Social Security Code 2020)</p>}{r.isESICodeWagesUsed && <p>** ESI calculated on Code Wages (Social Security Code 2020)</p>}<p className="text-center italic mt-4">This is a computer-generated document and does not require a signature.</p></div></>
+                                <div className="text-[10px] text-slate-400 space-y-1 pt-4 border-t border-slate-200">{r.isCode88 && <p>* PF calculated on Code Wages (Social Security Code 2020)</p>}{r.isESICodeWagesUsed && <p>** ESI calculated on Code Wages (Social Security Code 2020)</p>}{r.esiRemark && <p className="text-amber-600 font-bold">{r.esiRemark}</p>}<p className="text-center italic mt-4">This is a computer-generated document and does not require a signature.</p></div></>
                         );
                     })()}
                 </div>

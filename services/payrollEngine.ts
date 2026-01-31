@@ -1,3 +1,4 @@
+
 import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger } from '../types';
 import { PT_STATE_PRESETS } from '../constants';
 
@@ -39,15 +40,14 @@ export const calculatePayroll = (
   leave: LeaveLedger,
   advance: AdvanceLedger,
   month: string,
-  year: number
+  year: number,
+  advanceOptions: { restrictTo50Percent: boolean } = { restrictTo50Percent: false }
 ): PayrollResult => {
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const monthIdx = months.indexOf(month);
   const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
   
   // --- Calculation of Payable Days ---
-  // Logic: Pay for Present Days + Paid Leaves (EL, SL, CL)
-  // LOP is implicitly handled because it reduces the Present Days count in Attendance Entry.
   const paidLeaveDays = (attendance.earnedLeave || 0) + 
                         (attendance.sickLeave || 0) + 
                         (attendance.casualLeave || 0);
@@ -68,24 +68,18 @@ export const calculatePayroll = (
       const dolDate = new Date(employee.dol);
       dolDate.setHours(0,0,0,0);
 
-      // Case 1: Employee Left BEFORE this month started -> No Pay
       if (dolDate < periodStart) {
           effectivePayableDays = 0;
           exitRemark = 'Left Service (Previous Period)';
       }
-      // Case 2: Employee Left DURING this month
       else if (dolDate >= periodStart && dolDate <= periodEnd) {
           isLeftService = true;
           exitRemark = `Left: ${employee.dol}`;
-          // For mid-month exit, we strictly trust the attendance entered by the user
-          // which should ideally end at DOL.
       }
   }
 
-  // Safety Cap: Cannot exceed days in month (unless arrears, but this engine is for current month standard pay)
   effectivePayableDays = Math.min(effectivePayableDays, daysInMonth);
 
-  // Stop if 0 days
   if (effectivePayableDays <= 0) {
       return {
         employeeId: employee.id,
@@ -124,21 +118,8 @@ export const calculatePayroll = (
   const bonus = 0; 
   const encashedDays = attendance.encashedDays || 0;
 
-  // --- NEW: Configurable Leave Wages Calculation ---
   let leaveWageBase = 0;
-  // Fallback to default { basic: true, da: true } if config is missing (backward compatibility)
-  const lwComponents = config.leaveWagesComponents || { 
-    basic: true, 
-    da: true, 
-    retaining: false,
-    hra: false,
-    conveyance: false,
-    washing: false,
-    attire: false,
-    special1: false,
-    special2: false,
-    special3: false
-  };
+  const lwComponents = config.leaveWagesComponents || { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false };
 
   if (lwComponents.basic) leaveWageBase += employee.basicPay;
   if (lwComponents.da) leaveWageBase += (employee.da || 0);
@@ -155,16 +136,7 @@ export const calculatePayroll = (
   
   const grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
 
-  const standardMonthlyGross = employee.basicPay + 
-    (employee.da || 0) + 
-    (employee.retainingAllowance || 0) + 
-    (employee.hra || 0) + 
-    (employee.conveyance || 0) + 
-    (employee.washing || 0) + 
-    (employee.attire || 0) + 
-    (employee.specialAllowance1 || 0) + 
-    (employee.specialAllowance2 || 0) + 
-    (employee.specialAllowance3 || 0);
+  const standardMonthlyGross = employee.basicPay + (employee.da || 0) + (employee.retainingAllowance || 0) + (employee.hra || 0) + (employee.conveyance || 0) + (employee.washing || 0) + (employee.attire || 0) + (employee.specialAllowance1 || 0) + (employee.specialAllowance2 || 0) + (employee.specialAllowance3 || 0);
 
   // --- PF Calculation Logic ---
   const wageA = basic + da + retaining;
@@ -180,11 +152,9 @@ export const calculatePayroll = (
       }
   }
 
-  // Base Logic: Code Wages (Clause 88)
   let basePFWage = Math.round(wageA + wageD);
   let isCode88 = wageD > 0;
 
-  // --- NEW: Higher Contribution Wage Arriving ---
   if (config.enableHigherContribution) {
     const hc = config.higherContributionComponents;
     let higherWageBase = 0;
@@ -198,10 +168,9 @@ export const calculatePayroll = (
     if (hc.special2) higherWageBase += special2;
     if (hc.special3) higherWageBase += special3;
 
-    // RULE: Only consider if higher than Code Wages
     if (higherWageBase > basePFWage) {
         basePFWage = Math.round(higherWageBase);
-        isCode88 = false; // Higher base overrides Code adjustment
+        isCode88 = false; 
     }
   }
 
@@ -210,7 +179,6 @@ export const calculatePayroll = (
   let epfEmployer = 0;
   let epsEmployer = 0;
   
-  // OPT OUT LOGIC (AGE 58+)
   const isOptOut = employee.isDeferredPension && employee.deferredPensionOption === 'OptOut';
 
   if (!employee.isPFExempt && !isOptOut) {
@@ -226,7 +194,6 @@ export const calculatePayroll = (
     const isPost2014 = B5_Date && B5_Date >= CUTOFF_2014;
     const isPre2014 = B5_Date && B5_Date < CUTOFF_2014;
 
-    // J5: EPF WAGES (Column J)
     let J5_EPFWage = 0;
     if (D5 === 'Higher' || (config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer')) {
         J5_EPFWage = basePFWage;
@@ -238,7 +205,6 @@ export const calculatePayroll = (
         }
     }
 
-    // K5: EPS WAGES (Column K)
     let K5_EPSWage = 0;
     if (A5 && C5 === 'Higher' && D5 === 'Higher' && E5 && isPre2014) {
         K5_EPSWage = J5_EPFWage;
@@ -255,20 +221,16 @@ export const calculatePayroll = (
         }
     }
 
-    // M5: EPF Remitted (Employee Share)
-    // If Higher Contribution is enabled "By Employee", we calculate share on basePFWage without ceiling if selected
     let eeBasis = (config.enableHigherContribution && config.higherContributionType !== 'By Employee') 
         ? J5_EPFWage 
         : (config.enableHigherContribution ? basePFWage : J5_EPFWage);
     
     epfEmployee = Math.round(eeBasis * config.epfEmployeeRate);
 
-    // VPF
     if (employee.employeeVPFRate > 0) {
         vpfEmployee = Math.round(eeBasis * (employee.employeeVPFRate / 100));
     }
 
-    // N5: EPS Remitted (Pension Fund)
     if (!E5) {
         if (K5_EPSWage === 0) epsEmployer = 0;
         else {
@@ -279,7 +241,6 @@ export const calculatePayroll = (
         epsEmployer = Math.round(K5_EPSWage * 0.0833);
     }
 
-    // O5: EPF Employer Share (Diff)
     if (K5_EPSWage === 0) {
         epfEmployer = Math.round(J5_EPFWage * config.epfEmployerRate);
     } else if (D5 === 'Higher' || (config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer')) {
@@ -400,8 +361,27 @@ export const calculatePayroll = (
   const annualTaxable = (grossEarnings * 12) - 50000;
   if (annualTaxable > 700000) incomeTax = Math.round(((annualTaxable - 700000) * 0.1) / 12);
 
-  const advanceRecovery = Math.min(advance.monthlyInstallment, advance.balance);
-  const totalDeductions = epfEmployee + vpfEmployee + esiEmployee + pt + incomeTax + lwfEmployee + advanceRecovery;
+  // --- ADVANCE RECOVERY Logic (Code on Wages 2020) ---
+  const statutoryDeductions = epfEmployee + vpfEmployee + esiEmployee + pt + incomeTax + lwfEmployee;
+  const codeGrossWages = Math.max(0, grossEarnings - statutoryDeductions);
+  
+  let targetRecovery = Math.min(advance.monthlyInstallment, advance.balance);
+  let advanceRecovery = targetRecovery;
+
+  // 1. Restrict to 50% Rule if Configured (Labour Code 2020)
+  if (advanceOptions.restrictTo50Percent) {
+      const limit50 = Math.round(codeGrossWages * 0.5);
+      advanceRecovery = Math.min(targetRecovery, limit50);
+  }
+
+  // 2. ABSOLUTE Restriction: No Negative Wages
+  // Advance cannot exceed Code Gross Wages (resulting in < 0 Net Pay)
+  if (advanceRecovery > codeGrossWages) {
+      advanceRecovery = codeGrossWages;
+      esiRemark += (esiRemark ? '. ' : '') + "Advance recovery restricted to Code_Gross_Wages resulting in Net Wages to Nil";
+  }
+
+  const totalDeductions = statutoryDeductions + advanceRecovery;
 
   return {
     employeeId: employee.id,
@@ -419,6 +399,6 @@ export const calculatePayroll = (
     netPay: grossEarnings - totalDeductions,
     isCode88,
     isESICodeWagesUsed,
-    esiRemark
+    esiRemark: esiRemark
   };
 };
