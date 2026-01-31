@@ -384,6 +384,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   return (
     <div className="max-w-4xl space-y-8 text-white relative">
       
+      {/* Header Band - Tab Navigation */}
       <div className="flex gap-4 border-b border-slate-700 overflow-x-auto pb-1 scrollbar-hide">
           <button onClick={() => setActiveTab('STATUTORY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
              <ShieldCheck size={16} /> Statutory Rules
@@ -418,9 +419,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         <Landmark className="text-blue-400" size={20} />
                         <h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">Provident Fund (EPF)</h3>
                     </div>
-                    <label className="flex items-center gap-2 cursor-pointer p-1.5 bg-blue-900/10 rounded-lg border border-blue-500/20 hover:bg-blue-900/20 transition-all">
-                        <input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900" checked={formData.enableHigherContribution || false} onChange={e => setFormData({...formData, enableHigherContribution: e.target.checked})} />
-                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Enable Higher Contribution Rules</span>
+                    {/* Updated styling to match Compliance & Parameter Configuration (Amber) */}
+                    <label className="flex items-center gap-2 cursor-pointer p-1.5 bg-amber-900/20 rounded-lg border border-amber-500/20 hover:bg-amber-900/30 transition-all">
+                        <input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-amber-500 bg-slate-900 accent-amber-500" checked={formData.enableHigherContribution || false} onChange={e => setFormData({...formData, enableHigherContribution: e.target.checked})} />
+                        <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Enable Higher Contribution Rules</span>
                     </label>
                 </div>
                 
@@ -447,15 +449,15 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
 
                         {formData.enableHigherContribution && (
-                            <div className="bg-blue-900/5 p-4 rounded-xl border border-blue-500/20 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="bg-amber-900/10 p-4 rounded-xl border border-amber-500/20 space-y-4 animate-in fade-in zoom-in-95 duration-200">
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Higher Applicability</label>
+                                    <label className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Higher Applicability</label>
                                     <div className="grid grid-cols-1 gap-2">
                                         {['By Employee', 'By Employee & Employer'].map(type => (
                                             <button 
                                                 key={type}
                                                 onClick={() => setFormData({...formData, higherContributionType: type as any})}
-                                                className={`py-2 px-4 text-left text-xs font-bold rounded-lg border transition-all flex items-center justify-between ${formData.higherContributionType === type ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}
+                                                className={`py-2 px-4 text-left text-xs font-bold rounded-lg border transition-all flex items-center justify-between ${formData.higherContributionType === type ? 'bg-amber-600 border-amber-400 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}
                                             >
                                                 {type}
                                                 {formData.higherContributionType === type ? <CheckCircle2 size={14} /> : <div className="w-3.5 h-3.5 rounded-full border border-slate-700" />}
@@ -463,7 +465,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         ))}
                                     </div>
                                 </div>
-                                <p className="text-[9px] text-blue-300 italic leading-relaxed">
+                                <p className="text-[9px] text-amber-300 italic leading-relaxed">
                                     * PF Wages will be taken from Higher Contribution Base only if it exceeds Code Wages (Clause 88).
                                 </p>
                             </div>
@@ -473,7 +475,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                     {formData.enableHigherContribution && (
                         <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                <Table size={12} className="text-blue-400" />
+                                <Table size={12} className="text-amber-400" />
                                 Selected Wage Components for Higher Contribution
                             </label>
                             <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -496,7 +498,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             onClick={() => handleHigherContributionToggle(comp.key as any)}
                                             className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${
                                                 isActive
-                                                ? 'bg-blue-600 border-blue-400 text-white'
+                                                ? 'bg-amber-600 border-amber-400 text-white'
                                                 : 'bg-slate-800 border-slate-700 text-slate-500'
                                             }`}
                                         >
