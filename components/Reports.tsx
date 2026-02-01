@@ -235,17 +235,20 @@ const Reports: React.FC<ReportsProps> = ({
                      
                      // Use snapshot if available, otherwise fallback to current state (might be inaccurate for past months)
                      const l = snapshot || liveLedger || {
-                         el: { opening: 0, eligible: 0, availed: 0, balance: 0 },
+                         el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
                          sl: { eligible: 0, availed: 0, balance: 0 },
                          cl: { accumulation: 0, availed: 0, balance: 0 }
                      };
                      
+                     // Calculate Total EL Used (Taken + Encashed)
+                     const elUsed = (l.el.availed || 0) + (l.el.encashed || 0);
+
                      return {
                          'ID': e.id,
                          'Name': e.name,
                          'EL Opening': l.el.opening || 0,
                          'EL Credit': l.el.eligible || 0,
-                         'EL Availed': l.el.availed || 0,
+                         'EL Used': elUsed, // Sum of availed and encashed
                          'EL Balance': l.el.balance || 0,
                          'SL Credit': l.sl.eligible || 0,
                          'SL Availed': l.sl.availed || 0,

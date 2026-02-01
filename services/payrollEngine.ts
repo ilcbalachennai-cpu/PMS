@@ -82,13 +82,16 @@ export const calculatePayroll = (
   effectivePayableDays = Math.min(effectivePayableDays, daysInMonth);
 
   // PREPARE SNAPSHOT: Create a frozen copy of leave ledger state specifically for this payroll run
+  // This ensures reports generated later use the EXACT values used during calculation
   const leaveSnapshot = JSON.parse(JSON.stringify(leave));
   
-  // Force update 'availed' counts in snapshot to match current attendance (source of truth for this month)
+  // Force update 'availed' and 'encashed' counts in snapshot to match current attendance (source of truth for this month)
   if (leaveSnapshot.el) {
       leaveSnapshot.el.availed = attendance.earnedLeave || 0;
-      leaveSnapshot.el.encashed = attendance.encashedDays || 0;
-      // Recalculate balance for report consistency
+      leaveSnapshot.el.encashed = attendance.encashedDays || 0; 
+      
+      // Recalculate balance for report consistency within the snapshot
+      // Balance = (Opening + Credit) - (Used + Encashed)
       leaveSnapshot.el.balance = (leaveSnapshot.el.opening || 0) + (leaveSnapshot.el.eligible || 0) - (leaveSnapshot.el.encashed || 0) - (leaveSnapshot.el.availed || 0);
   }
   if (leaveSnapshot.sl) {

@@ -299,12 +299,15 @@ export const generateLeaveLedgerReport = (
             cl: { accumulation: 0, availed: 0, balance: 0 }
         };
         
+        // Calculate Total Used (Availed + Encashed)
+        const elUsed = (l.el.availed || 0) + (l.el.encashed || 0);
+
         return [
             e.id, 
             e.name, 
             l.el.opening || 0, 
             l.el.eligible || 0, 
-            l.el.availed || 0, 
+            elUsed, 
             l.el.balance || 0, 
             l.sl.balance || 0, 
             l.cl.balance || 0

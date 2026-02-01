@@ -18,10 +18,11 @@ interface SettingsProps {
   initialTab?: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER';
   userRole?: string;
   currentUser?: User;
+  isSetupMode?: boolean;
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, initialTab = 'STATUTORY', userRole, currentUser }) => {
-  const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER'>(initialTab);
+const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false }) => {
+  const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER'>(isSetupMode ? 'DATA' : initialTab);
   
   // SCHEMA MIGRATION: Merge current config with defaults to prevent crashes on new features
   const [formData, setFormData] = useState<StatutoryConfig>(() => {
@@ -57,8 +58,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   }, []);
 
   useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab]);
+    setActiveTab(isSetupMode ? 'DATA' : initialTab);
+  }, [initialTab, isSetupMode]);
 
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetPassword, setResetPassword] = useState('');
@@ -384,7 +385,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   return (
     <div className="max-w-4xl space-y-8 text-white relative">
       
-      {/* Header Band - Tab Navigation (Sticky) */}
+      {/* Header Band - Tab Navigation (Sticky) - Hidden in Setup Mode */}
+      {!isSetupMode && (
       <div className="sticky top-20 z-30 bg-[#020617] pt-2 flex gap-4 border-b border-slate-700 overflow-x-auto pb-1 scrollbar-hide">
           <button onClick={() => setActiveTab('STATUTORY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
              <ShieldCheck size={16} /> Statutory Rules
@@ -401,6 +403,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             </button>
           )}
       </div>
+      )}
 
       {activeTab === 'STATUTORY' && (
       <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-300">
@@ -1037,7 +1040,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         </div>
       )}
 
-      {activeTab !== 'DATA' && (
+      {activeTab !== 'DATA' && !isSetupMode && (
       <div className="flex justify-between items-center p-2 pt-6 border-t border-slate-800">
         <div></div>
         <button onClick={handleSave} className={`flex items-center gap-3 px-10 py-4 rounded-2xl font-black transition-all shadow-2xl ${saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
