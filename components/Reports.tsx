@@ -603,17 +603,21 @@ const Reports: React.FC<ReportsProps> = ({
                                             value={r.dol} 
                                             onChange={(e) => handleZeroWageChange(r.id, 'dol', e.target.value)} 
                                         />
-                                    </td>
-                                    <td className="py-3">
-                                        <input 
-                                            type="text" 
-                                            placeholder="Enter Reason..."
+                                    </td> <td className="py-3">
+                                        <select 
                                             className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-amber-500 w-full"
                                             value={r.reason} 
                                             onChange={(e) => handleZeroWageChange(r.id, 'reason', e.target.value)} 
-                                        />
+                                        >
+                                            <option value="">Select Reason...</option>
+                                            <option value="Resignation">Resignation</option>
+                                            <option value="Retirement">Retirement</option>
+                                            <option value="Termination">Termination</option>
+                                            <option value="Suspension">Suspension</option>
+                                            <option value="Death">Death</option>
+                                        </select>
                                     </td>
-                                </tr>
+                                  </tr>
                             ))}
                         </tbody>
                     </table>
