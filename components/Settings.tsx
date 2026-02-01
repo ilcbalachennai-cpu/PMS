@@ -384,8 +384,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
   return (
     <div className="max-w-4xl space-y-8 text-white relative">
       
-      {/* Header Band - Tab Navigation */}
-      <div className="flex gap-4 border-b border-slate-700 overflow-x-auto pb-1 scrollbar-hide">
+      {/* Header Band - Tab Navigation (Sticky) */}
+      <div className="sticky top-20 z-30 bg-[#020617] pt-2 flex gap-4 border-b border-slate-700 overflow-x-auto pb-1 scrollbar-hide">
           <button onClick={() => setActiveTab('STATUTORY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
              <ShieldCheck size={16} /> Statutory Rules
           </button>
@@ -408,7 +408,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             <AlertCircle size={28} className="shrink-0 text-amber-400" />
             <div className="text-sm space-y-2">
             <p className="font-bold text-lg text-amber-400">Compliance & Parameter Configuration</p>
-            <p className="text-slate-300">These settings define how PF, ESI, and Taxes are calculated establishment-wide.</p>
+            <p className="text-slate-300">These Settings Define How PF, ESI, Leave Policy and Taxes are Calculated Establishment wise</p>
             </div>
         </div>
 
