@@ -1,6 +1,6 @@
 
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { PayrollResult, Employee, CompanyProfile, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger } from '../types';
 
@@ -53,7 +53,7 @@ export const generatePDFTableReport = (
   const doc = new jsPDF({ orientation });
   doc.setFontSize(14);
   if (companyProfile) {
-      doc.text(companyProfile.establishmentName, 14, 10);
+      doc.text(companyProfile.establishmentName || '', 14, 10);
   }
   doc.setFontSize(10);
   doc.text(title, 14, 16);
@@ -63,7 +63,7 @@ export const generatePDFTableReport = (
     body: data,
     startY: 20,
     theme: 'grid',
-    styles: { fontSize: 8 },
+    styles: { fontSize: 7, cellPadding: 1 }, 
   });
 
   if (footer) {
@@ -74,59 +74,242 @@ export const generatePDFTableReport = (
 };
 
 export const generatePaySlipsPDF = (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
+  if (!results || results.length === 0) return;
   const doc = new jsPDF();
-  let y = 10;
   
   results.forEach((r, i) => {
     if (i > 0) doc.addPage();
     const emp = employees.find(e => e.id === r.employeeId);
-    doc.setFontSize(16);
+    if (!emp) return;
+
+    // --- Header ---
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
     doc.text(companyProfile.establishmentName || 'Company Name', 105, 15, { align: 'center' });
-    doc.setFontSize(12);
-    doc.text(`Payslip for ${month} ${year}`, 105, 22, { align: 'center' });
+    
     doc.setFontSize(10);
-    doc.text(`Employee: ${emp?.name} (${r.employeeId})`, 14, 35);
-    doc.text(`Designation: ${emp?.designation}`, 14, 40);
-    doc.text(`Department: ${emp?.division || emp?.department}`, 14, 45);
-    doc.text(`Net Pay: ${r.netPay}`, 14, 55);
+    doc.setFont("helvetica", "normal");
+    const address = [companyProfile.doorNo, companyProfile.buildingName, companyProfile.street, companyProfile.area, companyProfile.city, companyProfile.state, companyProfile.pincode].filter(Boolean).join(', ');
+    const splitAddress = doc.splitTextToSize(address, 160);
+    doc.text(splitAddress, 105, 22, { align: 'center' });
+
+    let yPos = 22 + (splitAddress.length * 4);
     
-    // Add summary table
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Pay Slip - ${month} ${year}`, 105, yPos + 6, { align: 'center' });
+    doc.line(80, yPos + 7, 130, yPos + 7); // Underline
+
+    yPos += 15;
+
+    // --- Employee Details Grid (Mocking standard grid layout) ---
     autoTable(doc, {
-        startY: 60,
-        head: [['Earnings', 'Amount', 'Deductions', 'Amount']],
+        startY: yPos,
+        theme: 'plain',
+        styles: { fontSize: 9, cellPadding: 1.5, overflow: 'hidden' },
+        columnStyles: {
+            0: { fontStyle: 'bold', textColor: [100, 116, 139], cellWidth: 35 }, 
+            1: { fontStyle: 'bold', textColor: [0, 0, 0], cellWidth: 55 },       
+            2: { fontStyle: 'bold', textColor: [100, 116, 139], cellWidth: 35 }, 
+            3: { fontStyle: 'bold', textColor: [0, 0, 0], cellWidth: 55 }        
+        },
         body: [
-            ['Basic', r.earnings.basic, 'EPF', r.deductions.epf],
-            ['DA', r.earnings.da, 'ESI', r.deductions.esi],
-            ['HRA', r.earnings.hra, 'PT', r.deductions.pt],
-            ['Allowances', r.earnings.total - (r.earnings.basic + r.earnings.da + r.earnings.hra), 'TDS', r.deductions.it],
-            ['', '', 'Other', (r.deductions.total - (r.deductions.epf + r.deductions.esi + r.deductions.pt + r.deductions.it))],
-            ['Total Earnings', r.earnings.total, 'Total Deductions', r.deductions.total]
+            ['Employee Name', emp.name, 'Designation', emp.designation],
+            ['Employee ID', emp.id, 'Department', emp.division || emp.department || '-'],
+            ['Bank A/c', emp.bankAccount || '-', 'Days Paid', `${r.payableDays} / ${r.daysInMonth}`],
+            ['UAN No', emp.uanc || 'N/A', 'PF No', emp.pfNumber || 'N/A'],
+            ['ESI No', emp.esiNumber || 'N/A', 'PAN No', emp.pan || 'N/A']
         ],
-        theme: 'grid'
     });
+
+    const detailsTable = (doc as any).lastAutoTable;
+    // Draw Box
+    if (detailsTable && detailsTable.finalY) {
+        doc.setDrawColor(200, 200, 200);
+        // Calculate height using finalY - startY(yPos)
+        doc.rect(14, yPos, 182, detailsTable.finalY - yPos);
+        yPos = detailsTable.finalY + 5;
+    } else {
+        yPos += 40; // Fallback spacing
+    }
+
+    // --- Salary Details Table ---
+    const special = (r.earnings?.special1 || 0) + (r.earnings?.special2 || 0) + (r.earnings?.special3 || 0);
+    const otherEarn = (r.earnings?.washing || 0) + (r.earnings?.attire || 0);
+
+    const salaryBody = [
+        ['Basic Pay', (r.earnings?.basic || 0).toFixed(2), `Provident Fund${r.isCode88 ? '*' : ''}`, (r.deductions?.epf || 0).toFixed(2)],
+        ['DA', (r.earnings?.da || 0).toFixed(2), `ESI${r.isESICodeWagesUsed ? '**' : ''}`, (r.deductions?.esi || 0).toFixed(2)],
+        ['Retaining Allw', (r.earnings?.retainingAllowance || 0).toFixed(2), 'Professional Tax', (r.deductions?.pt || 0).toFixed(2)],
+        ['HRA', (r.earnings?.hra || 0).toFixed(2), 'Income Tax', (r.deductions?.it || 0).toFixed(2)],
+        ['Conveyance', (r.earnings?.conveyance || 0).toFixed(2), 'VPF', (r.deductions?.vpf || 0).toFixed(2)],
+        ['Special Allw', special.toFixed(2), 'LWF', (r.deductions?.lwf || 0).toFixed(2)],
+        ['Other Allw', otherEarn.toFixed(2), 'Adv Recovery', (r.deductions?.advanceRecovery || 0).toFixed(2)],
+        ['Leave Encash', (r.earnings?.leaveEncashment || 0).toFixed(2), 'Fine / Damages', (r.deductions?.fine || 0).toFixed(2)]
+    ];
+
+    autoTable(doc, {
+        startY: yPos,
+        head: [['Earnings', 'Amount', 'Deductions', 'Amount']],
+        body: salaryBody,
+        theme: 'grid',
+        headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+        columnStyles: {
+            0: { textColor: [71, 85, 105] }, 
+            1: { halign: 'right', fontStyle: 'bold', font: 'courier' }, 
+            2: { textColor: [71, 85, 105] }, 
+            3: { halign: 'right', fontStyle: 'bold', font: 'courier' }
+        },
+        styles: { fontSize: 9, cellPadding: 1.5 },
+        foot: [['Gross Earnings', (r.earnings?.total || 0).toFixed(2), 'Total Deductions', (r.deductions?.total || 0).toFixed(2)]],
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', halign: 'right' }
+    });
+
+    const salaryTable = (doc as any).lastAutoTable;
+    if (salaryTable && salaryTable.finalY) {
+        yPos = salaryTable.finalY + 5;
+    } else {
+        yPos += 100;
+    }
+
+    // --- Net Pay Section ---
+    doc.setDrawColor(59, 130, 246); 
+    doc.setFillColor(239, 246, 255); 
+    doc.roundedRect(14, yPos, 182, 20, 2, 2, 'FD');
+
+    doc.setFontSize(10);
+    doc.setTextColor(30, 64, 175);
+    doc.setFont("helvetica", "bold");
+    doc.text('NET SALARY PAYABLE', 20, yPos + 8);
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(37, 99, 235);
+    doc.text(`${numberToWords(Math.round(r.netPay || 0))} Rupees Only`, 20, yPos + 15);
+
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 58, 138); 
+    const netText = `Rs. ${Math.round(r.netPay || 0).toLocaleString('en-IN')}`;
+    const netTextWidth = doc.getTextWidth(netText);
+    doc.text(netText, 190 - netTextWidth, yPos + 13);
+
+    yPos += 25;
+
+    // --- Footer Notes ---
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.setFont("helvetica", "normal");
     
-    doc.text(`Net Payable: ${Math.round(r.netPay)} (${numberToWords(Math.round(r.netPay))} Only)`, 14, (doc as any).lastAutoTable.finalY + 10);
+    if (r.isCode88) doc.text('* PF calculated on Code Wages (Social Security Code 2020)', 14, yPos);
+    if (r.isESICodeWagesUsed) doc.text('** ESI calculated on Code Wages (Social Security Code 2020)', 14, yPos + 4);
+    if (r.esiRemark) {
+        doc.setTextColor(180, 83, 9);
+        doc.text(`Remark: ${r.esiRemark}`, 14, yPos + 8);
+        doc.setTextColor(100, 116, 139);
+    }
+
+    doc.setFont("helvetica", "italic");
+    doc.text('This is a computer-generated document and does not require a signature.', 105, 285, { align: 'center' });
   });
   
   doc.save(`Payslips_${month}_${year}.pdf`);
 };
 
 export const generateSimplePaySheetPDF = (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'Gross', 'Deductions', 'Net'];
+    // Extended headers for "All Details" request, fit for Landscape A4
+    const headers = [
+        'ID', 'Name', 
+        'Basic', 'DA', 'HRA', 'Conv', 'Spl/Oth', 
+        'GROSS', 
+        'PF', 'ESI', 'PT', 'TDS', 'Adv', 'Fine', 
+        'NET PAY'
+    ];
+    
     const data = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return [r.employeeId, emp?.name, r.earnings.total, r.deductions.total, r.netPay];
+        
+        // Summing up Special/Other allowances to save space on PDF
+        const specials = (r.earnings?.special1 || 0) + (r.earnings?.special2 || 0) + (r.earnings?.special3 || 0);
+        const others = (r.earnings?.washing || 0) + (r.earnings?.attire || 0) + (r.earnings?.bonus || 0) + (r.earnings?.leaveEncashment || 0) + specials;
+
+        return [
+            r.employeeId, 
+            emp?.name, 
+            Math.round(r.earnings?.basic || 0),
+            Math.round(r.earnings?.da || 0),
+            Math.round(r.earnings?.hra || 0),
+            Math.round(r.earnings?.conveyance || 0),
+            Math.round(others),
+            Math.round(r.earnings?.total || 0),
+            
+            Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)),
+            Math.round(r.deductions?.esi || 0),
+            Math.round(r.deductions?.pt || 0),
+            Math.round(r.deductions?.it || 0),
+            Math.round(r.deductions?.advanceRecovery || 0),
+            Math.round(r.deductions?.fine || 0),
+            
+            Math.round(r.netPay || 0)
+        ];
     });
-    generatePDFTableReport(`Pay Sheet ${month} ${year}`, headers, data, `PaySheet_${month}_${year}`, 'l', undefined, companyProfile);
+    
+    generatePDFTableReport(
+        `Consolidated Pay Sheet - ${month} ${year}`, 
+        headers, 
+        data, 
+        `PaySheet_${month}_${year}`, 
+        'l', 
+        'Generated by BharatPay Pro', 
+        companyProfile
+    );
 };
 
-export const generateLeaveLedgerReport = (employees: Employee[], ledgers: LeaveLedger[], attendances: Attendance[], month: string, year: number, type: 'BC'|'AC', companyProfile: CompanyProfile) => {
+export const generateBankStatementPDF = (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
+    const headers = ['Emp ID', 'Name', 'Bank', 'Account No', 'IFSC', 'Net Pay'];
+    const data = results.filter(r => r.netPay > 0).map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        return [
+            r.employeeId, 
+            emp?.name, 
+            '-', 
+            emp?.bankAccount || '', 
+            emp?.ifsc || '', 
+            (r.netPay || 0).toFixed(2)
+        ];
+    });
+    generatePDFTableReport(`Bank Statement ${month} ${year}`, headers, data, `Bank_Statement_${month}_${year}`, 'p', undefined, companyProfile);
+};
+
+export const generateLeaveLedgerReport = (
+    results: PayrollResult[], 
+    activeEmployees: Employee[], 
+    month: string, 
+    year: number, 
+    type: 'BC'|'AC', 
+    companyProfile: CompanyProfile
+) => {
     const headers = ['ID', 'Name', 'EL Open', 'EL Credit', 'EL Used', 'EL Bal', 'SL Bal', 'CL Bal'];
-    const data = employees.map(e => {
-        const l = ledgers.find(led => led.employeeId === e.id);
-        if (!l) return [];
-        return [e.id, e.name, l.el.opening, l.el.eligible, l.el.availed, l.el.balance, l.sl.balance, l.cl.balance];
-    }).filter(d => d.length > 0);
+    const data = activeEmployees.map(e => {
+        // Use Snapshot from payroll results for historical accuracy
+        const r = results.find(res => res.employeeId === e.id);
+        const l = r?.leaveSnapshot || { 
+            el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
+            sl: { eligible: 0, availed: 0, balance: 0 },
+            cl: { accumulation: 0, availed: 0, balance: 0 }
+        };
+        
+        return [
+            e.id, 
+            e.name, 
+            l.el.opening || 0, 
+            l.el.eligible || 0, 
+            l.el.availed || 0, 
+            l.el.balance || 0, 
+            l.sl.balance || 0, 
+            l.cl.balance || 0
+        ];
+    });
     generatePDFTableReport(`Leave Ledger (${type}) ${month} ${year}`, headers, data, `LeaveLedger_${type}_${month}_${year}`, 'l', undefined, companyProfile);
 };
 
@@ -148,7 +331,7 @@ export const generatePFECR = (records: PayrollResult[], employees: Employee[], f
         const textContent = records.map(r => {
             const emp = employees.find(e => e.id === r.employeeId);
             // Example UAN#MEMBERID#GROSS#EPF#EPS#EDLI#EE_SHARE#ER_SHARE_EPS#ER_SHARE_EPF#NCP#REFUND
-            return `${emp?.uanc}#${emp?.pfNumber}#${r.earnings.total}#${r.earnings.basic}#${r.earnings.basic}#${r.earnings.basic}#${r.deductions.epf}#${r.employerContributions.eps}#${r.employerContributions.epf}#${r.daysInMonth - r.payableDays}#0`;
+            return `${emp?.uanc}#${emp?.pfNumber}#${r.earnings?.total}#${r.earnings?.basic}#${r.earnings?.basic}#${r.earnings?.basic}#${r.deductions?.epf}#${r.employerContributions?.eps}#${r.employerContributions?.epf}#${r.daysInMonth - r.payableDays}#0`;
         }).join('\n');
         
         const blob = new Blob([textContent], { type: 'text/plain' });
@@ -180,8 +363,8 @@ export const generateESIReturn = (
                     dolStr = formatDateInd(emp.dol);
                 }
             }
-            const wageA = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0);
-            const gross = r.earnings.total || 0;
+            const wageA = (r.earnings?.basic || 0) + (r.earnings?.da || 0) + (r.earnings?.retainingAllowance || 0);
+            const gross = r.earnings?.total || 0;
             const wageC = gross - wageA;
             let wageD = 0;
             if (gross > 0) {
@@ -210,9 +393,9 @@ export const generateESIReturn = (
                 'IP Number': emp?.esiNumber,
                 'Name': emp?.name,
                 'Days': r.payableDays,
-                'Wages': r.earnings.total, 
-                'EE Contribution': r.deductions.esi,
-                'ER Contribution': r.employerContributions.esi
+                'Wages': r.earnings?.total, 
+                'EE Contribution': r.deductions?.esi,
+                'ER Contribution': r.employerContributions?.esi
             };
         });
         const headers = ['IP No', 'Name', 'Days', 'Wages', 'EE Share', 'ER Share'];
@@ -225,8 +408,8 @@ export const generatePTReport = (records: PayrollResult[], employees: Employee[]
     const data = records.map(r => ({ 
         id: r.employeeId, 
         name: employees.find(e => e.id === r.employeeId)?.name, 
-        pt: r.deductions.pt 
-    })).filter(r => r.pt > 0);
+        pt: r.deductions?.pt 
+    })).filter(r => (r.pt || 0) > 0);
     generateExcelReport(data, 'PT Report', fileName);
 };
 
@@ -234,8 +417,8 @@ export const generateTDSReport = (records: PayrollResult[], employees: Employee[
     const data = records.map(r => ({ 
         id: r.employeeId, 
         name: employees.find(e => e.id === r.employeeId)?.name, 
-        tds: r.deductions.it 
-    })).filter(r => r.tds > 0);
+        tds: r.deductions?.it 
+    })).filter(r => (r.tds || 0) > 0);
     generateExcelReport(data, 'TDS Report', fileName);
 };
 
@@ -254,7 +437,7 @@ export const generateFormB = (records: PayrollResult[], employees: Employee[], m
     const headers = ['ID', 'Name', 'Designation', 'Basic', 'DA', 'Gross', 'Deductions', 'Net'];
     const data = records.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        return [r.employeeId, emp?.name, emp?.designation, r.earnings.basic, r.earnings.da, r.earnings.total, r.deductions.total, r.netPay];
+        return [r.employeeId, emp?.name, emp?.designation, r.earnings?.basic, r.earnings?.da, r.earnings?.total, r.deductions?.total, r.netPay];
     });
     generatePDFTableReport(`Form B - Register of Wages (${month} ${year})`, headers, data, `FormB_${month}_${year}`, 'l', undefined, companyProfile);
 };
@@ -282,8 +465,8 @@ export const generateTNFormP = (records: PayrollResult[], employees: Employee[],
     const data = records.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
         const adv = advances.find(a => a.employeeId === r.employeeId);
-        if ((r.deductions.advanceRecovery || 0) === 0 && (adv?.balance || 0) === 0) return null;
-        return [r.employeeId, emp?.name, r.deductions.advanceRecovery, adv?.balance];
+        if ((r.deductions?.advanceRecovery || 0) === 0 && (adv?.balance || 0) === 0) return null;
+        return [r.employeeId, emp?.name, r.deductions?.advanceRecovery, adv?.balance];
     }).filter(d => d !== null);
     generatePDFTableReport(`Form P - Register of Advances (${month} ${year})`, headers, data as any[][], `FormP_${month}_${year}`, 'p', undefined, companyProfile);
 };
@@ -304,7 +487,7 @@ export const generateESIExitReport = (records: PayrollResult[], employees: Emplo
     const data = records.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
         if (emp?.dol) return { id: r.employeeId, name: emp.name, reason: 'Left Service' };
-        if (r.earnings.total > 21000) return { id: r.employeeId, name: emp?.name, reason: 'Crossed Ceiling' };
+        if ((r.earnings?.total || 0) > 21000) return { id: r.employeeId, name: emp?.name, reason: 'Crossed Ceiling' };
         return null;
     }).filter(d => d !== null);
     generateExcelReport(data as any[], 'ESI Exit', `ESI_Exit_${month}_${year}`);

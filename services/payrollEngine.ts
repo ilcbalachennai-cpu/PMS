@@ -81,6 +81,25 @@ export const calculatePayroll = (
 
   effectivePayableDays = Math.min(effectivePayableDays, daysInMonth);
 
+  // PREPARE SNAPSHOT: Create a frozen copy of leave ledger state specifically for this payroll run
+  const leaveSnapshot = JSON.parse(JSON.stringify(leave));
+  
+  // Force update 'availed' counts in snapshot to match current attendance (source of truth for this month)
+  if (leaveSnapshot.el) {
+      leaveSnapshot.el.availed = attendance.earnedLeave || 0;
+      leaveSnapshot.el.encashed = attendance.encashedDays || 0;
+      // Recalculate balance for report consistency
+      leaveSnapshot.el.balance = (leaveSnapshot.el.opening || 0) + (leaveSnapshot.el.eligible || 0) - (leaveSnapshot.el.encashed || 0) - (leaveSnapshot.el.availed || 0);
+  }
+  if (leaveSnapshot.sl) {
+      leaveSnapshot.sl.availed = attendance.sickLeave || 0;
+      leaveSnapshot.sl.balance = (leaveSnapshot.sl.eligible || 0) - (leaveSnapshot.sl.availed || 0);
+  }
+  if (leaveSnapshot.cl) {
+      leaveSnapshot.cl.availed = attendance.casualLeave || 0;
+      leaveSnapshot.cl.balance = (leaveSnapshot.cl.accumulation || 0) - (leaveSnapshot.cl.availed || 0);
+  }
+
   if (effectivePayableDays <= 0) {
       return {
         employeeId: employee.id,
@@ -99,7 +118,8 @@ export const calculatePayroll = (
         isCode88: false,
         isESICodeWagesUsed: false,
         esiRemark: exitRemark || 'No Payable Days',
-        fineReason: ''
+        fineReason: '',
+        leaveSnapshot: leaveSnapshot
       };
   }
 
@@ -369,14 +389,7 @@ export const calculatePayroll = (
   const fineReason = fineRecord ? fineRecord.reason : '';
 
   // --- ADVANCE RECOVERY Logic (Code on Wages 2020) ---
-  // Statutory deductions: EPF, VPF, ESI, PT, IT, LWF
-  // Fines are typically deducted *before* calculating net available for other non-statutory deductions, but after statutory ones for 50% rule check?
-  // Actually, Code on Wages Section 18: Deductions for fines. 
-  // Total deductions (including fines) should not exceed 50%.
-  
   const statutoryDeductions = epfEmployee + vpfEmployee + esiEmployee + pt + incomeTax + lwfEmployee;
-  
-  // Fines are deductible.
   
   // Calculate distributable wages for 50% check
   const codeGrossWages = Math.max(0, grossEarnings - statutoryDeductions);
@@ -384,18 +397,9 @@ export const calculatePayroll = (
   let targetRecovery = Math.min(advance.monthlyInstallment, advance.balance);
   let advanceRecovery = targetRecovery;
 
-  // Total Proposed Deduction excluding Advance = Statutory + Fine
-  // Check if Fine + Advance > 50%? Or Statutory + Fine + Advance > 50% of Gross?
-  // Simplification: We check against codeGrossWages (Net after statutory)
-  
   // 1. Restrict to 50% Rule if Configured (Labour Code 2020)
   if (advanceOptions.restrictTo50Percent) {
       const limit50 = Math.round(codeGrossWages * 0.5);
-      
-      // If fine itself exceeds limit, take full fine (assuming fines are mandatory/priority) but restrict advance
-      // Typically fines are capped at 3% of wages in some acts, but here we take user input.
-      // We prioritize Fine over Advance.
-      
       const availableForNonStatutory = limit50;
       const remainingForAdvance = Math.max(0, availableForNonStatutory - fineAmount);
       
@@ -403,17 +407,9 @@ export const calculatePayroll = (
   }
 
   // 2. ABSOLUTE Restriction: No Negative Wages
-  // (Statutory + Fine + Advance) <= Gross
-  // => Fine + Advance <= CodeGrossWages
-  
   if (fineAmount > codeGrossWages) {
-      // Fine exceeds distributable wages. 
-      // In reality, this shouldn't happen if inputs are sane, but we just let it go negative or cap it?
-      // Let's allow fine to push it negative or zero, but restrict advance to 0.
       advanceRecovery = 0;
-      // We don't cap fine here as it's a punitive measure, but user sees net pay 0 or negative.
   } else {
-      // Fine fits, check advance
       const remainingForAdvance = codeGrossWages - fineAmount;
       if (advanceRecovery > remainingForAdvance) {
           advanceRecovery = remainingForAdvance;
@@ -443,6 +439,7 @@ export const calculatePayroll = (
     isCode88,
     isESICodeWagesUsed,
     esiRemark: esiRemark,
-    fineReason: fineReason
+    fineReason: fineReason,
+    leaveSnapshot: leaveSnapshot
   };
 };
