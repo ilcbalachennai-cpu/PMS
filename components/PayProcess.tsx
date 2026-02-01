@@ -1,6 +1,6 @@
 
-import React, { useState, useRef } from 'react';
-import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge } from 'lucide-react';
+import React, { useState, useRef, useMemo } from 'react';
+import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge, Lock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord } from '../types';
 import AttendanceManager from './AttendanceManager';
@@ -37,6 +37,11 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
   const [isImporting, setIsImporting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const masterFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Compute lock status
+  const isLocked = useMemo(() => {
+    return props.savedRecords.some(r => r.month === props.month && r.year === props.year && r.status === 'Finalized');
+  }, [props.savedRecords, props.month, props.year]);
 
   const TabButton = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
     <button
@@ -94,6 +99,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
   };
 
   const handleMasterImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isLocked) return; // Prevent import if locked
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -227,6 +233,12 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     <h2 className="text-lg font-black text-white leading-tight">Monthly Pay Process</h2>
                     <p className="text-slate-400 text-xs">Active Period: <span className="text-white font-bold">{props.month} {props.year}</span></p>
                 </div>
+                {isLocked && (
+                    <div className="ml-2 px-3 py-1 bg-amber-900/30 border border-amber-600/30 rounded-full flex items-center gap-2">
+                        <Lock size={12} className="text-amber-500" />
+                        <span className="text-[10px] font-bold text-amber-400 uppercase">Locked</span>
+                    </div>
+                )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -234,8 +246,13 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     <button onClick={downloadMasterTemplate} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-600 transition-all text-[10px] font-bold uppercase" title="Consolidated Template">
                         <FileSpreadsheet size={14} className="text-emerald-500" /> Master Template
                     </button>
-                    <button onClick={() => masterFileInputRef.current?.click()} disabled={isImporting} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md shadow-lg shadow-indigo-900/20 transition-all text-[10px] font-bold uppercase">
-                        {isImporting ? <div className="animate-spin rounded-full h-3 w-3 border-2 border-white/30 border-t-white" /> : <Upload size={14} />} 
+                    <button 
+                        onClick={() => masterFileInputRef.current?.click()} 
+                        disabled={isImporting || isLocked} 
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-white rounded-md shadow-lg transition-all text-[10px] font-bold uppercase ${isLocked ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-900/20'}`}
+                        title={isLocked ? "Payroll is Finalized" : "Import Consolidated Data"}
+                    >
+                        {isImporting ? <div className="animate-spin rounded-full h-3 w-3 border-2 border-white/30 border-t-white" /> : (isLocked ? <Lock size={14} /> : <Upload size={14} />)} 
                         Import All (1, 2 & 3)
                     </button>
                     <input ref={masterFileInputRef} type="file" className="hidden" accept=".xlsx, .xls" onChange={handleMasterImport} />

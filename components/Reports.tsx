@@ -33,6 +33,7 @@ import { DEFAULT_LEAVE_POLICY } from '../constants';
 
 interface ReportsProps {
   employees: Employee[];
+  setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>; // Added setter
   config: StatutoryConfig;
   companyProfile: CompanyProfile; 
   attendances: Attendance[];
@@ -51,6 +52,7 @@ interface ReportsProps {
 
 const Reports: React.FC<ReportsProps> = ({ 
     employees, 
+    setEmployees,
     config, 
     companyProfile,
     attendances, 
@@ -80,10 +82,10 @@ const Reports: React.FC<ReportsProps> = ({
       data: any[];
   }>({ isOpen: false, data: [] });
 
-  // Zero Wages Modal State
+  // Zero Wages Modal State - Now holds editable data
   const [zeroWagesModal, setZeroWagesModal] = useState<{
       isOpen: boolean;
-      data: any[];
+      data: { id: string; name: string; dol: string; reason: string }[];
   }>({ isOpen: false, data: [] });
 
   const [modalState, setModalState] = useState<{
@@ -114,7 +116,7 @@ const Reports: React.FC<ReportsProps> = ({
   const executeFreeze = () => {
     setModalState(prev => ({ ...prev, isOpen: false })); 
     setShortfallModal({ isOpen: false, data: [] }); 
-    setZeroWagesModal({ isOpen: false, data: [] }); // Ensure this is closed
+    setZeroWagesModal({ isOpen: false, data: [] }); 
     setIsFreezing(true);
 
     setTimeout(() => {
@@ -263,8 +265,8 @@ const Reports: React.FC<ReportsProps> = ({
           return {
               id: r.employeeId,
               name: emp?.name || '',
-              dol: emp?.dol || null,
-              reason: emp?.leavingReason || '-'
+              dol: emp?.dol || '',
+              reason: emp?.leavingReason || ''
           };
       });
 
@@ -273,6 +275,33 @@ const Reports: React.FC<ReportsProps> = ({
       } else {
           verifyShortfall();
       }
+  };
+
+  const handleZeroWageChange = (id: string, field: 'dol' | 'reason', value: string) => {
+      setZeroWagesModal(prev => ({
+          ...prev,
+          data: prev.data.map(item => item.id === id ? { ...item, [field]: value } : item)
+      }));
+  };
+
+  const handleSaveExitAndFreeze = () => {
+      // 1. Update Employee Master
+      const updates = new Map(zeroWagesModal.data.map(item => [item.id, item]));
+      
+      const updatedEmployees = employees.map(emp => {
+          const update = updates.get(emp.id);
+          // Only update if DOL is provided in the modal
+          if (update && update.dol) {
+              return { ...emp, dol: update.dol, leavingReason: update.reason };
+          }
+          return emp;
+      });
+
+      setEmployees(updatedEmployees);
+      
+      // 2. Close Modal and Proceed
+      setZeroWagesModal({ isOpen: false, data: [] });
+      verifyShortfall();
   };
 
   const userRole = currentUser?.role;
@@ -537,38 +566,53 @@ const Reports: React.FC<ReportsProps> = ({
         </div>
       </div>
       
-      {/* ZERO WAGES ALERT MODAL */}
+      {/* ZERO WAGES ALERT MODAL (EDITABLE) */}
       {zeroWagesModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl p-0 flex flex-col relative overflow-hidden">
+            <div className="bg-[#1e293b] w-full max-w-2xl rounded-2xl border border-slate-700 shadow-2xl p-0 flex flex-col relative overflow-hidden">
                 <div className="bg-amber-600 p-6 flex justify-between items-start">
                     <div className="flex gap-4">
                         <div className="p-3 bg-white/20 rounded-full text-white shadow-lg"><UserX size={24} /></div>
                         <div>
-                            <h3 className="text-xl font-black text-white uppercase tracking-wide">Zero Wages Detected</h3>
-                            <p className="text-xs text-amber-100 mt-1 font-medium">Following Employees Wages is NIL, do you want proceed and mark the date of exit?</p>
+                            <h3 className="text-xl font-black text-white uppercase tracking-wide">Proceed to Mark Exit</h3>
+                            <p className="text-xs text-amber-100 mt-1 font-medium">Following employees have NIL wages. Enter separation details to proceed.</p>
                         </div>
                     </div>
                     <button onClick={() => setZeroWagesModal({ isOpen: false, data: [] })} className="text-white/70 hover:text-white"><X size={20} /></button>
                 </div>
                 
-                <div className="p-6 bg-[#0f172a] max-h-60 overflow-y-auto custom-scrollbar">
+                <div className="p-6 bg-[#0f172a] max-h-[60vh] overflow-y-auto custom-scrollbar">
                     <table className="w-full text-left text-xs">
                         <thead className="text-slate-500 uppercase font-bold border-b border-slate-700">
                             <tr>
-                                <th className="pb-2 pl-2">EMP ID</th>
-                                <th className="pb-2">Name</th>
-                                <th className="pb-2 text-center">DOL</th>
-                                <th className="pb-2 text-right">Reason</th>
+                                <th className="pb-3 pl-2 w-24">EMP ID</th>
+                                <th className="pb-3 w-40">Name</th>
+                                <th className="pb-3 w-32">Date of Leaving</th>
+                                <th className="pb-3">Reason</th>
                             </tr>
                         </thead>
                         <tbody className="text-slate-300 divide-y divide-slate-800">
                             {zeroWagesModal.data.map((r: any) => (
-                                <tr key={r.id}>
-                                    <td className="py-2 pl-2 font-mono text-slate-500">{r.id}</td>
-                                    <td className="py-2 font-bold text-white">{r.name}</td>
-                                    <td className="py-2 text-center font-mono text-amber-400">{r.dol ? formatDateInd(r.dol) : '-'}</td>
-                                    <td className="py-2 text-right">{r.reason || '-'}</td>
+                                <tr key={r.id} className="hover:bg-slate-800/50">
+                                    <td className="py-3 pl-2 font-mono text-slate-500">{r.id}</td>
+                                    <td className="py-3 font-bold text-white">{r.name}</td>
+                                    <td className="py-3">
+                                        <input 
+                                            type="date" 
+                                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-amber-500 w-full"
+                                            value={r.dol} 
+                                            onChange={(e) => handleZeroWageChange(r.id, 'dol', e.target.value)} 
+                                        />
+                                    </td>
+                                    <td className="py-3">
+                                        <input 
+                                            type="text" 
+                                            placeholder="Enter Reason..."
+                                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-amber-500 w-full"
+                                            value={r.reason} 
+                                            onChange={(e) => handleZeroWageChange(r.id, 'reason', e.target.value)} 
+                                        />
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -578,10 +622,10 @@ const Reports: React.FC<ReportsProps> = ({
                 <div className="p-6 bg-[#1e293b] border-t border-slate-800 flex flex-col gap-4">
                     <div className="flex gap-3 pt-2 border-t border-slate-700/50">
                         <button onClick={() => setZeroWagesModal({ isOpen: false, data: [] })} className="flex-1 py-3 border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl font-bold text-xs uppercase tracking-widest transition-colors">
-                            Cancel
+                            Cancel (Abort)
                         </button>
-                        <button onClick={() => verifyShortfall()} className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg flex items-center justify-center gap-2">
-                            Proceed to Freeze <Lock size={14} />
+                        <button onClick={handleSaveExitAndFreeze} className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg flex items-center justify-center gap-2">
+                            <Save size={14} /> Save & Proceed to Freeze
                         </button>
                     </div>
                 </div>

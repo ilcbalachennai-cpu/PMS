@@ -1308,9 +1308,20 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                           <input type="date" className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:ring-1 focus:ring-red-500" value={newEmpForm.dol || ''} onChange={e => setNewEmpForm({...newEmpForm, dol: e.target.value})} />
                       </div>
                       <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Reason for Leaving</label>
-                          <input className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:ring-1 focus:ring-red-500" value={newEmpForm.leavingReason || ''} onChange={e => setNewEmpForm({...newEmpForm, leavingReason: e.target.value})} placeholder="Resignation / Retirement / Termination" />
-                      </div>
+    <label className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Reason for Leaving</label>
+    <select 
+        className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:ring-1 focus:ring-red-500" 
+        value={newEmpForm.leavingReason || ''} 
+        onChange={e => setNewEmpForm({...newEmpForm, leavingReason: e.target.value})}
+    >
+        <option value="">Select Reason...</option>
+        <option value="Resignation">Resignation</option>
+        <option value="Retirement">Retirement</option>
+        <option value="Termination">Termination</option>
+        <option value="Suspension">Suspension</option>
+        <option value="Death">Death</option>
+    </select>
+</div>
                   </div>
               </div>
 
