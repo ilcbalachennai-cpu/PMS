@@ -285,7 +285,10 @@ const Reports: React.FC<ReportsProps> = ({
                  return null;
              }).filter(d => d !== null);
 
-             if (shortfallData.length === 0) throw new Error("No advance recovery shortfall found.");
+             if (shortfallData.length === 0) {
+                 setModalState({ isOpen: true, type: 'error', title: 'No Data Available', message: 'No Data Available to Report' });
+                 return;
+             }
              
              generateAdvanceShortfallReport(shortfallData, month, year, format, companyProfile);
         }
