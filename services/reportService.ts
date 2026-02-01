@@ -546,21 +546,46 @@ export const generateESIReturn = (
   fileName: string,
   companyProfile: CompanyProfile
 ) => {
-    const data = records.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        return {
-            'IP Number': emp?.esiNumber,
-            'Name': emp?.name,
-            'Days': r.payableDays,
-            'Wages': r.earnings.total, 
-            'EE Contribution': r.deductions.esi,
-            'ER Contribution': r.employerContributions.esi
-        };
-    });
-
     if (format === 'Excel') {
-        generateExcelReport(data, 'ESI Return', fileName);
+        const data = records.map(r => {
+            const emp = employees.find(e => e.id === r.employeeId);
+            
+            let reasonCode = 0;
+            let dolStr = '';
+
+            // Check if employee left in the current pay period
+            if (emp?.dol) {
+                const dolDate = new Date(emp.dol);
+                const monthIdx = MONTHS.indexOf(r.month);
+                if (dolDate.getMonth() === monthIdx && dolDate.getFullYear() === r.year) {
+                    reasonCode = 2; // Standard ESI Code for Left Service
+                    dolStr = formatDateInd(emp.dol);
+                }
+            }
+
+            return {
+                'IP Number': emp?.esiNumber || '',
+                'IP Name': emp?.name || '',
+                'No. Of Days': r.payableDays,
+                'ESI Wages': Math.round(r.earnings.total), // Monthly Gross Wages
+                'Reason': reasonCode,
+                'DOL': dolStr
+            };
+        });
+        // Sheet Name explicitly 'Sheet1' as requested
+        generateExcelReport(data, 'Sheet1', fileName);
     } else {
+        const data = records.map(r => {
+            const emp = employees.find(e => e.id === r.employeeId);
+            return {
+                'IP Number': emp?.esiNumber,
+                'Name': emp?.name,
+                'Days': r.payableDays,
+                'Wages': r.earnings.total, 
+                'EE Contribution': r.deductions.esi,
+                'ER Contribution': r.employerContributions.esi
+            };
+        });
         const headers = ['IP No', 'Name', 'Days', 'Wages', 'EE Share', 'ER Share'];
         const rows = data.map(d => Object.values(d));
         generatePDFTableReport('ESI Monthly Contribution', headers, rows as any[][], fileName, 'p', undefined, companyProfile);

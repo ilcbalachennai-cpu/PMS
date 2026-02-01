@@ -22,11 +22,12 @@ import {
   HelpCircle,
   ClipboardList,
   Eye,
-  HandCoins
+  HandCoins,
+  UserX
 } from 'lucide-react';
 import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile, User } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
-import { generateExcelReport, generatePDFTableReport, generatePaySlipsPDF, generateSimplePaySheetPDF, generateLeaveLedgerReport, generateAdvanceShortfallReport } from '../services/reportService';
+import { generateExcelReport, generatePDFTableReport, generatePaySlipsPDF, generateSimplePaySheetPDF, generateLeaveLedgerReport, generateAdvanceShortfallReport, formatDateInd } from '../services/reportService';
 import LedgerManager from './LedgerManager';
 import { DEFAULT_LEAVE_POLICY } from '../constants'; 
 
@@ -79,6 +80,12 @@ const Reports: React.FC<ReportsProps> = ({
       data: any[];
   }>({ isOpen: false, data: [] });
 
+  // Zero Wages Modal State
+  const [zeroWagesModal, setZeroWagesModal] = useState<{
+      isOpen: boolean;
+      data: any[];
+  }>({ isOpen: false, data: [] });
+
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
     type: 'confirm' | 'success' | 'error';
@@ -106,7 +113,8 @@ const Reports: React.FC<ReportsProps> = ({
 
   const executeFreeze = () => {
     setModalState(prev => ({ ...prev, isOpen: false })); 
-    setShortfallModal({ isOpen: false, data: [] }); // Close shortfall modal if open
+    setShortfallModal({ isOpen: false, data: [] }); 
+    setZeroWagesModal({ isOpen: false, data: [] }); // Ensure this is closed
     setIsFreezing(true);
 
     setTimeout(() => {
@@ -206,13 +214,10 @@ const Reports: React.FC<ReportsProps> = ({
       });
   };
 
-  // CHECK FOR SHORTFALLS BEFORE FREEZING
-  const initiateFreeze = () => {
+  // Step 2: Check Shortfalls
+  const verifyShortfall = () => {
       const currentData = getPayrollData();
-      if (!currentData) {
-          setModalState({ isOpen: true, type: 'error', title: 'No Data', message: 'No payroll data found to freeze.' });
-          return;
-      }
+      if (!currentData) return;
 
       const detectedShortfalls: any[] = [];
 
@@ -220,12 +225,10 @@ const Reports: React.FC<ReportsProps> = ({
           const emp = employees.find(e => e.id === record.employeeId);
           const adv = advanceLedgers.find(a => a.employeeId === record.employeeId);
           
-          // Check if there was an active advance with scheduled payment
           if (adv && adv.balance > 0 && adv.monthlyInstallment > 0) {
               const target = Math.min(adv.monthlyInstallment, adv.balance);
               const recovered = record.deductions.advanceRecovery || 0;
               
-              // If recovery is LESS than target, it's a shortfall
               if (recovered < target) {
                   detectedShortfalls.push({
                       id: emp?.id,
@@ -244,6 +247,31 @@ const Reports: React.FC<ReportsProps> = ({
           setShortfallModal({ isOpen: true, data: detectedShortfalls });
       } else {
           confirmFreeze();
+      }
+  };
+
+  // Step 1: Check Zero Wages (Initiator)
+  const initiateFreeze = () => {
+      const currentData = getPayrollData();
+      if (!currentData) {
+          setModalState({ isOpen: true, type: 'error', title: 'No Data', message: 'No payroll data found to freeze.' });
+          return;
+      }
+
+      const zeroWages = currentData.filter(r => r.payableDays === 0).map(r => {
+          const emp = employees.find(e => e.id === r.employeeId);
+          return {
+              id: r.employeeId,
+              name: emp?.name || '',
+              dol: emp?.dol || null,
+              reason: emp?.leavingReason || '-'
+          };
+      });
+
+      if (zeroWages.length > 0) {
+          setZeroWagesModal({ isOpen: true, data: zeroWages });
+      } else {
+          verifyShortfall();
       }
   };
 
@@ -509,6 +537,58 @@ const Reports: React.FC<ReportsProps> = ({
         </div>
       </div>
       
+      {/* ZERO WAGES ALERT MODAL */}
+      {zeroWagesModal.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl p-0 flex flex-col relative overflow-hidden">
+                <div className="bg-amber-600 p-6 flex justify-between items-start">
+                    <div className="flex gap-4">
+                        <div className="p-3 bg-white/20 rounded-full text-white shadow-lg"><UserX size={24} /></div>
+                        <div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-wide">Zero Wages Detected</h3>
+                            <p className="text-xs text-amber-100 mt-1 font-medium">Following Employees Wages is NIL, do you want proceed and mark the date of exit?</p>
+                        </div>
+                    </div>
+                    <button onClick={() => setZeroWagesModal({ isOpen: false, data: [] })} className="text-white/70 hover:text-white"><X size={20} /></button>
+                </div>
+                
+                <div className="p-6 bg-[#0f172a] max-h-60 overflow-y-auto custom-scrollbar">
+                    <table className="w-full text-left text-xs">
+                        <thead className="text-slate-500 uppercase font-bold border-b border-slate-700">
+                            <tr>
+                                <th className="pb-2 pl-2">EMP ID</th>
+                                <th className="pb-2">Name</th>
+                                <th className="pb-2 text-center">DOL</th>
+                                <th className="pb-2 text-right">Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody className="text-slate-300 divide-y divide-slate-800">
+                            {zeroWagesModal.data.map((r: any) => (
+                                <tr key={r.id}>
+                                    <td className="py-2 pl-2 font-mono text-slate-500">{r.id}</td>
+                                    <td className="py-2 font-bold text-white">{r.name}</td>
+                                    <td className="py-2 text-center font-mono text-amber-400">{r.dol ? formatDateInd(r.dol) : '-'}</td>
+                                    <td className="py-2 text-right">{r.reason || '-'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div className="p-6 bg-[#1e293b] border-t border-slate-800 flex flex-col gap-4">
+                    <div className="flex gap-3 pt-2 border-t border-slate-700/50">
+                        <button onClick={() => setZeroWagesModal({ isOpen: false, data: [] })} className="flex-1 py-3 border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl font-bold text-xs uppercase tracking-widest transition-colors">
+                            Cancel
+                        </button>
+                        <button onClick={() => verifyShortfall()} className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg flex items-center justify-center gap-2">
+                            Proceed to Freeze <Lock size={14} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* SHORTFALL ALERT MODAL */}
       {shortfallModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
