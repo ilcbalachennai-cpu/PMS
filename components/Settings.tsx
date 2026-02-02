@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
@@ -138,6 +137,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             leaveLedgers: JSON.parse(localStorage.getItem('app_leave_ledgers') || '[]'),
             advanceLedgers: JSON.parse(localStorage.getItem('app_advance_ledgers') || '[]'),
             payrollHistory: JSON.parse(localStorage.getItem('app_payroll_history') || '[]'),
+            fines: JSON.parse(localStorage.getItem('app_fines') || '[]'), // Include Fines
+            leavePolicy: JSON.parse(localStorage.getItem('app_leave_policy') || '{}'), // Include Leave Policy
             masters: {
                 designations: JSON.parse(localStorage.getItem('app_master_designations') || '[]'),
                 divisions: JSON.parse(localStorage.getItem('app_master_divisions') || '[]'),
@@ -236,6 +237,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
               if (data.leaveLedgers) localStorage.setItem('app_leave_ledgers', JSON.stringify(data.leaveLedgers));
               if (data.advanceLedgers) localStorage.setItem('app_advance_ledgers', JSON.stringify(data.advanceLedgers));
               if (data.payrollHistory) localStorage.setItem('app_payroll_history', JSON.stringify(data.payrollHistory));
+              if (data.fines) localStorage.setItem('app_fines', JSON.stringify(data.fines)); // Restore Fines
+              if (data.leavePolicy) localStorage.setItem('app_leave_policy', JSON.stringify(data.leavePolicy)); // Restore Leave Policy
               if (data.logo) localStorage.setItem('app_logo', JSON.stringify(data.logo));
               
               if (data.masters) {
@@ -279,6 +282,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
       }
   };
 
+  // ... (rest of the component remains unchanged)
   const handlePFTypeChange = (type: PFComplianceType) => {
     const newRate = type === 'Statutory' ? 0.12 : 0.10;
     setFormData({
@@ -384,8 +388,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
   return (
     <div className="max-w-4xl space-y-8 text-white relative">
-      
-      {/* Header Band - Tab Navigation (Sticky) - Hidden in Setup Mode */}
+      {/* ... (rest of the render method remains identical to existing, omitting for brevity as it is unchanged) */}
       {!isSetupMode && (
       <div className="sticky top-20 z-30 bg-[#020617] pt-2 flex gap-4 border-b border-slate-700 overflow-x-auto pb-1 scrollbar-hide">
           <button onClick={() => setActiveTab('STATUTORY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
@@ -405,31 +408,35 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
       </div>
       )}
 
+      {/* ... (Existing Content for STATUTORY, COMPANY, DEVELOPER tabs) ... */}
       {activeTab === 'STATUTORY' && (
-      <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-300">
-        <div className="bg-amber-900/20 border border-amber-700/50 p-6 rounded-2xl flex gap-4 text-amber-200">
-            <AlertCircle size={28} className="shrink-0 text-amber-400" />
-            <div className="text-sm space-y-2">
-            <p className="font-bold text-lg text-amber-400">Compliance & Parameter Configuration</p>
-            <p className="text-slate-300">These Settings Define How PF, ESI, Leave Policy and Taxes are Calculated Establishment wise</p>
-            </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
-            <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 space-y-6">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div className="flex items-center gap-3">
-                        <Landmark className="text-blue-400" size={20} />
-                        <h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">Provident Fund (EPF)</h3>
-                    </div>
-                    {/* Updated styling to match Compliance & Parameter Configuration (Amber) */}
-                    <label className="flex items-center gap-2 cursor-pointer p-1.5 bg-amber-900/20 rounded-lg border border-amber-500/20 hover:bg-amber-900/30 transition-all">
-                        <input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-amber-500 bg-slate-900 accent-amber-500" checked={formData.enableHigherContribution || false} onChange={e => setFormData({...formData, enableHigherContribution: e.target.checked})} />
-                        <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Enable Higher Contribution Rules</span>
-                    </label>
+        // ... same content ...
+        <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-300">
+            {/* ... Content of Statutory ... */}
+            <div className="bg-amber-900/20 border border-amber-700/50 p-6 rounded-2xl flex gap-4 text-amber-200">
+                <AlertCircle size={28} className="shrink-0 text-amber-400" />
+                <div className="text-sm space-y-2">
+                <p className="font-bold text-lg text-amber-400">Compliance & Parameter Configuration</p>
+                <p className="text-slate-300">These Settings Define How PF, ESI, Leave Policy and Taxes are Calculated Establishment wise</p>
                 </div>
-                
-                <div className="space-y-6">
+            </div>
+            {/* ... (rest of statutory) */}
+            <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
+                {/* ... existing ... */}
+                <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 space-y-6">
+                    {/* ... */}
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-3">
+                            <Landmark className="text-blue-400" size={20} />
+                            <h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">Provident Fund (EPF)</h3>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 bg-amber-900/20 rounded-lg border border-amber-500/20 hover:bg-amber-900/30 transition-all">
+                            <input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-amber-500 bg-slate-900 accent-amber-500" checked={formData.enableHigherContribution || false} onChange={e => setFormData({...formData, enableHigherContribution: e.target.checked})} />
+                            <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Enable Higher Contribution Rules</span>
+                        </label>
+                    </div>
+                    {/* ... rest of PF config ... */}
+                    <div className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-4">
                             <div className="space-y-2">
@@ -450,506 +457,243 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 </div>
                             </div>
                         </div>
-
                         {formData.enableHigherContribution && (
                             <div className="bg-amber-900/10 p-4 rounded-xl border border-amber-500/20 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                                {/* ... higher contrib ... */}
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Higher Applicability</label>
                                     <div className="grid grid-cols-1 gap-2">
                                         {['By Employee', 'By Employee & Employer'].map(type => (
-                                            <button 
-                                                key={type}
-                                                onClick={() => setFormData({...formData, higherContributionType: type as any})}
-                                                className={`py-2 px-4 text-left text-xs font-bold rounded-lg border transition-all flex items-center justify-between ${formData.higherContributionType === type ? 'bg-amber-600 border-amber-400 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}
-                                            >
-                                                {type}
-                                                {formData.higherContributionType === type ? <CheckCircle2 size={14} /> : <div className="w-3.5 h-3.5 rounded-full border border-slate-700" />}
-                                            </button>
+                                            <button key={type} onClick={() => setFormData({...formData, higherContributionType: type as any})} className={`py-2 px-4 text-left text-xs font-bold rounded-lg border transition-all flex items-center justify-between ${formData.higherContributionType === type ? 'bg-amber-600 border-amber-400 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>{type}{formData.higherContributionType === type ? <CheckCircle2 size={14} /> : <div className="w-3.5 h-3.5 rounded-full border border-slate-700" />}</button>
                                         ))}
                                     </div>
                                 </div>
-                                <p className="text-[9px] text-amber-300 italic leading-relaxed">
-                                    * PF Wages will be taken from Higher Contribution Base only if it exceeds Code Wages (Clause 88).
-                                </p>
+                                <p className="text-[9px] text-amber-300 italic leading-relaxed">* PF Wages will be taken from Higher Contribution Base only if it exceeds Code Wages (Clause 88).</p>
                             </div>
                         )}
                     </div>
-
+                    {/* ... components select ... */}
                     {formData.enableHigherContribution && (
                         <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                <Table size={12} className="text-amber-400" />
-                                Selected Wage Components for Higher Contribution
-                            </label>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Table size={12} className="text-amber-400" /> Selected Wage Components for Higher Contribution</label>
                             <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
                                 {[
-                                    { key: 'basic', label: 'Basic Pay' },
-                                    { key: 'da', label: 'DA' },
-                                    { key: 'retaining', label: 'Retn Allow' },
-                                    { key: 'conveyance', label: 'Conveyance' },
-                                    { key: 'washing', label: 'Washing' },
-                                    { key: 'attire', label: 'Attire' },
-                                    { key: 'special1', label: 'Allow 1' },
-                                    { key: 'special2', label: 'Allow 2' },
-                                    { key: 'special3', label: 'Allow 3' },
+                                    { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                    { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' },
+                                    { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' }, { key: 'special3', label: 'Allow 3' },
                                 ].map(comp => {
                                     const components = formData.higherContributionComponents || INITIAL_STATUTORY_CONFIG.higherContributionComponents;
                                     const isActive = components[comp.key as keyof typeof components];
                                     return (
-                                        <button
-                                            key={comp.key}
-                                            onClick={() => handleHigherContributionToggle(comp.key as any)}
-                                            className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${
-                                                isActive
-                                                ? 'bg-amber-600 border-amber-400 text-white'
-                                                : 'bg-slate-800 border-slate-700 text-slate-500'
-                                            }`}
-                                        >
-                                            {isActive ? <CheckSquare size={14} /> : <Square size={14} />}
-                                            <span className="truncate">{comp.label}</span>
-                                        </button>
+                                        <button key={comp.key} onClick={() => handleHigherContributionToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-amber-600 border-amber-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>
                                     );
                                 })}
                             </div>
                         </div>
                     )}
+                    </div>
                 </div>
-            </div>
-
-            <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 space-y-6">
-                <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-                    <ShieldCheck className="text-pink-400" size={20} />
-                    <h3 className="font-bold uppercase tracking-widest text-xs text-pink-400">ESI Corporation</h3>
-                </div>
-                <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label>
-                            <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiCeiling} onChange={e => setFormData({...formData, esiCeiling: +e.target.value})} />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">EE Rate (%)</label>
-                            <input type="number" step="0.001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiEmployeeRate * 100} onChange={e => setFormData({...formData, esiEmployeeRate: +e.target.value / 100})} />
+                {/* ... ESI, Bonus, Leave, PT, LWF sections remain same ... */}
+                <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 space-y-6">
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-3"><ShieldCheck className="text-pink-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-pink-400">ESI Corporation</h3></div>
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiCeiling} onChange={e => setFormData({...formData, esiCeiling: +e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">EE Rate (%)</label><input type="number" step="0.001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiEmployeeRate * 100} onChange={e => setFormData({...formData, esiEmployeeRate: +e.target.value / 100})} /></div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-            <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center gap-3">
-                <Heart className="text-red-400" size={20} />
-                <h3 className="font-bold uppercase tracking-widest text-xs text-red-400">Employee Welfare (Bonus & Gratuity)</h3>
-            </div>
-            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                    <div className="flex items-center gap-2 mb-2">
-                        <Percent size={14} className="text-amber-400" />
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Annual Bonus Policy</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Rate (%)</label>
-                            <input type="number" step="0.0001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={(formData.bonusRate * 100).toFixed(2)} onChange={e => setFormData({...formData, bonusRate: +e.target.value / 100})} />
-                        </div>
-                        <div className="flex flex-col justify-end">
-                            <span className="text-[9px] text-slate-500 italic">Standard: 8.33% Min</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                    <div className="flex items-center gap-2 mb-2">
-                        <Building2 size={14} className="text-blue-400" />
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">LIC Gratuity Policy</span>
-                    </div>
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Calculation Basis (Formula)</label>
-                        <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-blue-300 font-mono">
-                            (Basic + DA) * (15/26) * Years
-                        </div>
-                        <p className="text-[9px] text-slate-500 mt-2">Calculated as per LIC Master Policy for Statutory Gratuity (Act 1972).</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {/* RESTORED: Annual Leave Policy Section */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-            <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center gap-3">
-                <CalendarClock className="text-emerald-400" size={20} />
-                <h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Annual Leave Policy</h3>
-            </div>
-            <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* EL */}
-                <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                    <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2">
-                        <span className="text-xs font-bold text-slate-300 uppercase">Earned Leave (EL)</span>
-                    </div>
-                    <div className="space-y-2">
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Label</label>
-                            <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.el.label} onChange={e => handleLeavePolicyChange('el', 'label', e.target.value)} />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label>
-                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxPerYear} onChange={e => handleLeavePolicyChange('el', 'maxPerYear', +e.target.value)} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label>
-                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxCarryForward} onChange={e => handleLeavePolicyChange('el', 'maxCarryForward', +e.target.value)} />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* SL */}
-                <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                    <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2">
-                        <span className="text-xs font-bold text-slate-300 uppercase">Sick Leave (SL)</span>
-                    </div>
-                    <div className="space-y-2">
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Label</label>
-                            <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.sl.label} onChange={e => handleLeavePolicyChange('sl', 'label', e.target.value)} />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label>
-                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxPerYear} onChange={e => handleLeavePolicyChange('sl', 'maxPerYear', +e.target.value)} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label>
-                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxCarryForward} onChange={e => handleLeavePolicyChange('sl', 'maxCarryForward', +e.target.value)} />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* CL */}
-                <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                    <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2">
-                        <span className="text-xs font-bold text-slate-300 uppercase">Casual Leave (CL)</span>
-                    </div>
-                    <div className="space-y-2">
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Label</label>
-                            <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.cl.label} onChange={e => handleLeavePolicyChange('cl', 'label', e.target.value)} />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label>
-                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxPerYear} onChange={e => handleLeavePolicyChange('cl', 'maxPerYear', +e.target.value)} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label>
-                                <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxCarryForward} onChange={e => handleLeavePolicyChange('cl', 'maxCarryForward', +e.target.value)} />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {/* Leave Encashment Wages Policy Section */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-            <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <Calculator className="text-emerald-400" size={20} />
-                    <h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Leave Encashment Wages Policy</h3>
-                </div>
+            {/* ... Other sections (Bonus, Leave, PT, LWF) ... */}
+            <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+               {/* ... Bonus & Gratuity ... */}
+               <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center gap-3"><Heart className="text-red-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-red-400">Employee Welfare (Bonus & Gratuity)</h3></div>
+               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                   <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                       <div className="flex items-center gap-2 mb-2"><Percent size={14} className="text-amber-400" /><span className="text-[10px] font-bold text-slate-400 uppercase">Annual Bonus Policy</span></div>
+                       <div className="grid grid-cols-2 gap-4">
+                           <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Rate (%)</label><input type="number" step="0.0001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={(formData.bonusRate * 100).toFixed(2)} onChange={e => setFormData({...formData, bonusRate: +e.target.value / 100})} /></div>
+                           <div className="flex flex-col justify-end"><span className="text-[9px] text-slate-500 italic">Standard: 8.33% Min</span></div>
+                       </div>
+                   </div>
+                   <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                       <div className="flex items-center gap-2 mb-2"><Building2 size={14} className="text-blue-400" /><span className="text-[10px] font-bold text-slate-400 uppercase">LIC Gratuity Policy</span></div>
+                       <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Calculation Basis (Formula)</label><div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-blue-300 font-mono">(Basic + DA) * (15/26) * Years</div><p className="text-[9px] text-slate-500 mt-2">Calculated as per LIC Master Policy for Statutory Gratuity (Act 1972).</p></div>
+                   </div>
+               </div>
             </div>
             
-            <div className="p-6 space-y-4">
-                <p className="text-xs text-slate-400 mb-2">Select the wage components to include for Leave Encashment Calculation (EL/SL/CL).</p>
-                <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
-                    {[
-                        { key: 'basic', label: 'Basic Pay' },
-                        { key: 'da', label: 'DA' },
-                        { key: 'retaining', label: 'Retn Allow' },
-                        { key: 'hra', label: 'HRA' },
-                        { key: 'conveyance', label: 'Conveyance' },
-                        { key: 'washing', label: 'Washing' },
-                        { key: 'attire', label: 'Attire' },
-                        { key: 'special1', label: 'Special 1' },
-                        { key: 'special2', label: 'Special 2' },
-                        { key: 'special3', label: 'Special 3' },
-                    ].map(comp => {
-                        const components = formData.leaveWagesComponents || INITIAL_STATUTORY_CONFIG.leaveWagesComponents;
-                        const isActive = components[comp.key as keyof typeof components];
-                        return (
-                            <button
-                                key={comp.key}
-                                onClick={() => handleLeaveWagesToggle(comp.key as any)}
-                                className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${
-                                    isActive
-                                    ? 'bg-emerald-600 border-emerald-400 text-white'
-                                    : 'bg-slate-800 border-slate-700 text-slate-500'
-                                }`}
-                            >
-                                {isActive ? <CheckSquare size={14} /> : <Square size={14} />}
-                                <span className="truncate">{comp.label}</span>
-                            </button>
-                        );
-                    })}
-                </div>
-                <div className="flex justify-end">
-                    <span className="text-[10px] text-slate-500 italic">* Default logic uses Basic + DA. Adjust according to company policy.</span>
-                </div>
+            {/* Annual Leave Policy */}
+            <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+               <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center gap-3"><CalendarClock className="text-emerald-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Annual Leave Policy</h3></div>
+               <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                   {/* EL */}
+                   <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                       <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><span className="text-xs font-bold text-slate-300 uppercase">Earned Leave (EL)</span></div>
+                       <div className="space-y-2">
+                           <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.el.label} onChange={e => handleLeavePolicyChange('el', 'label', e.target.value)} /></div>
+                           <div className="grid grid-cols-2 gap-2">
+                               <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxPerYear} onChange={e => handleLeavePolicyChange('el', 'maxPerYear', +e.target.value)} /></div>
+                               <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxCarryForward} onChange={e => handleLeavePolicyChange('el', 'maxCarryForward', +e.target.value)} /></div>
+                           </div>
+                       </div>
+                   </div>
+                   {/* SL */}
+                   <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                       <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><span className="text-xs font-bold text-slate-300 uppercase">Sick Leave (SL)</span></div>
+                       <div className="space-y-2">
+                           <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.sl.label} onChange={e => handleLeavePolicyChange('sl', 'label', e.target.value)} /></div>
+                           <div className="grid grid-cols-2 gap-2">
+                               <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxPerYear} onChange={e => handleLeavePolicyChange('sl', 'maxPerYear', +e.target.value)} /></div>
+                               <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxCarryForward} onChange={e => handleLeavePolicyChange('sl', 'maxCarryForward', +e.target.value)} /></div>
+                           </div>
+                       </div>
+                   </div>
+                   {/* CL */}
+                   <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                       <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><span className="text-xs font-bold text-slate-300 uppercase">Casual Leave (CL)</span></div>
+                       <div className="space-y-2">
+                           <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.cl.label} onChange={e => handleLeavePolicyChange('cl', 'label', e.target.value)} /></div>
+                           <div className="grid grid-cols-2 gap-2">
+                               <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxPerYear} onChange={e => handleLeavePolicyChange('cl', 'maxPerYear', +e.target.value)} /></div>
+                               <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxCarryForward} onChange={e => handleLeavePolicyChange('cl', 'maxCarryForward', +e.target.value)} /></div>
+                           </div>
+                       </div>
+                   </div>
+               </div>
             </div>
-        </div>
 
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-            <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <ScrollText className="text-amber-400" size={20} />
-                    <h3 className="font-bold uppercase tracking-widest text-xs text-amber-400">Professional Tax (PT) Matrix</h3>
-                </div>
-                <div className="flex items-center gap-4">
-                    <select className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedStatePreset} onChange={handleStatePresetChange}>
-                        {Object.keys(PT_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}
-                    </select>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900" checked={formData.enableProfessionalTax} onChange={e => setFormData({...formData, enableProfessionalTax: e.target.checked})} />
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Enable PT</span>
-                    </label>
-                </div>
+            {/* Leave Encashment Wages */}
+            <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+               <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between"><div className="flex items-center gap-3"><Calculator className="text-emerald-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Leave Encashment Wages Policy</h3></div></div>
+               <div className="p-6 space-y-4">
+                   <p className="text-xs text-slate-400 mb-2">Select the wage components to include for Leave Encashment Calculation (EL/SL/CL).</p>
+                   <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
+                       {[{ key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' }, { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Special 1' }, { key: 'special2', label: 'Special 2' }, { key: 'special3', label: 'Special 3' }].map(comp => {
+                           const components = formData.leaveWagesComponents || INITIAL_STATUTORY_CONFIG.leaveWagesComponents;
+                           const isActive = components[comp.key as keyof typeof components];
+                           return <button key={comp.key} onClick={() => handleLeaveWagesToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>;
+                       })}
+                   </div>
+                   <div className="flex justify-end"><span className="text-[10px] text-slate-500 italic">* Default logic uses Basic + DA. Adjust according to company policy.</span></div>
+               </div>
             </div>
-            
-            {formData.enableProfessionalTax && (
-            <div className="p-6 space-y-6">
-                <div className="flex items-center gap-4">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase">Deduction Cycle:</span>
-                    <div className="flex gap-2">
-                        {['Monthly', 'HalfYearly'].map(c => (
-                            <button key={c} onClick={() => setFormData({...formData, ptDeductionCycle: c as any})} className={`px-4 py-1.5 rounded-full text-[10px] font-bold border transition-all ${formData.ptDeductionCycle === c ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>{c}</button>
-                        ))}
-                    </div>
-                </div>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                        <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800">
-                            <tr>
-                                <th className="pb-3">Min Earnings (₹)</th>
-                                <th className="pb-3">Max Earnings (₹)</th>
-                                <th className="pb-3">Deduction (₹)</th>
-                                <th className="pb-3 text-right">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800">
-                            {formData.ptSlabs.map((slab, i) => (
-                                <tr key={i} className="group">
-                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.min} onChange={e => handleSlabChange(i, 'min', +e.target.value)} /></td>
-                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.max} onChange={e => handleSlabChange(i, 'max', +e.target.value)} /></td>
-                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} /></td>
-                                    <td className="py-3 text-right"><button onClick={() => handleDeleteSlab(i)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button></td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    <button onClick={handleAddSlab} className="mt-4 flex items-center gap-2 text-[10px] font-bold text-sky-400 hover:text-sky-300"><Plus size={14} /> Add Slab Row</button>
-                </div>
-            </div>
-            )}
-        </div>
 
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-            <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <HandCoins className="text-emerald-400" size={20} />
-                    <h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Labour Welfare Fund (LWF)</h3>
-                </div>
-                <div className="flex items-center gap-4">
-                    <select className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedLWFState} onChange={handleLWFStateChange}>
-                        {Object.keys(LWF_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}
-                    </select>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-emerald-500 bg-slate-900" checked={formData.enableLWF} onChange={e => setFormData({...formData, enableLWF: e.target.checked})} />
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Enable LWF</span>
-                    </label>
-                </div>
+            {/* PT Matrix */}
+            <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+               <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                   <div className="flex items-center gap-3"><ScrollText className="text-amber-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-amber-400">Professional Tax (PT) Matrix</h3></div>
+                   <div className="flex items-center gap-4">
+                       <select className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedStatePreset} onChange={handleStatePresetChange}>{Object.keys(PT_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
+                       <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900" checked={formData.enableProfessionalTax} onChange={e => setFormData({...formData, enableProfessionalTax: e.target.checked})} /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable PT</span></label>
+                   </div>
+               </div>
+               {formData.enableProfessionalTax && (
+               <div className="p-6 space-y-6">
+                   <div className="flex items-center gap-4"><span className="text-[10px] font-bold text-slate-500 uppercase">Deduction Cycle:</span><div className="flex gap-2">{['Monthly', 'HalfYearly'].map(c => (<button key={c} onClick={() => setFormData({...formData, ptDeductionCycle: c as any})} className={`px-4 py-1.5 rounded-full text-[10px] font-bold border transition-all ${formData.ptDeductionCycle === c ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>{c}</button>))}</div></div>
+                   <div className="overflow-x-auto">
+                       <table className="w-full text-left">
+                           <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800"><tr><th className="pb-3">Min Earnings (₹)</th><th className="pb-3">Max Earnings (₹)</th><th className="pb-3">Deduction (₹)</th><th className="pb-3 text-right">Action</th></tr></thead>
+                           <tbody className="divide-y divide-slate-800">
+                               {formData.ptSlabs.map((slab, i) => (
+                                   <tr key={i} className="group">
+                                       <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.min} onChange={e => handleSlabChange(i, 'min', +e.target.value)} /></td>
+                                       <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.max} onChange={e => handleSlabChange(i, 'max', +e.target.value)} /></td>
+                                       <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} /></td>
+                                       <td className="py-3 text-right"><button onClick={() => handleDeleteSlab(i)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button></td>
+                                   </tr>
+                               ))}
+                           </tbody>
+                       </table>
+                       <button onClick={handleAddSlab} className="mt-4 flex items-center gap-2 text-[10px] font-bold text-sky-400 hover:text-sky-300"><Plus size={14} /> Add Slab Row</button>
+                   </div>
+               </div>
+               )}
             </div>
-            {formData.enableLWF && (
-                <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Cycle</label>
-                        <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white" value={formData.lwfDeductionCycle} onChange={e => setFormData({...formData, lwfDeductionCycle: e.target.value as any})}>
-                            <option value="Monthly">Monthly</option>
-                            <option value="HalfYearly">Half-Yearly</option>
-                            <option value="Yearly">Yearly</option>
-                        </select>
-                    </div>
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">EE Contribution (₹)</label>
-                        <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployeeContribution} onChange={e => setFormData({...formData, lwfEmployeeContribution: +e.target.value})} />
-                    </div>
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">ER Contribution (₹)</label>
-                        <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployerContribution} onChange={e => setFormData({...formData, lwfEmployerContribution: +e.target.value})} />
-                    </div>
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Total (₹)</label>
-                        <div className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-emerald-400 font-mono font-bold">
-                            {(formData.lwfEmployeeContribution + formData.lwfEmployerContribution).toLocaleString()}
-                        </div>
-                    </div>
-                </div>
-            )}
+
+            {/* LWF */}
+            <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+               <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                   <div className="flex items-center gap-3"><HandCoins className="text-emerald-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Labour Welfare Fund (LWF)</h3></div>
+                   <div className="flex items-center gap-4">
+                       <select className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedLWFState} onChange={handleLWFStateChange}>{Object.keys(LWF_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
+                       <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-emerald-500 bg-slate-900" checked={formData.enableLWF} onChange={e => setFormData({...formData, enableLWF: e.target.checked})} /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable LWF</span></label>
+                   </div>
+               </div>
+               {formData.enableLWF && (
+               <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
+                   <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Cycle</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white" value={formData.lwfDeductionCycle} onChange={e => setFormData({...formData, lwfDeductionCycle: e.target.value as any})}><option value="Monthly">Monthly</option><option value="HalfYearly">Half-Yearly</option><option value="Yearly">Yearly</option></select></div>
+                   <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">EE Contribution (₹)</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployeeContribution} onChange={e => setFormData({...formData, lwfEmployeeContribution: +e.target.value})} /></div>
+                   <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">ER Contribution (₹)</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployerContribution} onChange={e => setFormData({...formData, lwfEmployerContribution: +e.target.value})} /></div>
+                   <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Total (₹)</label><div className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-emerald-400 font-mono font-bold">{(formData.lwfEmployeeContribution + formData.lwfEmployerContribution).toLocaleString()}</div></div>
+               </div>
+               )}
+            </div>
         </div>
-      </div>
       )}
 
+      {/* ... (COMPANY & DEVELOPER tabs remain unchanged) ... */}
       {activeTab === 'COMPANY' && (
         <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+            {/* ... Company Branding & Profile ... */}
             <div className="bg-[#1e293b] rounded-2xl border border-slate-800 shadow-xl overflow-hidden p-8">
-                <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4">
-                    <ImageIcon className="text-amber-400" size={24} />
-                    <h3 className="font-bold text-sky-400 uppercase tracking-widest text-sm">Establishment Branding</h3>
-                </div>
+                <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4"><ImageIcon className="text-amber-400" size={24} /><h3 className="font-bold text-sky-400 uppercase tracking-widest text-sm">Establishment Branding</h3></div>
                 <div className="flex flex-col md:flex-row items-center gap-8">
                     <div className="relative group shrink-0">
-                        <div className="w-32 h-32 rounded-full border-4 border-slate-800 bg-white shadow-2xl overflow-hidden">
-                            <img src={currentLogo} className="w-full h-full object-cover" alt="Establishment Logo" />
-                        </div>
-                        <button onClick={() => logoInputRef.current?.click()} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-full flex items-center justify-center transition-opacity">
-                            <Camera className="text-white" size={24} />
-                        </button>
+                        <div className="w-32 h-32 rounded-full border-4 border-slate-800 bg-white shadow-2xl overflow-hidden"><img src={currentLogo} className="w-full h-full object-cover" alt="Establishment Logo" /></div>
+                        <button onClick={() => logoInputRef.current?.click()} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-full flex items-center justify-center transition-opacity"><Camera className="text-white" size={24} /></button>
                     </div>
-                    <div className="space-y-4">
-                        <div>
-                            <h4 className="font-bold text-white text-lg">Company Logo</h4>
-                            <p className="text-xs text-slate-400 mt-1">This logo will appear on all Pay Slips, Reports, and the Login screen.</p>
-                        </div>
-                        <button onClick={() => logoInputRef.current?.click()} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-900/20 flex items-center gap-2">
-                            <Upload size={14} /> Upload New Logo
-                        </button>
-                        <input ref={logoInputRef} type="file" className="hidden" accept="image/*" onChange={handleLogoChange} />
-                    </div>
+                    <div className="space-y-4"><div><h4 className="font-bold text-white text-lg">Company Logo</h4><p className="text-xs text-slate-400 mt-1">This logo will appear on all Pay Slips, Reports, and the Login screen.</p></div><button onClick={() => logoInputRef.current?.click()} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-900/20 flex items-center gap-2"><Upload size={14} /> Upload New Logo</button><input ref={logoInputRef} type="file" className="hidden" accept="image/*" onChange={handleLogoChange} /></div>
                 </div>
             </div>
-
+            {/* ... Company Profile Form ... */}
             <div className="bg-[#1e293b] rounded-2xl border border-slate-800 shadow-xl overflow-hidden p-8">
-                <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4">
-                    <div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20">
-                        <Building2 size={24} />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-sky-400 uppercase tracking-widest text-sm">Establishment Profile</h3>
-                        <p className="text-xs text-slate-400">Official details for legal forms and reports.</p>
-                    </div>
-                </div>
-
+                {/* ... existing fields ... */}
+                <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4"><div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20"><Building2 size={24} /></div><div><h3 className="font-bold text-sky-400 uppercase tracking-widest text-sm">Establishment Profile</h3><p className="text-xs text-slate-400">Official details for legal forms and reports.</p></div></div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 gap-y-8">
+                    {/* ... Legal ID ... */}
                     <div className="md:col-span-3">
                         <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1">Legal Identity & Identification</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.establishmentName} onChange={e => setProfileData({...profileData, establishmentName: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Trade Name (If Any)</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.tradeName} onChange={e => setProfileData({...profileData, tradeName: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)*</label>
-                                <input type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500" value={profileData.cin} onChange={e => setProfileData({...profileData, cin: e.target.value})} placeholder="U00000XX0000XXX000000" />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-sky-400 uppercase">LIN No (Labour ID)*</label>
-                                <input type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500" value={profileData.lin} onChange={e => setProfileData({...profileData, lin: e.target.value})} placeholder="L0000000000" />
-                            </div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.establishmentName} onChange={e => setProfileData({...profileData, establishmentName: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Trade Name (If Any)</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.tradeName} onChange={e => setProfileData({...profileData, tradeName: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)*</label><input type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500" value={profileData.cin} onChange={e => setProfileData({...profileData, cin: e.target.value})} placeholder="U00000XX0000XXX000000" /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-sky-400 uppercase">LIN No (Labour ID)*</label><input type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500" value={profileData.lin} onChange={e => setProfileData({...profileData, lin: e.target.value})} placeholder="L0000000000" /></div>
                         </div>
                     </div>
-
+                    {/* ... Registration Codes ... */}
                     <div className="md:col-span-3">
                         <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Registration Codes</h4>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">PF Code</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.pfCode} onChange={e => setProfileData({...profileData, pfCode: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">ESI Code</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.esiCode} onChange={e => setProfileData({...profileData, esiCode: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">GST No</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.gstNo} onChange={e => setProfileData({...profileData, gstNo: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">PAN No</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.pan} onChange={e => setProfileData({...profileData, pan: e.target.value})} />
-                            </div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">PF Code</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.pfCode} onChange={e => setProfileData({...profileData, pfCode: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">ESI Code</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.esiCode} onChange={e => setProfileData({...profileData, esiCode: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">GST No</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.gstNo} onChange={e => setProfileData({...profileData, gstNo: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">PAN No</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.pan} onChange={e => setProfileData({...profileData, pan: e.target.value})} /></div>
                         </div>
                     </div>
-
+                    {/* ... Address ... */}
                     <div className="md:col-span-3">
                         <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Address Details (Registered Office)</h4>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Door No / Flat No</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.doorNo} onChange={e => setProfileData({...profileData, doorNo: e.target.value})} />
-                            </div>
-                            <div className="space-y-1 md:col-span-2">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Building Name / Landmark</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.buildingName} onChange={e => setProfileData({...profileData, buildingName: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Street</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.street} onChange={e => setProfileData({...profileData, street: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Locality</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.locality} onChange={e => setProfileData({...profileData, locality: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Area</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.area} onChange={e => setProfileData({...profileData, area: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.city} onChange={e => setProfileData({...profileData, city: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">State / Union Territory</label>
-                                <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.state} onChange={e => setProfileData({...profileData, state: e.target.value})}>
-                                    {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-                                </select>
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Pin Code</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.pincode} onChange={e => setProfileData({...profileData, pincode: e.target.value})} />
-                            </div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Door No / Flat No</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.doorNo} onChange={e => setProfileData({...profileData, doorNo: e.target.value})} /></div>
+                            <div className="space-y-1 md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Building Name / Landmark</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.buildingName} onChange={e => setProfileData({...profileData, buildingName: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Street</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.street} onChange={e => setProfileData({...profileData, street: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Locality</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.locality} onChange={e => setProfileData({...profileData, locality: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Area</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.area} onChange={e => setProfileData({...profileData, area: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.city} onChange={e => setProfileData({...profileData, city: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">State / Union Territory</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.state} onChange={e => setProfileData({...profileData, state: e.target.value})}>{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Pin Code</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.pincode} onChange={e => setProfileData({...profileData, pincode: e.target.value})} /></div>
                         </div>
                     </div>
-
+                    {/* ... Contact ... */}
                     <div className="md:col-span-3">
                         <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Contact & Online Presence</h4>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Mobile No</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.mobile} onChange={e => setProfileData({...profileData, mobile: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Land Line (Telephone)</label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.telephone} onChange={e => setProfileData({...profileData, telephone: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Mail size={10} /> Official Email</label>
-                                <input type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.email} onChange={e => setProfileData({...profileData, email: e.target.value})} />
-                            </div>
-                            <div className="space-y-1 md:col-span-2">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Globe size={10} /> Corporate Website</label>
-                                <input type="url" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.website} onChange={e => setProfileData({...profileData, website: e.target.value})} />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Nature of Business</label>
-                                <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.natureOfBusiness} onChange={e => setProfileData({...profileData, natureOfBusiness: e.target.value})}>
-                                    {NATURE_OF_BUSINESS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                </select>
-                            </div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Mobile No</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.mobile} onChange={e => setProfileData({...profileData, mobile: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Land Line (Telephone)</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.telephone} onChange={e => setProfileData({...profileData, telephone: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Mail size={10} /> Official Email</label><input type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.email} onChange={e => setProfileData({...profileData, email: e.target.value})} /></div>
+                            <div className="space-y-1 md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Globe size={10} /> Corporate Website</label><input type="url" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.website} onChange={e => setProfileData({...profileData, website: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Nature of Business</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.natureOfBusiness} onChange={e => setProfileData({...profileData, natureOfBusiness: e.target.value})}>{NATURE_OF_BUSINESS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select></div>
                         </div>
                     </div>
                 </div>
@@ -1040,6 +784,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         </div>
       )}
 
+      {/* ... (Footer actions and Modals) ... */}
       {activeTab !== 'DATA' && !isSetupMode && (
       <div className="flex justify-between items-center p-2 pt-6 border-t border-slate-800">
         <div></div>
@@ -1116,6 +861,28 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </button>
                     </div>
                 )}
+            </div>
+        </div>
+       )}
+
+       {/* ... (Overwrite and Auth Modals remain same) ... */}
+       {showOverwriteConfirm && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                <button onClick={() => setShowOverwriteConfirm(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                <div className="flex flex-col items-center gap-2">
+                    <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2">
+                        <AlertTriangle size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-white text-center">Overwrite Data?</h3>
+                    <p className="text-xs text-slate-300 text-center leading-relaxed">
+                        Existing data detected. Restoring a backup will <span className="text-red-400 font-bold">PERMANENTLY REPLACE</span> all current records.
+                    </p>
+                </div>
+                <div className="flex gap-3 mt-4">
+                    <button onClick={() => setShowOverwriteConfirm(false)} className="flex-1 py-3 border border-slate-600 rounded-xl text-slate-300 font-bold hover:bg-slate-800 transition-all">Cancel</button>
+                    <button onClick={() => { setShowOverwriteConfirm(false); executeImport(); }} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-lg transition-all">Proceed & Overwrite</button>
+                </div>
             </div>
         </div>
        )}
