@@ -624,7 +624,184 @@ export const generatePFForm6A = (
     doc.save(`Form6A_${startYear}-${endYear}.pdf`);
 };
 
-// ... existing code for other exports ...
+// --- ESI CODE ON SOCIAL SECURITY IMPACT ANALYSIS ---
+export const generateCodeOnWagesReport = (records: PayrollResult[], employees: Employee[], format: 'PDF'|'Excel', fileName: string, companyProfile: CompanyProfile) => {
+    
+    // Impact Analysis Data Generation
+    const impactData = records.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        
+        // 1. Gross Wages
+        const gross = r.earnings?.total || 0;
+
+        // 2. ESI Wages (Base = Basic + DA + Retaining) as per User Request
+        // Note: Normally ESI is on Gross minus specific allowances, but prompt asks for Basic+DA+Retn comparison
+        const esiBaseWage = (r.earnings?.basic || 0) + (r.earnings?.da || 0) + (r.earnings?.retainingAllowance || 0);
+
+        // 3. ESI Code Wages (Derive from System Calculation logic for Clause 88)
+        // Clause 88: If Allowances > 50% of Gross, excess is added to wage.
+        const wageA = esiBaseWage;
+        const wageC = gross - wageA; // Allowances
+        let wageD = 0; // Deemed addition
+        if (gross > 0) {
+            const allowancePercentage = wageC / gross;
+            if (allowancePercentage > 0.50) {
+                const fiftyPercentOfGross = Math.round(gross * 0.50);
+                wageD = wageC - fiftyPercentOfGross;
+            }
+        }
+        const esiCodeWages = Math.round(wageA + wageD);
+
+        // 4. Old ESI Contribution (Simulated on Base Wage)
+        // ESI Rate: 0.75% (EE) + 3.25% (ER) = 4.00%
+        let oldContribution = 0;
+        if (esiBaseWage <= 21000) {
+            oldContribution = Math.ceil(esiBaseWage * 0.0075) + Math.ceil(esiBaseWage * 0.0325);
+        }
+
+        // 5. ESI Code Contribution (Actual Actuals from Payroll)
+        const newContribution = (r.deductions?.esi || 0) + (r.employerContributions?.esi || 0);
+
+        // 6. Impact Difference
+        // Saved = Old - New. If Positive, we saved. If Negative, we paid excess.
+        const diff = oldContribution - newContribution;
+        
+        let reason = "Neutral";
+        if (diff < 0) reason = "Negative Impact (Excess Cost)";
+        else if (diff > 0) reason = "Positive Impact (Saved)";
+        else if (newContribution === 0 && oldContribution > 0) reason = "Positive (Out of Coverage)";
+        else if (newContribution > 0 && oldContribution === 0) reason = "Negative (New Coverage)";
+
+        // Filter out if no contribution at all involved (unless analysis requires all)
+        if (gross === 0) return null;
+
+        return {
+            id: r.employeeId,
+            name: emp?.name || '',
+            gross: gross,
+            esiWageBase: esiBaseWage,
+            esiCodeWage: esiCodeWages,
+            oldContrib: oldContribution,
+            newContrib: newContribution,
+            impact: diff,
+            reason: reason
+        };
+    }).filter(d => d !== null);
+
+    if (format === 'Excel') {
+        const excelData = impactData.map(d => ({
+            'EMP ID': d!.id,
+            'Employee Name': d!.name,
+            'Gross Wages': d!.gross,
+            'ESI_Wages(Basic+DA+Retn)': d!.esiWageBase,
+            'ESI_Code_Wages': d!.esiCodeWage,
+            'Old_ESI_Contribution (4%)': d!.oldContrib,
+            'ESI_Code_Contribution (Actual)': d!.newContrib,
+            'Excess/Saved': d!.impact,
+            'Reason': d!.reason
+        }));
+        generateExcelReport(excelData, 'ESI_Code_Impact', fileName);
+    } else {
+        const headers = ['ID', 'Name', 'Gross', 'Base Wage', 'Code Wage', 'Old Cont', 'New Cont', 'Diff', 'Impact'];
+        const rows = impactData.map(d => [
+            d!.id, 
+            d!.name, 
+            d!.gross.toString(), 
+            d!.esiWageBase.toString(), 
+            d!.esiCodeWage.toString(), 
+            d!.oldContrib.toString(), 
+            d!.newContrib.toString(), 
+            d!.impact.toString(),
+            d!.reason
+        ]);
+        
+        // Add Summary Row
+        const totalOld = impactData.reduce((acc, curr) => acc + curr!.oldContrib, 0);
+        const totalNew = impactData.reduce((acc, curr) => acc + curr!.newContrib, 0);
+        const totalDiff = totalOld - totalNew;
+        rows.push(['TOTAL', '', '', '', '', totalOld.toString(), totalNew.toString(), totalDiff.toString(), totalDiff < 0 ? 'Excess Cost' : 'Saved']);
+
+        generatePDFTableReport(
+            'ESI Social Security Code Impact Analysis', 
+            headers, 
+            rows, 
+            fileName, 
+            'l', 
+            'Note: "Old Contribution" simulated on Basic+DA+Retn @ 4%. "New Contribution" is actual system deduction.', 
+            companyProfile
+        );
+    }
+};
+
+// ... existing code ...
+export const generateFormB = (records: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
+    const headers = ['ID', 'Name', 'Designation', 'Basic', 'DA', 'Gross', 'Deductions', 'Net'];
+    const data = records.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        return [r.employeeId, emp?.name, emp?.designation, r.earnings?.basic, r.earnings?.da, r.earnings?.total, r.deductions?.total, r.netPay];
+    });
+    generatePDFTableReport(`Form B - Register of Wages (${month} ${year})`, headers, data, `FormB_${month}_${year}`, 'l', undefined, companyProfile);
+};
+
+export const generateFormC = (records: PayrollResult[], employees: Employee[], attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile) => {
+    const headers = ['ID', 'Name', 'Present', 'Leaves', 'LOP'];
+    const data = records.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        const att = attendances.find(a => a.employeeId === r.employeeId && a.month === month && a.year === year);
+        return [r.employeeId, emp?.name, att?.presentDays, (att?.earnedLeave||0)+(att?.sickLeave||0)+(att?.casualLeave||0), att?.lopDays];
+    });
+    generatePDFTableReport(`Form C - Register of Attendance (${month} ${year})`, headers, data, `FormC_${month}_${year}`, 'p', undefined, companyProfile);
+};
+
+export const generateTNFormR = (records: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
+    generateFormB(records, employees, month, year, companyProfile);
+};
+
+export const generateTNFormT = (records: PayrollResult[], employees: Employee[], attendances: Attendance[], ledgers: LeaveLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
+    generatePaySlipsPDF(records, employees, month, year, companyProfile);
+};
+
+export const generateTNFormP = (records: PayrollResult[], employees: Employee[], advances: AdvanceLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
+    const headers = ['ID', 'Name', 'Advance Recovered', 'Balance'];
+    const data = records.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        const adv = advances.find(a => a.employeeId === r.employeeId);
+        if ((r.deductions?.advanceRecovery || 0) === 0 && (adv?.balance || 0) === 0) return null;
+        return [r.employeeId, emp?.name, r.deductions?.advanceRecovery, adv?.balance];
+    }).filter(d => d !== null);
+    generatePDFTableReport(`Form P - Register of Advances (${month} ${year})`, headers, data as any[][], `FormP_${month}_${year}`, 'p', undefined, companyProfile);
+};
+
+export const generateESIExitReport = (records: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
+    const data = records.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (emp?.dol) return { id: r.employeeId, name: emp.name, reason: 'Left Service' };
+        if ((r.earnings?.total || 0) > 21000) return { id: r.employeeId, name: emp?.name, reason: 'Crossed Ceiling' };
+        return null;
+    }).filter(d => d !== null);
+    generateExcelReport(data as any[], 'ESI Exit', `ESI_Exit_${month}_${year}`);
+};
+
+export const generateESICodeWagesReport = (records: PayrollResult[], employees: Employee[], format: 'PDF'|'Excel', fileName: string, companyProfile: CompanyProfile) => {
+    generateCodeOnWagesReport(records, employees, format, fileName, companyProfile);
+};
+
+export const generateGratuityReport = (employees: Employee[], companyProfile: CompanyProfile) => {
+    const headers = ['ID', 'Name', 'DOJ', 'Years Service', 'Gratuity Accrued'];
+    const data = employees.map(e => {
+        const years = 5; // Mock calculation
+        const gratuity = 50000; // Mock calculation
+        return [e.id, e.name, e.doj, years, gratuity];
+    });
+    generatePDFTableReport('Gratuity Liability Statement', headers, data, 'Gratuity_Report', 'p', undefined, companyProfile);
+};
+
+export const generateBonusReport = (history: PayrollResult[], employees: Employee[], config: StatutoryConfig, startMonth: string, startYear: number, endMonth: string, endYear: number, companyProfile: CompanyProfile, format: 'PDF'|'Excel') => {
+    const headers = ['ID', 'Name', 'Total Wages', 'Bonus Payable'];
+    const data = [['EMP001', 'John Doe', '100000', '8330']]; // Mock data
+    if (format === 'Excel') generateExcelReport(data.map(d => ({id:d[0], name:d[1], wages:d[2], bonus:d[3]})), 'Bonus', 'Bonus_Register');
+    else generatePDFTableReport('Form C - Bonus Register', headers, data, 'Bonus_Register', 'p', undefined, companyProfile);
+};
 
 export const generatePaySlipsPDF = (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
   if (!results || results.length === 0) return;
@@ -956,77 +1133,4 @@ export const generateTDSReport = (records: PayrollResult[], employees: Employee[
         tds: r.deductions?.it 
     })).filter(r => (r.tds || 0) > 0);
     generateExcelReport(data, 'TDS Report', fileName);
-};
-
-export const generateCodeOnWagesReport = (records: PayrollResult[], employees: Employee[], format: 'PDF'|'Excel', fileName: string, companyProfile: CompanyProfile) => {
-    generateExcelReport(records, 'CodeOnWages', fileName);
-};
-
-export const generateFormB = (records: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'Designation', 'Basic', 'DA', 'Gross', 'Deductions', 'Net'];
-    const data = records.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        return [r.employeeId, emp?.name, emp?.designation, r.earnings?.basic, r.earnings?.da, r.earnings?.total, r.deductions?.total, r.netPay];
-    });
-    generatePDFTableReport(`Form B - Register of Wages (${month} ${year})`, headers, data, `FormB_${month}_${year}`, 'l', undefined, companyProfile);
-};
-
-export const generateFormC = (records: PayrollResult[], employees: Employee[], attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'Present', 'Leaves', 'LOP'];
-    const data = records.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const att = attendances.find(a => a.employeeId === r.employeeId && a.month === month && a.year === year);
-        return [r.employeeId, emp?.name, att?.presentDays, (att?.earnedLeave||0)+(att?.sickLeave||0)+(att?.casualLeave||0), att?.lopDays];
-    });
-    generatePDFTableReport(`Form C - Register of Attendance (${month} ${year})`, headers, data, `FormC_${month}_${year}`, 'p', undefined, companyProfile);
-};
-
-export const generateTNFormR = (records: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    generateFormB(records, employees, month, year, companyProfile);
-};
-
-export const generateTNFormT = (records: PayrollResult[], employees: Employee[], attendances: Attendance[], ledgers: LeaveLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
-    generatePaySlipsPDF(records, employees, month, year, companyProfile);
-};
-
-export const generateTNFormP = (records: PayrollResult[], employees: Employee[], advances: AdvanceLedger[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'Advance Recovered', 'Balance'];
-    const data = records.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const adv = advances.find(a => a.employeeId === r.employeeId);
-        if ((r.deductions?.advanceRecovery || 0) === 0 && (adv?.balance || 0) === 0) return null;
-        return [r.employeeId, emp?.name, r.deductions?.advanceRecovery, adv?.balance];
-    }).filter(d => d !== null);
-    generatePDFTableReport(`Form P - Register of Advances (${month} ${year})`, headers, data as any[][], `FormP_${month}_${year}`, 'p', undefined, companyProfile);
-};
-
-export const generateESIExitReport = (records: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const data = records.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        if (emp?.dol) return { id: r.employeeId, name: emp.name, reason: 'Left Service' };
-        if ((r.earnings?.total || 0) > 21000) return { id: r.employeeId, name: emp?.name, reason: 'Crossed Ceiling' };
-        return null;
-    }).filter(d => d !== null);
-    generateExcelReport(data as any[], 'ESI Exit', `ESI_Exit_${month}_${year}`);
-};
-
-export const generateESICodeWagesReport = (records: PayrollResult[], employees: Employee[], format: 'PDF'|'Excel', fileName: string, companyProfile: CompanyProfile) => {
-    generateCodeOnWagesReport(records, employees, format, fileName, companyProfile);
-};
-
-export const generateGratuityReport = (employees: Employee[], companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'DOJ', 'Years Service', 'Gratuity Accrued'];
-    const data = employees.map(e => {
-        const years = 5; // Mock calculation
-        const gratuity = 50000; // Mock calculation
-        return [e.id, e.name, e.doj, years, gratuity];
-    });
-    generatePDFTableReport('Gratuity Liability Statement', headers, data, 'Gratuity_Report', 'p', undefined, companyProfile);
-};
-
-export const generateBonusReport = (history: PayrollResult[], employees: Employee[], config: StatutoryConfig, startMonth: string, startYear: number, endMonth: string, endYear: number, companyProfile: CompanyProfile, format: 'PDF'|'Excel') => {
-    const headers = ['ID', 'Name', 'Total Wages', 'Bonus Payable'];
-    const data = [['EMP001', 'John Doe', '100000', '8330']]; // Mock data
-    if (format === 'Excel') generateExcelReport(data.map(d => ({id:d[0], name:d[1], wages:d[2], bonus:d[3]})), 'Bonus', 'Bonus_Register');
-    else generatePDFTableReport('Form C - Bonus Register', headers, data, 'Bonus_Register', 'p', undefined, companyProfile);
 };
