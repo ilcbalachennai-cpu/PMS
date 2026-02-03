@@ -75,16 +75,44 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     });
   }, [employees, month, year]);
 
+  // Load Data Effect (Priority: Temp Storage > Saved Records)
   useEffect(() => {
-    const drafts = savedRecords.filter(r => r.month === month && r.year === year);
-    if (drafts.length > 0) {
-        setResults(drafts);
-        setIsSaved(true); 
-    } else {
-        setResults([]);
-        setIsSaved(false);
+    const tempKey = `app_temp_payroll_${month}_${year}`;
+    const savedTemp = localStorage.getItem(tempKey);
+    let loadedFromTemp = false;
+
+    if (savedTemp) {
+        try {
+            const parsed = JSON.parse(savedTemp);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                setResults(parsed);
+                setIsSaved(false); // Temp data is by definition unsaved
+                loadedFromTemp = true;
+            }
+        } catch (e) {
+            localStorage.removeItem(tempKey);
+        }
+    }
+
+    if (!loadedFromTemp) {
+        const drafts = savedRecords.filter(r => r.month === month && r.year === year);
+        if (drafts.length > 0) {
+            setResults(drafts);
+            setIsSaved(true); 
+        } else {
+            setResults([]);
+            setIsSaved(false);
+        }
     }
   }, [month, year, savedRecords]);
+
+  // Sync Unsaved Changes to Temp Storage
+  useEffect(() => {
+      const tempKey = `app_temp_payroll_${month}_${year}`;
+      if (!isSaved && results.length > 0) {
+          localStorage.setItem(tempKey, JSON.stringify(results));
+      }
+  }, [results, isSaved, month, year]);
 
   const checkAgeMaturity = () => {
     const unconfiguredMaturity: Employee[] = [];
@@ -206,6 +234,11 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
   const handleSaveDraft = () => {
     if (results.length === 0 || isLocked) return;
+    
+    // Clear temp storage for this period as we are committing it
+    const tempKey = `app_temp_payroll_${month}_${year}`;
+    localStorage.removeItem(tempKey);
+
     const otherRecords = savedRecords.filter(r => !(r.month === month && r.year === year));
     const newRecords = results.map(r => ({ ...r, status: 'Draft' as const }));
     setSavedRecords([...otherRecords, ...newRecords]);

@@ -289,25 +289,25 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         </div>
       </div>
 
-      {/* 3. Content Area */}
+      {/* 3. Content Area - Using CSS display instead of conditional rendering to preserve state */}
       <div className="min-h-[500px]">
-        {activeTab === 'attendance' && (
+        <div className={activeTab === 'attendance' ? 'block' : 'hidden'}>
             <AttendanceManager 
                 employees={props.employees}
                 attendances={props.attendances}
                 setAttendances={props.setAttendances}
                 month={props.month}
                 year={props.year}
-                setMonth={props.setMonth} // Passed but effectively controlled by parent
+                setMonth={props.setMonth}
                 setYear={props.setYear}
                 savedRecords={props.savedRecords}
                 leaveLedgers={props.leaveLedgers}
-                setLeaveLedgers={props.setLeaveLedgers} // Updated: Pass setter
-                hideContextSelector={true} // New prop to hide internal selector
+                setLeaveLedgers={props.setLeaveLedgers}
+                hideContextSelector={true}
             />
-        )}
+        </div>
 
-        {activeTab === 'ledgers' && (
+        <div className={activeTab === 'ledgers' ? 'block' : 'hidden'}>
             <LedgerManager 
                 employees={props.employees}
                 leaveLedgers={props.leaveLedgers}
@@ -321,11 +321,11 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 setYear={props.setYear}
                 savedRecords={props.savedRecords}
                 hideContextSelector={true}
-                viewMode="advance" // STRICTLY ADVANCE MODE
+                viewMode="advance"
             />
-        )}
+        </div>
 
-        {activeTab === 'fines' && (
+        <div className={activeTab === 'fines' ? 'block' : 'hidden'}>
             <FineManager
                 employees={props.employees}
                 fines={props.fines}
@@ -335,9 +335,9 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 savedRecords={props.savedRecords}
                 hideContextSelector={true}
             />
-        )}
+        </div>
 
-        {activeTab === 'payroll' && (
+        <div className={activeTab === 'payroll' ? 'block' : 'hidden'}>
             <PayrollProcessor 
                 employees={props.employees}
                 config={props.config}
@@ -357,7 +357,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 currentUser={props.currentUser}
                 fines={props.fines}
             />
-        )}
+        </div>
       </div>
 
       {/* Success Modal */}

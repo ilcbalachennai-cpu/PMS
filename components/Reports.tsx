@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, KeyRound, UserX, Save } from 'lucide-react';
+
+import React, { useState, useMemo, useEffect } from 'react';
+import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, KeyRound, UserX, Save, RefreshCw } from 'lucide-react';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User } from '../types';
 import { 
   generateExcelReport, 
@@ -48,6 +49,7 @@ const Reports: React.FC<ReportsProps> = ({
   const [reportType, setReportType] = useState<string>('Pay Sheet');
   const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   
   // General Modal State
   const [modalState, setModalState] = useState<{
@@ -83,10 +85,37 @@ const Reports: React.FC<ReportsProps> = ({
       return currentResults.length > 0;
   }, [currentResults]);
 
+  // Check for unsaved changes in Process Payroll (Temp Storage)
+  useEffect(() => {
+      const tempKey = `app_temp_payroll_${month}_${year}`;
+      const tempData = localStorage.getItem(tempKey);
+      // If temp data exists and is not empty array, we have unsaved changes
+      if (tempData) {
+          try {
+              const parsed = JSON.parse(tempData);
+              setHasUnsavedChanges(Array.isArray(parsed) && parsed.length > 0);
+          } catch (e) {
+              setHasUnsavedChanges(false);
+          }
+      } else {
+          setHasUnsavedChanges(false);
+      }
+  }, [month, year]);
+
   // Helper to get 1st day of the selected wage month
+  // Logic: Calculate string for 1st of the currently selected month and year. (YYYY-MM-01)
+  // This ensures inputs with type="date" default to the 1st of the payroll month correctly.
   const getPayrollPeriodStart = () => {
       const mIdx = months.indexOf(month);
+      // Construct date in local time string YYYY-MM-DD manually to avoid UTC shifts
       return `${year}-${String(mIdx + 1).padStart(2, '0')}-01`;
+  };
+
+  // Helper to get Last day of the selected wage month for Max Date restriction
+  const getPayrollPeriodEnd = () => {
+      const mIdx = months.indexOf(month);
+      const lastDay = new Date(year, mIdx + 1, 0).getDate();
+      return `${year}-${String(mIdx + 1).padStart(2, '0')}-${lastDay}`;
   };
 
   const handleReportTypeChange = (type: string) => {
@@ -112,8 +141,13 @@ const Reports: React.FC<ReportsProps> = ({
         return;
     }
     
+    if (hasUnsavedChanges) {
+        setModalState({ isOpen: true, type: 'error', title: 'Unsaved Changes', message: 'There are unsaved payroll calculations in "Process Payroll". Please save them as Draft before freezing.' });
+        return;
+    }
+
     if (!hasData) {
-        setModalState({ isOpen: true, type: 'error', title: 'No Data', message: 'There is no saved payroll data to freeze for this period.' });
+        setModalState({ isOpen: true, type: 'error', title: 'No Draft Found', message: 'Please calculate and "Save Draft" in the Pay Process module before freezing.' });
         return;
     }
 
@@ -129,7 +163,7 @@ const Reports: React.FC<ReportsProps> = ({
             const emp = employees.find(e => e.id === r.employeeId);
             if (emp) {
                 initialExitData[emp.id] = {
-                    dol: emp.dol || defaultDOL, // Set default if empty
+                    dol: emp.dol || defaultDOL, // Set default if empty to 1st of current payroll month
                     reason: emp.leavingReason || 'Resignation' // Default to Resignation
                 };
             }
@@ -148,19 +182,6 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const handleExitChange = (id: string, field: 'dol' | 'reason', value: string) => {
-      if (field === 'dol' && value) {
-          const maxDate = getPayrollPeriodStart();
-          // Strict check: Ensure date is not later than 1st of the month
-          if (value > maxDate) {
-              setModalState({
-                  isOpen: true,
-                  type: 'error',
-                  title: 'Invalid Date',
-                  message: "DOL Can't be later than 1st day of the wage month"
-              });
-              return; // Do not update state if date is invalid
-          }
-      }
       setExitData(prev => ({
           ...prev,
           [id]: { ...prev[id], [field]: value }
@@ -168,7 +189,25 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const processExitAndFreeze = () => {
-      // 1. Update Master Data
+      // 1. Validate Data - Ensure no bad dates (e.g. 0202 year) are submitted
+      const invalidEntries = Object.entries(exitData).filter(([_, val]) => {
+          const data = val as { dol: string, reason: string };
+          if (!data.dol) return true; // Empty date
+          const yearVal = parseInt(data.dol.split('-')[0]);
+          return yearVal < 2000 || yearVal > 2100; // Sanity check for year
+      });
+
+      if (invalidEntries.length > 0) {
+          setModalState({
+              isOpen: true,
+              type: 'error',
+              title: 'Invalid Date Detected',
+              message: 'One or more employees have an invalid Date of Leaving (e.g., incorrect year). Please correct the date (YYYY-MM-DD) before proceeding.'
+          });
+          return;
+      }
+
+      // 2. Update Master Data
       const updatedEmployees = employees.map(emp => {
           if (exitData[emp.id]) {
               return {
@@ -181,11 +220,11 @@ const Reports: React.FC<ReportsProps> = ({
       });
       setEmployees(updatedEmployees);
 
-      // 2. Close Modal
+      // 3. Close Modal
       setZeroWageEmployees([]);
       setExitData({});
 
-      // 3. Freeze
+      // 4. Freeze
       executeFreeze();
   };
 
@@ -334,7 +373,7 @@ const Reports: React.FC<ReportsProps> = ({
                          cl: { accumulation: 0, availed: 0, balance: 0 }
                      };
                      
-                     // Calculate Total EL Used (Taken + Encashed)
+                     // Calculate Total Used (Availed + Encashed)
                      const elUsed = (l.el.availed || 0) + (l.el.encashed || 0);
 
                      return {
@@ -396,7 +435,7 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500">
+    <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 relative">
       
       {/* Header & Context Selector */}
       <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
@@ -439,16 +478,22 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
           <button 
             onClick={isLocked ? handleUnlock : handleFreeze} 
-            disabled={!isLocked && !hasData}
+            disabled={!isLocked && (!hasData || hasUnsavedChanges)}
             className={`px-6 py-2.5 rounded-lg font-bold text-sm shadow-lg transition-all ${
                 isLocked 
                 ? 'bg-slate-800 hover:bg-slate-700 text-white border border-slate-600' 
-                : hasData 
+                : (hasData && !hasUnsavedChanges) 
                     ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                     : 'bg-slate-700 text-slate-500 cursor-not-allowed'
             }`}
           >
-              {isLocked ? 'Unlock Period' : hasData ? 'Confirm & Freeze Data' : 'No Data to Freeze'}
+              {isLocked 
+                ? 'Unlock Period' 
+                : hasUnsavedChanges 
+                    ? 'Save in Process Payroll to Freeze' 
+                    : hasData 
+                        ? 'Confirm & Freeze Data' 
+                        : 'No Data to Freeze'}
           </button>
       </div>
 
@@ -570,7 +615,7 @@ const Reports: React.FC<ReportsProps> = ({
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-4xl max-h-[90vh] rounded-2xl border border-amber-500/30 shadow-2xl flex flex-col overflow-hidden relative">
                 
-                {/* Header - Styled like an Alert Card */}
+                {/* Header - Styled like an Alert Card (Amber/Orange) */}
                 <div className="bg-amber-600 p-6 flex justify-between items-center shrink-0">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-white/20 rounded-full text-white shadow-lg border border-white/10">
@@ -614,7 +659,7 @@ const Reports: React.FC<ReportsProps> = ({
                                 {zeroWageEmployees.map((r) => {
                                     const emp = employees.find(e => e.id === r.employeeId);
                                     const data = exitData[r.employeeId] || { dol: '', reason: '' };
-                                    const maxDate = getPayrollPeriodStart();
+                                    const maxDate = getPayrollPeriodEnd();
                                     
                                     return (
                                         <tr key={r.employeeId} className="bg-[#1e293b]/50 hover:bg-[#1e293b] transition-colors">
@@ -630,7 +675,7 @@ const Reports: React.FC<ReportsProps> = ({
                                                     type="date" 
                                                     className="bg-[#0f172a] border border-slate-600 rounded-lg px-3 py-2 text-white text-xs w-full focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 outline-none transition-all placeholder-slate-600"
                                                     value={data.dol}
-                                                    max={maxDate}
+                                                    max={maxDate} 
                                                     onChange={(e) => handleExitChange(r.employeeId, 'dol', e.target.value)}
                                                 />
                                             </td>
@@ -658,7 +703,7 @@ const Reports: React.FC<ReportsProps> = ({
 
                 <div className="p-5 bg-[#1e293b] border-t border-slate-800 flex justify-between items-center gap-4">
                     <div className="text-[10px] text-slate-500 italic">
-                        * Leaving date cannot be later than the 1st of the current wage month.
+                        * Leaving date can be anytime within the payroll month.
                     </div>
                     <div className="flex gap-3">
                         <button 

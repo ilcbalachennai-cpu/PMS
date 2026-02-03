@@ -19,7 +19,8 @@ import {
   generateESIExitReport, 
   generateESICodeWagesReport, 
   generateGratuityReport,
-  generateBonusReport
+  generateBonusReport,
+  generateEPFCodeImpactReport
 } from '../services/reportService';
 
 interface StatutoryReportsProps {
@@ -102,7 +103,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     const fileName = `${reportName.replace(/ /g, '_')}_${globalMonth}_${globalYear}`;
 
     try {
-        if (reportName.includes('ECR')) {
+        if (reportName.includes('PF ECR')) {
              generatePFECR(currentData, employees, format as any, fileName);
         } else if (reportName.includes('ESI Code Wages')) {
              generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile);
@@ -118,6 +119,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
              generateGratuityReport(employees, companyProfile);
         } else if (reportName.includes('Social Security')) {
              generateCodeOnWagesReport(currentData, employees, format as any, fileName, companyProfile);
+        } else if (reportName.includes('EPF Code Impact')) {
+             generateEPFCodeImpactReport(currentData, employees, format as any, fileName, companyProfile);
         } else if (reportName.includes('Form 12A')) {
              generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
         } else if (reportName.includes('Form B')) {
@@ -192,7 +195,10 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
              <button onClick={() => handleDownload('Form 12A', 'PDF')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
                 <FileText size={16} className="group-hover:scale-110" /> Form 12A (Revised)
              </button>
-             <div className="grid grid-cols-2 gap-2">
+             <button onClick={() => handleDownload('EPF Code Impact', 'PDF')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
+                <Scale size={16} className="group-hover:scale-110" /> Social Security Code Impact
+             </button>
+             <div className="grid grid-cols-2 gap-2 md:col-span-2">
                  <button onClick={() => openRangeModal('Form 3A')} className="w-full py-3 bg-blue-900/10 hover:bg-blue-900/20 text-blue-300 font-bold text-[10px] rounded-xl border border-blue-900/30 flex flex-col items-center justify-center gap-1 transition-all">
                     <Calendar size={14} /> Form 3A (Annual)
                  </button>
