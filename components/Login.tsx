@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { ArrowRight, Lock, User as UserIcon, AlertCircle, Edit, IndianRupee, Shield, ShieldCheck, User, Maximize, Minimize } from 'lucide-react';
+import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, Shield, ShieldCheck, User, Maximize, Minimize } from 'lucide-react';
 import { User as UserType } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
 
@@ -10,7 +9,7 @@ interface LoginProps {
   setLogo: (url: string) => void;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin, currentLogo, setLogo }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -57,17 +56,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo, setLogo }) => {
     }, 800);
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogo(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   const autofill = (u: string, p: string) => {
       setUsername(u);
       setPassword(p);
@@ -96,20 +84,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo, setLogo }) => {
         {/* Left: Branding & Info */}
         <div className="md:w-1/2 bg-[#0f172a] p-8 md:p-12 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 text-center">
             
-            {/* Logo */}
+            {/* Logo - Locked to Developer Logo - NO UPLOAD OPTION */}
             <div className="relative inline-block group mb-6">
-                <div className="inline-flex items-center justify-center w-32 h-32 rounded-full bg-white shadow-2xl shadow-black/50 p-1 overflow-hidden border-4 border-[#1e293b]">
+                <div className="inline-flex items-center justify-center w-32 h-32 rounded-full bg-white shadow-2xl shadow-black/50 p-[5px] overflow-hidden border-4 border-[#1e293b]">
                     <img 
-                      src={currentLogo} 
+                      src={BRAND_CONFIG.logoUrl} 
                       alt={BRAND_CONFIG.companyName} 
                       className="w-full h-full object-cover rounded-full"
                     />
                 </div>
-                {/* Upload Overlay */}
-                <label className="absolute inset-0 top-0 h-32 w-32 mx-auto rounded-full bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer transition-opacity z-10">
-                    <Edit className="text-white" size={24} />
-                    <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} />
-                </label>
             </div>
 
             {/* App Title */}
