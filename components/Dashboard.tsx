@@ -123,7 +123,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
 
   const stats = [
     { label: 'Total Payroll Cost', value: `₹${(totalGross/100000).toFixed(2)}L`, icon: IndianRupee, color: 'text-blue-400', bg: 'bg-blue-900/30' },
-    { label: 'Total Employees Data', value: employees.length, icon: Users, color: 'text-emerald-400', bg: 'bg-emerald-900/30' },
+    { label: 'Total Employees Enrolled', value: employees.length, icon: Users, color: 'text-emerald-400', bg: 'bg-emerald-900/30' },
     { label: 'EPF Pool', value: `₹${totalEPF.toLocaleString()}`, icon: Building, color: 'text-amber-400', bg: 'bg-amber-900/30' },
     { label: 'Total LOP Days', value: totalLOP, icon: TrendingUp, color: 'text-red-400', bg: 'bg-red-900/30' },
   ];
