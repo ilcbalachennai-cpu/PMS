@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, KeyRound, UserX, Save, RefreshCw } from 'lucide-react';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User } from '../types';
@@ -132,7 +131,12 @@ const Reports: React.FC<ReportsProps> = ({
           return r;
       });
       setSavedRecords(updated);
-      setModalState({ isOpen: false, type: 'success', title: '', message: '' });
+      setModalState({ 
+          isOpen: true, 
+          type: 'success', 
+          title: 'Operation Successful', 
+          message: 'Data Frozen and Locked Successfully' 
+      });
   };
 
   const handleFreeze = () => {
