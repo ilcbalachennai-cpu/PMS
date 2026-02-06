@@ -150,6 +150,12 @@ export interface Employee {
   fatherSpouseName: string;
   relationship: string;
   
+  // New Family Relations Fields
+  maritalStatus?: 'Yes' | 'No';
+  spouseName?: string;
+  spouseGender?: 'Male' | 'Female' | 'Others' | string;
+  spouseAadhaar?: string;
+
   // GRANULAR ADDRESS Breakdown
   doorNo: string;
   buildingName: string;
@@ -161,6 +167,8 @@ export interface Employee {
   
   mobile: string;
   bankAccount: string;
+  bankName?: string; // New field
+  bankBranch?: string; // New field
   ifsc: string;
   doj: string;
   dol?: string;

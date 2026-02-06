@@ -33,8 +33,16 @@ const AVAILABLE_COLUMNS = [
     { key: 'pan', label: 'PAN' },
     { key: 'aadhaarNumber', label: 'Aadhaar' },
     { key: 'bankAccount', label: 'Bank Account' },
+    { key: 'bankName', label: 'Bank Name' },
+    { key: 'bankBranch', label: 'Bank Branch' },
     { key: 'ifsc', label: 'IFSC' },
     { key: 'fatherSpouseName', label: 'Father/Spouse' },
+    { key: 'relationship', label: 'Relationship' },
+    // New Fields
+    { key: 'maritalStatus', label: 'Married' },
+    { key: 'spouseName', label: 'Spouse Name' },
+    { key: 'spouseGender', label: 'Spouse Gender' },
+    { key: 'spouseAadhaar', label: 'Spouse Aadhaar' },
     { key: 'gender', label: 'Gender' },
     { key: 'dob', label: 'Date of Birth' },
     { key: 'grossPay', label: 'Gross Salary' },
@@ -51,7 +59,18 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   
   const [showRejoinPanel, setShowRejoinPanel] = useState(false);
   const [rejoinSearchTerm, setRejoinSearchTerm] = useState('');
-  const [authModal, setAuthModal] = useState({ isOpen: false, password: '', error: '', targetEmp: null as Employee | null });
+  
+  // Auth Modal State - Extended for Separation Unlock
+  const [authModal, setAuthModal] = useState({ 
+      isOpen: false, 
+      password: '', 
+      error: '', 
+      targetEmp: null as Employee | null,
+      mode: 'REJOIN' as 'REJOIN' | 'UNLOCK_SEPARATION'
+  });
+
+  // State to track if Separation fields are unlocked for editing
+  const [isSeparationUnlocked, setIsSeparationUnlocked] = useState(false);
 
   // New State for Import Report
   const [importSummary, setImportSummary] = useState<{
@@ -93,8 +112,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     site: sites[0] || '',
     pan: '', aadhaarNumber: '', uanc: '', pfNumber: '', esiNumber: '',
     fatherSpouseName: '', relationship: 'Father',
+    // New Fields Init
+    maritalStatus: 'No', spouseName: '', spouseGender: '', spouseAadhaar: '',
+    
     doorNo: '', buildingName: '', street: '', area: '', city: '', state: 'Tamil Nadu', pincode: '',
-    mobile: '', bankAccount: '', ifsc: '',
+    mobile: '', bankAccount: '', bankName: '', bankBranch: '', ifsc: '',
     basicPay: 0, da: 0, retainingAllowance: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, 
     specialAllowance1: 0, specialAllowance2: 0, specialAllowance3: 0,
     isPFExempt: false, isESIExempt: false, employeeVPFRate: 0, isPFHigherWages: false, isEmployerPFHigher: false,
@@ -147,18 +169,21 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     }
   };
 
-  const proceedToEdit = (emp: Employee) => {
+  const proceedToEdit = (emp: Employee, forceUnlock: boolean = false) => {
     setEditingId(emp.id);
     setNewEmpForm({ 
       ...getEmptyForm(), 
       ...emp,
       pfHigherPension: emp.pfHigherPension ? { ...emp.pfHigherPension } : getEmptyForm().pfHigherPension 
     });
+    // If DOL is set (Ex-Employee), default to Locked state unless forceUnlock is true (Rejoin). 
+    // If DOL is empty (Active), fields are open.
+    setIsSeparationUnlocked(forceUnlock || !emp.dol);
     setIsAdding(true);
   };
 
   const initiateRejoin = (emp: Employee) => {
-      setAuthModal({ isOpen: true, password: '', error: '', targetEmp: emp });
+      setAuthModal({ isOpen: true, password: '', error: '', targetEmp: emp, mode: 'REJOIN' });
   };
 
   const initiateDelete = (emp: Employee, e: React.MouseEvent) => {
@@ -183,13 +208,16 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
       }
   };
 
-  const confirmRejoinAuth = () => {
+  const handleAuthSubmit = () => {
       if (authModal.password === currentUser?.password && (currentUser?.role === 'Developer' || currentUser?.role === 'Administrator')) {
-          const target = authModal.targetEmp;
-          if (target) {
+          if (authModal.mode === 'REJOIN' && authModal.targetEmp) {
               setAuthModal({ ...authModal, isOpen: false });
               setShowRejoinPanel(false);
-              proceedToEdit(target);
+              // Pass true to force unlock separation fields for rejoining
+              proceedToEdit(authModal.targetEmp, true);
+          } else if (authModal.mode === 'UNLOCK_SEPARATION') {
+              setIsSeparationUnlocked(true);
+              setAuthModal({ ...authModal, isOpen: false });
           }
       } else {
           setAuthModal({ ...authModal, error: 'Access Denied: Invalid credentials or insufficient privileges.' });
@@ -316,9 +344,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
         "Employee ID", "Full Name", "Gender", "Date of Birth (DD-MM-YYYY)", "Designation", 
         "Department/Division", "Branch", "Site", "Date of Joining (DD-MM-YYYY)", 
         "Mobile Number", "Father or Spouse Name", "Relationship",
+        "Married (Yes/No)", "Spouse Name", "Spouse Gender", "Spouse Aadhaar Number",
         "Door No", "Building Name", "Street", "Area", "City", "State", "Pincode",
         "PAN Number", "Aadhaar Number", "UAN Number", "PF Member ID", "ESI Number",
-        "Bank Account Number", "IFSC Code",
+        "Bank Account Number", "Bank Name", "Bank Branch", "IFSC Code",
         "Basic Pay", "DA", "Retaining Allowance", "HRA", "Conveyance", 
         "Washing Allowance", "Attire Allowance", "Special Allowance 1", 
         "Special Allowance 2", "Special Allowance 3",
@@ -330,9 +359,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
         "EMP101", "John Doe", "Male", "15-05-1990", "Software Engineer", 
         "Engineering", "Chennai", "Main Plant", "01-01-2024", 
         "9876543210", "Jane Doe", "Spouse",
+        "Yes", "Jane Doe", "Female", "999988887777",
         "12A", "Sun Villa", "Main Road", "Guindy", "Chennai", "Tamil Nadu", "600032",
         "ABCDE1234F", "123456789012", "100234567890", "TN/MAS/0012345/000/0000101", "3112345678",
-        "50100012345678", "HDFC0000123",
+        "50100012345678", "HDFC Bank", "Adyar", "HDFC0000123",
         "15000", "5000", "0", "8000", "1600",
         "0", "0", "0", "0", "0",
         "FALSE", "FALSE", "", ""
@@ -365,8 +395,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 return;
             }
 
-            // --- SORT LOGIC START ---
-            // Sort data by Date of Joining to ensure Employee IDs are assigned chronologically
+            // ... (Sorting Logic Omitted for Brevity - kept same) ...
             data.sort((a: any, b: any) => {
                 const getRowDoj = (r: any) => {
                     const keys = ['Date of Joining (DD-MM-YYYY)', 'Date of Joining', 'DOJ', 'Joining Date'];
@@ -376,33 +405,27 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     }
                     return null;
                 };
-                
-                const parseSortDate = (val: any) => {
-                    if (!val) return 9999999999999; // Push empty dates to end
+                const parseSortDate = (val: any): number => {
+                    if (!val) return 9999999999999;
                     if (val instanceof Date) return val.getTime();
                     const str = String(val).trim();
-                    // DD-MM-YYYY
                     if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
                         const [d, m, y] = str.split('-').map(Number);
                         return new Date(y, m - 1, d).getTime();
                     }
-                    // Excel Serial
                     if (/^\d+$/.test(str) && Number(str) > 20000) {
-                        return (Number(str) - 25569) * 86400 * 1000;
+                        const excelDate = new Date((Number(str) - 25569) * 86400 * 1000);
+                        return excelDate.getTime();
                     }
-                    // ISO or other
                     const t = Date.parse(str);
                     return isNaN(t) ? 9999999999999 : t;
                 };
-
                 return parseSortDate(getRowDoj(a)) - parseSortDate(getRowDoj(b));
             });
-            // --- SORT LOGIC END ---
 
             const validNewEmployees: Employee[] = [];
             const rejectedRecords: { row: number; name: string; id: string; reason: string }[] = [];
             
-            // Build Quick Lookup Sets for Existing Data to detect duplicates
             const existingUAN = new Set(employees.filter(e => e.uanc).map(e => String(e.uanc).trim()));
             const existingAadhaar = new Set(employees.filter(e => e.aadhaarNumber).map(e => String(e.aadhaarNumber).trim()));
             const existingPAN = new Set(employees.filter(e => e.pan).map(e => String(e.pan).trim().toLowerCase()));
@@ -410,7 +433,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
             const existingPF = new Set(employees.filter(e => e.pfNumber).map(e => String(e.pfNumber).trim()));
             const existingID = new Set(employees.map(e => e.id.toLowerCase()));
 
-            // Sets for current batch to avoid self-duplication within the file
             const batchUAN = new Set();
             const batchAadhaar = new Set();
             const batchPAN = new Set();
@@ -418,7 +440,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
             const batchPF = new Set();
             const batchID = new Set();
 
-            // Calculate current max ID to auto-generate IDs for missing ones
             let currentMaxId = 0;
             employees.forEach(e => {
                 const match = e.id.match(/^EMP(\d+)$/);
@@ -429,7 +450,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
             });
 
             data.forEach((row: any, rowIndex: number) => {
-                const rowNum = rowIndex + 2; // Assuming header is row 1
+                const rowNum = rowIndex + 2; 
                 
                 const getVal = (keys: string[]) => {
                     for (const k of keys) {
@@ -439,57 +460,38 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     return null;
                 };
 
-                // ID LOGIC: Check provided ID
                 let id = String(getVal(['Employee ID', 'ID', 'Emp ID', 'EmpID']) || '').trim();
-                
-                // NAME LOGIC: Mandatory
                 const name = String(getVal(['Full Name', 'Name', 'Employee Name']) || '').trim();
                 if (!name || name === 'Unknown') {
                     rejectedRecords.push({ row: rowNum, name: 'Unknown', id: '', reason: "Missing 'Full Name'. Skipped." });
                     return; 
                 }
 
-                // IDENTIFIERS Extraction
                 const uan = String(getVal(['UAN Number', 'UAN', 'UAN No']) || '').trim();
                 const aadhaar = String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No']) || '').trim();
                 const pan = String(getVal(['PAN Number', 'PAN', 'PAN No']) || '').trim().toLowerCase();
                 const esi = String(getVal(['ESI Number', 'ESI IP Number', 'ESI No']) || '').trim();
                 const pf = String(getVal(['PF Member ID', 'PF ID', 'PF Number']) || '').trim();
 
-                // DUPLICATE CHECKS
                 const duplicateReasons: string[] = [];
-                if (uan) {
-                    if (existingUAN.has(uan) || batchUAN.has(uan)) duplicateReasons.push(`Duplicate UAN (${uan})`);
-                }
-                if (aadhaar) {
-                    if (existingAadhaar.has(aadhaar) || batchAadhaar.has(aadhaar)) duplicateReasons.push(`Duplicate Aadhaar (${aadhaar})`);
-                }
-                if (pan) {
-                    if (existingPAN.has(pan) || batchPAN.has(pan)) duplicateReasons.push(`Duplicate PAN (${pan.toUpperCase()})`);
-                }
-                if (esi) {
-                    if (existingESI.has(esi) || batchESI.has(esi)) duplicateReasons.push(`Duplicate ESI (${esi})`);
-                }
-                if (pf) {
-                    if (existingPF.has(pf) || batchPF.has(pf)) duplicateReasons.push(`Duplicate PF (${pf})`);
-                }
-                if (id) {
-                    if (existingID.has(id.toLowerCase()) || batchID.has(id.toLowerCase())) duplicateReasons.push(`Duplicate ID (${id})`);
-                }
+                if (uan) { if (existingUAN.has(uan) || batchUAN.has(uan)) duplicateReasons.push(`Duplicate UAN (${uan})`); }
+                if (aadhaar) { if (existingAadhaar.has(aadhaar) || batchAadhaar.has(aadhaar)) duplicateReasons.push(`Duplicate Aadhaar (${aadhaar})`); }
+                if (pan) { if (existingPAN.has(pan) || batchPAN.has(pan)) duplicateReasons.push(`Duplicate PAN (${pan.toUpperCase()})`); }
+                if (esi) { if (existingESI.has(esi) || batchESI.has(esi)) duplicateReasons.push(`Duplicate ESI (${esi})`); }
+                if (pf) { if (existingPF.has(pf) || batchPF.has(pf)) duplicateReasons.push(`Duplicate PF (${pf})`); }
+                if (id) { if (existingID.has(id.toLowerCase()) || batchID.has(id.toLowerCase())) duplicateReasons.push(`Duplicate ID (${id})`); }
 
                 if (duplicateReasons.length > 0) {
                     rejectedRecords.push({ row: rowNum, name, id, reason: duplicateReasons.join(', ') });
                     return;
                 }
 
-                // If valid, reserve identifiers in batch sets
                 if (uan) batchUAN.add(uan);
                 if (aadhaar) batchAadhaar.add(aadhaar);
                 if (pan) batchPAN.add(pan);
                 if (esi) batchESI.add(esi);
                 if (pf) batchPF.add(pf);
 
-                // Auto-generate ID if missing
                 if (!id) {
                     currentMaxId++;
                     id = `EMP${String(currentMaxId).padStart(3, '0')}`;
@@ -530,6 +532,12 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     mobile: String(getVal(['Mobile Number', 'Mobile', 'Mobile No']) || ''),
                     fatherSpouseName: String(getVal(['Father or Spouse Name', 'Father Name', 'Spouse Name']) || ''),
                     relationship: String(getVal(['Relationship']) || 'Father'),
+                    // New Fields Import
+                    maritalStatus: String(getVal(['Married (Yes/No)', 'Married', 'Marital Status']) || 'No') === 'Yes' ? 'Yes' : 'No',
+                    spouseName: String(getVal(['Spouse Name', 'Wife Name', 'Husband Name']) || ''),
+                    spouseGender: String(getVal(['Spouse Gender']) || '') as any,
+                    spouseAadhaar: String(getVal(['Spouse Aadhaar Number', 'Spouse Aadhaar', 'Spouse UID']) || ''),
+                    
                     doorNo: String(getVal(['Door No', 'House No', 'Flat No']) || ''),
                     buildingName: String(getVal(['Building Name', 'Apartment']) || ''),
                     street: String(getVal(['Street']) || ''),
@@ -543,6 +551,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     pfNumber: pf,
                     esiNumber: esi,
                     bankAccount: String(getVal(['Bank Account Number', 'Account No', 'Bank A/c']) || ''),
+                    bankName: String(getVal(['Bank Name', 'Bank']) || ''),
+                    bankBranch: String(getVal(['Bank Branch', 'Branch Name']) || ''),
                     ifsc: String(getVal(['IFSC Code', 'IFSC']) || ''),
                     basicPay: Number(getVal(['Basic Pay', 'Basic']) || 0),
                     da: Number(getVal(['DA', 'Dearness Allowance']) || 0),
@@ -564,7 +574,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 validNewEmployees.push(importedEmp);
             });
 
-            // Process Results
             if (validNewEmployees.length > 0) {
                 if (onBulkAddEmployees) {
                     onBulkAddEmployees(validNewEmployees);
@@ -575,7 +584,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 }
             }
 
-            // Set Import Summary to trigger Report Modal
             setImportSummary({
                 total: data.length,
                 success: validNewEmployees.length,
@@ -605,6 +613,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
     setIsAdding(false);
     setEditingId(null);
     setNewEmpForm(getEmptyForm());
+    setIsSeparationUnlocked(false);
   };
 
   const handleAddSubmit = (e: React.FormEvent) => {
@@ -640,6 +649,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
 
   return (
     <div className="space-y-6 text-white relative">
+      {/* ... (Existing search bar and header code) ... */}
       <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -662,7 +672,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
             <button onClick={() => setShowRejoinPanel(true)} className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all font-bold text-xs">
                 <RotateCcw size={16} /> Rejoin
             </button>
-            <button onClick={() => { setEditingId(null); setNewEmpForm(getEmptyForm()); setIsAdding(true); }} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-lg font-bold">
+            <button onClick={() => { setEditingId(null); setNewEmpForm(getEmptyForm()); setIsSeparationUnlocked(true); setIsAdding(true); }} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-lg font-bold">
                 <Plus size={18} /> Add New
             </button>
         </div>
@@ -681,6 +691,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* ... (Existing Table and Side Panel code) ... */}
         <div className="lg:col-span-2 bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl overflow-hidden h-fit max-h-[800px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-left table-fixed">
                 <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-widest font-bold sticky top-0 z-10">
@@ -840,94 +851,25 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
           </div>
       </div>
 
-      {/* IMPORT SUMMARY MODAL */}
-      {importSummary && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-[#1e293b] w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl border border-slate-700 shadow-2xl">
-                {/* Header */}
-                <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-[#0f172a] rounded-t-2xl">
-                    <div>
-                        <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                            <Upload size={20} className="text-blue-400" /> Import Result
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-1">
-                            Processed {importSummary.total} rows from Excel file.
-                        </p>
-                    </div>
-                    <button onClick={() => setImportSummary(null)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+      {/* AUTH MODAL FOR REJOIN OR UNLOCK SEPARATION */}
+      {authModal.isOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
+                <button onClick={() => setAuthModal({...authModal, isOpen: false})} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                <div className="flex flex-col items-center gap-2">
+                    <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><KeyRound size={24} /></div>
+                    <h3 className="text-lg font-bold text-white text-center">Admin Access Required</h3>
+                    <p className="text-xs text-slate-400 text-center">
+                        {authModal.mode === 'REJOIN' 
+                            ? 'Enter Developer/Admin password to modify ex-employee records.' 
+                            : 'Enter Developer/Admin password to edit restricted separation details.'}
+                    </p>
                 </div>
-                
-                {/* Body */}
-                <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                    <div className="grid grid-cols-2 gap-4 mb-6">
-                        <div className="bg-emerald-900/20 border border-emerald-500/30 p-4 rounded-xl flex items-center justify-between">
-                            <div>
-                                <p className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider">Successful</p>
-                                <h4 className="text-2xl font-black text-emerald-300">{importSummary.success}</h4>
-                            </div>
-                            <CheckCircle className="text-emerald-500 opacity-50" size={32} />
-                        </div>
-                        <div className="bg-red-900/20 border border-red-500/30 p-4 rounded-xl flex items-center justify-between">
-                            <div>
-                                <p className="text-[10px] text-red-400 uppercase font-bold tracking-wider">Failed / Duplicate</p>
-                                <h4 className="text-2xl font-black text-red-300">{importSummary.failed}</h4>
-                            </div>
-                            <FileX className="text-red-500 opacity-50" size={32} />
-                        </div>
-                    </div>
-
-                    {importSummary.failed > 0 && (
-                        <div className="bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden">
-                            <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 text-xs font-bold text-slate-300 uppercase">
-                                Error Details ({importSummary.failed})
-                            </div>
-                            <div className="max-h-60 overflow-y-auto custom-scrollbar">
-                                <table className="w-full text-left text-xs">
-                                    <thead className="bg-slate-800 text-slate-400 sticky top-0">
-                                        <tr>
-                                            <th className="px-4 py-2 w-16">Row</th>
-                                            <th className="px-4 py-2">Employee</th>
-                                            <th className="px-4 py-2 text-red-300">Reason for Failure</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-700 text-slate-300">
-                                        {importSummary.errors.map((err, i) => (
-                                            <tr key={i} className="hover:bg-slate-800/50">
-                                                <td className="px-4 py-2 font-mono text-slate-500">{err.row}</td>
-                                                <td className="px-4 py-2">
-                                                    <div className="font-bold text-white">{err.name}</div>
-                                                    <div className="text-[10px] text-slate-500">{err.id}</div>
-                                                </td>
-                                                <td className="px-4 py-2 text-red-400">{err.reason}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    )}
-                    {importSummary.failed === 0 && (
-                        <div className="flex flex-col items-center justify-center py-8 text-emerald-400">
-                            <CheckCircle size={48} className="mb-2" />
-                            <p className="font-bold">All records imported successfully!</p>
-                        </div>
-                    )}
+                <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                    <input type="password" placeholder="Enter Password" autoFocus className={`w-full bg-[#0f172a] border ${authModal.error ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all text-sm`} value={authModal.password} onChange={(e) => setAuthModal({...authModal, password: e.target.value, error: ''})} onKeyDown={(e) => e.key === 'Enter' && handleAuthSubmit()} />
+                    {authModal.error && <p className="text-[10px] text-red-400 font-bold text-center animate-pulse">{authModal.error}</p>}
                 </div>
-                
-                {/* Footer */}
-                <div className="p-4 border-t border-slate-700 bg-[#1e293b] flex justify-end gap-3 rounded-b-2xl">
-                    {importSummary.failed > 0 && (
-                        <>
-                            <button onClick={() => handleDownloadImportReport('PDF')} className="px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/50 rounded-lg font-bold text-xs transition-colors flex items-center gap-2">
-                                <FileText size={16} /> PDF Report
-                            </button>
-                            <button onClick={() => handleDownloadImportReport('Excel')} className="px-4 py-2 bg-emerald-900/20 hover:bg-emerald-900/40 text-emerald-400 border border-emerald-900/50 rounded-lg font-bold text-xs transition-colors flex items-center gap-2">
-                                <FileSpreadsheet size={16} /> Excel Report
-                            </button>
-                        </>
-                    )}
-                    <button onClick={() => setImportSummary(null)} className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold text-sm transition-colors">Close</button>
-                </div>
+                <button onClick={handleAuthSubmit} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-900/20 transition-all text-sm">CONFIRM ACCESS</button>
             </div>
         </div>
       )}
@@ -1029,21 +971,94 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
         </div>
       )}
 
-      {/* AUTH MODAL FOR REJOIN */}
-      {authModal.isOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                <button onClick={() => setAuthModal({...authModal, isOpen: false})} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
-                <div className="flex flex-col items-center gap-2">
-                    <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><KeyRound size={24} /></div>
-                    <h3 className="text-lg font-bold text-white text-center">Admin Access Required</h3>
-                    <p className="text-xs text-slate-400 text-center">Enter Developer/Admin password to modify ex-employee records.</p>
+      {/* IMPORT SUMMARY MODAL */}
+      {importSummary && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl border border-slate-700 shadow-2xl">
+                {/* Header */}
+                <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-[#0f172a] rounded-t-2xl">
+                    <div>
+                        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                            <Upload size={20} className="text-blue-400" /> Import Result
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                            Processed {importSummary.total} rows from Excel file.
+                        </p>
+                    </div>
+                    <button onClick={() => setImportSummary(null)} className="text-slate-400 hover:text-white"><X size={20} /></button>
                 </div>
-                <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                    <input type="password" placeholder="Enter Password" autoFocus className={`w-full bg-[#0f172a] border ${authModal.error ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all text-sm`} value={authModal.password} onChange={(e) => setAuthModal({...authModal, password: e.target.value, error: ''})} onKeyDown={(e) => e.key === 'Enter' && confirmRejoinAuth()} />
-                    {authModal.error && <p className="text-[10px] text-red-400 font-bold text-center animate-pulse">{authModal.error}</p>}
+                
+                {/* Body */}
+                <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                        <div className="bg-emerald-900/20 border border-emerald-500/30 p-4 rounded-xl flex items-center justify-between">
+                            <div>
+                                <p className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider">Successful</p>
+                                <h4 className="text-2xl font-black text-emerald-300">{importSummary.success}</h4>
+                            </div>
+                            <CheckCircle className="text-emerald-500 opacity-50" size={32} />
+                        </div>
+                        <div className="bg-red-900/20 border border-red-500/30 p-4 rounded-xl flex items-center justify-between">
+                            <div>
+                                <p className="text-[10px] text-red-400 uppercase font-bold tracking-wider">Failed / Duplicate</p>
+                                <h4 className="text-2xl font-black text-red-300">{importSummary.failed}</h4>
+                            </div>
+                            <FileX className="text-red-500 opacity-50" size={32} />
+                        </div>
+                    </div>
+
+                    {importSummary.failed > 0 && (
+                        <div className="bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden">
+                            <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 text-xs font-bold text-slate-300 uppercase">
+                                Error Details ({importSummary.failed})
+                            </div>
+                            <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-800 text-slate-400 sticky top-0">
+                                        <tr>
+                                            <th className="px-4 py-2 w-16">Row</th>
+                                            <th className="px-4 py-2">Employee</th>
+                                            <th className="px-4 py-2 text-red-300">Reason for Failure</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-700 text-slate-300">
+                                        {importSummary.errors.map((err, i) => (
+                                            <tr key={i} className="hover:bg-slate-800/50">
+                                                <td className="px-4 py-2 font-mono text-slate-500">{err.row}</td>
+                                                <td className="px-4 py-2">
+                                                    <div className="font-bold text-white">{err.name}</div>
+                                                    <div className="text-[10px] text-slate-500">{err.id}</div>
+                                                </td>
+                                                <td className="px-4 py-2 text-red-400">{err.reason}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                    {importSummary.failed === 0 && (
+                        <div className="flex flex-col items-center justify-center py-8 text-emerald-400">
+                            <CheckCircle size={48} className="mb-2" />
+                            <p className="font-bold">All records imported successfully!</p>
+                        </div>
+                    )}
                 </div>
-                <button onClick={confirmRejoinAuth} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-900/20 transition-all text-sm">CONFIRM ACCESS</button>
+                
+                {/* Footer */}
+                <div className="p-4 border-t border-slate-700 bg-[#1e293b] flex justify-end gap-3 rounded-b-2xl">
+                    {importSummary.failed > 0 && (
+                        <>
+                            <button onClick={() => handleDownloadImportReport('PDF')} className="px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/50 rounded-lg font-bold text-xs transition-colors flex items-center gap-2">
+                                <FileText size={16} /> PDF Report
+                            </button>
+                            <button onClick={() => handleDownloadImportReport('Excel')} className="px-4 py-2 bg-emerald-900/20 hover:bg-emerald-900/40 text-emerald-400 border border-emerald-900/50 rounded-lg font-bold text-xs transition-colors flex items-center gap-2">
+                                <FileSpreadsheet size={16} /> Excel Report
+                            </button>
+                        </>
+                    )}
+                    <button onClick={() => setImportSummary(null)} className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold text-sm transition-colors">Close</button>
+                </div>
             </div>
         </div>
       )}
@@ -1102,7 +1117,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                         
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Date of Joining</label><input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.doj} onChange={e => setNewEmpForm({...newEmpForm, doj: e.target.value})} /></div>
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Designation</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.designation} onChange={e => setNewEmpForm({...newEmpForm, designation: e.target.value})}>{designations.map(d => <option key={d}>{d}</option>)}</select></div>
+                        <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Department/Division</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.division} onChange={e => setNewEmpForm({...newEmpForm, division: e.target.value})}>{divisions.map(d => <option key={d}>{d}</option>)}</select></div>
+
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Work Branch</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.branch} onChange={e => setNewEmpForm({...newEmpForm, branch: e.target.value})}>{branches.map(b => <option key={b}>{b}</option>)}</select></div>
+                        <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Site</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.site} onChange={e => setNewEmpForm({...newEmpForm, site: e.target.value})}>{sites.map(s => <option key={s}>{s}</option>)}</select></div>
                     </div>
                 </div>
               </div>
@@ -1110,9 +1128,55 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                  <div>
                     <FormSectionHeader icon={Home} title="2. Family Relations" />
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-900/30 p-4 rounded-xl border border-slate-800">
+                        {/* Parent / General Relation */}
                         <div className="col-span-2 space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Father / Spouse Name</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.fatherSpouseName} onChange={e => setNewEmpForm({...newEmpForm, fatherSpouseName: e.target.value})} /></div>
-                        <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Relationship</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.relationship} onChange={e => setNewEmpForm({...newEmpForm, relationship: e.target.value})}><option>Father</option><option>Spouse</option><option>Mother</option><option>Guardian</option></select></div>
+                        <div className="col-span-2 space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Relationship</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.relationship} onChange={e => setNewEmpForm({...newEmpForm, relationship: e.target.value})}><option>Father</option><option>Spouse</option><option>Mother</option><option>Guardian</option></select></div>
+                        
+                        {/* Spouse Details - Conditional */}
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Married</label>
+                            <select 
+                                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none"
+                                value={newEmpForm.maritalStatus || 'No'}
+                                onChange={e => setNewEmpForm({...newEmpForm, maritalStatus: e.target.value as 'Yes'|'No'})}
+                            >
+                                <option value="No">No</option>
+                                <option value="Yes">Yes</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Name</label>
+                            <input 
+                                className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none transition-colors ${newEmpForm.maritalStatus === 'Yes' ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`} 
+                                disabled={newEmpForm.maritalStatus !== 'Yes'}
+                                value={newEmpForm.spouseName || ''} 
+                                onChange={e => setNewEmpForm({...newEmpForm, spouseName: e.target.value})} 
+                            />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Gender</label>
+                            <select 
+                                className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none transition-colors ${newEmpForm.maritalStatus === 'Yes' ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
+                                disabled={newEmpForm.maritalStatus !== 'Yes'}
+                                value={newEmpForm.spouseGender || ''} 
+                                onChange={e => setNewEmpForm({...newEmpForm, spouseGender: e.target.value})}
+                            >
+                                <option value="">Select...</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                                <option value="Others">Others</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Aadhaar No</label>
+                            <input 
+                                className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none font-mono transition-colors ${newEmpForm.maritalStatus === 'Yes' ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
+                                disabled={newEmpForm.maritalStatus !== 'Yes'}
+                                value={newEmpForm.spouseAadhaar || ''} 
+                                onChange={e => setNewEmpForm({...newEmpForm, spouseAadhaar: e.target.value})} 
+                            />
+                        </div>
                     </div>
                  </div>
                  
@@ -1120,7 +1184,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     <FormSectionHeader icon={MapPinned} title="3. Residential Address" />
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Door No / House No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.doorNo} onChange={e => setNewEmpForm({...newEmpForm, doorNo: e.target.value})} /></div>
-                        <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Building / Flat Name</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.buildingName} onChange={e => setNewEmpForm({...newEmpForm, buildingName: e.target.value})} /></div>
+                        <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase">Building / Flat Name</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.buildingName} onChange={e => setNewEmpForm({...newEmpForm, buildingName: e.target.value})} /></div>
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Street</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.street} onChange={e => setNewEmpForm({...newEmpForm, street: e.target.value})} /></div>
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Area</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.area} onChange={e => setNewEmpForm({...newEmpForm, area: e.target.value})} /></div>
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">City / Town</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.city} onChange={e => setNewEmpForm({...newEmpForm, city: e.target.value})} /></div>
@@ -1132,8 +1196,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
 
               <div>
                 <FormSectionHeader icon={Landmark} title="4. Banking & Disbursement" color="text-indigo-400" />
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-indigo-900/5 p-6 rounded-2xl border border-indigo-900/20">
-                    <div className="space-y-1.5 md:col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Bank Account Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.bankAccount} onChange={e => setNewEmpForm({...newEmpForm, bankAccount: e.target.value})} /></div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-indigo-900/5 p-6 rounded-2xl border border-indigo-900/20">
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Bank Name</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.bankName || ''} onChange={e => setNewEmpForm({...newEmpForm, bankName: e.target.value})} placeholder="e.g. HDFC Bank" /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Bank Branch</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.bankBranch || ''} onChange={e => setNewEmpForm({...newEmpForm, bankBranch: e.target.value})} placeholder="e.g. Adyar" /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Bank Account Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.bankAccount} onChange={e => setNewEmpForm({...newEmpForm, bankAccount: e.target.value})} /></div>
                     <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">IFSC Code</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none uppercase" value={newEmpForm.ifsc} onChange={e => setNewEmpForm({...newEmpForm, ifsc: e.target.value})} /></div>
                 </div>
               </div>
@@ -1164,6 +1230,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PAN Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none uppercase" value={newEmpForm.pan} onChange={e => setNewEmpForm({...newEmpForm, pan: e.target.value})} /></div>
                     <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Aadhaar No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.aadhaarNumber} onChange={e => setNewEmpForm({...newEmpForm, aadhaarNumber: e.target.value})} /></div>
                     <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">UAN Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.uanc} onChange={e => setNewEmpForm({...newEmpForm, uanc: e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PF No.</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.pfNumber} onChange={e => setNewEmpForm({...newEmpForm, pfNumber: e.target.value})} /></div>
                     <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ESI IP Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({...newEmpForm, esiNumber: e.target.value})} />
                     </div>
                 </div>
@@ -1300,28 +1367,41 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 </div>
               </div>
 
-              <div className="bg-red-900/5 p-6 rounded-2xl border border-red-900/20">
-                  <FormSectionHeader icon={LogOut} title="7. Separation Details (If Applicable)" color="text-red-400" />
+              <div className="bg-red-900/5 p-6 rounded-2xl border border-red-900/20 relative">
+                  <FormSectionHeader icon={LogOut} title="7. Separation Details (If Applicable)" color="text-red-400" 
+                    extra={!isSeparationUnlocked && (
+                        <button type="button" onClick={() => setAuthModal({ isOpen: true, password: '', error: '', targetEmp: null, mode: 'UNLOCK_SEPARATION' })} className="text-[10px] bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/50 px-3 py-1 rounded-lg flex items-center gap-1 font-bold transition-all">
+                            <KeyRound size={12} /> Unlock Editing
+                        </button>
+                    )}
+                  />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-1.5">
                           <label className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Date of Leaving</label>
-                          <input type="date" className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:ring-1 focus:ring-red-500" value={newEmpForm.dol || ''} onChange={e => setNewEmpForm({...newEmpForm, dol: e.target.value})} />
+                          <input 
+                            type="date" 
+                            className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none focus:ring-1 focus:ring-red-500 ${!isSeparationUnlocked ? 'opacity-50 cursor-not-allowed border-slate-800' : 'border-red-900/50'}`}
+                            value={newEmpForm.dol || ''} 
+                            onChange={e => setNewEmpForm({...newEmpForm, dol: e.target.value})} 
+                            disabled={!isSeparationUnlocked}
+                          />
                       </div>
                       <div className="space-y-1.5">
-    <label className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Reason for Leaving</label>
-    <select 
-        className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:ring-1 focus:ring-red-500" 
-        value={newEmpForm.leavingReason || ''} 
-        onChange={e => setNewEmpForm({...newEmpForm, leavingReason: e.target.value})}
-    >
-        <option value="">Select Reason...</option>
-        <option value="Resignation">Resignation</option>
-        <option value="Retirement">Retirement</option>
-        <option value="Termination">Termination</option>
-        <option value="Suspension">Suspension</option>
-        <option value="Death">Death</option>
-    </select>
-</div>
+                        <label className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Reason for Leaving</label>
+                        <select 
+                            className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none focus:ring-1 focus:ring-red-500 ${!isSeparationUnlocked ? 'opacity-50 cursor-not-allowed border-slate-800' : 'border-red-900/50'}`} 
+                            value={newEmpForm.leavingReason || ''} 
+                            onChange={e => setNewEmpForm({...newEmpForm, leavingReason: e.target.value})}
+                            disabled={!isSeparationUnlocked}
+                        >
+                            <option value="">Select Reason...</option>
+                            <option value="Resignation">Resignation</option>
+                            <option value="Retirement">Retirement</option>
+                            <option value="Termination">Termination</option>
+                            <option value="Suspension">Suspension</option>
+                            <option value="Death">Death</option>
+                        </select>
+                    </div>
                   </div>
               </div>
 
