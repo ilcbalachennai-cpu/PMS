@@ -28,6 +28,7 @@ interface ReportsProps {
   advanceLedgers: AdvanceLedger[];
   setAdvanceLedgers: (a: AdvanceLedger[]) => void;
   currentUser?: User;
+  onRollover: () => void;
 }
 
 const Reports: React.FC<ReportsProps> = ({
@@ -43,7 +44,8 @@ const Reports: React.FC<ReportsProps> = ({
   setYear,
   leaveLedgers,
   advanceLedgers,
-  currentUser
+  currentUser,
+  onRollover
 }) => {
   const [reportType, setReportType] = useState<string>('Pay Sheet');
   const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
@@ -57,6 +59,7 @@ const Reports: React.FC<ReportsProps> = ({
     title: string;
     message: string | React.ReactNode;
     onConfirm?: () => void;
+    onClose?: () => void;
   }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
   // Zero Wage / Exit Mark Modal State
@@ -88,7 +91,6 @@ const Reports: React.FC<ReportsProps> = ({
   useEffect(() => {
       const tempKey = `app_temp_payroll_${month}_${year}`;
       const tempData = localStorage.getItem(tempKey);
-      // If temp data exists and is not empty array, we have unsaved changes
       if (tempData) {
           try {
               const parsed = JSON.parse(tempData);
@@ -101,16 +103,11 @@ const Reports: React.FC<ReportsProps> = ({
       }
   }, [month, year]);
 
-  // Helper to get 1st day of the selected wage month
-  // Logic: Calculate string for 1st of the currently selected month and year. (YYYY-MM-01)
-  // This ensures inputs with type="date" default to the 1st of the payroll month correctly.
   const getPayrollPeriodStart = () => {
       const mIdx = months.indexOf(month);
-      // Construct date in local time string YYYY-MM-DD manually to avoid UTC shifts
       return `${year}-${String(mIdx + 1).padStart(2, '0')}-01`;
   };
 
-  // Helper to get Last day of the selected wage month for Max Date restriction
   const getPayrollPeriodEnd = () => {
       const mIdx = months.indexOf(month);
       const lastDay = new Date(year, mIdx + 1, 0).getDate();
@@ -119,7 +116,6 @@ const Reports: React.FC<ReportsProps> = ({
 
   const handleReportTypeChange = (type: string) => {
       setReportType(type);
-      // Automatically force PDF for Pay Slips as Excel is not supported
       if (type === 'Pay Slips') {
           setFormat('PDF');
       }
@@ -131,11 +127,17 @@ const Reports: React.FC<ReportsProps> = ({
           return r;
       });
       setSavedRecords(updated);
+      
+      // SHOW SUCCESS MESSAGE
       setModalState({ 
           isOpen: true, 
           type: 'success', 
           title: 'Operation Successful', 
-          message: 'Data Frozen and Locked Successfully' 
+          message: 'Data Frozen and Locked Successfully',
+          onClose: () => {
+              // TRIGGER ROLLOVER ONLY AFTER MODAL IS CLOSED
+              onRollover(); 
+          }
       });
   };
 
@@ -160,15 +162,13 @@ const Reports: React.FC<ReportsProps> = ({
 
     if (zw.length > 0) {
         const defaultDOL = getPayrollPeriodStart();
-
-        // Initialize Edit Data
         const initialExitData: Record<string, { dol: string, reason: string }> = {};
         zw.forEach(r => {
             const emp = employees.find(e => e.id === r.employeeId);
             if (emp) {
                 initialExitData[emp.id] = {
-                    dol: emp.dol || defaultDOL, // Set default if empty to 1st of current payroll month
-                    reason: emp.leavingReason || 'Resignation' // Default to Resignation
+                    dol: emp.dol || defaultDOL,
+                    reason: emp.leavingReason || 'Resignation'
                 };
             }
         });
@@ -193,12 +193,11 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const processExitAndFreeze = () => {
-      // 1. Validate Data - Ensure no bad dates (e.g. 0202 year) are submitted
       const invalidEntries = Object.entries(exitData).filter(([_, val]) => {
           const data = val as { dol: string, reason: string };
-          if (!data.dol) return true; // Empty date
+          if (!data.dol) return true;
           const yearVal = parseInt(data.dol.split('-')[0]);
-          return yearVal < 2000 || yearVal > 2100; // Sanity check for year
+          return yearVal < 2000 || yearVal > 2100;
       });
 
       if (invalidEntries.length > 0) {
@@ -211,7 +210,6 @@ const Reports: React.FC<ReportsProps> = ({
           return;
       }
 
-      // 2. Update Master Data
       const updatedEmployees = employees.map(emp => {
           if (exitData[emp.id]) {
               return {
@@ -223,12 +221,8 @@ const Reports: React.FC<ReportsProps> = ({
           return emp;
       });
       setEmployees(updatedEmployees);
-
-      // 3. Close Modal
       setZeroWageEmployees([]);
       setExitData({});
-
-      // 4. Freeze
       executeFreeze();
   };
 
@@ -269,7 +263,6 @@ const Reports: React.FC<ReportsProps> = ({
     setIsGenerating(true);
     setTimeout(() => {
       try {
-        // Payroll Data Check
         if ((reportType === 'Pay Sheet' || reportType === 'Pay Slips' || reportType === 'Bank Statement') && currentResults.length === 0) {
              throw new Error("No payroll data found for this period. Please run & save payroll in Pay Process first.");
         }
@@ -286,8 +279,6 @@ const Reports: React.FC<ReportsProps> = ({
                         'Name': emp?.name,
                         'Designation': emp?.designation,
                         'Days Paid': r.payableDays,
-                        
-                        // Detailed Earnings
                         'Basic': r.earnings?.basic,
                         'DA': r.earnings?.da,
                         'Retaining Allw': r.earnings?.retainingAllowance,
@@ -301,8 +292,6 @@ const Reports: React.FC<ReportsProps> = ({
                         'Bonus': r.earnings?.bonus,
                         'Leave Encash': r.earnings?.leaveEncashment,
                         'GROSS EARNINGS': r.earnings?.total,
-
-                        // Detailed Deductions
                         'PF (EE)': r.deductions?.epf,
                         'VPF': r.deductions?.vpf,
                         'ESI (EE)': r.deductions?.esi,
@@ -312,7 +301,6 @@ const Reports: React.FC<ReportsProps> = ({
                         'Advance': r.deductions?.advanceRecovery,
                         'Fine': r.deductions?.fine,
                         'TOTAL DEDUCTIONS': r.deductions?.total,
-
                         'NET PAY': r.netPay
                     };
                 });
@@ -345,10 +333,7 @@ const Reports: React.FC<ReportsProps> = ({
                 generateBankStatementPDF(currentResults, employees, month, year, companyProfile);
             }
         } else if (reportType === 'Leave Ledger') {
-             // Use snapshot from payroll result for historical accuracy if available
              const resultsMap = new Map<string, PayrollResult>(currentResults.map(r => [r.employeeId, r]));
-             
-             // Filter Active Employees for the selected period
              const periodStart = new Date(year, months.indexOf(month), 1);
              const periodEnd = new Date(year, months.indexOf(month) + 1, 0);
              
@@ -366,18 +351,13 @@ const Reports: React.FC<ReportsProps> = ({
 
              if (format === 'Excel') {
                  const data = activeEmps.map(e => {
-                     // Priority: 1. Snapshot from Frozen Payroll (accurate history), 2. Global Ledger (current state - fallback)
                      const snapshot = resultsMap.get(e.id)?.leaveSnapshot;
                      const liveLedger = leaveLedgers.find(led => led.employeeId === e.id);
-                     
-                     // Use snapshot if available, otherwise fallback to current state (might be inaccurate for past months)
                      const l = snapshot || liveLedger || {
                          el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
                          sl: { eligible: 0, availed: 0, balance: 0 },
                          cl: { accumulation: 0, availed: 0, balance: 0 }
                      };
-                     
-                     // Calculate Total Used (Availed + Encashed)
                      const elUsed = (l.el.availed || 0) + (l.el.encashed || 0);
 
                      return {
@@ -385,7 +365,7 @@ const Reports: React.FC<ReportsProps> = ({
                          'Name': e.name,
                          'EL Opening': l.el.opening || 0,
                          'EL Credit': l.el.eligible || 0,
-                         'EL Used': elUsed, // Sum of availed and encashed
+                         'EL Used': elUsed,
                          'EL Balance': l.el.balance || 0,
                          'SL Credit': l.sl.eligible || 0,
                          'SL Availed': l.sl.availed || 0,
@@ -397,12 +377,10 @@ const Reports: React.FC<ReportsProps> = ({
                  });
                  generateExcelReport(data, 'Leave Ledger', `LeaveLedger_${month}_${year}`);
              } else {
-                 // Pass results directly so PDF generator can access snapshots
                  generateLeaveLedgerReport(currentResults, activeEmps, month, year, 'AC', companyProfile);
              }
 
         } else if (reportType === 'Advance Shortfall') {
-             // Calculate shortfall
              const shortfallData = currentResults.map(r => {
                  const emp = employees.find(e => e.id === r.employeeId);
                  const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
@@ -436,6 +414,14 @@ const Reports: React.FC<ReportsProps> = ({
         setIsGenerating(false);
       }
     }, 500);
+  };
+
+  const handleModalClose = () => {
+      // Execute the onClose callback (Rollover) if defined
+      if (modalState.onClose) {
+          modalState.onClose();
+      }
+      setModalState({ ...modalState, isOpen: false, onClose: undefined });
   };
 
   return (
@@ -732,7 +718,7 @@ const Reports: React.FC<ReportsProps> = ({
       {modalState.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                <button onClick={handleModalClose} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                 <div className="flex flex-col items-center gap-2">
                     <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>
                         {modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle2 size={24} /> : <Lock size={24} />}
@@ -744,11 +730,11 @@ const Reports: React.FC<ReportsProps> = ({
                 <div className="flex gap-3 mt-4">
                     {modalState.type === 'confirm' ? (
                         <>
-                            <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors">Cancel</button>
+                            <button onClick={handleModalClose} className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors">Cancel</button>
                             <button onClick={modalState.onConfirm} className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg">Confirm</button>
                         </>
                     ) : (
-                        <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
+                        <button onClick={handleModalClose} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
                     )}
                 </div>
             </div>
