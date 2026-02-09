@@ -62,7 +62,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         "Employee ID", "Name", 
         "Present Days", "EL (Availed)", "EL Encash", "SL (Sick)", "CL (Casual)", "LOP",
         "New Advance", "Monthly EMI", "Adv Manual Pay",
-        "Fine Amount", "Fine Reason"
+        "Income Tax", "Fine Amount", "Fine Reason"
     ];
 
     // Filter for active employees for the current period logic could be applied, 
@@ -87,6 +87,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             adv?.totalAdvance || 0,
             adv?.monthlyInstallment || 0,
             adv?.paidAmount || 0,
+            fine?.tax || 0,
             fine?.amount || 0,
             fine?.reason || ''
         ];
@@ -170,17 +171,28 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     });
                 }
 
-                // 3. Process Fines
+                // 3. Process Fines & Tax
                 const fineAmt = Number(row['Fine Amount'] || 0);
                 const fineReason = String(row['Fine Reason'] || '').trim();
                 
-                if (fineAmt > 0) {
+                // Flexible Tax Key Search
+                const taxKeys = ['Income Tax', 'Tax', 'TDS'];
+                let taxVal = 0;
+                for (const k of taxKeys) {
+                    if (row[k] !== undefined) {
+                        taxVal = Number(row[k]);
+                        break;
+                    }
+                }
+                
+                if (fineAmt > 0 || taxVal > 0) {
                     newFines.push({
                         employeeId: empId,
                         month: props.month,
                         year: props.year,
                         amount: fineAmt,
-                        reason: fineReason
+                        reason: fineReason,
+                        tax: taxVal
                     });
                 }
             });
@@ -284,7 +296,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         <div className="flex gap-1 overflow-x-auto pb-1">
             <TabButton id="attendance" label="1. Attendance" icon={CalendarDays} />
             <TabButton id="ledgers" label="2. Advances" icon={Wallet} />
-            <TabButton id="fines" label="3. Fines" icon={Gavel} />
+            <TabButton id="fines" label="3. Tax & Fines" icon={Gavel} />
             <TabButton id="payroll" label="4. Run Payroll" icon={Calculator} />
         </div>
       </div>

@@ -64,21 +64,24 @@ const FineManager: React.FC<FineManagerProps> = ({
     });
   }, [employees, month, year, searchTerm]);
 
-  const handleUpdate = (empId: string, field: 'amount' | 'reason', value: string | number) => {
+  const handleUpdate = (empId: string, field: 'amount' | 'reason' | 'tax', value: string | number) => {
       if (isLocked || justSaved) return;
 
       const existingIndex = fines.findIndex(f => f.employeeId === empId && f.month === month && f.year === year);
       let newFines = [...fines];
 
+      const newVal = (field === 'amount' || field === 'tax') && value === '' ? undefined : value;
+
       if (existingIndex >= 0) {
-          newFines[existingIndex] = { ...newFines[existingIndex], [field]: value };
+          newFines[existingIndex] = { ...newFines[existingIndex], [field]: newVal };
       } else {
           newFines.push({
               employeeId: empId,
               month,
               year,
-              amount: field === 'amount' ? Number(value) : 0,
-              reason: field === 'reason' ? String(value) : ''
+              amount: field === 'amount' ? Number(newVal) : 0,
+              reason: field === 'reason' ? String(newVal) : '',
+              tax: field === 'tax' ? Number(newVal) : undefined
           });
       }
       setFines(newFines);
@@ -94,22 +97,22 @@ const FineManager: React.FC<FineManagerProps> = ({
           setModalState({
               isOpen: true,
               type: 'success',
-              title: 'Fines Updated',
-              message: 'Fine register has been saved successfully.'
+              title: 'Records Updated',
+              message: 'Tax & Fine register has been saved successfully.'
           });
       }, 500);
   };
 
   const downloadTemplate = () => {
-      const headers = ["Employee ID", "Name", "Fine Amount", "Reason"];
+      const headers = ["Employee ID", "Name", "Income Tax", "Fine Amount", "Reason"];
       const data = filteredEmployees.map(e => {
           const f = fines.find(rec => rec.employeeId === e.id && rec.month === month && rec.year === year);
-          return [e.id, e.name, f?.amount || 0, f?.reason || '']; 
+          return [e.id, e.name, f?.tax || 0, f?.amount || 0, f?.reason || '']; 
       });
       const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Fine_Register");
-      XLSX.writeFile(wb, `Fine_Register_Template_${month}_${year}.xlsx`);
+      XLSX.utils.book_append_sheet(wb, ws, "Tax_Fine_Register");
+      XLSX.writeFile(wb, `Tax_Fine_Template_${month}_${year}.xlsx`);
   };
 
   const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,21 +136,32 @@ const FineManager: React.FC<FineManagerProps> = ({
                   const id = String(row['Employee ID'] || row['ID'] || '').trim();
                   const amount = Number(row['Fine Amount'] || row['Amount'] || 0);
                   const reason = String(row['Reason'] || row['Fine Reason'] || '').trim();
+                  
+                  // Flexible Tax Keys
+                  const taxKeys = ['Income Tax', 'Tax', 'TDS', 'IT'];
+                  let taxVal = 0;
+                  for (const k of taxKeys) {
+                      if (row[k] !== undefined) {
+                          taxVal = Number(row[k]);
+                          break;
+                      }
+                  }
 
-                  if (id && amount > 0) {
+                  if (id && (amount > 0 || taxVal > 0)) {
                       newFines.push({
                           employeeId: id,
                           month,
                           year,
                           amount,
-                          reason
+                          reason,
+                          tax: taxVal
                       });
                       count++;
                   }
               });
 
               setFines(newFines);
-              setModalState({ isOpen: true, type: 'success', title: 'Import Successful', message: `Imported ${count} fine records.` });
+              setModalState({ isOpen: true, type: 'success', title: 'Import Successful', message: `Imported ${count} records.` });
           } catch (err) {
               setModalState({ isOpen: true, type: 'error', title: 'Import Error', message: 'Failed to parse file.' });
           } finally {
@@ -165,7 +179,7 @@ const FineManager: React.FC<FineManagerProps> = ({
                 <Lock size={20} className="text-amber-400" />
                 <div>
                     <h3 className="font-bold text-amber-200 text-sm">Register Locked</h3>
-                    <p className="text-xs text-amber-300/80">Payroll finalized. Fines cannot be modified.</p>
+                    <p className="text-xs text-amber-300/80">Payroll finalized. Records cannot be modified.</p>
                 </div>
             </div>
         )}
@@ -186,7 +200,7 @@ const FineManager: React.FC<FineManagerProps> = ({
                     <Gavel size={24} />
                 </div>
                 <div>
-                    <h2 className="text-lg font-bold text-white">Fine Register</h2>
+                    <h2 className="text-lg font-bold text-white">Tax & Fine Register</h2>
                     {!hideContextSelector && <p className="text-xs text-slate-400">{month} {year}</p>}
                 </div>
             </div>
@@ -214,13 +228,14 @@ const FineManager: React.FC<FineManagerProps> = ({
                 <thead className="bg-[#0f172a] text-xs font-bold uppercase text-slate-400">
                     <tr>
                         <th className="px-6 py-4">Employee</th>
+                        <th className="px-4 py-4 text-right">Income Tax (₹)</th>
                         <th className="px-4 py-4 text-right">Fine Amount (₹)</th>
                         <th className="px-6 py-4">Reason / Remarks</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                     {filteredEmployees.map(emp => {
-                        const rec = fines.find(f => f.employeeId === emp.id && f.month === month && f.year === year) || { amount: 0, reason: '' };
+                        const rec = fines.find(f => f.employeeId === emp.id && f.month === month && f.year === year) || { amount: 0, reason: '', tax: undefined };
                         const inputDisabled = isLocked || justSaved;
                         
                         return (
@@ -228,6 +243,16 @@ const FineManager: React.FC<FineManagerProps> = ({
                                 <td className="px-6 py-4">
                                     <div className="text-sm font-bold text-white">{emp.name}</div>
                                     <div className="text-[10px] text-slate-500">{emp.id}</div>
+                                </td>
+                                <td className="px-4 py-4 text-right">
+                                    <input 
+                                        type="number" 
+                                        disabled={inputDisabled}
+                                        className={`w-32 bg-[#0f172a] border rounded-lg p-2 text-right text-sm font-mono outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent ${rec.tax !== undefined && rec.tax > 0 ? 'text-sky-400 font-bold border-sky-900/50' : 'text-slate-400 border-slate-700'}`}
+                                        value={rec.tax !== undefined ? rec.tax : ''}
+                                        onChange={e => handleUpdate(emp.id, 'tax', e.target.value)}
+                                        placeholder="Auto"
+                                    />
                                 </td>
                                 <td className="px-4 py-4 text-right">
                                     <input 

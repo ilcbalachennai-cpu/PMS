@@ -1,5 +1,6 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, Search, Edit2, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, Download, X, Save, MapPin, Trash2, Maximize2, UserPlus, CheckCircle, CheckCircle2, AlertTriangle, Home, IndianRupee, ShieldCheck, MapPinned, CreditCard, Building2, UserMinus, Camera, LogOut, RotateCcw, KeyRound, FileSpreadsheet, FileText, CheckSquare, Square, Filter, Loader2, DatabaseZap, ListPlus, FileX } from 'lucide-react';
+import { Plus, Search, Edit2, User2, Briefcase, Landmark, ShieldAlert, Fingerprint, Upload, Phone, Download, X, Save, MapPin, Trash2, Maximize2, UserPlus, CheckCircle, CheckCircle2, AlertTriangle, Home, IndianRupee, ShieldCheck, MapPinned, CreditCard, Building2, UserMinus, Camera, LogOut, RotateCcw, KeyRound, FileSpreadsheet, FileText, CheckSquare, Square, Filter, Loader2, DatabaseZap, ListPlus, FileX, Scale, Lock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, User, CompanyProfile } from '../types';
 import { INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS } from '../constants';
@@ -339,38 +340,52 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
   };
 
   const handleDownloadTemplate = () => {
-    const templateHeaders = [
-        "Employee ID", "Full Name", "Gender", "Date of Birth (DD-MM-YYYY)", "Designation", 
-        "Department/Division", "Branch", "Site", "Date of Joining (DD-MM-YYYY)", 
-        "Mobile Number", "Father or Spouse Name", "Relationship",
-        "Married (Yes/No)", "Spouse Name", "Spouse Gender", "Spouse Aadhaar Number",
-        "Door No", "Building Name", "Street", "Area", "City", "State", "Pincode",
-        "PAN Number", "Aadhaar Number", "UAN Number", "PF Member ID", "ESI Number",
-        "Bank Account Number", "Bank Name", "Bank Branch", "IFSC Code",
-        "Basic Pay", "DA", "Retaining Allowance", "HRA", "Conveyance", 
-        "Washing Allowance", "Attire Allowance", "Special Allowance 1", 
-        "Special Allowance 2", "Special Allowance 3",
-        "PF Exempt (TRUE/FALSE)", "ESI Exempt (TRUE/FALSE)",
-        "Date of Leaving (DD-MM-YYYY)", "Reason for Leaving"
-    ];
+    try {
+        const templateHeaders = [
+            "Employee ID", "Full Name", "Gender", "Date of Birth (DD-MM-YYYY)", "Designation", 
+            "Department/Division", "Branch", "Site", "Date of Joining (DD-MM-YYYY)", 
+            "Mobile Number", "Father or Spouse Name", "Relationship",
+            "Married (Yes/No)", "Spouse Name", "Spouse Gender", "Spouse Aadhaar Number",
+            "Door No", "Building Name", "Street", "Area", "City", "State", "Pincode",
+            "PAN Number", "Aadhaar Number", "UAN Number", "PF Member ID", "ESI Number",
+            "Bank Account Number", "Bank Name", "Bank Branch", "IFSC Code",
+            "Basic Pay", "DA", "Retaining Allowance", "HRA", "Conveyance", 
+            "Washing Allowance", "Attire Allowance", "Special Allowance 1", 
+            "Special Allowance 2", "Special Allowance 3",
+            // New Fields - Expanded
+            "PF Exempt (Yes/No)", "ESI Exempt (Yes/No)",
+            "Higher Pension Enabled (Yes/No)",
+            "HP: Pre-2014 Contrib (Yes/No)",
+            "HP: EPF Membership Date (DD-MM-YYYY)",
+            "HP: EE Contrib (Regular/Higher)",
+            "HP: ER Contrib (Regular/Higher)",
+            "HP: Joint Option (Yes/No)",
+            "Date of Leaving (DD-MM-YYYY)", "Reason for Leaving"
+        ];
 
-    const sampleRow = [
-        "EMP101", "John Doe", "Male", "15-05-1990", "Software Engineer", 
-        "Engineering", "Chennai", "Main Plant", "01-01-2024", 
-        "9876543210", "Jane Doe", "Spouse",
-        "Yes", "Jane Doe", "Female", "999988887777",
-        "12A", "Sun Villa", "Main Road", "Guindy", "Chennai", "Tamil Nadu", "600032",
-        "ABCDE1234F", "123456789012", "100234567890", "TN/MAS/0012345/000/0000101", "3112345678",
-        "50100012345678", "HDFC Bank", "Adyar", "HDFC0000123",
-        "15000", "5000", "0", "8000", "1600",
-        "0", "0", "0", "0", "0",
-        "FALSE", "FALSE", "", ""
-    ];
+        const sampleRow = [
+            "EMP101", "John Doe", "Male", "15-05-1990", "Software Engineer", 
+            "Engineering", "Chennai", "Main Plant", "01-01-2024", 
+            "9876543210", "Jane Doe", "Spouse",
+            "Yes", "Jane Doe", "Female", "999988887777",
+            "12A", "Sun Villa", "Main Road", "Guindy", "Chennai", "Tamil Nadu", "600032",
+            "ABCDE1234F", "123456789012", "100234567890", "TN/MAS/0012345/000/0000101", "3112345678",
+            "50100012345678", "HDFC Bank", "Adyar", "HDFC0000123",
+            "15000", "5000", "0", "8000", "1600",
+            "0", "0", "0", "0", "0",
+            "No", "No", 
+            "No", "No", "", "Regular", "Regular", "No",
+            "", ""
+        ];
 
-    const ws = XLSX.utils.aoa_to_sheet([templateHeaders, sampleRow]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "EmployeeMasterTemplate");
-    XLSX.writeFile(wb, "BharatPay_Employee_Master_Template.xlsx");
+        const ws = XLSX.utils.aoa_to_sheet([templateHeaders, sampleRow]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "EmployeeMasterTemplate");
+        XLSX.writeFile(wb, "BharatPay_Employee_Master_Template.xlsx");
+    } catch (err: any) {
+        console.error("Template Error:", err);
+        alert("Failed to download template. Please check file permissions.");
+    }
   };
 
   const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -516,6 +531,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     return str;
                 };
 
+                const isTrue = (val: any) => String(val).trim().toUpperCase() === 'TRUE' || String(val).trim().toUpperCase() === 'YES';
+
                 const importedEmp: Employee = {
                     ...getEmptyForm() as Employee,
                     id,
@@ -563,8 +580,21 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     specialAllowance1: Number(getVal(['Special Allowance 1', 'Special 1']) || 0),
                     specialAllowance2: Number(getVal(['Special Allowance 2', 'Special 2']) || 0),
                     specialAllowance3: Number(getVal(['Special Allowance 3', 'Special 3']) || 0),
-                    isPFExempt: String(getVal(['PF Exempt', 'PF Exempted'])).toUpperCase() === 'TRUE',
-                    isESIExempt: String(getVal(['ESI Exempt', 'ESI Exempted'])).toUpperCase() === 'TRUE',
+                    
+                    isPFExempt: isTrue(getVal(['PF Exempt', 'PF Exempted'])),
+                    isESIExempt: isTrue(getVal(['ESI Exempt', 'ESI Exempted'])),
+                    
+                    // Higher Pension Import
+                    pfHigherPension: {
+                        enabled: isTrue(getVal(['Higher Pension Enabled', 'HP Enabled'])),
+                        contributedBefore2014: isTrue(getVal(['HP: Pre-2014 Contrib'])) ? 'Yes' : 'No',
+                        dojImpact: '',
+                        employeeContribution: (String(getVal(['HP: EE Contrib'])).includes('Higher') ? 'Higher' : 'Regular'),
+                        employerContribution: (String(getVal(['HP: ER Contrib'])).includes('Higher') ? 'Higher' : 'Regular'),
+                        isHigherPensionOpted: isTrue(getVal(['HP: Joint Option'])) ? 'Yes' : 'No'
+                    },
+                    epfMembershipDate: parseIndDate(getVal(['HP: EPF Membership Date'])),
+
                     dol: parseIndDate(getVal(['Date of Leaving', 'Date of Leaving (DD-MM-YYYY)', 'DOL'])),
                     leavingReason: String(getVal(['Reason for Leaving', 'Reason']) || ''),
                     serviceRecords: [{ date: parseIndDate(getVal(['Date of Joining', 'DOJ'])) || new Date().toISOString().split('T')[0], type: 'Appointment', description: 'Imported from Excel' }]
@@ -1185,70 +1215,172 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
 
               <div>
                 <FormSectionHeader icon={Landmark} title="4. Banking & Disbursement" color="text-indigo-400" />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-indigo-900/5 p-6 rounded-2xl border border-indigo-900/20">
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Bank Name</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.bankName || ''} onChange={e => setNewEmpForm({...newEmpForm, bankName: e.target.value})} placeholder="e.g. HDFC Bank" /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Bank Branch</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.bankBranch || ''} onChange={e => setNewEmpForm({...newEmpForm, bankBranch: e.target.value})} placeholder="e.g. Adyar" /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Bank Account Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.bankAccount} onChange={e => setNewEmpForm({...newEmpForm, bankAccount: e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">IFSC Code</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none uppercase" value={newEmpForm.ifsc} onChange={e => setNewEmpForm({...newEmpForm, ifsc: e.target.value})} /></div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-indigo-900/10 p-6 rounded-2xl border border-indigo-500/20">
+                    <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Bank Account No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-indigo-500" value={newEmpForm.bankAccount} onChange={e => setNewEmpForm({...newEmpForm, bankAccount: e.target.value})} /></div>
+                    <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">IFSC Code</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-indigo-500" value={newEmpForm.ifsc} onChange={e => setNewEmpForm({...newEmpForm, ifsc: e.target.value.toUpperCase()})} /></div>
+                    <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Bank Name</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:border-indigo-500" value={newEmpForm.bankName} onChange={e => setNewEmpForm({...newEmpForm, bankName: e.target.value})} /></div>
+                    <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Bank Branch</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:border-indigo-500" value={newEmpForm.bankBranch} onChange={e => setNewEmpForm({...newEmpForm, bankBranch: e.target.value})} /></div>
                 </div>
               </div>
 
               <div>
-                <FormSectionHeader 
-                    icon={IndianRupee} 
-                    title={`5. Monthly Compensation Structure (Gross ₹ ${calculateGrossWage(newEmpForm).toLocaleString()})`} 
-                    color="text-emerald-400" 
-                />
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-6 bg-emerald-900/5 p-6 rounded-2xl border border-emerald-900/20">
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">Basic Pay*</label><input required type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-bold font-mono outline-none" value={newEmpForm.basicPay} onChange={e => setNewEmpForm({...newEmpForm, basicPay: +e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">DA</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.da} onChange={e => setNewEmpForm({...newEmpForm, da: +e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">Retn Allow</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.retainingAllowance} onChange={e => setNewEmpForm({...newEmpForm, retainingAllowance: +e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">HRA</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.hra} onChange={e => setNewEmpForm({...newEmpForm, hra: +e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">Conveyance</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.conveyance} onChange={e => setNewEmpForm({...newEmpForm, conveyance: +e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">Washing</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.washing} onChange={e => setNewEmpForm({...newEmpForm, washing: +e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">Attire</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.attire} onChange={e => setNewEmpForm({...newEmpForm, attire: +e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">Special-1</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.specialAllowance1} onChange={e => setNewEmpForm({...newEmpForm, specialAllowance1: +e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">Special-2</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.specialAllowance2} onChange={e => setNewEmpForm({...newEmpForm, specialAllowance2: +e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">Special-3</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.specialAllowance3} onChange={e => setNewEmpForm({...newEmpForm, specialAllowance3: +e.target.value})} /></div>
+                <FormSectionHeader icon={Briefcase} title="5. Salary Structure & Allowances" color="text-emerald-400" />
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Basic Pay</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.basicPay} onChange={e => setNewEmpForm({...newEmpForm, basicPay: +e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">DA</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.da} onChange={e => setNewEmpForm({...newEmpForm, da: +e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Retaining Allow</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.retainingAllowance} onChange={e => setNewEmpForm({...newEmpForm, retainingAllowance: +e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">HRA</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.hra} onChange={e => setNewEmpForm({...newEmpForm, hra: +e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Conveyance</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.conveyance} onChange={e => setNewEmpForm({...newEmpForm, conveyance: +e.target.value})} /></div>
+                    
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Washing Allow</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.washing} onChange={e => setNewEmpForm({...newEmpForm, washing: +e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Attire Allow</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.attire} onChange={e => setNewEmpForm({...newEmpForm, attire: +e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Special Allow 1</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance1} onChange={e => setNewEmpForm({...newEmpForm, specialAllowance1: +e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Special Allow 2</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance2} onChange={e => setNewEmpForm({...newEmpForm, specialAllowance2: +e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Special Allow 3</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance3} onChange={e => setNewEmpForm({...newEmpForm, specialAllowance3: +e.target.value})} /></div>
+                </div>
+                <div className="mt-4 p-4 bg-emerald-900/10 border border-emerald-500/20 rounded-xl flex justify-between items-center">
+                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Total Gross Salary</span>
+                    <span className="text-2xl font-black text-white font-mono">₹{calculateGrossWage(newEmpForm).toLocaleString()}</span>
                 </div>
               </div>
 
               <div>
-                <FormSectionHeader icon={ShieldCheck} title="6. Statutory IDs & Options" color="text-amber-400" />
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PAN Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none uppercase" value={newEmpForm.pan} onChange={e => setNewEmpForm({...newEmpForm, pan: e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Aadhaar No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.aadhaarNumber} onChange={e => setNewEmpForm({...newEmpForm, aadhaarNumber: e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">UAN Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.uanc} onChange={e => setNewEmpForm({...newEmpForm, uanc: e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PF No.</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.pfNumber} onChange={e => setNewEmpForm({...newEmpForm, pfNumber: e.target.value})} /></div>
-                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ESI IP Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({...newEmpForm, esiNumber: e.target.value})} />
-                    </div>
+                <FormSectionHeader icon={ShieldCheck} title="6. Statutory Identity Numbers" color="text-amber-400" />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PAN No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500 uppercase" value={newEmpForm.pan} onChange={e => setNewEmpForm({...newEmpForm, pan: e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Aadhaar No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.aadhaarNumber} onChange={e => setNewEmpForm({...newEmpForm, aadhaarNumber: e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">UAN No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.uanc} onChange={e => setNewEmpForm({...newEmpForm, uanc: e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PF Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.pfNumber} onChange={e => setNewEmpForm({...newEmpForm, pfNumber: e.target.value})} /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ESI Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({...newEmpForm, esiNumber: e.target.value})} /></div>
                 </div>
+              </div>
 
-                <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 mt-8 mb-4">
-                    <div className="flex items-center gap-3 mb-4">
-                        <input type="checkbox" className="w-5 h-5 rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500" 
-                            checked={newEmpForm.pfHigherPension?.enabled || false}
-                            onChange={e => setNewEmpForm({...newEmpForm, pfHigherPension: { ...newEmpForm.pfHigherPension!, enabled: e.target.checked }})}
-                        />
-                        <label className="text-sm font-bold text-white">Enable Higher Pension Options (EPS 95)</label>
-                    </div>
-                    {newEmpForm.pfHigherPension?.enabled && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-8 border-l-2 border-slate-700">
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Option Status</label>
-                                <select className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.isHigherPensionOpted} onChange={e => setNewEmpForm({...newEmpForm, pfHigherPension: { ...newEmpForm.pfHigherPension!, isHigherPensionOpted: e.target.value as any }})}>
-                                    <option value="No">No</option>
-                                    <option value="Yes">Yes</option>
-                                </select>
-                            </div>
+              <div>
+                <FormSectionHeader icon={ShieldAlert} title="7. Statutory Options & Exemptions" color="text-amber-400" />
+                <div className="bg-slate-900/30 p-6 rounded-xl border border-slate-800 space-y-6">
+                    
+                    {/* A. PF Exempted */}
+                    <div className="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700">
+                        <div>
+                            <h4 className="text-sm font-bold text-white">A. PF Exempted (Para 69)</h4>
+                            <p className="text-[10px] text-slate-400">Employee excluded from EPF coverage. (Also disables Higher Pension)</p>
                         </div>
-                    )}
-                </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" className="sr-only peer" checked={newEmpForm.isPFExempt} onChange={e => {
+                                const isExempt = e.target.checked;
+                                setNewEmpForm(prev => ({
+                                    ...prev, 
+                                    isPFExempt: isExempt,
+                                    // Disable Higher Pension if Exempt
+                                    pfHigherPension: isExempt ? { ...prev.pfHigherPension!, enabled: false } : prev.pfHigherPension
+                                }));
+                            }} />
+                            <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                        </label>
+                    </div>
 
-                <div className="flex justify-end gap-4 border-t border-slate-800 pt-6">
-                    <button type="button" onClick={handleCloseModal} className="px-6 py-3 rounded-xl font-bold text-slate-400 hover:bg-slate-800 transition-colors">Cancel</button>
-                    <button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-all flex items-center gap-2"><Save size={18} /> Save Details</button>
+                    {/* B. ESI Exempted */}
+                    <div className="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700">
+                        <div>
+                            <h4 className="text-sm font-bold text-white">B. ESI Exempted</h4>
+                            <p className="text-[10px] text-slate-400">Above Wage Ceiling or not covered.</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" className="sr-only peer" checked={newEmpForm.isESIExempt} onChange={e => setNewEmpForm({...newEmpForm, isESIExempt: e.target.checked})} />
+                            <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                        </label>
+                    </div>
+
+                    {/* Higher Pension Block (Moved Here) */}
+                    <div className={`border-t border-slate-800 pt-6 space-y-4 ${newEmpForm.isPFExempt ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
+                       <div className="flex items-center justify-between">
+                           <div>
+                               <h4 className="text-sm font-bold text-amber-400">Enable Higher Pension Option (EPS 95)</h4>
+                               <p className="text-[10px] text-slate-400">Apply for Higher Pension on Actual Wages (Joint Option).</p>
+                           </div>
+                           <label className="relative inline-flex items-center cursor-pointer">
+                               <input type="checkbox" className="sr-only peer" checked={newEmpForm.pfHigherPension?.enabled} onChange={e => setNewEmpForm(prev => ({...prev, pfHigherPension: { ...prev.pfHigherPension!, enabled: e.target.checked }}))} />
+                               <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                           </label>
+                       </div>
+
+                       {newEmpForm.pfHigherPension?.enabled && (
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-800/50 p-4 rounded-xl border border-slate-700 animate-in slide-in-from-top-2">
+                               <div className="space-y-1.5">
+                                   <label className="text-[9px] font-bold text-slate-400 uppercase">1. Contributed on Higher Wages pre-2014?</label>
+                                   <select className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.contributedBefore2014} onChange={e => setNewEmpForm(prev => ({...prev, pfHigherPension: { ...prev.pfHigherPension!, contributedBefore2014: e.target.value as any }}))}>
+                                       <option>No</option><option>Yes</option>
+                                   </select>
+                               </div>
+                               <div className="space-y-1.5">
+                                   <label className="text-[9px] font-bold text-slate-400 uppercase">2. EPF Membership Date (DOJ Impact)</label>
+                                   <input type="date" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.epfMembershipDate} onChange={e => setNewEmpForm({...newEmpForm, epfMembershipDate: e.target.value})} />
+                               </div>
+                               <div className="space-y-1.5">
+                                   <label className="text-[9px] font-bold text-slate-400 uppercase">3. Employee Contribution Type</label>
+                                   <select className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.employeeContribution} onChange={e => setNewEmpForm(prev => ({...prev, pfHigherPension: { ...prev.pfHigherPension!, employeeContribution: e.target.value as any }}))}>
+                                       <option>Regular</option><option>Higher</option>
+                                   </select>
+                               </div>
+                               <div className="space-y-1.5">
+                                   <label className="text-[9px] font-bold text-slate-400 uppercase">4. Employer Contribution Type</label>
+                                   <select className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.employerContribution} onChange={e => setNewEmpForm(prev => ({...prev, pfHigherPension: { ...prev.pfHigherPension!, employerContribution: e.target.value as any }}))}>
+                                       <option>Regular</option><option>Higher</option>
+                                   </select>
+                               </div>
+                               <div className="space-y-1.5 col-span-2">
+                                   <label className="text-[9px] font-bold text-slate-400 uppercase">5. Joint Option Exercised?</label>
+                                   <select className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.isHigherPensionOpted} onChange={e => setNewEmpForm(prev => ({...prev, pfHigherPension: { ...prev.pfHigherPension!, isHigherPensionOpted: e.target.value as any }}))}>
+                                       <option>No</option><option>Yes</option>
+                                   </select>
+                               </div>
+                           </div>
+                       )}
+                    </div>
+
                 </div>
+              </div>
+
+              {/* Separation Details - VISIBLE ONLY if editing existing employee */}
+              {editingId && (
+                  <div>
+                    <div className="flex items-center justify-between mb-6 border-b border-red-900/30 pb-2">
+                        <div className="flex items-center gap-3">
+                            <UserMinus size={18} className="text-red-400" />
+                            <h3 className="text-xs font-black uppercase tracking-widest text-red-400">8. Separation & Final Settlement</h3>
+                        </div>
+                        {!isSeparationUnlocked && (
+                            <button type="button" onClick={() => setAuthModal({ isOpen: true, password: '', error: '', targetEmp: null, mode: 'UNLOCK_SEPARATION' })} className="flex items-center gap-2 text-[10px] font-bold bg-red-900/20 text-red-400 px-3 py-1.5 rounded-lg border border-red-900/30 hover:bg-red-900/40 transition-colors">
+                                <Lock size={12} /> Unlock Restricted Fields
+                            </button>
+                        )}
+                    </div>
+                    <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 p-6 rounded-2xl border transition-all ${isSeparationUnlocked ? 'bg-red-900/10 border-red-500/30' : 'bg-slate-900/30 border-slate-800 opacity-60 pointer-events-none'}`}>
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-red-300 uppercase tracking-widest">Date of Leaving (DOL)</label>
+                            <input type="date" className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:border-red-500" value={newEmpForm.dol} onChange={e => setNewEmpForm({...newEmpForm, dol: e.target.value})} />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-red-300 uppercase tracking-widest">Reason for Leaving</label>
+                            <select className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:border-red-500" value={newEmpForm.leavingReason} onChange={e => setNewEmpForm({...newEmpForm, leavingReason: e.target.value})}>
+                                <option value="">Select Reason...</option>
+                                <option value="Resignation">Resignation</option>
+                                <option value="Retirement">Retirement</option>
+                                <option value="Termination">Termination</option>
+                                <option value="Death">Death</option>
+                                <option value="Absconding">Absconding</option>
+                                <option value="Disablement">Permanent Disablement</option>
+                            </select>
+                        </div>
+                    </div>
+                  </div>
+              )}
+
+              <div className="flex justify-end gap-4 pt-6 border-t border-slate-800">
+                <button type="button" onClick={handleCloseModal} className="px-6 py-3 rounded-xl font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-all text-sm">Cancel</button>
+                <button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all text-sm flex items-center gap-2">
+                    <Save size={18} /> Save Record
+                </button>
               </div>
             </form>
           </div>

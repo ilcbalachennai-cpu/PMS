@@ -28,6 +28,7 @@ export interface FineRecord {
   year: number;
   amount: number;
   reason: string;
+  tax?: number; // New field for Income Tax (TDS) Override
 }
 
 export interface LeavePolicy {
@@ -85,18 +86,18 @@ export interface StatutoryConfig {
     special3: boolean;
   };
 
-  // NEW: Leave Wages Calculation Components
+  // NEW: Leave Wages Calculation Policy (Default Basic + DA)
   leaveWagesComponents: {
-    basic: boolean;
-    da: boolean;
-    retaining: boolean;
-    hra: boolean;
-    conveyance: boolean;
-    washing: boolean;
-    attire: boolean;
-    special1: boolean;
-    special2: boolean;
-    special3: boolean;
+    basic: true,
+    da: true,
+    retaining: false,
+    hra: false,
+    conveyance: false,
+    washing: false,
+    attire: false,
+    special1: false,
+    special2: false,
+    special3: false
   };
 }
 

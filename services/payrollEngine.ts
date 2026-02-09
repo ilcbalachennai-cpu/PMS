@@ -193,10 +193,9 @@ export const calculatePayroll = (
     if (hc.special2) higherWageBase += special2;
     if (hc.special3) higherWageBase += special3;
 
-    if (higherWageBase > basePFWage) {
-        basePFWage = Math.round(higherWageBase);
-        isCode88 = false; 
-    }
+    // If Higher Wages is enabled in configuration, use it directly and ignore Code Wages (50% rule)
+    basePFWage = Math.round(higherWageBase);
+    isCode88 = false; 
   }
 
   let epfEmployee = 0;
@@ -298,26 +297,49 @@ export const calculatePayroll = (
   let esiRemark = exitRemark || '';
 
   if (!employee.isESIExempt) {
-    const esiWageBase = isOptOut ? Math.round(wageA + wageD) : basePFWage;
-    let effectiveESIWage = esiWageBase;
-
-    if (Math.abs(effectiveESIWage - grossEarnings) > 1) {
+    // ESI Wage Base according to Code on Wages (Clause 88): Wage A + Wage D
+    const esiWageBase = Math.round(wageA + wageD);
+    
+    if (wageD > 0) {
         isESICodeWagesUsed = true;
     }
 
-    if (effectiveESIWage > config.esiCeiling) {
-        if (month === 'April' || month === 'October') {
+    // Determine if Excluded from Coverage
+    // Step 1: Check if Basic+DA+Retaining > ESI Ceiling
+    // Step 2: Otherwise Check if Code Wages (esiWageBase) > ESI Ceiling
+    let isAboveCeiling = false;
+    
+    if (wageA > config.esiCeiling) {
+        isAboveCeiling = true;
+    } else if (esiWageBase > config.esiCeiling) {
+        isAboveCeiling = true;
+    }
+
+    if (isAboveCeiling) {
+        // Under both steps check if Employee is going out of coverage
+        const isStartOfPeriod = month === 'April' || month === 'October';
+        
+        const periodStart = new Date(year, monthIdx, 1);
+        periodStart.setHours(0,0,0,0);
+        
+        const empDOJ = new Date(employee.doj);
+        empDOJ.setHours(0,0,0,0);
+        const isNewJoinee = empDOJ >= periodStart;
+
+        if (isStartOfPeriod || isNewJoinee) {
              esiEmployee = 0;
              esiEmployer = 0;
-             esiRemark = 'IP is out of coverage';
+             esiRemark = 'IP is out of coverage (Salary > Ceiling)';
              isESICodeWagesUsed = false;
         } else {
-             esiEmployee = Math.ceil(effectiveESIWage * config.esiEmployeeRate);
-             esiEmployer = Math.ceil(effectiveESIWage * config.esiEmployerRate);
+             // Continued Coverage
+             esiEmployee = Math.ceil(esiWageBase * config.esiEmployeeRate);
+             esiEmployer = Math.ceil(esiWageBase * config.esiEmployerRate);
+             esiRemark = 'Continued Coverage (Mid-Period)';
         }
     } else {
-        esiEmployee = Math.ceil(effectiveESIWage * config.esiEmployeeRate);
-        esiEmployer = Math.ceil(effectiveESIWage * config.esiEmployerRate);
+        esiEmployee = Math.ceil(esiWageBase * config.esiEmployeeRate);
+        esiEmployer = Math.ceil(esiWageBase * config.esiEmployerRate);
     }
   }
 
@@ -381,15 +403,20 @@ export const calculatePayroll = (
       }
   }
 
-  // Income Tax
-  let incomeTax = 0;
-  const annualTaxable = (grossEarnings * 12) - 50000;
-  if (annualTaxable > 700000) incomeTax = Math.round(((annualTaxable - 700000) * 0.1) / 12);
-
-  // --- FINE / DAMAGES ---
+  // --- FINE / DAMAGES & TAX ---
   const fineRecord = fines.find(f => f.employeeId === employee.id && f.month === month && f.year === year);
-  const fineAmount = fineRecord ? fineRecord.amount : 0;
-  const fineReason = fineRecord ? fineRecord.reason : '';
+  const fineAmount = fineRecord ? (fineRecord.amount || 0) : 0;
+  const fineReason = fineRecord ? (fineRecord.reason || '') : '';
+  const manualTax = fineRecord ? fineRecord.tax : undefined;
+
+  // Income Tax (Preference: Manual Override > Auto Calculation)
+  let incomeTax = 0;
+  if (manualTax !== undefined && manualTax !== null) {
+      incomeTax = manualTax;
+  } else {
+      const annualTaxable = (grossEarnings * 12) - 50000;
+      if (annualTaxable > 700000) incomeTax = Math.round(((annualTaxable - 700000) * 0.1) / 12);
+  }
 
   // --- ADVANCE RECOVERY Logic (Code on Wages 2020) ---
   const statutoryDeductions = epfEmployee + vpfEmployee + esiEmployee + pt + incomeTax + lwfEmployee;
