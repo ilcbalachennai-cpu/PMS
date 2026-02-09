@@ -1,5 +1,6 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -35,7 +36,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         leaveWagesComponents: {
             ...INITIAL_STATUTORY_CONFIG.leaveWagesComponents,
             ...(config.leaveWagesComponents || {})
-        }
+        },
+        incomeTaxCalculationType: config.incomeTaxCalculationType || INITIAL_STATUTORY_CONFIG.incomeTaxCalculationType
     };
   });
 
@@ -628,6 +630,28 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Total (₹)</label><div className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-emerald-400 font-mono font-bold">{(formData.lwfEmployeeContribution + formData.lwfEmployerContribution).toLocaleString()}</div></div>
                </div>
                )}
+            </div>
+
+            {/* Income Tax Config */}
+            <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+               <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center gap-3"><Wallet className="text-sky-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">Income Tax (TDS) Calculation</h3></div>
+               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                   <div className="text-xs text-slate-400 leading-relaxed">
+                       Choose how Income Tax is determined during payroll processing.
+                       <ul className="list-disc pl-4 mt-2 space-y-1 text-slate-500">
+                           <li><b>Manual:</b> Uses imported/entered tax value from 'Tax & Fines'. Zero values are respected.</li>
+                           <li><b>Auto:</b> Calculates based on taxable salary if imported value is zero/missing. Imported non-zero values override auto calculation.</li>
+                       </ul>
+                   </div>
+                   <div className="flex gap-4">
+                       <button onClick={() => setFormData({...formData, incomeTaxCalculationType: 'Manual'})} className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Manual' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
+                           {formData.incomeTaxCalculationType === 'Manual' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Manual (As per Import)
+                       </button>
+                       <button onClick={() => setFormData({...formData, incomeTaxCalculationType: 'Auto'})} className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Auto' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
+                           {formData.incomeTaxCalculationType === 'Auto' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Auto (Taxable Salary)
+                       </button>
+                   </div>
+               </div>
             </div>
         </div>
       )}

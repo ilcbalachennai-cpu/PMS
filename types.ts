@@ -68,6 +68,9 @@ export interface StatutoryConfig {
   lwfEmployeeContribution: number;
   lwfEmployerContribution: number;
   
+  // IT Configuration
+  incomeTaxCalculationType: 'Manual' | 'Auto';
+
   bonusRate: number;
   pfComplianceType: PFComplianceType; // Company-level compliance
 

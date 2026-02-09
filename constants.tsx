@@ -79,6 +79,9 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
   lwfEmployeeContribution: 10,
   lwfEmployerContribution: 20,
   
+  // IT Config
+  incomeTaxCalculationType: 'Manual',
+
   bonusRate: 0.0833,
   pfComplianceType: 'Statutory',
 

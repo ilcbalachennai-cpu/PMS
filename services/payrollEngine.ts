@@ -194,8 +194,12 @@ export const calculatePayroll = (
     if (hc.special3) higherWageBase += special3;
 
     // If Higher Wages is enabled in configuration, use it directly and ignore Code Wages (50% rule)
-    basePFWage = Math.round(higherWageBase);
-    isCode88 = false; 
+    // ONLY IF the calculated Higher Wage is GREATER THAN OR EQUAL to Statutory Ceiling
+    if (higherWageBase >= config.epfCeiling) {
+        basePFWage = Math.round(higherWageBase);
+        isCode88 = false; 
+    }
+    // Else: Fallback to existing Code Wages logic (basePFWage = wageA + wageD)
   }
 
   let epfEmployee = 0;
@@ -409,13 +413,33 @@ export const calculatePayroll = (
   const fineReason = fineRecord ? (fineRecord.reason || '') : '';
   const manualTax = fineRecord ? fineRecord.tax : undefined;
 
-  // Income Tax (Preference: Manual Override > Auto Calculation)
+  // --- Income Tax (TDS) Logic ---
   let incomeTax = 0;
-  if (manualTax !== undefined && manualTax !== null) {
-      incomeTax = manualTax;
+  
+  if (config.incomeTaxCalculationType === 'Manual') {
+      // In Manual Mode: Strictly trust the imported/input value.
+      // If undefined (no record exist), it is 0. 
+      // Even if 0 is explicitly passed in fineRecord, it stays 0.
+      incomeTax = manualTax || 0;
   } else {
-      const annualTaxable = (grossEarnings * 12) - 50000;
-      if (annualTaxable > 700000) incomeTax = Math.round(((annualTaxable - 700000) * 0.1) / 12);
+      // In Auto Mode:
+      // 1. If manualTax is present and greater than 0, treat as Override.
+      // 2. If manualTax is 0 or undefined, calculate Auto.
+      if (manualTax !== undefined && manualTax > 0) {
+          incomeTax = manualTax;
+      } else {
+          // Auto Calculation Logic (Simplified for Demo)
+          // Annual Projection: Gross * 12 - Standard Deduction (50000)
+          const annualTaxable = (grossEarnings * 12) - 50000;
+          
+          if (annualTaxable > 700000) {
+              // Basic Slab Logic (Old Regime approx / Simplified)
+              // This is a placeholder for complex tax logic.
+              incomeTax = Math.round(((annualTaxable - 700000) * 0.1) / 12);
+          } else {
+              incomeTax = 0;
+          }
+      }
   }
 
   // --- ADVANCE RECOVERY Logic (Code on Wages 2020) ---
