@@ -82,16 +82,12 @@ export const calculatePayroll = (
   effectivePayableDays = Math.min(effectivePayableDays, daysInMonth);
 
   // PREPARE SNAPSHOT: Create a frozen copy of leave ledger state specifically for this payroll run
-  // This ensures reports generated later use the EXACT values used during calculation
   const leaveSnapshot = JSON.parse(JSON.stringify(leave));
   
-  // Force update 'availed' and 'encashed' counts in snapshot to match current attendance (source of truth for this month)
+  // Force update 'availed' and 'encashed' counts in snapshot
   if (leaveSnapshot.el) {
       leaveSnapshot.el.availed = attendance.earnedLeave || 0;
       leaveSnapshot.el.encashed = attendance.encashedDays || 0; 
-      
-      // Recalculate balance for report consistency within the snapshot
-      // Balance = (Opening + Credit) - (Used + Encashed)
       leaveSnapshot.el.balance = (leaveSnapshot.el.opening || 0) + (leaveSnapshot.el.eligible || 0) - (leaveSnapshot.el.encashed || 0) - (leaveSnapshot.el.availed || 0);
   }
   if (leaveSnapshot.sl) {
@@ -164,6 +160,11 @@ export const calculatePayroll = (
   const standardMonthlyGross = employee.basicPay + (employee.da || 0) + (employee.retainingAllowance || 0) + (employee.hra || 0) + (employee.conveyance || 0) + (employee.washing || 0) + (employee.attire || 0) + (employee.specialAllowance1 || 0) + (employee.specialAllowance2 || 0) + (employee.specialAllowance3 || 0);
 
   // --- PF Calculation Logic ---
+  
+  // 1. Calculate Prorated Ceiling (As per Example 3: 15000/30 * days)
+  const proratedCeiling = Math.round((config.epfCeiling / daysInMonth) * effectivePayableDays);
+
+  // 2. Calculate Code Wages (As per Code on Wages 2020)
   const wageA = basic + da + retaining;
   const wageB = grossEarnings;
   const wageC = wageB - wageA;
@@ -176,30 +177,46 @@ export const calculatePayroll = (
           wageD = wageC - fiftyPercentOfGross;
       }
   }
-
-  let basePFWage = Math.round(wageA + wageD);
+  const codeWage = Math.round(wageA + wageD);
   let isCode88 = wageD > 0;
 
-  if (config.enableHigherContribution) {
-    const hc = config.higherContributionComponents;
-    let higherWageBase = 0;
-    if (hc.basic) higherWageBase += basic;
-    if (hc.da) higherWageBase += da;
-    if (hc.retaining) higherWageBase += retaining;
-    if (hc.conveyance) higherWageBase += conveyance;
-    if (hc.washing) higherWageBase += washing;
-    if (hc.attire) higherWageBase += attire;
-    if (hc.special1) higherWageBase += special1;
-    if (hc.special2) higherWageBase += special2;
-    if (hc.special3) higherWageBase += special3;
+  // 3. Determine Final PF Wage based on Configuration & Examples
+  let basePFWage = 0;
+  
+  // UPDATED LOGIC: If Higher Contribution is enabled globally in Configuration, we evaluate the Higher Wage condition.
+  // We rely on the Configuration setting primarily as the 'Opt-in' for the calculation logic.
+  const isHigherContribApplicable = config.enableHigherContribution;
 
-    // If Higher Wages is enabled in configuration, use it directly and ignore Code Wages (50% rule)
-    // ONLY IF the calculated Higher Wage is GREATER THAN OR EQUAL to Statutory Ceiling
-    if (higherWageBase >= config.epfCeiling) {
-        basePFWage = Math.round(higherWageBase);
-        isCode88 = false; 
-    }
-    // Else: Fallback to existing Code Wages logic (basePFWage = wageA + wageD)
+  if (isHigherContribApplicable) {
+      // Calculate Higher Wage Base based on configured components
+      const hc = config.higherContributionComponents;
+      let higherWageBase = 0;
+      if (hc.basic) higherWageBase += basic;
+      if (hc.da) higherWageBase += da;
+      if (hc.retaining) higherWageBase += retaining;
+      if (hc.conveyance) higherWageBase += conveyance;
+      if (hc.washing) higherWageBase += washing;
+      if (hc.attire) higherWageBase += attire;
+      if (hc.special1) higherWageBase += special1;
+      if (hc.special2) higherWageBase += special2;
+      if (hc.special3) higherWageBase += special3;
+      
+      higherWageBase = Math.round(higherWageBase);
+
+      // Rule: If Higher Wage >= Prorated Ceiling, Use Higher Wage. (Example 2, 4, 6, 8)
+      if (higherWageBase >= proratedCeiling) {
+          basePFWage = higherWageBase;
+          isCode88 = false; // Higher Wages logic overrides Code Wages logic
+      } else {
+          // Fallback: If Higher Wage is effectively below ceiling, default to Statutory Logic (Min of Code, Ceiling)
+          basePFWage = Math.min(codeWage, proratedCeiling);
+          // Note: In this fallback, isCode88 remains as calculated above
+      }
+  } else {
+      // Rule: Higher Contribution = No (Example 1, 3, 5, 7)
+      // PF Wage is Capped at Prorated Ceiling, even if Code Wage is higher (Example 5)
+      // If Code Wage is lower than Ceiling, use Code Wage (Example 7 logic inferred)
+      basePFWage = Math.min(codeWage, proratedCeiling);
   }
 
   let epfEmployee = 0;
@@ -214,32 +231,39 @@ export const calculatePayroll = (
     
     const A5 = hp?.contributedBefore2014 === 'Yes';
     const B5_Date = employee.epfMembershipDate ? new Date(employee.epfMembershipDate) : null;
-    const C5 = hp?.employeeContribution || (employee.isPFHigherWages ? 'Higher' : 'Regular');
-    const D5 = hp?.employerContribution || (employee.isEmployerPFHigher ? 'Higher' : 'Regular');
+    const C5 = hp?.employeeContribution || (config.enableHigherContribution ? 'Higher' : 'Regular'); // Default to Higher if global config enabled to match wage calculation
+    const D5 = hp?.employerContribution || (config.enableHigherContribution ? 'Higher' : 'Regular'); // Default to Higher if global config enabled
     const E5 = hp?.isHigherPensionOpted === 'Yes';
     
     const CUTOFF_2014 = new Date('2014-09-01');
     const isPost2014 = B5_Date && B5_Date >= CUTOFF_2014;
     const isPre2014 = B5_Date && B5_Date < CUTOFF_2014;
 
+    // Determine Wages for Split (EPF vs EPS)
     let J5_EPFWage = 0;
+    
+    // If Employer is contributing Higher, use the full basePFWage
     if (D5 === 'Higher' || (config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer')) {
         J5_EPFWage = basePFWage;
     } else {
+        // If Employer is Regular, cap the wage used for their split logic at Ceiling
         if (C5 === 'Regular') {
             J5_EPFWage = Math.min(basePFWage, config.epfCeiling);
         } else {
+            // If Employee is Higher but Employer Regular, base is full, but split calculation handles the cap below
             J5_EPFWage = basePFWage; 
         }
     }
 
     let K5_EPSWage = 0;
+    // EPS Logic
     if (A5 && C5 === 'Higher' && D5 === 'Higher' && E5 && isPre2014) {
         K5_EPSWage = J5_EPFWage;
     } else if (!A5 && isPost2014 && basePFWage > config.epfCeiling) {
-        K5_EPSWage = 0;
+        K5_EPSWage = 0; // No EPS for new members > 15k
     } else {
         if (J5_EPFWage > config.epfCeiling) {
+            // Cap EPS at Ceiling if not explicitly eligible for Higher EPS
             if (D5 === 'Regular') K5_EPSWage = config.epfCeiling;
             else if (!E5) K5_EPSWage = config.epfCeiling;
             else if (!A5) K5_EPSWage = config.epfCeiling;
@@ -249,9 +273,9 @@ export const calculatePayroll = (
         }
     }
 
-    let eeBasis = (config.enableHigherContribution && config.higherContributionType !== 'By Employee') 
-        ? J5_EPFWage 
-        : (config.enableHigherContribution ? basePFWage : J5_EPFWage);
+    // Employee Share Calculation
+    // Use full basePFWage if Higher Contribution is enabled
+    let eeBasis = basePFWage;
     
     epfEmployee = Math.round(eeBasis * config.epfEmployeeRate);
 
@@ -259,6 +283,7 @@ export const calculatePayroll = (
         vpfEmployee = Math.round(eeBasis * (employee.employeeVPFRate / 100));
     }
 
+    // Employer Share Calculation
     if (!E5) {
         if (K5_EPSWage === 0) epsEmployer = 0;
         else {
@@ -417,24 +442,14 @@ export const calculatePayroll = (
   let incomeTax = 0;
   
   if (config.incomeTaxCalculationType === 'Manual') {
-      // In Manual Mode: Strictly trust the imported/input value.
-      // If undefined (no record exist), it is 0. 
-      // Even if 0 is explicitly passed in fineRecord, it stays 0.
       incomeTax = manualTax || 0;
   } else {
-      // In Auto Mode:
-      // 1. If manualTax is present and greater than 0, treat as Override.
-      // 2. If manualTax is 0 or undefined, calculate Auto.
       if (manualTax !== undefined && manualTax > 0) {
           incomeTax = manualTax;
       } else {
-          // Auto Calculation Logic (Simplified for Demo)
-          // Annual Projection: Gross * 12 - Standard Deduction (50000)
+          // Auto Calculation Logic (Simplified)
           const annualTaxable = (grossEarnings * 12) - 50000;
-          
           if (annualTaxable > 700000) {
-              // Basic Slab Logic (Old Regime approx / Simplified)
-              // This is a placeholder for complex tax logic.
               incomeTax = Math.round(((annualTaxable - 700000) * 0.1) / 12);
           } else {
               incomeTax = 0;
