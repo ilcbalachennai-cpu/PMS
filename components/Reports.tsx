@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, KeyRound, UserX, Save, RefreshCw } from 'lucide-react';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User } from '../types';
@@ -377,7 +378,8 @@ const Reports: React.FC<ReportsProps> = ({
                  });
                  generateExcelReport(data, 'Leave Ledger', `LeaveLedger_${month}_${year}`);
              } else {
-                 generateLeaveLedgerReport(currentResults, activeEmps, month, year, 'AC', companyProfile);
+                 // Pass leaveLedgers to the PDF generator to populate data
+                 generateLeaveLedgerReport(currentResults, activeEmps, leaveLedgers, month, year, 'AC', companyProfile);
              }
 
         } else if (reportType === 'Advance Shortfall') {

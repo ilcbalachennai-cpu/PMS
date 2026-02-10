@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList, Info } from 'lucide-react';
+import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList, Info, AlertTriangle, CheckCircle } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile } from '../types';
 import { 
   generatePFECR, 
@@ -70,6 +70,13 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     format: 'PDF' as 'PDF' | 'Excel'
   });
 
+  const [msgModal, setMsgModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'error' | 'success';
+  }>({ isOpen: false, title: '', message: '', type: 'error' });
+
   const openRangeModal = (reportType: string) => {
     const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
     const fyStartYear = isJanToMar ? globalYear - 1 : globalYear;
@@ -94,7 +101,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         } else if (rangeModal.reportType === 'Bonus Statement') {
             generateBonusReport(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile, rangeModal.format);
         }
-    } catch (e: any) { alert(`Error: ${e.message}`); }
+    } catch (e: any) { 
+        setMsgModal({ isOpen: true, title: 'Error', message: e.message, type: 'error' });
+    }
     setRangeModal({ ...rangeModal, isOpen: false });
   };
 
@@ -138,7 +147,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         } else if (reportName.includes('Form 6A')) {
              openRangeModal('Form 6A');
         }
-    } catch (e: any) { alert(`Failed: ${e.message}`); }
+    } catch (e: any) { 
+        setMsgModal({ isOpen: true, title: 'Report Generation Failed', message: e.message, type: 'error' });
+    }
   };
 
   return (
@@ -412,6 +423,27 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
                 <button onClick={handleGenerateRange} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg mt-4 flex items-center justify-center gap-2 group">
                     <Download size={18} className="group-hover:translate-y-0.5 transition-transform" /> GENERATE STATEMENT
+                </button>
+            </div>
+        </div>
+      )}
+
+      {/* MESSAGE MODAL */}
+      {msgModal.isOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
+                <button onClick={() => setMsgModal({ ...msgModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+                    <X size={20} />
+                </button>
+                <div className="flex flex-col items-center gap-2">
+                    <div className={`p-3 rounded-full border ${msgModal.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50'}`}>
+                        {msgModal.type === 'error' ? <AlertTriangle size={24} /> : <CheckCircle size={24} />}
+                    </div>
+                    <h3 className="text-lg font-bold text-white text-center">{msgModal.title}</h3>
+                    <p className="text-sm text-slate-400 text-center whitespace-pre-line leading-relaxed">{msgModal.message}</p>
+                </div>
+                <button onClick={() => setMsgModal({ ...msgModal, isOpen: false })} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">
+                    Close
                 </button>
             </div>
         </div>
