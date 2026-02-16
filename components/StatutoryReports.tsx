@@ -20,7 +20,8 @@ import {
   generateESICodeWagesReport, 
   generateGratuityReport,
   generateBonusReport,
-  generateEPFCodeImpactReport
+  generateEPFCodeImpactReport,
+  generateESIForm5
 } from '../services/reportService';
 
 interface StatutoryReportsProps {
@@ -67,7 +68,10 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     endMonth: 'March',
     endYear: globalYear + 1,
     selectedEmployee: 'ALL',
-    format: 'PDF' as 'PDF' | 'Excel'
+    format: 'PDF' as 'PDF' | 'Excel',
+    // New fields for Form 5
+    halfYearPeriod: 'Apr-Sep' as 'Apr-Sep' | 'Oct-Mar',
+    periodYear: globalYear
   });
 
   const [msgModal, setMsgModal] = useState<{
@@ -80,6 +84,13 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
   const openRangeModal = (reportType: string) => {
     const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
     const fyStartYear = isJanToMar ? globalYear - 1 : globalYear;
+    
+    // Default for Form 5 based on current global month
+    let defaultHalfYear: 'Apr-Sep' | 'Oct-Mar' = 'Apr-Sep';
+    if (months.indexOf(globalMonth) >= 9 || months.indexOf(globalMonth) <= 2) {
+       defaultHalfYear = 'Oct-Mar'; // Oct, Nov, Dec, Jan, Feb, Mar
+    }
+
     setRangeModal({
         isOpen: true,
         reportType,
@@ -88,7 +99,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         endMonth: 'March',
         endYear: fyStartYear + 1,
         selectedEmployee: 'ALL',
-        format: 'PDF'
+        format: 'PDF',
+        halfYearPeriod: defaultHalfYear,
+        periodYear: fyStartYear
     });
   };
 
@@ -100,6 +113,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             generatePFForm6A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile);
         } else if (rangeModal.reportType === 'Bonus Statement') {
             generateBonusReport(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile, rangeModal.format);
+        } else if (rangeModal.reportType === 'Form 5') {
+            generateESIForm5(payrollHistory, employees, rangeModal.halfYearPeriod, rangeModal.periodYear, companyProfile);
         }
     } catch (e: any) { 
         setMsgModal({ isOpen: true, title: 'Error', message: e.message, type: 'error' });
@@ -236,7 +251,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
              <button onClick={() => handleDownload('ESI Exit Report', 'Excel')} className="w-full py-3 bg-red-900/10 hover:bg-red-900/20 text-red-400 font-bold text-xs rounded-xl border border-red-900/30 flex items-center justify-center gap-2 transition-all group" title="Employees who crossed ESI ceiling or left service">
                 <LogOut size={16} className="group-hover:scale-110" /> ESI Exit List
              </button>
-             <button disabled className="w-full py-3 bg-slate-800/50 text-slate-500 font-bold text-xs rounded-xl border border-slate-800 flex items-center justify-center gap-2 cursor-not-allowed">
+             <button onClick={() => openRangeModal('Form 5')} className="w-full py-3 bg-pink-900/10 hover:bg-pink-900/20 text-pink-400 font-bold text-xs rounded-xl border border-pink-900/30 flex items-center justify-center gap-2 transition-all group">
                 <ShieldCheck size={16} /> Form 5 (Half-Yearly)
              </button>
           </div>
@@ -366,7 +381,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
       </div>
       )}
 
-      {/* RANGE MODAL FOR ANNUAL REPORTS */}
+      {/* RANGE MODAL FOR ANNUAL/HALF-YEARLY REPORTS */}
       {rangeModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
@@ -375,35 +390,58 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 </button>
                 <div className="text-center space-y-1">
                     <h3 className="text-xl font-black text-white">{rangeModal.reportType} Generator</h3>
-                    <p className="text-xs text-slate-400">Specify period range for returns</p>
+                    <p className="text-xs text-slate-400">Specify period details for returns</p>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4 mt-2">
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Start Period</label>
-                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startMonth} onChange={e => setRangeModal({...rangeModal, startMonth: e.target.value})} >
-                            {months.map(m => <option key={m} value={m}>{m}</option>)}
-                        </select>
+                {rangeModal.reportType === 'Form 5' ? (
+                    // FORM 5 SPECIFIC UI
+                    <div className="grid grid-cols-2 gap-4 mt-2">
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Contribution Period</label>
+                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.halfYearPeriod} onChange={e => setRangeModal({...rangeModal, halfYearPeriod: e.target.value as any})} >
+                                <option value="Apr-Sep">April - September</option>
+                                <option value="Oct-Mar">October - March</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Year</label>
+                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.periodYear} onChange={e => setRangeModal({...rangeModal, periodYear: +e.target.value})} >
+                                {yearOptions.map(y => <option key={y} value={y}>{y}-{y+1}</option>)}
+                            </select>
+                        </div>
+                        <div className="col-span-2 text-[10px] text-center text-slate-500 italic mt-2">
+                            * Generates Form 5 for the selected Half-Yearly period.
+                        </div>
                     </div>
-                    <div className="space-y-1 flex flex-col justify-end">
-                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startYear} onChange={e => setRangeModal({...rangeModal, startYear: +e.target.value})} >
-                            {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
-                        </select>
+                ) : (
+                    // STANDARD ANNUAL RANGE UI
+                    <div className="grid grid-cols-2 gap-4 mt-2">
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Start Period</label>
+                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startMonth} onChange={e => setRangeModal({...rangeModal, startMonth: e.target.value})} >
+                                {months.map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                        </div>
+                        <div className="space-y-1 flex flex-col justify-end">
+                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startYear} onChange={e => setRangeModal({...rangeModal, startYear: +e.target.value})} >
+                                {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">End Period</label>
+                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endMonth} onChange={e => setRangeModal({...rangeModal, endMonth: e.target.value})} >
+                                {months.map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                        </div>
+                        <div className="space-y-1 flex flex-col justify-end">
+                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endYear} onChange={e => setRangeModal({...rangeModal, endYear: +e.target.value})} >
+                                {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                        </div>
                     </div>
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">End Period</label>
-                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endMonth} onChange={e => setRangeModal({...rangeModal, endMonth: e.target.value})} >
-                            {months.map(m => <option key={m} value={m}>{m}</option>)}
-                        </select>
-                    </div>
-                    <div className="space-y-1 flex flex-col justify-end">
-                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endYear} onChange={e => setRangeModal({...rangeModal, endYear: +e.target.value})} >
-                            {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
-                        </select>
-                    </div>
-                </div>
+                )}
 
-                {rangeModal.reportType !== 'Bonus Statement' ? (
+                {rangeModal.reportType !== 'Bonus Statement' && rangeModal.reportType !== 'Form 5' ? (
                     <div className="space-y-1 mt-2">
                         <label className="text-[10px] font-bold text-slate-500 uppercase">Employee Filter</label>
                         <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({...rangeModal, selectedEmployee: e.target.value})} >
@@ -411,7 +449,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                             {employees.map(e => <option key={e.id} value={e.id}>{e.id} - {e.name}</option>)}
                         </select>
                     </div>
-                ) : (
+                ) : null}
+                
+                {rangeModal.reportType === 'Bonus Statement' && (
                     <div className="space-y-1 mt-2">
                         <label className="text-[10px] font-bold text-slate-500 uppercase">Output Format</label>
                         <div className="flex gap-2">

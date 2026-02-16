@@ -165,11 +165,12 @@ export const calculatePayroll = (
   const proratedCeiling = Math.round((config.epfCeiling / daysInMonth) * effectivePayableDays);
 
   // 2. Calculate Code Wages (As per Code on Wages 2020)
-  const wageA = basic + da + retaining;
-  const wageB = grossEarnings;
-  const wageC = wageB - wageA;
+  // Clause 88: If Exclusions > 50% of Gross, excess is added to Wages.
+  const wageA = basic + da + retaining; // Basic Wage
+  const wageB = grossEarnings;          // Total Remuneration
+  const wageC = wageB - wageA;          // Allowances (Exclusions)
 
-  let wageD = 0;
+  let wageD = 0; // Excess to be added
   if (wageB > 0) {
       const allowancePercentage = wageC / wageB;
       if (allowancePercentage > 0.50) {
@@ -183,12 +184,13 @@ export const calculatePayroll = (
   // 3. Determine Final PF Wage based on Configuration & Examples
   let basePFWage = 0;
   
-  // UPDATED LOGIC: If Higher Contribution is enabled globally in Configuration, we evaluate the Higher Wage condition.
-  // We rely on the Configuration setting primarily as the 'Opt-in' for the calculation logic.
   const isHigherContribApplicable = config.enableHigherContribution;
 
   if (isHigherContribApplicable) {
-      // Calculate Higher Wage Base based on configured components
+      // Logic for "Higher Contribution = Yes" (Examples 2, 4, 6, 8)
+      // If Higher Contribution is enabled, we use the sum of configured components (Actual Wage),
+      // effectively treating it as "Higher Wages" opted.
+      
       const hc = config.higherContributionComponents;
       let higherWageBase = 0;
       if (hc.basic) higherWageBase += basic;
@@ -203,19 +205,24 @@ export const calculatePayroll = (
       
       higherWageBase = Math.round(higherWageBase);
 
-      // Rule: If Higher Wage >= Prorated Ceiling, Use Higher Wage. (Example 2, 4, 6, 8)
-      if (higherWageBase >= proratedCeiling) {
-          basePFWage = higherWageBase;
-          isCode88 = false; // Higher Wages logic overrides Code Wages logic
-      } else {
-          // Fallback: If Higher Wage is effectively below ceiling, default to Statutory Logic (Min of Code, Ceiling)
-          basePFWage = Math.min(codeWage, proratedCeiling);
-          // Note: In this fallback, isCode88 remains as calculated above
-      }
+      // As per Example 6: "Higher Wages (Higher wages even though the code wages is above (a))"
+      // This implies we stick to the Actual Wage (Higher Base) even if Code Wage is higher, 
+      // provided we are in "Higher Contribution" mode which assumes paying on actuals.
+      // And as per Ex 2, 4, 8: We pay on Actuals if > Ceiling.
+      
+      basePFWage = higherWageBase;
+      
+      // Override isCode88 flag because we are manually forcing the wage base
+      isCode88 = false; 
+
   } else {
-      // Rule: Higher Contribution = No (Example 1, 3, 5, 7)
-      // PF Wage is Capped at Prorated Ceiling, even if Code Wage is higher (Example 5)
-      // If Code Wage is lower than Ceiling, use Code Wage (Example 7 logic inferred)
+      // Logic for "Higher Contribution = No" (Examples 1, 3, 5, 7)
+      // Rule: Wage is capped at Prorated Ceiling.
+      // Exception: If Code Wage is lower than Ceiling, use Code Wage.
+      
+      // Ex 1, 3, 5: Code Wage or Actual Wage > Ceiling -> Result: Ceiling.
+      // Ex 7: Actual Wage < Code Wage < Ceiling -> Result: Code Wage.
+      
       basePFWage = Math.min(codeWage, proratedCeiling);
   }
 
