@@ -2,6 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList, Info, AlertTriangle, CheckCircle, MapPin } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile } from '../types';
+import { INDIAN_STATES } from '../constants';
 import { 
   generatePFECR, 
   generateESIReturn, 
@@ -11,9 +12,9 @@ import {
   generatePFForm12A, 
   generateFormB, 
   generateFormC, 
-  generateTNFormR, 
-  generateTNFormT, 
-  generateTNFormP, 
+  generateStateWageRegister,
+  generateStatePaySlip,
+  generateStateAdvanceRegister,
   generatePFForm3A, 
   generatePFForm6A, 
   generateESIExitReport, 
@@ -38,6 +39,45 @@ interface StatutoryReportsProps {
   advanceLedgers?: AdvanceLedger[];
 }
 
+// Configuration for State Specific Forms
+const STATE_FORM_MAPPINGS: Record<string, { wage: string; slip: string; advance: string }> = {
+  'Tamil Nadu': { 
+      wage: 'Form R (Wage Register)', 
+      slip: 'Form T (Wage Slip)', 
+      advance: 'Form P (Advances)' 
+  },
+  'Karnataka': { 
+      wage: 'Form T (Wage Register)', 
+      slip: 'Form V (Wage Slip)', 
+      advance: 'Form XXII (Advances)' // Common in Karnataka S&E
+  },
+  'Maharashtra': { 
+      wage: 'Form II (Wage Register)', 
+      slip: 'Form III (Wage Slip)', 
+      advance: 'Form IV (Advances)' 
+  },
+  'Andhra Pradesh': { 
+      wage: 'Form XXIII (Wage Register)', 
+      slip: 'Form XXIV (Wage Slip)', 
+      advance: 'Form XXII (Advances)' 
+  },
+  'Telangana': { 
+      wage: 'Form XXIII (Wage Register)', 
+      slip: 'Form XXIV (Wage Slip)', 
+      advance: 'Form XXII (Advances)' 
+  },
+  'West Bengal': { 
+      wage: 'Form J (Register of Wages)', 
+      slip: 'Form H (Pay Slip)', 
+      advance: 'Form M (Advances)' 
+  },
+  'Default': { 
+      wage: 'Wage Register', 
+      slip: 'Pay Slip', 
+      advance: 'Advance Register' 
+  }
+};
+
 const StatutoryReports: React.FC<StatutoryReportsProps> = ({ 
     payrollHistory,
     employees,
@@ -55,6 +95,12 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
   const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+  const [selectedState, setSelectedState] = useState<string>('Tamil Nadu');
+
+  const currentForms = useMemo(() => {
+      return STATE_FORM_MAPPINGS[selectedState] || STATE_FORM_MAPPINGS['Default'];
+  }, [selectedState]);
+
   const isFinalized = useMemo(() => {
     const records = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
     return records.length > 0 && records[0].status === 'Finalized';
@@ -69,7 +115,6 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     endYear: globalYear + 1,
     selectedEmployee: 'ALL',
     format: 'PDF' as 'PDF' | 'Excel',
-    // New fields for Form 5
     halfYearPeriod: 'Apr-Sep' as 'Apr-Sep' | 'Oct-Mar',
     periodYear: globalYear
   });
@@ -85,10 +130,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
     const fyStartYear = isJanToMar ? globalYear - 1 : globalYear;
     
-    // Default for Form 5 based on current global month
     let defaultHalfYear: 'Apr-Sep' | 'Oct-Mar' = 'Apr-Sep';
     if (months.indexOf(globalMonth) >= 9 || months.indexOf(globalMonth) <= 2) {
-       defaultHalfYear = 'Oct-Mar'; // Oct, Nov, Dec, Jan, Feb, Mar
+       defaultHalfYear = 'Oct-Mar'; 
     }
 
     setRangeModal({
@@ -140,7 +184,6 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         } else if (reportName.includes('TDS')) {
              generateTDSReport(currentData, employees, fileName, companyProfile);
         } else if (reportName.includes('Form 16')) {
-             // Reusing TDS logic for now, typically Form 16 Part B is annual but can be generated as snapshot
              generateTDSReport(currentData, employees, `Form16_${fileName}`, companyProfile);
         } else if (reportName.includes('Gratuity')) {
              generateGratuityReport(employees, companyProfile);
@@ -154,29 +197,30 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
              generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
         } else if (reportName.includes('Form C')) {
              generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
-        } else if (reportName.includes('TN Form R')) {
-             generateTNFormR(currentData, employees, globalMonth, globalYear, companyProfile);
-        } else if (reportName.includes('TN Form T')) {
-             generateTNFormT(currentData, employees, attendances, leaveLedgers, globalMonth, globalYear, companyProfile);
-        } else if (reportName.includes('TN Form P')) {
-             generateTNFormP(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile);
-        } else if (reportName.includes('Form 3A')) {
-             openRangeModal('Form 3A');
-        } else if (reportName.includes('Form 6A')) {
-             openRangeModal('Form 6A');
+        } 
+        // STATE SPECIFIC LOGIC
+        else if (reportName === 'Wage Register') {
+             generateStateWageRegister(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.wage);
+        } else if (reportName === 'Pay Slip') {
+             generateStatePaySlip(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.slip);
+        } else if (reportName === 'Advance Register') {
+             generateStateAdvanceRegister(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
         }
     } catch (e: any) { 
         setMsgModal({ isOpen: true, title: 'Report Generation Failed', message: e.message, type: 'error' });
     }
   };
 
-  const ReportCard = ({ title, icon: Icon, color, reports }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string }[] }) => (
+  const ReportCard = ({ title, icon: Icon, color, reports, headerAction }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string }[], headerAction?: React.ReactNode }) => (
     <div className="bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group hover:border-slate-700 transition-all h-full">
-        <div className="bg-[#0f172a] p-4 flex items-center gap-3 border-b border-slate-800">
-            <div className={`p-2 rounded-lg bg-${color}-900/20 text-${color}-400 border border-${color}-900/30`}>
-                <Icon size={20} />
+        <div className="bg-[#0f172a] p-4 flex items-center justify-between border-b border-slate-800">
+            <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg bg-${color}-900/20 text-${color}-400 border border-${color}-900/30`}>
+                    <Icon size={20} />
+                </div>
+                <h3 className={`font-bold text-${color}-400 text-sm uppercase tracking-widest`}>{title}</h3>
             </div>
-            <h3 className={`font-bold text-${color}-400 text-sm uppercase tracking-widest`}>{title}</h3>
+            {headerAction}
         </div>
         <div className="p-4 grid grid-cols-1 gap-2">
             {reports.map((r, i) => (
@@ -267,15 +311,24 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             ]} 
         />
 
-        {/* State Labour Law Registers */}
+        {/* State Labour Law Registers (Dynamic) */}
         <ReportCard 
             title="State Labour Law Registers" 
             icon={ScrollText} 
             color="teal"
+            headerAction={
+                <select 
+                    value={selectedState} 
+                    onChange={e => setSelectedState(e.target.value)} 
+                    className="bg-[#1e293b] border border-teal-500/30 text-teal-400 text-[10px] font-bold rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-teal-500"
+                >
+                    {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+            }
             reports={[
-                { label: 'TN Form R (Wages)', action: () => handleDownload('TN Form R', 'PDF') },
-                { label: 'TN Form T (Pay Slips)', action: () => handleDownload('TN Form T', 'PDF') },
-                { label: 'TN Form P (Advances)', action: () => handleDownload('TN Form P', 'PDF') },
+                { label: currentForms.wage, action: () => handleDownload('Wage Register', 'PDF') }, 
+                { label: currentForms.slip, action: () => handleDownload('Pay Slip', 'PDF') }, 
+                { label: currentForms.advance, action: () => handleDownload('Advance Register', 'PDF') }, 
             ]} 
         />
 
