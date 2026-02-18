@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList, Info, AlertTriangle, CheckCircle } from 'lucide-react';
+import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList, Info, AlertTriangle, CheckCircle, MapPin } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile } from '../types';
 import { 
   generatePFECR, 
@@ -139,6 +139,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
              generatePTReport(currentData, employees, fileName, companyProfile);
         } else if (reportName.includes('TDS')) {
              generateTDSReport(currentData, employees, fileName, companyProfile);
+        } else if (reportName.includes('Form 16')) {
+             // Reusing TDS logic for now, typically Form 16 Part B is annual but can be generated as snapshot
+             generateTDSReport(currentData, employees, `Form16_${fileName}`, companyProfile);
         } else if (reportName.includes('Gratuity')) {
              generateGratuityReport(employees, companyProfile);
         } else if (reportName.includes('Social Security')) {
@@ -168,7 +171,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
   };
 
   const ReportCard = ({ title, icon: Icon, color, reports }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string }[] }) => (
-    <div className="bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group hover:border-slate-700 transition-all">
+    <div className="bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group hover:border-slate-700 transition-all h-full">
         <div className="bg-[#0f172a] p-4 flex items-center gap-3 border-b border-slate-800">
             <div className={`p-2 rounded-lg bg-${color}-900/20 text-${color}-400 border border-${color}-900/30`}>
                 <Icon size={20} />
@@ -252,31 +255,50 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             ]} 
         />
 
-        {/* Labour Law Registers */}
+        {/* Central Labour Law Registers */}
         <ReportCard 
-            title="Labour Law Registers" 
+            title="Central Labour Law Registers" 
             icon={BookOpen} 
             color="emerald"
             reports={[
                 { label: 'Form B (Register of Wages)', action: () => handleDownload('Form B', 'PDF') },
                 { label: 'Form C (Muster Roll)', action: () => handleDownload('Form C', 'PDF') },
-                { label: 'TN Form R (Wages)', action: () => handleDownload('TN Form R', 'PDF') },
-                { label: 'TN Form T (Pay Slips)', action: () => handleDownload('TN Form T', 'PDF') },
-                { label: 'TN Form P (Advances)', action: () => handleDownload('TN Form P', 'PDF') },
                 { label: 'Code on Wages 2020 Report', action: () => handleDownload('Social Security', 'PDF') }
             ]} 
         />
 
-        {/* Financial & Others */}
+        {/* State Labour Law Registers */}
+        <ReportCard 
+            title="State Labour Law Registers" 
+            icon={ScrollText} 
+            color="teal"
+            reports={[
+                { label: 'TN Form R (Wages)', action: () => handleDownload('TN Form R', 'PDF') },
+                { label: 'TN Form T (Pay Slips)', action: () => handleDownload('TN Form T', 'PDF') },
+                { label: 'TN Form P (Advances)', action: () => handleDownload('TN Form P', 'PDF') },
+            ]} 
+        />
+
+        {/* Finance & Benefits (Bonus & Gratuity) */}
         <ReportCard 
             title="Finance & Benefits" 
             icon={HandCoins} 
             color="amber"
             reports={[
-                { label: 'Professional Tax (PT) Report', action: () => handleDownload('PT', 'Excel'), format: 'XLSX' },
-                { label: 'TDS / Income Tax Report', action: () => handleDownload('TDS', 'Excel'), format: 'XLSX' },
                 { label: 'Bonus Payment Statement', action: () => openRangeModal('Bonus Statement'), format: 'PDF' },
                 { label: 'Gratuity Liability (Estimated)', action: () => handleDownload('Gratuity', 'PDF') }
+            ]} 
+        />
+
+        {/* Taxes & Liabilities */}
+        <ReportCard 
+            title="Taxes & Liabilities" 
+            icon={ReceiptText} 
+            color="purple"
+            reports={[
+                { label: 'Professional Tax (PT) Report', action: () => handleDownload('PT', 'Excel'), format: 'XLSX' },
+                { label: 'TDS / Income Tax Report', action: () => handleDownload('TDS', 'Excel'), format: 'XLSX' },
+                { label: 'Form 16 (Part B) Preview', action: () => handleDownload('Form 16', 'PDF'), format: 'PDF' }
             ]} 
         />
 
