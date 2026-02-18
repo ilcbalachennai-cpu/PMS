@@ -1364,6 +1364,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                             <label className="text-[10px] font-bold text-red-300 uppercase tracking-widest">Reason for Leaving</label>
                             <select className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:border-red-500" value={newEmpForm.leavingReason} onChange={e => setNewEmpForm({...newEmpForm, leavingReason: e.target.value})}>
                                 <option value="">Select Reason...</option>
+                                <option value="ON LOP">ON LOP</option>
                                 <option value="Resignation">Resignation</option>
                                 <option value="Retirement">Retirement</option>
                                 <option value="Termination">Termination</option>

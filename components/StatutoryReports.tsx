@@ -128,7 +128,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
     try {
         if (reportName.includes('PF ECR')) {
-             generatePFECR(currentData, employees, format as any, fileName);
+             generatePFECR(currentData, employees, config, format as any, fileName);
         } else if (reportName.includes('ESI Code Wages')) {
              generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile);
         } else if (reportName.includes('ESI Exit')) {
@@ -166,6 +166,25 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         setMsgModal({ isOpen: true, title: 'Report Generation Failed', message: e.message, type: 'error' });
     }
   };
+
+  const ReportCard = ({ title, icon: Icon, color, reports }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string }[] }) => (
+    <div className="bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group hover:border-slate-700 transition-all">
+        <div className="bg-[#0f172a] p-4 flex items-center gap-3 border-b border-slate-800">
+            <div className={`p-2 rounded-lg bg-${color}-900/20 text-${color}-400 border border-${color}-900/30`}>
+                <Icon size={20} />
+            </div>
+            <h3 className={`font-bold text-${color}-400 text-sm uppercase tracking-widest`}>{title}</h3>
+        </div>
+        <div className="p-4 grid grid-cols-1 gap-2">
+            {reports.map((r, i) => (
+                <button key={i} onClick={r.action} className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all group/btn text-left">
+                    <span className="text-xs font-bold text-slate-300 group-hover/btn:text-white">{r.label}</span>
+                    <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{r.format || 'PDF'}</span>
+                </button>
+            ))}
+        </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 relative">
@@ -205,286 +224,143 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             </div>
         </div>
 
-        {/* EPF SECTION */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-            <ShieldCheck className="text-blue-500" size={20} />
-            <h3 className="font-bold text-white text-sm">Employees' Provident Fund (EPF)</h3>
-          </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-             <button onClick={() => handleDownload('PF ECR', 'Excel')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
-                <FileSpreadsheet size={16} className="group-hover:scale-110" /> Monthly ECR (Excel)
-             </button>
-             <button onClick={() => handleDownload('PF ECR', 'Text')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
-                <FileText size={16} className="group-hover:scale-110" /> ECR (Text File)
-             </button>
-             <button onClick={() => handleDownload('Form 12A', 'PDF')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
-                <FileText size={16} className="group-hover:scale-110" /> Form 12A (Revised)
-             </button>
-             <button onClick={() => handleDownload('EPF Code Impact', 'PDF')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
-                <Scale size={16} className="group-hover:scale-110" /> Social Security Code Impact
-             </button>
-             <div className="grid grid-cols-2 gap-2 md:col-span-2">
-                 <button onClick={() => openRangeModal('Form 3A')} className="w-full py-3 bg-blue-900/10 hover:bg-blue-900/20 text-blue-300 font-bold text-[10px] rounded-xl border border-blue-900/30 flex flex-col items-center justify-center gap-1 transition-all">
-                    <Calendar size={14} /> Form 3A (Annual)
-                 </button>
-                 <button onClick={() => openRangeModal('Form 6A')} className="w-full py-3 bg-blue-900/10 hover:bg-blue-900/20 text-blue-300 font-bold text-[10px] rounded-xl border border-blue-900/30 flex flex-col items-center justify-center gap-1 transition-all">
-                    <Calendar size={14} /> Form 6A (Annual)
-                 </button>
-             </div>
-          </div>
-        </div>
+        {/* EPF Reports */}
+        <ReportCard 
+            title="EPF & MP Act, 1952" 
+            icon={Landmark} 
+            color="blue"
+            reports={[
+                { label: 'PF ECR (Electronic Challan Return)', action: () => handleDownload('PF ECR', 'Text'), format: 'TXT' },
+                { label: 'PF ECR (Excel Backup)', action: () => handleDownload('PF ECR', 'Excel'), format: 'XLSX' },
+                { label: 'Form 12A (Monthly Statement)', action: () => handleDownload('Form 12A', 'PDF') },
+                { label: 'Form 3A (Member Annual Card)', action: () => openRangeModal('Form 3A'), format: 'PDF' },
+                { label: 'Form 6A (Consolidated Annual)', action: () => openRangeModal('Form 6A'), format: 'PDF' },
+                { label: 'Code 2020 Impact Analysis', action: () => handleDownload('EPF Code Impact', 'PDF'), format: 'PDF' }
+            ]} 
+        />
 
-        {/* ESI SECTION */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-            <Landmark className="text-pink-500" size={20} />
-            <h3 className="font-bold text-white text-sm">ESIC Compliance</h3>
-          </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-             <button onClick={() => handleDownload('ESI Return', 'Excel')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-pink-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
-                <FileSpreadsheet size={16} className="group-hover:scale-110" /> ESI Return (Excel)
-             </button>
-             <button onClick={() => handleDownload('ESI Code Wages', 'PDF')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-pink-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all group">
-                <Scale size={16} className="group-hover:scale-110" /> Social Security Code
-             </button>
-             <button onClick={() => handleDownload('ESI Exit Report', 'Excel')} className="w-full py-3 bg-red-900/10 hover:bg-red-900/20 text-red-400 font-bold text-xs rounded-xl border border-red-900/30 flex items-center justify-center gap-2 transition-all group" title="Employees who crossed ESI ceiling or left service">
-                <LogOut size={16} className="group-hover:scale-110" /> ESI Exit List
-             </button>
-             <button onClick={() => openRangeModal('Form 5')} className="w-full py-3 bg-pink-900/10 hover:bg-pink-900/20 text-pink-400 font-bold text-xs rounded-xl border border-pink-900/30 flex items-center justify-center gap-2 transition-all group">
-                <ShieldCheck size={16} /> Form 5 (Half-Yearly)
-             </button>
-          </div>
-        </div>
+        {/* ESI Reports */}
+        <ReportCard 
+            title="ESI Act, 1948" 
+            icon={ShieldCheck} 
+            color="pink"
+            reports={[
+                { label: 'ESI Monthly Return (Excel)', action: () => handleDownload('ESI', 'Excel'), format: 'XLSX' },
+                { label: 'Form 5 (Return of Contribution)', action: () => openRangeModal('Form 5'), format: 'PDF' },
+                { label: 'ESI Code Wages Analysis', action: () => handleDownload('ESI Code Wages', 'PDF'), format: 'PDF' },
+                { label: 'Exit / Resignation Report', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' }
+            ]} 
+        />
 
-        {/* TAXATION & DEDUCTIONS */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl lg:col-span-2">
-            <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-                <ReceiptText className="text-amber-500" size={20} />
-                <h3 className="font-bold text-white text-sm">Professional Tax & Income Tax Recovery</h3>
-            </div>
-            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between group">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-amber-900/20 text-amber-500 rounded-lg border border-amber-900/30">
-                            <ScrollText size={24} />
-                        </div>
-                        <div>
-                            <h4 className="font-bold text-slate-200">Professional Tax (PT)</h4>
-                            <p className="text-[10px] text-slate-500 uppercase">State-wise Deduction Register</p>
-                        </div>
-                    </div>
-                    <button onClick={() => handleDownload('PT Report', 'Excel')} className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg transition-colors shadow-lg">Download Excel</button>
-                </div>
-                <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between group">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-sky-900/20 text-sky-500 rounded-lg border border-sky-900/30">
-                            <Landmark size={24} />
-                        </div>
-                        <div>
-                            <h4 className="font-bold text-slate-200">Income Tax (TDS)</h4>
-                            <p className="text-[10px] text-slate-500 uppercase">Monthly TDS Recovery Summary</p>
-                        </div>
-                    </div>
-                    <button onClick={() => handleDownload('TDS Report', 'Excel')} className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-lg transition-colors shadow-lg">Download Excel</button>
-                </div>
-            </div>
-        </div>
+        {/* Labour Law Registers */}
+        <ReportCard 
+            title="Labour Law Registers" 
+            icon={BookOpen} 
+            color="emerald"
+            reports={[
+                { label: 'Form B (Register of Wages)', action: () => handleDownload('Form B', 'PDF') },
+                { label: 'Form C (Muster Roll)', action: () => handleDownload('Form C', 'PDF') },
+                { label: 'TN Form R (Wages)', action: () => handleDownload('TN Form R', 'PDF') },
+                { label: 'TN Form T (Pay Slips)', action: () => handleDownload('TN Form T', 'PDF') },
+                { label: 'TN Form P (Advances)', action: () => handleDownload('TN Form P', 'PDF') },
+                { label: 'Code on Wages 2020 Report', action: () => handleDownload('Social Security', 'PDF') }
+            ]} 
+        />
 
-        {/* CENTRAL LABOR LAWS - FORM B & C */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl lg:col-span-2">
-            <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-                <BookOpen className="text-emerald-500" size={20} />
-                <h3 className="font-bold text-white text-sm">Central Labor Law Registers</h3>
-            </div>
-            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between hover:border-emerald-500/30 transition-all">
-                    <div className="flex items-center gap-3">
-                        <FileText size={24} className="text-emerald-400" />
-                        <div><h4 className="font-bold text-slate-200">Form B</h4><p className="text-[10px] text-slate-500 uppercase">Register of Wages</p></div>
-                    </div>
-                    <button onClick={() => handleDownload('Form B', 'PDF')} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-900/50 font-bold text-xs rounded-lg">Download PDF</button>
-                </div>
-                <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between hover:border-emerald-500/30 transition-all">
-                    <div className="flex items-center gap-3">
-                        <ClipboardList size={24} className="text-emerald-400" />
-                        <div><h4 className="font-bold text-slate-200">Form C</h4><p className="text-[10px] text-slate-500 uppercase">Muster Roll / Attendance</p></div>
-                    </div>
-                    <button onClick={() => handleDownload('Form C', 'PDF')} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-900/50 font-bold text-xs rounded-lg">Download PDF</button>
-                </div>
-            </div>
-        </div>
-
-        {/* TAMIL NADU STATE ACTS */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl lg:col-span-2">
-          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-            <Building className="text-indigo-500" size={20} />
-            <h3 className="font-bold text-white text-sm">Tamil Nadu Shops & Establishments Act</h3>
-          </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-indigo-500/30 transition-all">
-                <div className="flex items-center gap-3 mb-2">
-                    <FileText size={24} className="text-indigo-400" />
-                    <div><h4 className="font-bold text-slate-200">Form R</h4><p className="text-[10px] text-slate-500 uppercase">Register of Wages</p></div>
-                </div>
-                <button onClick={() => handleDownload('TN Form R', 'PDF')} className="w-full mt-4 py-2 bg-indigo-900/20 text-indigo-300 font-bold text-xs rounded-lg hover:bg-indigo-900/40">Download PDF</button>
-             </div>
-             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-indigo-500/30 transition-all">
-                <div className="flex items-center gap-3 mb-2">
-                    <ScrollText size={24} className="text-indigo-400" />
-                    <div><h4 className="font-bold text-slate-200">Form T</h4><p className="text-[10px] text-slate-500 uppercase">Wage Slip/Leave Card</p></div>
-                </div>
-                <button onClick={() => handleDownload('TN Form T', 'PDF')} className="w-full mt-4 py-2 bg-indigo-900/20 text-indigo-300 font-bold text-xs rounded-lg hover:bg-indigo-900/40">Download PDF</button>
-             </div>
-             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 hover:border-indigo-500/30 transition-all">
-                <div className="flex items-center gap-3 mb-2">
-                    <HandCoins size={24} className="text-indigo-400" />
-                    <div><h4 className="font-bold text-slate-200">Form P</h4><p className="text-[10px] text-slate-500 uppercase">Register of Advances</p></div>
-                </div>
-                <button onClick={() => handleDownload('TN Form P', 'PDF')} className="w-full mt-4 py-2 bg-indigo-900/20 text-indigo-300 font-bold text-xs rounded-lg hover:bg-indigo-900/40">Download PDF</button>
-             </div>
-          </div>
-        </div>
-
-        {/* WELFARE & GRATUITY */}
-        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl lg:col-span-2">
-          <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex items-center gap-2">
-            <Heart className="text-red-500" size={20} />
-            <h3 className="font-bold text-white text-sm">Employee Welfare & Gratuity</h3>
-          </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between group">
-                <div className="flex items-center gap-3">
-                    <HandCoins size={32} className="text-amber-500 group-hover:scale-110 transition-transform" />
-                    <div>
-                        <h4 className="font-bold text-slate-200 text-sm">LIC Gratuity Policy</h4>
-                        <p className="text-[10px] text-slate-500 uppercase">Monthly Accrual Report</p>
-                    </div>
-                </div>
-                <button onClick={() => handleDownload('Gratuity Statement', 'PDF')} className="px-6 py-2 bg-amber-900/20 text-amber-400 font-bold text-xs rounded-lg hover:bg-amber-900/40 transition-colors">Download PDF</button>
-             </div>
-             
-             {/* BONUS REPORT CARD - ACTIVATED */}
-             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 flex items-center justify-between hover:border-blue-500/30 transition-all group">
-                <div className="flex items-center gap-3">
-                    <Percent size={32} className="text-blue-500 group-hover:scale-110 transition-transform" />
-                    <div>
-                        <h4 className="font-bold text-slate-200 text-sm">Bonus Return (Form C)</h4>
-                        <p className="text-[10px] text-slate-500 uppercase">Clause 88 Code Wages Calc</p>
-                    </div>
-                </div>
-                <button onClick={() => openRangeModal('Bonus Statement')} className="px-6 py-2 bg-blue-900/20 text-blue-400 font-bold text-xs rounded-lg hover:bg-blue-900/40 transition-colors border border-blue-900/50">GENERATE</button>
-             </div>
-          </div>
-        </div>
+        {/* Financial & Others */}
+        <ReportCard 
+            title="Finance & Benefits" 
+            icon={HandCoins} 
+            color="amber"
+            reports={[
+                { label: 'Professional Tax (PT) Report', action: () => handleDownload('PT', 'Excel'), format: 'XLSX' },
+                { label: 'TDS / Income Tax Report', action: () => handleDownload('TDS', 'Excel'), format: 'XLSX' },
+                { label: 'Bonus Payment Statement', action: () => openRangeModal('Bonus Statement'), format: 'PDF' },
+                { label: 'Gratuity Liability (Estimated)', action: () => handleDownload('Gratuity', 'PDF') }
+            ]} 
+        />
 
       </div>
       )}
 
-      {/* RANGE MODAL FOR ANNUAL/HALF-YEARLY REPORTS */}
+      {/* Range Selection Modal */}
       {rangeModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                <button onClick={() => setRangeModal({ ...rangeModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors">
-                    <X size={20} />
-                </button>
-                <div className="text-center space-y-1">
-                    <h3 className="text-xl font-black text-white">{rangeModal.reportType} Generator</h3>
-                    <p className="text-xs text-slate-400">Specify period details for returns</p>
+                <button onClick={() => setRangeModal({...rangeModal, isOpen: false})} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                    <Calendar size={24} className="text-blue-400" />
+                    <div>
+                        <h3 className="text-lg font-bold text-white">{rangeModal.reportType}</h3>
+                        <p className="text-xs text-slate-400">Select reporting period</p>
+                    </div>
                 </div>
                 
-                {rangeModal.reportType === 'Form 5' ? (
-                    // FORM 5 SPECIFIC UI
-                    <div className="grid grid-cols-2 gap-4 mt-2">
-                        <div className="space-y-1">
+                <div className="space-y-4">
+                    {rangeModal.reportType === 'Form 5' ? (
+                        <div className="space-y-2">
                             <label className="text-[10px] font-bold text-slate-500 uppercase">Contribution Period</label>
-                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.halfYearPeriod} onChange={e => setRangeModal({...rangeModal, halfYearPeriod: e.target.value as any})} >
-                                <option value="Apr-Sep">April - September</option>
-                                <option value="Oct-Mar">October - March</option>
-                            </select>
+                            <div className="flex gap-2">
+                                <select className="flex-1 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.halfYearPeriod} onChange={e => setRangeModal({...rangeModal, halfYearPeriod: e.target.value as any})}>
+                                    <option value="Apr-Sep">Apr - Sep</option>
+                                    <option value="Oct-Mar">Oct - Mar</option>
+                                </select>
+                                <select className="w-24 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.periodYear} onChange={e => setRangeModal({...rangeModal, periodYear: +e.target.value})}>
+                                    {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                                </select>
+                            </div>
                         </div>
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Year</label>
-                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.periodYear} onChange={e => setRangeModal({...rangeModal, periodYear: +e.target.value})} >
-                                {yearOptions.map(y => <option key={y} value={y}>{y}-{y+1}</option>)}
-                            </select>
+                    ) : (
+                        <>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Start</label>
+                                <div className="flex gap-1">
+                                    <select className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.startMonth} onChange={e => setRangeModal({...rangeModal, startMonth: e.target.value})}>{months.map(m => <option key={m} value={m}>{m.slice(0,3)}</option>)}</select>
+                                    <select className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startYear} onChange={e => setRangeModal({...rangeModal, startYear: +e.target.value})}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                </div>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">End</label>
+                                <div className="flex gap-1">
+                                    <select className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.endMonth} onChange={e => setRangeModal({...rangeModal, endMonth: e.target.value})}>{months.map(m => <option key={m} value={m}>{m.slice(0,3)}</option>)}</select>
+                                    <select className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endYear} onChange={e => setRangeModal({...rangeModal, endYear: +e.target.value})}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                </div>
+                            </div>
                         </div>
-                        <div className="col-span-2 text-[10px] text-center text-slate-500 italic mt-2">
-                            * Generates Form 5 for the selected Half-Yearly period.
-                        </div>
-                    </div>
-                ) : (
-                    // STANDARD ANNUAL RANGE UI
-                    <div className="grid grid-cols-2 gap-4 mt-2">
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Start Period</label>
-                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startMonth} onChange={e => setRangeModal({...rangeModal, startMonth: e.target.value})} >
-                                {months.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
-                        </div>
-                        <div className="space-y-1 flex flex-col justify-end">
-                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startYear} onChange={e => setRangeModal({...rangeModal, startYear: +e.target.value})} >
-                                {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
-                            </select>
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">End Period</label>
-                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endMonth} onChange={e => setRangeModal({...rangeModal, endMonth: e.target.value})} >
-                                {months.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
-                        </div>
-                        <div className="space-y-1 flex flex-col justify-end">
-                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endYear} onChange={e => setRangeModal({...rangeModal, endYear: +e.target.value})} >
-                                {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
-                            </select>
-                        </div>
-                    </div>
-                )}
+                        {rangeModal.reportType === 'Form 3A' && (
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Employee</label>
+                                <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({...rangeModal, selectedEmployee: e.target.value})}>
+                                    <option value="ALL">All Employees</option>
+                                    {employees.map(e => <option key={e.id} value={e.id}>{e.name} ({e.id})</option>)}
+                                </select>
+                            </div>
+                        )}
+                        </>
+                    )}
+                </div>
 
-                {rangeModal.reportType !== 'Bonus Statement' && rangeModal.reportType !== 'Form 5' ? (
-                    <div className="space-y-1 mt-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Employee Filter</label>
-                        <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({...rangeModal, selectedEmployee: e.target.value})} >
-                            <option value="ALL">ALL Employees</option>
-                            {employees.map(e => <option key={e.id} value={e.id}>{e.id} - {e.name}</option>)}
-                        </select>
-                    </div>
-                ) : null}
-                
-                {rangeModal.reportType === 'Bonus Statement' && (
-                    <div className="space-y-1 mt-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Output Format</label>
-                        <div className="flex gap-2">
-                            <button onClick={() => setRangeModal({...rangeModal, format: 'PDF'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${rangeModal.format === 'PDF' ? 'bg-red-900/30 border-red-500 text-red-400' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>PDF Document</button>
-                            <button onClick={() => setRangeModal({...rangeModal, format: 'Excel'})} className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${rangeModal.format === 'Excel' ? 'bg-emerald-900/30 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>Excel Sheet</button>
-                        </div>
-                    </div>
-                )}
-
-                <button onClick={handleGenerateRange} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg mt-4 flex items-center justify-center gap-2 group">
-                    <Download size={18} className="group-hover:translate-y-0.5 transition-transform" /> GENERATE STATEMENT
+                <button onClick={handleGenerateRange} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl mt-4 transition-all shadow-lg flex items-center justify-center gap-2">
+                    <Download size={18} /> Generate Report
                 </button>
             </div>
         </div>
       )}
 
-      {/* MESSAGE MODAL */}
+      {/* Message Modal */}
       {msgModal.isOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                <button onClick={() => setMsgModal({ ...msgModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white">
-                    <X size={20} />
-                </button>
+                <button onClick={() => setMsgModal({...msgModal, isOpen: false})} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                 <div className="flex flex-col items-center gap-2">
                     <div className={`p-3 rounded-full border ${msgModal.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50'}`}>
                         {msgModal.type === 'error' ? <AlertTriangle size={24} /> : <CheckCircle size={24} />}
                     </div>
                     <h3 className="text-lg font-bold text-white text-center">{msgModal.title}</h3>
-                    <p className="text-sm text-slate-400 text-center whitespace-pre-line leading-relaxed">{msgModal.message}</p>
+                    <p className="text-sm text-slate-400 text-center">{msgModal.message}</p>
                 </div>
-                <button onClick={() => setMsgModal({ ...msgModal, isOpen: false })} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">
-                    Close
-                </button>
+                <button onClick={() => setMsgModal({...msgModal, isOpen: false})} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
             </div>
         </div>
       )}

@@ -677,6 +677,7 @@ const Reports: React.FC<ReportsProps> = ({
                                                     onChange={(e) => handleExitChange(r.employeeId, 'reason', e.target.value)}
                                                 >
                                                     <option value="">Select Reason...</option>
+                                                    <option value="ON LOP">ON LOP</option>
                                                     <option value="Resignation">Resignation</option>
                                                     <option value="Retirement">Retirement</option>
                                                     <option value="Termination">Termination</option>
