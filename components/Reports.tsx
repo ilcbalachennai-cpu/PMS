@@ -1,6 +1,7 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
-import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, KeyRound, UserX, Save, RefreshCw } from 'lucide-react';
-import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User } from '../types';
+import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, KeyRound, UserX, Save, RefreshCw, TrendingUp } from 'lucide-react';
+import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, ArrearBatch } from '../types';
 import { 
   generateExcelReport, 
   generateSimplePaySheetPDF, 
@@ -8,6 +9,7 @@ import {
   generateBankStatementPDF, 
   generateLeaveLedgerReport, 
   generateAdvanceShortfallReport,
+  generateArrearReport,
   formatDateInd
 } from '../services/reportService';
 
@@ -29,6 +31,7 @@ interface ReportsProps {
   setAdvanceLedgers: (a: AdvanceLedger[]) => void;
   currentUser?: User;
   onRollover: () => void;
+  arrearHistory?: ArrearBatch[];
 }
 
 const Reports: React.FC<ReportsProps> = ({
@@ -45,7 +48,8 @@ const Reports: React.FC<ReportsProps> = ({
   leaveLedgers,
   advanceLedgers,
   currentUser,
-  onRollover
+  onRollover,
+  arrearHistory
 }) => {
   const [reportType, setReportType] = useState<string>('Pay Sheet');
   const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
@@ -259,7 +263,9 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const generateReport = () => {
-    if (!isLocked) return;
+    // Exception for Arrear Report: It relies on History, not Lock state
+    if (reportType !== 'Arrear Report' && !isLocked) return;
+    
     setIsGenerating(true);
     setTimeout(() => {
       try {
@@ -407,6 +413,23 @@ const Reports: React.FC<ReportsProps> = ({
              }
              
              generateAdvanceShortfallReport(shortfallData, month, year, format, companyProfile);
+        } else if (reportType === 'Arrear Report') {
+             // Retrieve from Arrear History
+             const batch = arrearHistory?.find(b => b.month === month && b.year === year);
+             
+             if (!batch || !batch.records || batch.records.length === 0) {
+                 throw new Error(`No arrear calculation found for ${month} ${year}. Please process increments in Pay Process > Arrear Salary first.`);
+             }
+
+             generateArrearReport(
+                 batch.records, 
+                 batch.effectiveMonth, 
+                 batch.effectiveYear, 
+                 month, 
+                 year, 
+                 format, 
+                 companyProfile
+             );
         }
 
       } catch (e: any) {
@@ -492,7 +515,7 @@ const Reports: React.FC<ReportsProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* Report Selection */}
-          <div className={`lg:col-span-2 bg-[#1e293b] rounded-2xl border border-slate-800 p-6 shadow-xl transition-opacity ${!isLocked ? 'opacity-70' : 'opacity-100'}`}>
+          <div className={`lg:col-span-2 bg-[#1e293b] rounded-2xl border border-slate-800 p-6 shadow-xl transition-opacity ${!isLocked && reportType !== 'Arrear Report' ? 'opacity-70' : 'opacity-100'}`}>
               <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-800 pb-2">Select Report</h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {[
@@ -501,6 +524,7 @@ const Reports: React.FC<ReportsProps> = ({
                       { id: 'Bank Statement', icon: CreditCard, label: 'Bank Statement' },
                       { id: 'Leave Ledger', icon: ClipboardList, label: 'Leave Ledger' },
                       { id: 'Advance Shortfall', icon: Wallet, label: 'Advance Shortfall' },
+                      { id: 'Arrear Report', icon: TrendingUp, label: 'Arrear Salary Report' },
                   ].map(item => (
                       <button 
                         key={item.id}
@@ -547,16 +571,16 @@ const Reports: React.FC<ReportsProps> = ({
 
               <button 
                 onClick={generateReport} 
-                disabled={isGenerating || !isLocked}
+                disabled={isGenerating || (reportType !== 'Arrear Report' && !isLocked)}
                 className={`w-full py-4 font-black rounded-xl shadow-lg flex items-center justify-center gap-3 transition-all mt-6 ${
-                    !isLocked 
+                    (reportType !== 'Arrear Report' && !isLocked)
                     ? 'bg-slate-700 text-slate-400 cursor-not-allowed border border-slate-600' 
                     : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20'
                 }`}
               >
                   {isGenerating ? (
                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" />
-                  ) : !isLocked ? (
+                  ) : (reportType !== 'Arrear Report' && !isLocked) ? (
                       <>
                         <Lock size={20} /> FINALIZE PAYROLL TO DOWNLOAD
                       </>

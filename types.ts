@@ -272,6 +272,30 @@ export interface PayrollResult {
   fineReason?: string; // Store reason for fine in result for reporting
 }
 
+// New Types for Arrear Management
+export interface ArrearRecord {
+  id: string;
+  name: string;
+  oldBasic: number;
+  newBasic: number;
+  diffBasic: number;
+  oldDA: number;
+  newDA: number;
+  diffDA: number;
+  diffOthers: number;
+  monthlyIncrement: number;
+  months: number;
+  totalArrear: number;
+}
+
+export interface ArrearBatch {
+  month: string;
+  year: number;
+  effectiveMonth: string;
+  effectiveYear: number;
+  records: ArrearRecord[];
+}
+
 export interface User {
   username: string;
   password?: string;

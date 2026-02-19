@@ -1,16 +1,18 @@
 
 import React, { useState, useRef, useMemo } from 'react';
-import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge, Lock } from 'lucide-react';
+import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord } from '../types';
+import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch } from '../types';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
 import PayrollProcessor from './PayrollProcessor';
 import PayCycleGateway from './PayCycleGateway';
 import FineManager from './FineManager';
+import ArrearManager from './ArrearManager';
 
 interface PayProcessProps {
   employees: Employee[];
+  setEmployees?: (emps: Employee[]) => void; // Added setter
   config: StatutoryConfig;
   companyProfile: CompanyProfile;
   attendances: Attendance[];
@@ -29,10 +31,12 @@ interface PayProcessProps {
   currentUser?: User;
   fines: FineRecord[];
   setFines: (fines: FineRecord[]) => void;
+  arrearHistory?: ArrearBatch[];
+  setArrearHistory?: React.Dispatch<React.SetStateAction<ArrearBatch[]>>;
 }
 
 const PayProcess: React.FC<PayProcessProps> = (props) => {
-  const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'fines' | 'payroll'>('attendance');
+  const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'fines' | 'arrears' | 'payroll'>('attendance');
   const [isGatewayOpen, setIsGatewayOpen] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -46,7 +50,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
   const TabButton = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
     <button
       onClick={() => setActiveTab(id)}
-      className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all text-xs ${
+      className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all text-xs whitespace-nowrap ${
         activeTab === id 
           ? 'bg-blue-600 text-white shadow-lg' 
           : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -65,12 +69,9 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         "Income Tax", "Fine Amount", "Fine Reason"
     ];
 
-    // Filter for active employees for the current period logic could be applied, 
-    // but for template we generally list all non-ex employees.
     const activeEmps = props.employees.filter(e => !e.dol); 
 
     const data = activeEmps.map(emp => {
-        // Pre-fill existing data if available
         const att = props.attendances.find(a => a.employeeId === emp.id && a.month === props.month && a.year === props.year);
         const adv = props.advanceLedgers.find(a => a.employeeId === emp.id);
         const fine = props.fines.find(f => f.employeeId === emp.id && f.month === props.month && f.year === props.year);
@@ -100,7 +101,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
   };
 
   const handleMasterImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (isLocked) return; // Prevent import if locked
+    if (isLocked) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -116,10 +117,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
 
             if (data.length === 0) throw new Error("File is empty");
 
-            // Clone existing states
             const newAttendances = [...props.attendances];
             const newAdvanceLedgers = [...props.advanceLedgers];
-            // Filter out existing fines for this month to replace them
             const newFines = props.fines.filter(f => !(f.month === props.month && f.year === props.year));
 
             const daysInMonth = new Date(props.year, ['January','February','March','April','May','June','July','August','September','October','November','December'].indexOf(props.month) + 1, 0).getDate();
@@ -128,7 +127,6 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 const empId = String(row['Employee ID'] || row['ID'] || '').trim();
                 if (!empId) return;
 
-                // 1. Process Attendance
                 const attIdx = newAttendances.findIndex(a => a.employeeId === empId && a.month === props.month && a.year === props.year);
                 const attRecord: Attendance = {
                     employeeId: empId,
@@ -145,22 +143,18 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 if (attIdx >= 0) newAttendances[attIdx] = attRecord;
                 else newAttendances.push(attRecord);
 
-                // 2. Process Advance
                 const advIdx = newAdvanceLedgers.findIndex(a => a.employeeId === empId);
                 const totalAdvance = Number(row['New Advance'] || 0);
                 const monthlyEMI = Number(row['Monthly EMI'] || 0);
                 const paidManual = Number(row['Adv Manual Pay'] || 0);
 
                 if (advIdx >= 0) {
-                    // Update existing ledger
                     const ledger = newAdvanceLedgers[advIdx];
-                    ledger.totalAdvance = totalAdvance; // Assuming template provides current 'New' amount
+                    ledger.totalAdvance = totalAdvance;
                     ledger.monthlyInstallment = monthlyEMI;
                     ledger.paidAmount = paidManual;
-                    // Recalc balance: Opening + New - Paid
                     ledger.balance = (ledger.opening || 0) + totalAdvance - paidManual;
                 } else if (totalAdvance > 0 || monthlyEMI > 0) {
-                    // Create new ledger if not exists and has values
                     newAdvanceLedgers.push({
                         employeeId: empId,
                         opening: 0,
@@ -171,11 +165,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     });
                 }
 
-                // 3. Process Fines & Tax
                 const fineAmt = Number(row['Fine Amount'] || 0);
                 const fineReason = String(row['Fine Reason'] || '').trim();
-                
-                // Flexible Tax Key Search
                 const taxKeys = ['Income Tax', 'Tax', 'TDS'];
                 let taxVal = 0;
                 for (const k of taxKeys) {
@@ -197,12 +188,10 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 }
             });
 
-            // Batch Updates
             props.setAttendances(newAttendances);
             props.setAdvanceLedgers(newAdvanceLedgers);
             props.setFines(newFines);
 
-            // Workflow Actions
             setActiveTab('payroll');
             setShowSuccessModal(true);
 
@@ -297,11 +286,12 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             <TabButton id="attendance" label="1. Attendance" icon={CalendarDays} />
             <TabButton id="ledgers" label="2. Advances" icon={Wallet} />
             <TabButton id="fines" label="3. Tax & Fines" icon={Gavel} />
-            <TabButton id="payroll" label="4. Run Payroll" icon={Calculator} />
+            <TabButton id="arrears" label="4. Arrear Salary" icon={TrendingUp} />
+            <TabButton id="payroll" label="5. Run Payroll" icon={Calculator} />
         </div>
       </div>
 
-      {/* 3. Content Area - Using CSS display instead of conditional rendering to preserve state */}
+      {/* 3. Content Area */}
       <div className="min-h-[500px]">
         <div className={activeTab === 'attendance' ? 'block' : 'hidden'}>
             <AttendanceManager 
@@ -347,6 +337,22 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 savedRecords={props.savedRecords}
                 hideContextSelector={true}
             />
+        </div>
+
+        <div className={activeTab === 'arrears' ? 'block' : 'hidden'}>
+            {props.setEmployees ? (
+                <ArrearManager
+                    employees={props.employees}
+                    setEmployees={props.setEmployees}
+                    currentMonth={props.month}
+                    currentYear={props.year}
+                    companyProfile={props.companyProfile}
+                    arrearHistory={props.arrearHistory}
+                    setArrearHistory={props.setArrearHistory}
+                />
+            ) : (
+                <div className="p-8 text-center text-slate-500">Arrear Module Error: Missing Data Access</div>
+            )}
         </div>
 
         <div className={activeTab === 'payroll' ? 'block' : 'hidden'}>
