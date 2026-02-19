@@ -101,8 +101,21 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
 
   const totalActive = useMemo(() => employees.filter(e => !e.dol).length, [employees]);
 
+  // Helper to calculate next ID safely
+  const getNextId = () => {
+      let maxId = 0;
+      employees.forEach(e => {
+          const match = e.id.match(/^EMP(\d+)$/i);
+          if (match) {
+              const num = parseInt(match[1]);
+              if (!isNaN(num) && num > maxId) maxId = num;
+          }
+      });
+      return `EMP${String(maxId + 1).padStart(3, '0')}`;
+  };
+
   const getEmptyForm = (): Partial<Employee> => ({
-    id: `EMP00${employees.length + 1}`,
+    id: getNextId(),
     name: '', gender: 'Male', dob: '',
     doj: new Date().toISOString().split('T')[0],
     dol: '', leavingReason: '',
@@ -364,7 +377,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
         ];
 
         const sampleRow = [
-            "EMP101", "John Doe", "Male", "15-05-1990", "Software Engineer", 
+            "AUTO-GEN", "John Doe", "Male", "15-05-1990", "Software Engineer", 
             "Engineering", "Chennai", "Main Plant", "01-01-2024", 
             "9876543210", "Jane Doe", "Spouse",
             "Yes", "Jane Doe", "Female", "999988887777",
@@ -409,34 +422,18 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 return;
             }
 
-            // ... (Sorting Logic Omitted for Brevity - kept same) ...
-            data.sort((a: any, b: any) => {
-                const getRowDoj = (r: any) => {
-                    const keys = ['Date of Joining (DD-MM-YYYY)', 'Date of Joining', 'DOJ', 'Joining Date'];
-                    for (const k of keys) {
-                        const foundKey = Object.keys(r).find(rk => rk.trim().toLowerCase() === k.toLowerCase());
-                        if (foundKey && r[foundKey] !== undefined && r[foundKey] !== null) return r[foundKey];
-                    }
-                    return null;
-                };
-                const parseSortDate = (val: any): number => {
-                    if (!val) return 9999999999999;
-                    if (val instanceof Date) return val.getTime();
-                    const str = String(val).trim();
-                    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
-                        const [d, m, y] = str.split('-').map(Number);
-                        return new Date(y, m - 1, d).getTime();
-                    }
-                    if (/^\d+$/.test(str) && Number(str) > 20000) {
-                        const excelDate = new Date((Number(str) - 25569) * 86400 * 1000);
-                        return excelDate.getTime();
-                    }
-                    const t = Date.parse(str);
-                    return isNaN(t) ? 9999999999999 : t;
-                };
-                return parseSortDate(getRowDoj(a)) - parseSortDate(getRowDoj(b));
+            // Calculate Max ID to start auto-generation
+            let currentMaxId = 0;
+            employees.forEach(e => {
+                const match = e.id.match(/^EMP(\d+)$/i); // Case insensitive
+                if (match) {
+                    const num = parseInt(match[1]);
+                    if (!isNaN(num) && num > currentMaxId) currentMaxId = num;
+                }
             });
 
+            // Sort logic to process older joiners first if needed (omitted for brevity, assume source order is fine or minimal impact)
+            
             const validNewEmployees: Employee[] = [];
             const rejectedRecords: { row: number; name: string; id: string; reason: string }[] = [];
             
@@ -445,23 +442,13 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
             const existingPAN = new Set(employees.filter(e => e.pan).map(e => String(e.pan).trim().toLowerCase()));
             const existingESI = new Set(employees.filter(e => e.esiNumber).map(e => String(e.esiNumber).trim()));
             const existingPF = new Set(employees.filter(e => e.pfNumber).map(e => String(e.pfNumber).trim()));
-            const existingID = new Set(employees.map(e => e.id.toLowerCase()));
+            // ID check removed as we auto-generate
 
             const batchUAN = new Set();
             const batchAadhaar = new Set();
             const batchPAN = new Set();
             const batchESI = new Set();
             const batchPF = new Set();
-            const batchID = new Set();
-
-            let currentMaxId = 0;
-            employees.forEach(e => {
-                const match = e.id.match(/^EMP(\d+)$/);
-                if (match) {
-                    const num = parseInt(match[1]);
-                    if (!isNaN(num) && num > currentMaxId) currentMaxId = num;
-                }
-            });
 
             data.forEach((row: any, rowIndex: number) => {
                 const rowNum = rowIndex + 2; 
@@ -474,7 +461,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     return null;
                 };
 
-                let id = String(getVal(['Employee ID', 'ID', 'Emp ID', 'EmpID']) || '').trim();
+                // IGNORE EXCEL ID - Auto Generate always
+                currentMaxId++;
+                const id = `EMP${String(currentMaxId).padStart(3, '0')}`;
+
                 const name = String(getVal(['Full Name', 'Name', 'Employee Name']) || '').trim();
                 if (!name || name === 'Unknown') {
                     rejectedRecords.push({ row: rowNum, name: 'Unknown', id: '', reason: "Missing 'Full Name'. Skipped." });
@@ -493,10 +483,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 if (pan) { if (existingPAN.has(pan) || batchPAN.has(pan)) duplicateReasons.push(`Duplicate PAN (${pan.toUpperCase()})`); }
                 if (esi) { if (existingESI.has(esi) || batchESI.has(esi)) duplicateReasons.push(`Duplicate ESI (${esi})`); }
                 if (pf) { if (existingPF.has(pf) || batchPF.has(pf)) duplicateReasons.push(`Duplicate PF (${pf})`); }
-                if (id) { if (existingID.has(id.toLowerCase()) || batchID.has(id.toLowerCase())) duplicateReasons.push(`Duplicate ID (${id})`); }
-
+                
                 if (duplicateReasons.length > 0) {
                     rejectedRecords.push({ row: rowNum, name, id, reason: duplicateReasons.join(', ') });
+                    // Rollback ID counter if skip
+                    currentMaxId--;
                     return;
                 }
 
@@ -505,12 +496,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 if (pan) batchPAN.add(pan);
                 if (esi) batchESI.add(esi);
                 if (pf) batchPF.add(pf);
-
-                if (!id) {
-                    currentMaxId++;
-                    id = `EMP${String(currentMaxId).padStart(3, '0')}`;
-                }
-                batchID.add(id.toLowerCase());
 
                 const parseIndDate = (val: any) => {
                     if (!val) return '';
@@ -1127,7 +1112,17 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     </div>
 
                     <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Employee ID*</label><input required className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.id} onChange={e => setNewEmpForm({...newEmpForm, id: e.target.value})} /></div>
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Employee ID*</label>
+                            <div className="relative">
+                                <input 
+                                    readOnly 
+                                    className="w-full bg-slate-800/50 border border-slate-700 rounded-xl p-3 text-sm text-slate-400 font-bold font-mono outline-none cursor-not-allowed focus:ring-0" 
+                                    value={newEmpForm.id} 
+                                />
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-600 font-bold uppercase">Auto-Gen</div>
+                            </div>
+                        </div>
                         <div className="space-y-1.5 md:col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Full Legal Name*</label><input required className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.name} onChange={e => setNewEmpForm({...newEmpForm, name: e.target.value})} /></div>
                         
                         <div className="space-y-1.5"><label className="text-[10px] font-bold text-sky-400 uppercase tracking-widest ml-1">Mobile No*</label><input required className="w-full bg-slate-900 border border-sky-900/50 rounded-xl p-3 text-sm text-white font-mono focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.mobile} onChange={e => setNewEmpForm({...newEmpForm, mobile: e.target.value})} /></div>

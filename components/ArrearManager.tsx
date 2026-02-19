@@ -150,7 +150,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
 
       setIsProcessing(false);
       setShowConfirmation(false);
-      alert("Increments applied to Employee Master, Arrear Report generated, and history saved.");
+      alert(`Arrear Wages for the Month ${currentMonth} Year ${currentYear} is Processed & Employee Pay details also updated Successfully`);
   };
 
   return (
