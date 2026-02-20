@@ -747,12 +747,11 @@ const Reports: React.FC<ReportsProps> = ({
                 <button onClick={handleModalClose} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                 <div className="flex flex-col items-center gap-2">
                     <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>
-                        {modalState.type === 'error' ? <AlertTriangle size={24} /> : <CheckCircle2 size={24} /> : <Lock size={24} />}
+                        {modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle2 size={24} /> : <Lock size={24} />}
                     </div>
                     <h3 className="text-lg font-bold text-white text-center">{modalState.title}</h3>
                     <div className="text-sm text-slate-400 text-center whitespace-pre-line w-full">{modalState.message}</div>
                 </div>
-                
                 <div className="flex gap-3 mt-4">
                     {modalState.type === 'confirm' ? (
                         <>
