@@ -454,6 +454,73 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       nextMonth = monthsArr[currentIdx + 1];
     }
 
+    // ── 1. ATTENDANCE: Reset all entries for the finalized month to zero ──
+    setAttendances(prev =>
+      prev.map(a => {
+        if (a.month === globalMonth && a.year === globalYear) {
+          return {
+            ...a,
+            presentDays: 0,
+            earnedLeave: 0,
+            sickLeave: 0,
+            casualLeave: 0,
+            lopDays: 0,
+            encashedDays: 0,
+          };
+        }
+        return a;
+      })
+    );
+
+    // ── 2. ADVANCE LEDGER: Carry NET balance (after payroll recovery) as Opening ──
+    setAdvanceLedgers(prev => {
+      // Get the finalized payroll results for the month being closed out
+      const finalizedResults = payrollHistory.filter(
+        r => r.month === globalMonth && r.year === globalYear && r.status === 'Finalized'
+      );
+
+      return prev.map(a => {
+        // Find how much was actually recovered in payroll for this employee
+        const payrollResult = finalizedResults.find(r => r.employeeId === a.employeeId);
+        const actualRecovered = payrollResult ? (payrollResult.deductions?.advanceRecovery ?? 0) : 0;
+
+        // True remaining balance = pre-recovery balance − what payroll actually deducted
+        const priorBalance = a.balance ?? 0;
+        const netOpening = Math.max(0, priorBalance - actualRecovered + (a.recovery ?? 0) - actualRecovered);
+        // Simpler: opening = (opening + totalAdvance) - actualRecovered
+        const totalWas = (a.opening || 0) + (a.totalAdvance || 0);
+        const carryOpening = Math.max(0, totalWas - actualRecovered);
+
+        // Recompute recovery for next month using emiCount if applicable
+        const nextEmiCount = carryOpening > 0 ? (a.emiCount || 0) : 0;
+        let nextRecovery = 0;
+        if (nextEmiCount > 0) {
+          nextRecovery = Math.min(Math.round(carryOpening / nextEmiCount), carryOpening);
+        }
+
+        return {
+          ...a,
+          opening: carryOpening,
+          totalAdvance: 0,
+          manualPayment: 0,     // manual resets each month
+          emiCount: nextEmiCount,
+          recovery: nextRecovery,
+          balance: Math.max(0, carryOpening - nextRecovery),
+        };
+      });
+    });
+
+    // ── 3. FINES / TAX: Remove all records for the finalized month ──
+    setFines(prev =>
+      prev.filter(f => !(f.month === globalMonth && f.year === globalYear))
+    );
+
+    // ── 4. ARREAR HISTORY: Remove batch for the finalized month ──
+    setArrearHistory(prev =>
+      prev.filter(b => !(b.month === globalMonth && b.year === globalYear))
+    );
+
+    // ── 5. Advance the global period ──
     setGlobalMonth(nextMonth);
     setGlobalYear(nextYear);
   };
@@ -473,8 +540,8 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     <button
       onClick={() => setActiveView(view)}
       className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${activeView === view
-          ? 'bg-blue-500 text-white shadow-lg'
-          : 'text-slate-300 hover:bg-blue-900/50 hover:text-white'
+        ? 'bg-blue-500 text-white shadow-lg'
+        : 'text-slate-300 hover:bg-blue-900/50 hover:text-white'
         } ${depth > 0 ? 'ml-2 border-l border-slate-700 pl-4 w-[95%]' : ''}`}
     >
       <Icon size={depth > 0 ? 18 : 20} className={depth > 0 ? "opacity-80" : ""} />

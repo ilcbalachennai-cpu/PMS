@@ -124,37 +124,43 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
     const handleAdvanceUpdate = (empId: string, field: keyof AdvanceLedger, value: number) => {
         if (isLocked || isReadOnly || justSaved || !setAdvanceLedgers) return;
 
+        const computeRecoveryAndBalance = (rec: AdvanceLedger) => {
+            const totalBalance = (rec.opening || 0) + (rec.totalAdvance || 0);
+            let recovery = 0;
+            if ((rec.manualPayment || 0) > 0) {
+                // Manual overrides EMI
+                recovery = Math.min(rec.manualPayment, totalBalance);
+            } else if ((rec.emiCount || 0) > 0) {
+                // Divide total balance equally over EMI count
+                recovery = Math.round(totalBalance / rec.emiCount);
+                recovery = Math.min(recovery, totalBalance);
+            }
+            const balance = Math.max(0, totalBalance - recovery);
+            return { ...rec, recovery, balance };
+        };
+
         const exists = advanceLedgers.some(a => a.employeeId === empId);
 
         if (exists) {
             const updated = advanceLedgers.map(a => {
                 if (a.employeeId === empId) {
-                    const newRecord = { ...a, [field]: value };
-                    // Auto-calc balance
-                    if (field === 'totalAdvance' || field === 'paidAmount' || field === 'opening') {
-                        newRecord.balance = (newRecord.opening || 0) + (newRecord.totalAdvance || 0) - (newRecord.paidAmount || 0);
-                    }
-                    return newRecord;
+                    return computeRecoveryAndBalance({ ...a, [field]: value });
                 }
                 return a;
             });
             setAdvanceLedgers(updated);
         } else {
-            // Create new record
             const newRecord: AdvanceLedger = {
                 employeeId: empId,
                 opening: 0,
                 totalAdvance: 0,
-                monthlyInstallment: 0,
-                paidAmount: 0,
+                emiCount: 0,
+                manualPayment: 0,
+                recovery: 0,
                 balance: 0,
                 [field]: value
             };
-            // Auto-calc balance
-            if (field === 'totalAdvance' || field === 'paidAmount' || field === 'opening') {
-                newRecord.balance = (newRecord.opening || 0) + (newRecord.totalAdvance || 0) - (newRecord.paidAmount || 0);
-            }
-            setAdvanceLedgers([...advanceLedgers, newRecord]);
+            setAdvanceLedgers([...advanceLedgers, computeRecoveryAndBalance(newRecord)]);
         }
     };
 
@@ -203,10 +209,18 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
             const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
             XLSX.utils.book_append_sheet(wb, ws, "Leave_Ledger");
         } else {
-            const headers = ["Employee ID", "Name", "Advance Amount", "Monthly EMI", "Paid Amount"];
+            const headers = ["Employee ID", "Name", "Opening", "New Advance", "Manual Payment", "EMI Count", "Recovery"];
             const data = filteredEmployees.map(e => {
                 const a = advanceLedgers.find(adv => adv.employeeId === e.id);
-                return [e.id, e.name, a?.totalAdvance || 0, a?.monthlyInstallment || 0, a?.paidAmount || 0];
+                return [
+                    e.id,
+                    e.name,
+                    a?.opening || 0,
+                    a?.totalAdvance || 0,
+                    a?.manualPayment || 0,
+                    a?.emiCount || 0,
+                    a?.recovery || 0
+                ];
             });
             const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
             XLSX.utils.book_append_sheet(wb, ws, "Advance_Ledger");
@@ -262,23 +276,36 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                         if (filteredEmployees.some(e => e.id === id)) {
                             const idx = newLedgers.findIndex(l => l.employeeId === id);
 
-                            const totalAdvance = Number(row['Advance Amount'] || 0);
-                            const monthlyInstallment = Number(row['Monthly EMI'] || 0);
-                            const paidAmount = Number(row['Paid Amount'] || 0);
+                            const totalAdvance = Number(row['New Advance'] || row['Advance Amount'] || 0);
+                            const emiCount = Number(row['EMI Count'] || row['Monthly EMI'] || 0);
+                            const manualPayment = Number(row['Manual Payment'] || row['Paid Amount'] || 0);
+                            const opening = Number(row['Opening'] || 0);
+
+                            const totalBal = opening + totalAdvance;
+                            let recovery = 0;
+                            if (manualPayment > 0) {
+                                recovery = Math.min(manualPayment, totalBal);
+                            } else if (emiCount > 0) {
+                                recovery = Math.min(Math.round(totalBal / emiCount), totalBal);
+                            }
+                            const balance = Math.max(0, totalBal - recovery);
 
                             if (idx >= 0) {
                                 newLedgers[idx].totalAdvance = totalAdvance;
-                                newLedgers[idx].monthlyInstallment = monthlyInstallment;
-                                newLedgers[idx].paidAmount = paidAmount;
-                                newLedgers[idx].balance = (newLedgers[idx].opening || 0) + newLedgers[idx].totalAdvance - newLedgers[idx].paidAmount;
+                                newLedgers[idx].emiCount = emiCount;
+                                newLedgers[idx].manualPayment = manualPayment;
+                                if (opening > 0) newLedgers[idx].opening = opening;
+                                newLedgers[idx].recovery = recovery;
+                                newLedgers[idx].balance = balance;
                             } else {
                                 newLedgers.push({
                                     employeeId: id,
-                                    opening: 0,
+                                    opening,
                                     totalAdvance,
-                                    monthlyInstallment,
-                                    paidAmount,
-                                    balance: totalAdvance - paidAmount
+                                    emiCount,
+                                    manualPayment,
+                                    recovery,
+                                    balance
                                 });
                             }
                             count++;
@@ -406,8 +433,9 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                 <>
                                     <th className="px-4 py-4 text-center">Opening</th>
                                     <th className="px-4 py-4 text-center">New Advance</th>
-                                    <th className="px-4 py-4 text-center">Paid Manual</th>
-                                    <th className="px-4 py-4 text-center">EMI</th>
+                                    <th className="px-4 py-4 text-center text-amber-400">Manual</th>
+                                    <th className="px-4 py-4 text-center">EMI Count</th>
+                                    <th className="px-4 py-4 text-center text-sky-400">Recovery</th>
                                     <th className="px-4 py-4 text-center font-bold text-white">Balance</th>
                                 </>
                             )}
@@ -431,7 +459,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                     </tr>
                                 );
                             } else {
-                                const a = advanceLedgers.find(adv => adv.employeeId === emp.id) || { opening: 0, totalAdvance: 0, paidAmount: 0, monthlyInstallment: 0, balance: 0 };
+                                const a = advanceLedgers.find(adv => adv.employeeId === emp.id) || { opening: 0, totalAdvance: 0, manualPayment: 0, emiCount: 0, recovery: 0, balance: 0 };
 
                                 // Determine if Ex-Employee with pending balance
                                 let isExPending = false;
@@ -458,11 +486,36 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                             </div>
                                         </td>
                                         <td className="px-4 py-4 text-center text-slate-400 font-mono">{a.opening || 0}</td>
-                                        <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-emerald-400 font-bold text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent" value={a.totalAdvance} onChange={e => handleAdvanceUpdate(emp.id, 'totalAdvance', +e.target.value)} /></td>
-                                        <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-amber-400 text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent" value={a.paidAmount} onChange={e => handleAdvanceUpdate(emp.id, 'paidAmount', +e.target.value)} /></td>
-                                        <td className="px-4 py-4 text-center"><input disabled={inputDisabled} type="number" className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-slate-300 text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent" value={a.monthlyInstallment} onChange={e => handleAdvanceUpdate(emp.id, 'monthlyInstallment', +e.target.value)} /></td>
+                                        {/* New Advance */}
+                                        <td className="px-4 py-4 text-center">
+                                            <input disabled={inputDisabled} type="number" min={0}
+                                                className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-emerald-400 font-bold text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent"
+                                                value={a.totalAdvance || 0}
+                                                onChange={e => handleAdvanceUpdate(emp.id, 'totalAdvance', +e.target.value)} />
+                                        </td>
+                                        {/* Manual Payment — overrides EMI when > 0 */}
+                                        <td className="px-4 py-4 text-center">
+                                            <input disabled={inputDisabled} type="number" min={0}
+                                                placeholder="0"
+                                                className="w-20 bg-[#0f172a] border border-amber-700/40 rounded p-1 text-center text-amber-400 text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent"
+                                                value={(a.manualPayment || 0) > 0 ? a.manualPayment : ''}
+                                                onChange={e => handleAdvanceUpdate(emp.id, 'manualPayment', e.target.value === '' ? 0 : +e.target.value)} />
+                                        </td>
+                                        {/* EMI Count — disabled when manual is set */}
+                                        <td className="px-4 py-4 text-center">
+                                            <input
+                                                disabled={inputDisabled || (a.manualPayment || 0) > 0}
+                                                type="number" min={0} step={1}
+                                                title={(a.manualPayment || 0) > 0 ? 'Disabled — Manual payment is set' : 'Number of EMI installments'}
+                                                className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-slate-300 text-sm disabled:opacity-40 disabled:bg-transparent disabled:border-transparent disabled:cursor-not-allowed"
+                                                value={a.emiCount || 0}
+                                                onChange={e => handleAdvanceUpdate(emp.id, 'emiCount', +e.target.value)} />
+                                        </td>
+                                        {/* Recovery — computed read-only */}
+                                        <td className="px-4 py-4 text-center font-mono text-sky-400 font-bold">{a.recovery || 0}</td>
+                                        {/* Balance */}
                                         <td className="px-4 py-4 text-center font-black text-white text-lg">
-                                            {a.balance}
+                                            {a.balance || 0}
                                             {isExPending && <div className="text-[8px] text-pink-400 uppercase tracking-widest mt-1">Recovery Pending</div>}
                                         </td>
                                     </tr>

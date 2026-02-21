@@ -15,11 +15,12 @@ export interface LeaveLedger {
 
 export interface AdvanceLedger {
   employeeId: string;
-  opening: number; // New field for Opening Balance
-  totalAdvance: number;
-  monthlyInstallment: number;
-  paidAmount: number;
-  balance: number;
+  opening: number;          // Carry-forward from previous month
+  totalAdvance: number;     // New advance given this month
+  emiCount: number;         // Number of installments (used when manualPayment is 0)
+  manualPayment: number;    // Optional override; if > 0 disables emiCount
+  recovery: number;         // Computed: manualPayment > 0 ? manualPayment : totalBalance / emiCount
+  balance: number;          // opening + totalAdvance − recovery (carries forward as next month's opening)
 }
 
 export interface FineRecord {
@@ -67,7 +68,7 @@ export interface StatutoryConfig {
   lwfDeductionCycle: 'Monthly' | 'HalfYearly' | 'Yearly';
   lwfEmployeeContribution: number;
   lwfEmployerContribution: number;
-  
+
   // IT Configuration
   incomeTaxCalculationType: 'Manual' | 'Auto';
 
@@ -113,7 +114,7 @@ export interface CompanyProfile {
   esiCode: string;
   gstNo: string;
   pan: string;
-  
+
   // Granular Address
   doorNo: string;
   buildingName: string;
@@ -123,7 +124,7 @@ export interface CompanyProfile {
   city: string;
   state: string;
   pincode: string;
-  
+
   // Contact
   mobile: string;
   telephone: string;
@@ -153,7 +154,7 @@ export interface Employee {
   insuranceNo?: string;
   fatherSpouseName: string;
   relationship: string;
-  
+
   // New Family Relations Fields
   maritalStatus?: 'Yes' | 'No';
   spouseName?: string;
@@ -168,7 +169,7 @@ export interface Employee {
   city: string;
   state: string;
   pincode: string;
-  
+
   mobile: string;
   bankAccount: string;
   bankName?: string; // New field
@@ -177,7 +178,7 @@ export interface Employee {
   doj: string;
   dol?: string;
   leavingReason?: string; // New field for Reason of Leaving
-  
+
   // Wage Components
   basicPay: number;
   da: number;
@@ -189,14 +190,14 @@ export interface Employee {
   specialAllowance1: number;
   specialAllowance2: number;
   specialAllowance3: number;
-  
+
   isPFExempt: boolean;
   isESIExempt: boolean;
   // Employee Level PF Options
   employeeVPFRate: number; // Voluntary contribution above base 12%
   isPFHigherWages: boolean; // Contribute on full basic (no ceiling)
   isEmployerPFHigher: boolean; // Employer also contributes on full basic
-  
+
   // NEW: Higher Pension Eligibility Fields
   epfMembershipDate?: string;
   jointDeclaration?: boolean;
