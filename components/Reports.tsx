@@ -234,8 +234,10 @@ const Reports: React.FC<ReportsProps> = ({
     };
 
     const processExitAndFreeze = () => {
+        // ON LOP employees: DOL is optional — they remain active in the system
         const invalidEntries = Object.entries(exitData).filter(([_, val]) => {
             const data = val as { dol: string, reason: string };
+            if (data.reason === 'ON LOP') return false; // DOL not required for ON LOP
             if (!data.dol) return true;
             const yearVal = parseInt(data.dol.split('-')[0]);
             return yearVal < 2000 || yearVal > 2100;
@@ -253,11 +255,12 @@ const Reports: React.FC<ReportsProps> = ({
 
         const updatedEmployees = employees.map(emp => {
             if (exitData[emp.id]) {
-                return {
-                    ...emp,
-                    dol: exitData[emp.id].dol,
-                    leavingReason: exitData[emp.id].reason
-                };
+                const { dol, reason } = exitData[emp.id];
+                if (reason === 'ON LOP') {
+                    // ON LOP: only save the reason; clear any previous DOL so the employee stays active
+                    return { ...emp, dol: '', leavingReason: reason };
+                }
+                return { ...emp, dol, leavingReason: reason };
             }
             return emp;
         });
@@ -748,16 +751,27 @@ const Reports: React.FC<ReportsProps> = ({
                                                         <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
                                                             {r.employeeId}
                                                             <span className="bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 ml-2">Zero Pay</span>
+                                                            {data.reason === 'ON LOP' && (
+                                                                <span className="bg-teal-900/40 border border-teal-500/40 text-teal-400 px-1.5 py-0.5 rounded ml-1">Stays Active</span>
+                                                            )}
                                                         </div>
                                                     </td>
                                                     <td className="px-4 py-3">
                                                         <input
                                                             type="date"
-                                                            className="bg-[#0f172a] border border-slate-600 rounded-lg px-3 py-2 text-white text-xs w-full focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 outline-none transition-all placeholder-slate-600"
-                                                            value={data.dol}
+                                                            className={`border rounded-lg px-3 py-2 text-xs w-full outline-none transition-all placeholder-slate-600 ${data.reason === 'ON LOP'
+                                                                    ? 'bg-slate-800/40 border-slate-700 text-slate-500 cursor-not-allowed'
+                                                                    : 'bg-[#0f172a] border-slate-600 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50'
+                                                                }`}
+                                                            value={data.reason === 'ON LOP' ? '' : data.dol}
                                                             max={maxDate}
+                                                            disabled={data.reason === 'ON LOP'}
+                                                            placeholder={data.reason === 'ON LOP' ? 'Not required' : ''}
                                                             onChange={(e) => handleExitChange(r.employeeId, 'dol', e.target.value)}
                                                         />
+                                                        {data.reason === 'ON LOP' && (
+                                                            <p className="text-[9px] text-teal-400 mt-1">Employee stays active — no exit date needed</p>
+                                                        )}
                                                     </td>
                                                     <td className="px-4 py-3">
                                                         <select
