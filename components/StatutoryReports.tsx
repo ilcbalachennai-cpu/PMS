@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList, Info, AlertTriangle, CheckCircle, MapPin } from 'lucide-react';
-import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile } from '../types';
+import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile, ArrearBatch } from '../types';
 import { INDIAN_STATES } from '../constants';
 import {
     generatePFECR,
@@ -22,7 +22,9 @@ import {
     generateGratuityReport,
     generateBonusReport,
     generateEPFCodeImpactReport,
-    generateESIForm5
+    generateESIForm5,
+    generateArrearECRText,
+    generateArrearECRExcel
 } from '../services/reportService';
 
 interface StatutoryReportsProps {
@@ -37,6 +39,7 @@ interface StatutoryReportsProps {
     attendances?: Attendance[];
     leaveLedgers?: LeaveLedger[];
     advanceLedgers?: AdvanceLedger[];
+    arrearHistory?: ArrearBatch[];
 }
 
 // Configuration for State Specific Forms
@@ -89,7 +92,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     setGlobalYear,
     attendances = [],
     leaveLedgers = [],
-    advanceLedgers = []
+    advanceLedgers = [],
+    arrearHistory = []
 }) => {
     const currentYear = new Date().getFullYear();
     const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
@@ -175,10 +179,18 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         const fileName = `${reportName.replace(/ /g, '_')}_${globalMonth}_${globalYear}`;
 
         try {
-            if (reportName.includes('PF ECR')) {
+            if (reportName === 'PF ECR Arrears') {
+                const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
+                if (!batch) throw new Error(`No arrears processed for the period ${globalMonth} ${globalYear}`);
+                if (format === 'Excel') {
+                    generateArrearECRExcel(batch, payrollHistory, employees, config, fileName);
+                } else {
+                    generateArrearECRText(batch, payrollHistory, employees, config, fileName);
+                }
+            } else if (reportName.includes('PF ECR')) {
                 generatePFECR(currentData, employees, config, format as any, fileName);
             } else if (reportName.includes('ESI Code Wages')) {
-                generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile);
+                generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('ESI Exit')) {
                 generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
             } else if (reportName.includes('ESI')) {
@@ -192,9 +204,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             } else if (reportName.includes('Gratuity')) {
                 generateGratuityReport(employees, companyProfile);
             } else if (reportName.includes('Social Security')) {
-                generateCodeOnWagesReport(currentData, employees, format as any, fileName, companyProfile);
+                generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('EPF Code Impact')) {
-                generateEPFCodeImpactReport(currentData, employees, format as any, fileName, companyProfile);
+                generateEPFCodeImpactReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('Form 12A')) {
                 generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('Form B')) {
@@ -215,7 +227,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         }
     };
 
-    const ReportCard = ({ title, icon: Icon, color, reports, headerAction }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string }[], headerAction?: React.ReactNode }) => (
+    const ReportCard = ({ title, icon: Icon, color, reports, headerAction }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string, textColor?: string }[], headerAction?: React.ReactNode }) => (
         <div className="bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group hover:border-slate-700 transition-all h-full">
             <div className="bg-[#0f172a] p-4 flex items-center justify-between border-b border-slate-800">
                 <div className="flex items-center gap-3">
@@ -229,7 +241,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             <div className="p-4 grid grid-cols-1 gap-2">
                 {reports.map((r, i) => (
                     <button key={i} onClick={r.action} className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all group/btn text-left">
-                        <span className="text-xs font-bold text-slate-300 group-hover/btn:text-white">{r.label}</span>
+                        <span className={`text-xs font-bold ${r.textColor || 'text-slate-300'} group-hover/btn:text-white`}>{r.label}</span>
                         <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{r.format || 'PDF'}</span>
                     </button>
                 ))}
@@ -283,6 +295,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         reports={[
                             { label: 'PF ECR (Electronic Challan Return)', action: () => handleDownload('PF ECR', 'Text'), format: 'TXT' },
                             { label: 'PF ECR (Excel Backup)', action: () => handleDownload('PF ECR', 'Excel'), format: 'XLSX' },
+                            { label: 'PF ECR Arrears (Text format)', action: () => handleDownload('PF ECR Arrears', 'Text'), format: 'TXT', textColor: 'text-amber-400' },
+                            { label: 'PF ECR Arrears (Excel Backup)', action: () => handleDownload('PF ECR Arrears', 'Excel'), format: 'XLSX', textColor: 'text-amber-400' },
                             { label: 'Form 12A (Revised)', action: () => handleDownload('Form 12A', 'PDF') },
                             { label: 'Form 3A (Member Annual Card)', action: () => openRangeModal('Form 3A'), format: 'PDF' },
                             { label: 'Form 6A (Consolidated Annual)', action: () => openRangeModal('Form 6A'), format: 'PDF' },
@@ -299,7 +313,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                             { label: 'ESI Monthly Return (Excel)', action: () => handleDownload('ESI', 'Excel'), format: 'XLSX' },
                             { label: 'Form 5 (Return of Contribution)', action: () => openRangeModal('Form 5'), format: 'PDF' },
                             { label: 'ESI Code Wages Analysis', action: () => handleDownload('ESI Code Wages', 'PDF'), format: 'PDF' },
-                            { label: 'Exit / Resignation Report', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' }
+                            { label: 'ESI IP Going out of coverage', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' }
                         ]}
                     />
 

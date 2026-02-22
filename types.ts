@@ -283,7 +283,40 @@ export interface ArrearRecord {
   oldDA: number;
   newDA: number;
   diffDA: number;
-  diffOthers: number;
+
+  oldHRA: number;
+  newHRA: number;
+  diffHRA: number;
+
+  oldConveyance: number;
+  newConveyance: number;
+  diffConveyance: number;
+
+  oldWashing: number;
+  newWashing: number;
+  diffWashing: number;
+
+  oldAttire: number;
+  newAttire: number;
+  diffAttire: number;
+
+  oldSpecial1: number;
+  newSpecial1: number;
+  diffSpecial1: number;
+
+  oldSpecial2: number;
+  newSpecial2: number;
+  diffSpecial2: number;
+
+  oldSpecial3: number;
+  newSpecial3: number;
+  diffSpecial3: number;
+
+  oldGross: number;
+  newGross: number;
+  diffGross: number;
+
+  diffOthers: number; // Keep for backwards compatibility or random additions
   monthlyIncrement: number;
   months: number;
   totalArrear: number;

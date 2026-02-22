@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger } from '../types';
+import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
 
 // ==========================================
 // UTILITIES
@@ -82,12 +82,16 @@ export const generateArrearReport = (
         const exportData = arrearData.map(r => ({
             'Employee ID': r.id,
             'Name': r.name,
-            'Old Basic': r.oldBasic,
-            'New Basic': r.newBasic,
-            'Diff Basic': r.diffBasic,
-            'Old DA': r.oldDA,
-            'New DA': r.newDA,
-            'Diff DA': r.diffDA,
+            'Old Basic': r.oldBasic, 'New Basic': r.newBasic, 'Diff Basic': r.diffBasic,
+            'Old DA': r.oldDA, 'New DA': r.newDA, 'Diff DA': r.diffDA,
+            'Old HRA': r.oldHRA, 'New HRA': r.newHRA, 'Diff HRA': r.diffHRA,
+            'Old Conv': r.oldConveyance, 'New Conv': r.newConveyance, 'Diff Conv': r.diffConveyance,
+            'Old Wash': r.oldWashing, 'New Wash': r.newWashing, 'Diff Wash': r.diffWashing,
+            'Old Attire': r.oldAttire, 'New Attire': r.newAttire, 'Diff Attire': r.diffAttire,
+            'Old Spl 1': r.oldSpecial1, 'New Spl 1': r.newSpecial1, 'Diff Spl 1': r.diffSpecial1,
+            'Old Spl 2': r.oldSpecial2, 'New Spl 2': r.newSpecial2, 'Diff Spl 2': r.diffSpecial2,
+            'Old Spl 3': r.oldSpecial3, 'New Spl 3': r.newSpecial3, 'Diff Spl 3': r.diffSpecial3,
+            'Old Gross': r.oldGross, 'New Gross': r.newGross, 'Diff Gross': r.diffGross,
             'Other Allow Diff': r.diffOthers,
             'Total Monthly Incr': r.monthlyIncrement,
             'Arrear Months': r.months,
@@ -95,17 +99,18 @@ export const generateArrearReport = (
         }));
         generateExcelReport(exportData, 'Arrears', fileName);
     } else {
-        const headers = ['ID', 'Name', 'Old Basic', 'New Basic', 'Diff Basic', 'Old DA', 'New DA', 'Diff DA', 'Mth Incr', 'Months', 'Total Arrear'];
+        // For PDF, we condense to save horizontal space (focusing on Gross differences)
+        const headers = ['ID', 'Name', 'Old Basic', 'Diff Basic', 'Old DA', 'Diff DA', 'Old Gross', 'New Gross', 'Diff Gross', 'Months', 'Total Arrear'];
         const rows = arrearData.map(r => [
             r.id,
             r.name,
             r.oldBasic,
-            r.newBasic,
             r.diffBasic,
             r.oldDA,
-            r.newDA,
             r.diffDA,
-            r.monthlyIncrement,
+            r.oldGross,
+            r.newGross,
+            r.diffGross,
             r.months,
             r.totalArrear
         ]);
@@ -447,7 +452,7 @@ export const generatePFForm12A = (results: PayrollResult[], employees: Employee[
 
     // ── Header info (3 columns) ──
     doc.setFont('helvetica', 'normal'); doc.setTextColor(0);
-    const leftX = 14, midX = 100, rightX = 220;
+    const leftX = 14, midX = 100, rightX = 200;
 
     // Left col
     doc.setFontSize(8); doc.setTextColor(80);
@@ -485,25 +490,45 @@ export const generatePFForm12A = (results: PayrollResult[], employees: Employee[
 
     // ── Section title ────────────────────────────────────────────────────────
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0);
-    doc.text('PF ECR_UAN_CALCULATION SHEET', pageW / 2, y, { align: 'center' }); y += 8;
+    doc.text('PF ECR_UAN_CALCULATION SHEET', pageW / 2, y, { align: 'center' }); y += 9;
 
-    // TRRN / Date yellow boxes
-    const boxW = 50, boxH = 8;
-    doc.setFillColor(255, 255, 0); doc.setDrawColor(180);
-    doc.rect(60, y, boxW, boxH, 'FD');
-    doc.rect(185, y, boxW, boxH, 'FD');
-    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(0);
-    doc.text('TRRN', 60 + boxW / 2, y + 5.5, { align: 'center' });
-    doc.text('Date', 185 + boxW / 2, y + 5.5, { align: 'center' });
-    y += 14;
+    // ── TRRN / Date yellow boxes ─────────────────────────────────────────────
+    // Column cumulative edges (left margin = 14):
+    //   Particulars(55)=69 | Wages(32)=101 | Rate(18)=119 | EmpShare(35)=154
+    //   Rate(18)=172 | ErShare(35)=207 | Total(30)=237
+    //
+    //   Date box : x=14  → x=101  (Particulars+Wages,           width=87) ← LEFT
+    //   GAP      : x=101 → x=119  (Rate column,                  width=18) ← blank
+    //   TRRN box : x=119 → x=207  (EmpShare+Rate+ErShare,        width=88) ← RIGHT
+    //   Empty    : x=207 → x=237  (Total column outside boxes)
+    const boxH = 10;
+    const dateBoxL = 14, dateBoxW = 87;    // 14+87=101
+    const trrnBoxL = 119, trrnBoxW = 88;    // 119+88=207
+
+    doc.setFillColor(255, 255, 0); doc.setDrawColor(120); doc.setLineWidth(0.4);
+    doc.rect(dateBoxL, y, dateBoxW, boxH, 'FD');
+    doc.rect(trrnBoxL, y, trrnBoxW, boxH, 'FD');
+
+    // Date label + fill
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0);
+    doc.text('Date', dateBoxL + 3, y + 7);
+    doc.text('__  /  __  /  ______', dateBoxL + 22, y + 7);
+
+    // TRRN label + dots (fills the 88mm box)
+    doc.text('TRRN', trrnBoxL + 3, y + 7);
+    doc.text('......................................', trrnBoxL + 19, y + 7);
+
+    y += boxH + 4;
 
     // ── Contribution Table ───────────────────────────────────────────────────
     const tableHead = [['Particulars', 'Wages', 'Rate', 'Employee Share', 'Rate', 'Employer Share', 'Total']];
 
     const fmt = (n: number) => n > 0 ? n.toString() : '0';
 
+    const ROYAL_BLUE: [number, number, number] = [13, 21, 96];    // Dark Navy #0D1560
+
     const tableBody = [
-        ['PF-Wages', fmt(totalGrossWages), '', '', '', '', '',],
+        ['PF-Wages', fmt(totalEPFWages), '', '', '', '', '',],
         ['EPF_Wages (A/c No.1)', fmt(totalEPFWages), '12%', fmt(totalEEShare), '3.67%', fmt(totalERepfShare), fmt(totalEEShare + totalERepfShare)],
         ['EPS_Wages (A/c No.10)', fmt(totalEPSWages), '', '', '8.33%', fmt(totalERepsShare), fmt(totalERepsShare)],
         ['EDLI_Wages (A/c No.21)', fmt(edliWages), '', '', '0.50%', '', fmt(edliAmount)],
@@ -519,11 +544,11 @@ export const generatePFForm12A = (results: PayrollResult[], employees: Employee[
         theme: 'grid',
         styles: { fontSize: 8.5, cellPadding: 3, textColor: [0, 0, 0] },
         headStyles: {
-            fillColor: [240, 240, 240],
-            textColor: [0, 0, 0],
+            fillColor: ROYAL_BLUE,       // Royal Blue header
+            textColor: [255, 255, 255],  // White font
             fontStyle: 'bold',
             halign: 'left',
-            lineColor: [180, 180, 180],
+            lineColor: [255, 255, 255],
             lineWidth: 0.3
         },
         columnStyles: {
@@ -533,13 +558,20 @@ export const generatePFForm12A = (results: PayrollResult[], employees: Employee[
             3: { cellWidth: 35, halign: 'right' },
             4: { cellWidth: 18, halign: 'center' },
             5: { cellWidth: 35, halign: 'right' },
-            6: { cellWidth: 28, halign: 'right', fontStyle: 'bold' },
+            6: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
         },
         didParseCell: (hookData) => {
-            // Bold + light-grey total row
-            if (hookData.row.index === tableBody.length - 1) {
+            const rowIdx = hookData.row.index;
+            // PF-Wages row: larger font + bold
+            if (hookData.section === 'body' && rowIdx === 0) {
+                hookData.cell.styles.fontSize = 11;
                 hookData.cell.styles.fontStyle = 'bold';
-                hookData.cell.styles.fillColor = [235, 235, 235];
+            }
+            // Total row: Royal Blue + white (same as header)
+            if (hookData.section === 'body' && rowIdx === tableBody.length - 1) {
+                hookData.cell.styles.fontStyle = 'bold';
+                hookData.cell.styles.fillColor = ROYAL_BLUE;
+                hookData.cell.styles.textColor = [255, 255, 255];
             }
         }
     });
@@ -939,8 +971,114 @@ export const generatePFForm6A = (
 };
 
 export const generateESIExitReport = (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const data = results.filter(r => r.esiRemark).map(r => ({ ID: r.employeeId, Remark: r.esiRemark }));
-    generateExcelReport(data, 'ESI Exit', `ESI_Exit_${month}_${year}`);
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthIdx = months.indexOf(month);
+
+    const data: any[] = [];
+
+    results.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (!emp || emp.isESIExempt) return;
+
+        let reason = '';
+        let dolStr = '';
+        let oocStr = '';
+
+        let shouldInclude = false;
+
+        // ESI Wages calculation
+        // To accurately reflect the ESI Wage Base (which triggers the > 21000 limit), it should be Basic + DA + Retaining + any Code Wage additions
+        // We'll calculate it similarly to how the payrollEngine computes it internally.
+        const wageA = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0);
+        const wageB = Math.round(r.earnings.total || 0);
+        const wageC = wageB - wageA;
+        let wageD = 0;
+        if (wageB > 0) {
+            const allowancePercentage = wageC / wageB;
+            if (allowancePercentage > 0.50) {
+                wageD = wageC - Math.round(wageB * 0.50);
+            }
+        }
+        const esiWages = Math.round(wageA + wageD);
+
+        // Check 1: Did they leave service this month?
+        // USER REQUEST: DO NOT INCLUDE EMPLOYEE RESIGNED OR OTHERWISE. IT SHOULD ONLY CONTAIN EMPLOYEE STILL IN SERVICE.
+        if (emp.dol) {
+            const d = new Date(emp.dol);
+            if (d.getMonth() === monthIdx && d.getFullYear() === year) {
+                // Return early, do not include them in the Out of Coverage report if they are exiting
+                return;
+            }
+        }
+
+        // Check 2: Did they go out of coverage this month (April / October real-time trigger)
+        if (r.esiRemark && r.esiRemark.toLowerCase().includes('out of coverage')) {
+            shouldInclude = true;
+            reason = 'Out of Coverage';
+            oocStr = `01-${String(monthIdx + 1).padStart(2, '0')}-${year}`;
+            dolStr = ''; // Blank for out of coverage
+        }
+
+        // Check 3: PREDICTION - Is it March or September and wages > ceiling? If so, they WILL go out of coverage next month.
+        if (!shouldInclude && (month === 'March' || month === 'September')) {
+            const ESI_CEILING = 21000;
+            if (esiWages > ESI_CEILING) {
+                shouldInclude = true;
+                reason = 'Out of Coverage';
+
+                // Set the OoC Date to the 1st of the next month
+                let nextMonth = monthIdx + 2; // +1 to convert 0-indexed to 1-indexed, +1 for next month
+                let nextYear = year;
+                if (nextMonth > 12) {
+                    nextMonth = 1;
+                    nextYear++;
+                }
+                oocStr = `01-${String(nextMonth).padStart(2, '0')}-${nextYear}`;
+                dolStr = '';
+            }
+        }
+
+        if (shouldInclude) {
+            data.push({
+                'EMP_ID': emp.id,
+                'IP_ESI_No': emp.esiNumber || '',
+                'Emp_Name': emp.name,
+                'ESI Wages': esiWages,
+                'Reason': reason,
+                'DOL': dolStr,
+                '*OoC_Date': oocStr
+            });
+        }
+    });
+
+    if (data.length === 0) {
+        data.push({
+            'EMP_ID': '-', 'IP_ESI_No': '-', 'Emp_Name': 'No Exits or Out of Coverage',
+            'ESI Wages': '-', 'Reason': '-', 'DOL': '-', '*OoC_Date': '-'
+        });
+    }
+
+    const ws = XLSX.utils.json_to_sheet(data);
+
+    // Auto-size columns to fit data exactly
+    if (data.length > 0) {
+        const cols = Object.keys(data[0]).map(key => {
+            const maxLength = data.reduce((max, row) => {
+                const val = (row as any)[key];
+                const strLen = val ? val.toString().length : 0;
+                return Math.max(max, strLen);
+            }, key.length);
+            return { wch: maxLength + 2 };
+        });
+        ws['!cols'] = cols;
+    }
+
+    // Add trailing footer note as requested
+    XLSX.utils.sheet_add_aoa(ws, [['*Out of Coverage']], { origin: -1 }); // Appends to bottom
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'ESI Exit');
+    XLSX.writeFile(wb, `ESI_Going_Out_Of_Coverage_${month}_${year}.xlsx`);
 };
 
 export const generateGratuityReport = (employees: Employee[], companyProfile: CompanyProfile) => {
@@ -956,8 +1094,236 @@ export const generateBonusReport = (history: PayrollResult[], employees: Employe
     else generatePDFTableReport('Form C (Bonus)', headers, data, 'Bonus_Report', 'l', '', company);
 };
 
-export const generateESIForm5 = (payrollHistory: PayrollResult[], employees: Employee[], halfYearPeriod: 'Apr-Sep' | 'Oct-Mar', year: number, company: CompanyProfile) => {
-    // Stub
+export const generateESIForm5 = (payrollHistory: PayrollResult[], employees: Employee[], halfYearPeriod: 'Apr-Sep' | 'Oct-Mar', year: number, companyProfile: CompanyProfile) => {
+
+    // 1. Determine the months for the selected period
+    const monthsPeriod = halfYearPeriod === 'Apr-Sep'
+        ? ['April', 'May', 'June', 'July', 'August', 'September']
+        : ['October', 'November', 'December', 'January', 'February', 'March'];
+
+    // For Oct-Mar, Jan/Feb/Mar fall into the next calendar year
+    const getYearForMonth = (month: string) => {
+        if (halfYearPeriod === 'Oct-Mar' && ['January', 'February', 'March'].includes(month)) {
+            return year + 1;
+        }
+        return year;
+    };
+
+    // 2. Aggregate Data per Employee
+    const employeeTotals = new Map<string, {
+        days: number,
+        wages: number,
+        employeeContribution: number,
+        employerContribution: number
+    }>();
+
+    let grandTotalEmployee = 0;
+    let grandTotalEmployer = 0;
+
+    payrollHistory.forEach(r => {
+        if (monthsPeriod.includes(r.month) && r.year === getYearForMonth(r.month)) {
+            const emp = employees.find(e => e.id === r.employeeId);
+            if (!emp || emp.isESIExempt) return;
+
+            // Recalculate ESI Wage base as done in payrollEngine 
+            if (r.deductions.esi > 0 || r.payableDays > 0) {
+                const wageA = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0);
+                const wageB = Math.round(r.earnings.total || 0);
+                const wageC = wageB - wageA;
+                let wageD = 0;
+                if (wageB > 0) {
+                    const allowancePercentage = wageC / wageB;
+                    if (allowancePercentage > 0.50) {
+                        wageD = wageC - Math.round(wageB * 0.50);
+                    }
+                }
+                const esiWages = Math.round(wageA + wageD);
+
+                const current = employeeTotals.get(r.employeeId) || { days: 0, wages: 0, employeeContribution: 0, employerContribution: 0 };
+
+                current.days += r.payableDays;
+                current.wages += esiWages;
+                current.employeeContribution += r.deductions.esi;
+                current.employerContribution += r.employerContributions.esi;
+
+                grandTotalEmployee += r.deductions.esi;
+                grandTotalEmployer += r.employerContributions.esi;
+
+                employeeTotals.set(r.employeeId, current);
+            }
+        }
+    });
+
+    const grandTotalContribution = grandTotalEmployee + grandTotalEmployer;
+
+    // 3. Prepare Table Data for Page 2+
+    const tableData: any[][] = [];
+    let slNo = 1;
+
+    // Define period end date to check "still working" status
+    const periodEndDate = halfYearPeriod === 'Apr-Sep'
+        ? new Date(year, 8, 30)   // Sept 30
+        : new Date(year + 1, 2, 31); // March 31
+
+    employeeTotals.forEach((totals, empId) => {
+        const emp = employees.find(e => e.id === empId);
+        if (!emp) return;
+
+        const avgDailyWage = totals.days > 0 ? (totals.wages / totals.days).toFixed(2) : '0.00';
+
+        let stillWorking = 'Y';
+        if (emp.dol) {
+            const dolDate = new Date(emp.dol);
+            if (dolDate <= periodEndDate) stillWorking = 'N';
+        }
+
+        tableData.push([
+            slNo++,
+            emp.esiNumber || '',
+            emp.name,
+            Math.round(totals.days),
+            totals.wages.toFixed(2),
+            totals.employeeContribution.toFixed(2),
+            avgDailyWage,
+            stillWorking,
+            '' // Remarks
+        ]);
+    });
+
+    // 4. Generate PDF
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = 297;
+
+    // --- PAGE 1: COVER PAGE ---
+    let y = 15;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('FORM 5', pageW / 2, y, { align: 'center' }); y += 6;
+    doc.text('RETURN OF CONTRIBUTIONS', pageW / 2, y, { align: 'center' }); y += 5;
+    doc.text("EMPLOYEES' STATE INSURANCE CORPORATION", pageW / 2, y, { align: 'center' }); y += 7;
+
+    doc.setFont('helvetica', 'italic');
+    doc.text('(Regulation 26)', pageW / 2, y, { align: 'center' }); y += 12;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('Name of Branch Office : BO - Guindy', 14, y);
+    doc.text(`Employer's Code No. ${companyProfile.esiCode || ''}`, pageW - 14, y, { align: 'right' }); y += 6;
+
+    const addressParts = [
+        companyProfile.doorNo, companyProfile.buildingName,
+        companyProfile.street, companyProfile.area,
+        companyProfile.city, companyProfile.state, companyProfile.pincode
+    ].filter(Boolean);
+    const addressStr = addressParts.join(', ');
+
+    doc.text(`Name and Address of the factory or establishment : ${companyProfile.establishmentName || ''}, ${addressStr}`, 14, y); y += 8;
+
+    doc.text('Particulars of the Principal employer(s)', 14, y); y += 5;
+    doc.text('(a) Name :-----', 20, y); y += 5;
+    doc.text('(b) Designation :-----', 20, y); y += 5;
+    doc.text('(c) Residential Address:-----', 20, y); y += 8;
+
+    doc.setFont('helvetica', 'bold');
+    const periodStr = halfYearPeriod === 'Apr-Sep' ? `Apr ${year} to Sep ${year}` : `Oct ${year} to Mar ${year + 1}`;
+    doc.text(`Contribution Period from : ${periodStr}`, 14, y); y += 10;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const p1 = "I furnish below the details of the Employer's and Employee's share of contribution in respect of the under mentioned insured persons. I hereby declare that the return";
+    const p2 = "includes each and every employee, employed directly or through an immediate employer or in connection with the work of the factory / establishment or any";
+    const p3 = "work...............................connected with the administration of the factory / establishment or purchase of raw materials, sale or distribution of finished products etc. to";
+    const p4 = "whom the ESI Act, 1948 applies, in the contribution period to which this return relates and that the contributions in respect of employer's and employee's";
+    const p5 = "share have been correctly paid in accordance with the provisions of the Act and Regulations.";
+
+    doc.text(p1, 14, y); y += 6;
+    doc.text(p2, 14, y); y += 6;
+    doc.text(p3, 14, y); y += 6;
+    doc.text(p4, 14, y); y += 6;
+    doc.text(p5, 14, y); y += 8;
+
+    // Small Summary Table
+    autoTable(doc, {
+        head: [],
+        body: [
+            ["Employees's Share", grandTotalEmployee.toFixed(2)],
+            ["Employer's Share", grandTotalEmployer.toFixed(2)],
+            ["Total Contribution", grandTotalContribution.toFixed(2)]
+        ],
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 9, cellPadding: 2, textColor: [0, 0, 0], fontStyle: 'bold' },
+        columnStyles: {
+            0: { cellWidth: 50 },
+            1: { cellWidth: 40, halign: 'right' }
+        },
+        margin: { left: 14 }
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 5;
+
+    // Challan Table
+    const challanData = monthsPeriod.map(m => [
+        `${m.substring(0, 3)}-${getYearForMonth(m)}`,
+        '', // Challan Number
+        '', // Date
+        '', // Amount
+        ''  // Bank
+    ]);
+
+    autoTable(doc, {
+        head: [['S.No.', 'Month', 'Challan Number', 'Date of Challan', 'Amount', 'Name of the Bank and Branch']],
+        body: challanData.map((row, i) => [i + 1, ...row]),
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 9, cellPadding: 3, textColor: [0, 0, 0] },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
+    });
+
+    // --- PAGE 2+: EMPLOYEE TABLE ---
+    doc.addPage();
+    y = 15;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`Total amount paid: ${grandTotalContribution.toFixed(2)}`, pageW / 2, y, { align: 'center' }); y += 15;
+
+    doc.text("EMPLOYEES' STATE INSURANCE CORPORATION", pageW / 2, y, { align: 'center' }); y += 8;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(`Employer's Name and Address ${companyProfile.establishmentName || ''}, ${addressStr}`, 14, y); y += 6;
+    doc.text(`Employer's Code No period from ${periodStr}`, 14, y); y += 6;
+
+    autoTable(doc, {
+        head: [['Sl.No.', 'Insurance\nNumber', 'Name of Insured\nPerson', 'No. of days for\nwhich wages\npaid', 'Total amount of\nwages paid (Rs.)', "Employee's\ncontribution\ndeducted", 'Average\nDaily\nWages(Rs.)', 'Whether\nstill continues\nworking', 'Remarks']],
+        body: tableData,
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 2, textColor: [0, 0, 0] },
+        headStyles: {
+            fillColor: [240, 240, 240],
+            textColor: [0, 0, 0],
+            fontStyle: 'bold',
+            halign: 'center',
+            valign: 'middle'
+        },
+        columnStyles: {
+            0: { cellWidth: 15, halign: 'center' },
+            1: { cellWidth: 35, halign: 'center' },
+            2: { cellWidth: 50, halign: 'left' },
+            3: { cellWidth: 25, halign: 'right' },
+            4: { cellWidth: 30, halign: 'right' },
+            5: { cellWidth: 25, halign: 'right' },
+            6: { cellWidth: 25, halign: 'right' },
+            7: { cellWidth: 30, halign: 'center' },
+            8: { cellWidth: 'auto' }
+        },
+        margin: { left: 14, right: 14 }
+    });
+
+    doc.save(`ESI_Form_5_${halfYearPeriod}_${year}.pdf`);
 };
 
 // ==========================================
@@ -965,17 +1331,69 @@ export const generateESIForm5 = (payrollHistory: PayrollResult[], employees: Emp
 // ==========================================
 
 export const generateESIReturn = (results: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string, companyProfile: CompanyProfile) => {
-    const data = results.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        return {
-            'IP Number': emp?.esiNumber,
-            'IP Name': emp?.name,
-            'Days Worked': r.payableDays,
-            'Wages': r.earnings.total,
-            'Employee Contribution': r.deductions.esi
-        };
-    });
-    if (format === 'Excel') generateExcelReport(data, 'ESI Return', fileName);
+    // Note: ESI is only applicable for employees not exempt. 
+    // The report normally shows all covered employees.
+    const data = results
+        .filter(r => {
+            const emp = employees.find(e => e.id === r.employeeId);
+            return emp && !emp.isESIExempt;
+        })
+        .map(r => {
+            const emp = employees.find(e => e.id === r.employeeId);
+            const isLeft = !!emp?.dol;
+            const isLOP = (emp?.leavingReason || '').trim().toUpperCase() === 'ON LOP';
+
+            let reason: number | string = 0;
+            let dolStr = '';
+
+            if (isLOP) {
+                reason = 1;
+                dolStr = '';
+            } else if (isLeft) {
+                reason = 2;
+                if (emp?.dol) {
+                    // Formatting DOL as DD-MM-YYYY 
+                    const d = new Date(emp.dol);
+                    const day = String(d.getDate()).padStart(2, '0');
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    const year = d.getFullYear();
+                    dolStr = `${day}-${month}-${year}`;
+                }
+            }
+
+            const esiWages = r.payableDays > 0
+                ? Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0))
+                : 0;
+
+            return {
+                'IP Number': emp?.esiNumber || '',
+                'IP Name': emp?.name || '',
+                'No. Of Days': r.payableDays,
+                'ESI Wages': esiWages,
+                'Reason': reason,
+                'DOL': dolStr
+            };
+        });
+
+    if (format === 'Excel') {
+        const ws = XLSX.utils.json_to_sheet(data);
+
+        if (data.length > 0) {
+            const cols = Object.keys(data[0]).map(key => {
+                const maxLen = data.reduce((max, row) => {
+                    const val = (row as any)[key];
+                    const strLen = val ? val.toString().length : 0;
+                    return Math.max(max, strLen);
+                }, key.length);
+                return { wch: maxLen + 2 };
+            });
+            ws['!cols'] = cols;
+        }
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+        XLSX.writeFile(wb, `${fileName}.xlsx`);
+    }
 };
 
 export const generatePTReport = (results: PayrollResult[], employees: Employee[], fileName: string, companyProfile: CompanyProfile) => {
@@ -1015,24 +1433,569 @@ export const generateCodeOnWagesReport = (results: PayrollResult[], employees: E
     }
 };
 
-export const generateESICodeWagesReport = (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'Actual Gross', 'ESI Wages', 'Diff', 'Remark'];
-    const data = results.map(r => [r.employeeId, employees.find(e => e.id === r.employeeId)?.name, r.earnings.total, r.earnings.total, 0, r.esiRemark || '-']);
-    if (format === 'Excel') {
-        const excelData = data.map((row: any) => ({ ID: row[0], Name: row[1], ActualGross: row[2], ESIWages: row[3], Diff: row[4], Remark: row[5] }));
-        generateExcelReport(excelData, 'ESI Code Wages', fileName);
-    } else {
-        generatePDFTableReport('ESI Code Wages Analysis', headers, data, fileName, 'l', '', companyProfile);
+export const generateESICodeWagesReport = (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile, month: string, year: number) => {
+
+    // ── Build per-employee rows ─────────────────────────────────────────────
+    let totOld = 0, totNew = 0, totDiff = 0;
+
+    interface ImpactRow {
+        id: string; name: string; gross: number;
+        baseWage: number; codeWage: number;
+        oldValue: number; newValue: number; diff: number; impact: string;
     }
+
+    const rows: ImpactRow[] = results
+        .filter(r => !employees.find(e => e.id === r.employeeId)?.isESIExempt && r.payableDays > 0)
+        .map(r => {
+            const emp = employees.find(e => e.id === r.employeeId);
+            const gross = Math.round(r.earnings.total);
+
+            // For ESI Impact Analysis: Base Wage = Basic + DA + Retaining + HRA as per user specification "Old Value" note
+            const baseWage = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0) + (r.earnings.hra || 0));
+            const codeWage = baseWage;
+
+            // Old Value = 0.75% of Base Wage (uncapped theoretical)
+            const oldValue = Math.ceil(baseWage * 0.0075);
+            // New Value = Actual ESI Deducted
+            const newValue = Math.ceil(r.deductions.esi || 0);
+
+            const diff = oldValue - newValue;
+            const impact = diff > 0 ? 'Positive Impact (Savings)'
+                : diff < 0 ? 'Adverse Impact'
+                    : 'Neutral';
+
+            totOld += oldValue;
+            totNew += newValue;
+            totDiff += diff;
+            return { id: r.employeeId, name: emp?.name || r.employeeId, gross, baseWage, codeWage, oldValue, newValue, diff, impact };
+        });
+
+    // ── Excel output ────────────────────────────────────────────────────────
+    if (format === 'Excel') {
+        const excelData = rows.map(r => ({
+            'Employee ID': r.id, 'Name': r.name,
+            'Gross': r.gross, 'Base Wage': r.baseWage, 'Code Wage': r.codeWage,
+            'Old Value': r.oldValue, 'New Value': r.newValue, 'Diff': r.diff, 'Impact': r.impact
+        }));
+        generateExcelReport(excelData, 'ESI Code Impact', fileName);
+        return;
+    }
+
+    // ── PDF output ──────────────────────────────────────────────────────────
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = 297;
+    let y = 12;
+
+    const DARK_NAVY: [number, number, number] = [13, 21, 96];
+
+    // Company header
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(0);
+    doc.text((companyProfile.establishmentName || '').toUpperCase(), 14, y);
+    y += 6;
+
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(80);
+    const cityState = [companyProfile.city, companyProfile.state].filter(Boolean).join(', ');
+    doc.text(cityState, 14, y); y += 8;
+
+    // Report title (Left) + Month/Year (Right)
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0);
+    doc.text('ESI Social Security Code Impact Analysis', 14, y);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(80);
+    doc.text(`For the Month of: ${month} ${year}`, pageW - 14, y, { align: 'right' });
+    y += 7;
+
+    // Table
+    const tableHead = [['ID', 'Name', 'Gross', 'Base Wage', 'Code Wage', 'Old Value', 'New Value', 'Diff', 'Impact']];
+
+    const tableBody: (string | number)[][] = rows.map(r => [
+        r.id, r.name,
+        r.gross, r.baseWage, r.codeWage,
+        r.oldValue, r.newValue, r.diff, r.impact
+    ]);
+
+    // TOTAL row
+    tableBody.push(['', 'TOTAL', '', '', '', totOld, totNew, totDiff, '']);
+
+    autoTable(doc, {
+        head: tableHead,
+        body: tableBody,
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 2.5, textColor: [0, 0, 0] },
+        headStyles: {
+            fillColor: [52, 120, 180], // Steel Blue to match the ESI image header colour
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            halign: 'center',
+            lineColor: [255, 255, 255],
+            lineWidth: 0.3,
+        },
+        columnStyles: {
+            0: { cellWidth: 22, halign: 'center' },
+            1: { cellWidth: 55, halign: 'left' },
+            2: { cellWidth: 22, halign: 'right' },
+            3: { cellWidth: 25, halign: 'right' },
+            4: { cellWidth: 25, halign: 'right' },
+            5: { cellWidth: 22, halign: 'right' },
+            6: { cellWidth: 22, halign: 'right' },
+            7: { cellWidth: 18, halign: 'right' },
+            8: { cellWidth: 50, halign: 'left' },
+        },
+        didParseCell: (hookData) => {
+            const isTotal = hookData.row.index === tableBody.length - 1;
+            if (isTotal) {
+                hookData.cell.styles.fontStyle = 'bold';
+                // Total row is light gray in the reference image
+                hookData.cell.styles.fillColor = [240, 240, 240];
+                hookData.cell.styles.textColor = [0, 0, 0];
+            }
+            // Colour Impact column
+            if (hookData.section === 'body' && !isTotal && hookData.column.index === 8) {
+                const val = hookData.cell.raw as string;
+                if (val.includes('Positive')) {
+                    hookData.cell.styles.textColor = [0, 150, 80];   // Green
+                    hookData.cell.styles.fontStyle = 'bold';
+                } else if (val.includes('Adverse')) {
+                    hookData.cell.styles.textColor = [200, 0, 0];    // Red
+                    hookData.cell.styles.fontStyle = 'bold';
+                }
+            }
+        }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 5;
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'italic'); doc.setTextColor(80);
+    doc.text('Note: "Old Value" = (Basic+DA+Retaining+HRA)*0.75%. "New Value" = Actual ESI Deduction (Pay Sheet).', 14, finalY);
+
+    doc.save(`${fileName}.pdf`);
 };
 
-export const generateEPFCodeImpactReport = (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', 'EPF Wages', 'Pension Wages', 'Code Impact'];
-    const data = results.map(r => [r.employeeId, employees.find(e => e.id === r.employeeId)?.name, r.earnings.basic, r.earnings.basic, r.isCode88 ? 'Yes' : 'No']);
-    if (format === 'Excel') {
-        const excelData = data.map((row: any) => ({ ID: row[0], Name: row[1], EPFWages: row[2], PensionWages: row[3], Impact: row[4] }));
-        generateExcelReport(excelData, 'EPF Code Impact', fileName);
-    } else {
-        generatePDFTableReport('EPF Code Impact Analysis', headers, data, fileName, 'l', '', companyProfile);
+export const generateEPFCodeImpactReport = (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile, month: string, year: number) => {
+
+    // ── Build per-employee rows ─────────────────────────────────────────────
+    let totOld = 0, totNew = 0, totDiff = 0;
+
+    interface ImpactRow {
+        id: string; name: string; gross: number;
+        baseWage: number; codeWage: number;
+        oldValue: number; newValue: number; diff: number; impact: string;
     }
+
+    const rows: ImpactRow[] = results
+        .filter(r => !employees.find(e => e.id === r.employeeId)?.isPFExempt && r.payableDays > 0)
+        .map(r => {
+            const emp = employees.find(e => e.id === r.employeeId);
+            const gross = Math.round(r.earnings.total);
+            const baseWage = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0));
+            const codeWage = baseWage;   // Code Wage = Base Wage (EPF qualifying wages)
+            const oldValue = Math.round(baseWage * 0.12);    // Uncapped theoretical 12%
+            const newValue = Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0)); // Actual deduction
+            const diff = oldValue - newValue;
+            const impact = diff > 0 ? 'Positive Impact (Savings)'
+                : diff < 0 ? 'Adverse Impact'
+                    : 'Neutral';
+            totOld += oldValue;
+            totNew += newValue;
+            totDiff += diff;
+            return { id: r.employeeId, name: emp?.name || r.employeeId, gross, baseWage, codeWage, oldValue, newValue, diff, impact };
+        });
+
+    // ── Excel output ────────────────────────────────────────────────────────
+    if (format === 'Excel') {
+        const excelData = rows.map(r => ({
+            'Employee ID': r.id, 'Name': r.name,
+            'Gross': r.gross, 'Base Wage': r.baseWage, 'Code Wage': r.codeWage,
+            'Old Value': r.oldValue, 'New Value': r.newValue, 'Diff': r.diff, 'Impact': r.impact
+        }));
+        generateExcelReport(excelData, 'EPF Code Impact', fileName);
+        return;
+    }
+
+    // ── PDF output ──────────────────────────────────────────────────────────
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = 297;
+    let y = 12;
+
+    const DARK_NAVY: [number, number, number] = [13, 21, 96];
+
+    // Company header
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(0);
+    doc.text((companyProfile.establishmentName || '').toUpperCase(), 14, y);
+    y += 6;
+
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(80);
+    const cityState = [companyProfile.city, companyProfile.state].filter(Boolean).join(', ');
+    doc.text(cityState, 14, y); y += 8;
+
+    // Report title (Left) + Month/Year (Right)
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0);
+    doc.text('EPF Social Security Code Impact Analysis', 14, y);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(80);
+    doc.text(`For the Month of: ${month} ${year}`, pageW - 14, y, { align: 'right' });
+    y += 7;
+
+    // Table
+    const tableHead = [['ID', 'Name', 'Gross', 'Base Wage', 'Code Wage', 'Old Value', 'New Value', 'Diff', 'Impact']];
+
+    const tableBody: (string | number)[][] = rows.map(r => [
+        r.id, r.name,
+        r.gross, r.baseWage, r.codeWage,
+        r.oldValue, r.newValue, r.diff, r.impact
+    ]);
+
+    // TOTAL row
+    tableBody.push(['', 'TOTAL', '', '', '', totOld, totNew, totDiff, '']);
+
+    autoTable(doc, {
+        head: tableHead,
+        body: tableBody,
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 2.5, textColor: [0, 0, 0] },
+        headStyles: {
+            fillColor: DARK_NAVY,
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            halign: 'center',
+            lineColor: [255, 255, 255],
+            lineWidth: 0.3,
+        },
+        columnStyles: {
+            0: { cellWidth: 22, halign: 'center' },
+            1: { cellWidth: 55, halign: 'left' },
+            2: { cellWidth: 22, halign: 'right' },
+            3: { cellWidth: 25, halign: 'right' },
+            4: { cellWidth: 25, halign: 'right' },
+            5: { cellWidth: 22, halign: 'right' },
+            6: { cellWidth: 22, halign: 'right' },
+            7: { cellWidth: 18, halign: 'right' },
+            8: { cellWidth: 50, halign: 'left' },
+        },
+        didParseCell: (hookData) => {
+            const isTotal = hookData.row.index === tableBody.length - 1;
+            if (isTotal) {
+                hookData.cell.styles.fontStyle = 'bold';
+                hookData.cell.styles.fillColor = DARK_NAVY;
+                hookData.cell.styles.textColor = [255, 255, 255];
+            }
+            // Colour Impact column
+            if (hookData.section === 'body' && !isTotal && hookData.column.index === 8) {
+                const val = hookData.cell.raw as string;
+                if (val.includes('Positive')) {
+                    hookData.cell.styles.textColor = [0, 150, 80];   // Green
+                    hookData.cell.styles.fontStyle = 'bold';
+                } else if (val.includes('Adverse')) {
+                    hookData.cell.styles.textColor = [200, 0, 0];    // Red
+                    hookData.cell.styles.fontStyle = 'bold';
+                }
+            }
+        }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 5;
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'italic'); doc.setTextColor(80);
+    doc.text('Note: "Old Value" = (Basic+DA+Retaining)*12%. "New Value" = Actual PF Deduction (Pay Sheet).', 14, finalY);
+
+    doc.save(`${fileName}.pdf`);
+};
+
+export const generateArrearECRText = (
+    arrearBatch: ArrearBatch,
+    payrollHistory: PayrollResult[],
+    employees: Employee[],
+    config: StatutoryConfig,
+    fileName: string
+) => {
+    // 1. Determine the months covered by the arrear batch
+    const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const effectiveIdx = monthsArr.indexOf(arrearBatch.effectiveMonth);
+    const effectiveYear = arrearBatch.effectiveYear;
+
+    // Helper to get past month/year strings
+    const getCoveredMonths = (startIdx: number, startYear: number, count: number) => {
+        const covered = [];
+        let curIdx = startIdx;
+        let curYear = startYear;
+        for (let i = 0; i < count; i++) {
+            covered.push({ month: monthsArr[curIdx], year: curYear });
+            curIdx++;
+            if (curIdx > 11) {
+                curIdx = 0;
+                curYear++;
+            }
+        }
+        return covered;
+    };
+
+    const lines: string[] = [];
+
+    // 2. Process each arrear record
+    arrearBatch.records.forEach(record => {
+        const emp = employees.find(e => e.id === record.id);
+        if (!emp || emp.isPFExempt || !emp.uanc) return; // Skip invalid or non-contributing employees
+
+        const arrearPFWagePerMonth = record.diffGross || record.monthlyIncrement;
+        if (arrearPFWagePerMonth <= 0) return;
+
+        let totalArrearEPF = 0;
+        let totalArrearEPS = 0;
+        let totalArrearEDLI = 0;
+
+        const coveredMonths = getCoveredMonths(effectiveIdx, effectiveYear, record.months);
+
+        coveredMonths.forEach(cm => {
+            // Find historic payroll result for this specific month
+            const historicResult = payrollHistory.find(h => h.employeeId === emp.id && h.month === cm.month && h.year === cm.year);
+
+            // Reconstruct the wage used in that month's ECR based on actual deduction
+            let pastEPFWage = 0;
+            let pastEPSWage = 0;
+
+            if (historicResult) {
+                const eeEPF = (historicResult.deductions.epf || 0) + (historicResult.deductions.vpf || 0);
+                pastEPFWage = eeEPF > 0 ? Math.round(eeEPF / 0.12) : 0;
+                pastEPSWage = historicResult.employerContributions.eps > 0 ? Math.round(historicResult.employerContributions.eps / 0.0833) : 0;
+            }
+
+            // --- Arrear EPF Wages Calculation ---
+            let currentMonthArrearEPF = 0;
+            if (config.enableHigherContribution) {
+                currentMonthArrearEPF = arrearPFWagePerMonth;
+            } else if (pastEPFWage >= config.epfCeiling) {
+                currentMonthArrearEPF = 0;
+            } else {
+                currentMonthArrearEPF = Math.max(0, Math.min(config.epfCeiling - pastEPFWage, arrearPFWagePerMonth));
+            }
+
+            // --- Arrear EPS Wages Calculation ---
+            let currentMonthArrearEPS = 0;
+            const isPensionEligible = pastEPSWage > 0; // If they contributed EPS back then, they were eligible
+
+            if (!isPensionEligible) {
+                currentMonthArrearEPS = 0;
+            } else {
+                const isEmployeeHigherPensionOpted = emp.pfHigherPension?.isHigherPensionOpted === 'Yes';
+                const isEmployerHigherContrib = emp.pfHigherPension?.employerContribution === 'Higher' || config.enableHigherContribution;
+
+                if (isEmployeeHigherPensionOpted && isEmployerHigherContrib) {
+                    currentMonthArrearEPS = arrearPFWagePerMonth;
+                } else if (pastEPSWage >= config.epfCeiling) {
+                    currentMonthArrearEPS = 0;
+                } else {
+                    currentMonthArrearEPS = Math.max(0, Math.min(config.epfCeiling - pastEPSWage, arrearPFWagePerMonth));
+                }
+            }
+
+            // --- Arrear EDLI Wages Calculation ---
+            let currentMonthArrearEDLI = 0;
+            if (pastEPFWage >= config.epfCeiling) {
+                currentMonthArrearEDLI = 0;
+            } else {
+                currentMonthArrearEDLI = Math.max(0, Math.min(config.epfCeiling - pastEPFWage, arrearPFWagePerMonth));
+            }
+
+            totalArrearEPF += currentMonthArrearEPF;
+            totalArrearEPS += currentMonthArrearEPS;
+            totalArrearEDLI += currentMonthArrearEDLI;
+        });
+
+        // 3. Final calculations for the text row
+        if (totalArrearEPF > 0) {
+            const eeShare = Math.round(totalArrearEPF * 0.12);
+            const erEpsShare = Math.round(totalArrearEPS * 0.0833);
+            const erEpfShare = eeShare - erEpsShare;
+
+            // Format: UAN#~#MemberName#~#ArrearEPFWages#~#ArrearEPSWages#~#ArrearEDLIWages#~#EEShare#~#ERepfShare#~#ERepsShare
+            lines.push(`${emp.uanc}#~#${emp.name}#~#${totalArrearEPF}#~#${totalArrearEPS}#~#${totalArrearEDLI}#~#${eeShare}#~#${erEpfShare}#~#${erEpsShare}`);
+        }
+    });
+
+    // 4. Download logic
+    if (lines.length === 0) {
+        alert("No valid Arrear ECR records to generate.");
+        return;
+    }
+
+    const content = lines.join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fileName}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+};
+
+export const generateArrearECRExcel = (
+    arrearBatch: ArrearBatch,
+    payrollHistory: PayrollResult[],
+    employees: Employee[],
+    config: StatutoryConfig,
+    fileName: string
+) => {
+    // 1. Determine the months covered by the arrear batch
+    const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const effectiveIdx = monthsArr.indexOf(arrearBatch.effectiveMonth);
+    const effectiveYear = arrearBatch.effectiveYear;
+
+    // Helper to get past month/year strings
+    const getCoveredMonths = (startIdx: number, startYear: number, count: number) => {
+        const covered = [];
+        let curIdx = startIdx;
+        let curYear = startYear;
+        for (let i = 0; i < count; i++) {
+            covered.push({ month: monthsArr[curIdx], year: curYear });
+            curIdx++;
+            if (curIdx > 11) {
+                curIdx = 0;
+                curYear++;
+            }
+        }
+        return covered;
+    };
+
+    const rows: any[] = [];
+
+    // 2. Process each arrear record
+    arrearBatch.records.forEach(record => {
+        const emp = employees.find(e => e.id === record.id);
+        if (!emp || emp.isPFExempt || !emp.uanc) return;
+
+        const arrearPFWagePerMonth = record.diffBasic + record.diffDA;
+        if (arrearPFWagePerMonth <= 0) return;
+
+        let totalArrearEPF = 0;
+        let totalArrearEPS = 0;
+        let totalArrearEDLI = 0;
+
+        let totalPastEPFWage = 0;
+        let totalPastEPSWage = 0;
+
+        const coveredMonths = getCoveredMonths(effectiveIdx, effectiveYear, record.months);
+        const periodLabel = coveredMonths.length > 1
+            ? `${coveredMonths[0].month} ${coveredMonths[0].year} to ${coveredMonths[coveredMonths.length - 1].month} ${coveredMonths[coveredMonths.length - 1].year}`
+            : `${coveredMonths[0].month} ${coveredMonths[0].year}`;
+
+        coveredMonths.forEach(cm => {
+            const historicResult = payrollHistory.find(h => h.employeeId === emp.id && h.month === cm.month && h.year === cm.year);
+
+            let pastEPFWage = 0;
+            let pastEPSWage = 0;
+
+            if (historicResult) {
+                const eeEPF = (historicResult.deductions.epf || 0) + (historicResult.deductions.vpf || 0);
+                pastEPFWage = eeEPF > 0 ? Math.round(eeEPF / 0.12) : 0;
+                pastEPSWage = historicResult.employerContributions.eps > 0 ? Math.round(historicResult.employerContributions.eps / 0.0833) : 0;
+            }
+
+            totalPastEPFWage += pastEPFWage;
+            totalPastEPSWage += pastEPSWage;
+
+            // --- Arrear EPF Wages Calculation ---
+            let currentMonthArrearEPF = 0;
+            if (config.enableHigherContribution) {
+                currentMonthArrearEPF = arrearPFWagePerMonth;
+            } else if (pastEPFWage >= config.epfCeiling) {
+                currentMonthArrearEPF = 0;
+            } else {
+                currentMonthArrearEPF = Math.max(0, Math.min(config.epfCeiling - pastEPFWage, arrearPFWagePerMonth));
+            }
+
+            // --- Arrear EPS Wages Calculation ---
+            let currentMonthArrearEPS = 0;
+            const isPensionEligible = pastEPSWage > 0;
+
+            if (!isPensionEligible) {
+                currentMonthArrearEPS = 0;
+            } else {
+                const isEmployeeHigherPensionOpted = emp.pfHigherPension?.isHigherPensionOpted === 'Yes';
+                const isEmployerHigherContrib = emp.pfHigherPension?.employerContribution === 'Higher' || config.enableHigherContribution;
+
+                if (isEmployeeHigherPensionOpted && isEmployerHigherContrib) {
+                    currentMonthArrearEPS = arrearPFWagePerMonth;
+                } else if (pastEPSWage >= config.epfCeiling) {
+                    currentMonthArrearEPS = 0;
+                } else {
+                    currentMonthArrearEPS = Math.max(0, Math.min(config.epfCeiling - pastEPSWage, arrearPFWagePerMonth));
+                }
+            }
+
+            // --- Arrear EDLI Wages Calculation ---
+            let currentMonthArrearEDLI = 0;
+            if (pastEPFWage >= config.epfCeiling) {
+                currentMonthArrearEDLI = 0;
+            } else {
+                currentMonthArrearEDLI = Math.max(0, Math.min(config.epfCeiling - pastEPFWage, arrearPFWagePerMonth));
+            }
+
+            totalArrearEPF += currentMonthArrearEPF;
+            totalArrearEPS += currentMonthArrearEPS;
+            totalArrearEDLI += currentMonthArrearEDLI;
+        });
+
+        if (totalArrearEPF > 0) {
+            const eeShare = Math.round(totalArrearEPF * 0.12);
+            const erEpsShare = Math.round(totalArrearEPS * 0.0833);
+            const erEpfShare = eeShare - erEpsShare;
+
+            rows.push({
+                'UAN': emp.uanc,
+                'Member Name': emp.name,
+                'Original Period': periodLabel,
+                'Arrear Months': record.months,
+                'Historic EPF Wage (Sum)': totalPastEPFWage,
+                'Historic EPS Wage (Sum)': totalPastEPSWage,
+                'Arrear Base Wage (Sum)': arrearPFWagePerMonth * record.months,
+                'Arrear EPF Wages': totalArrearEPF,
+                'Arrear EPS Wages': totalArrearEPS,
+                'Arrear EDLI Wages': totalArrearEDLI,
+                'EE Share (12%)': eeShare,
+                'ER EPF Share (3.67%)': erEpfShare,
+                'ER EPS Share (8.33%)': erEpsShare
+            });
+        }
+    });
+
+    if (rows.length === 0) {
+        alert("No valid Arrear ECR records to generate Excel.");
+        return;
+    }
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+
+    // Apply header styling
+    const HEADERS = Object.keys(rows[0]);
+    for (let c = 0; c < HEADERS.length; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 0, c });
+        if (ws[addr]) {
+            ws[addr].s = {
+                font: { bold: true, color: { rgb: 'FFFFFF' } },
+                fill: { fgColor: { rgb: '0F172A' }, patternType: 'solid' },
+                alignment: { horizontal: 'center', vertical: 'center' }
+            };
+        }
+    }
+
+    // Set Column Widths
+    ws['!cols'] = [
+        { wch: 15 }, // UAN
+        { wch: 25 }, // Name
+        { wch: 25 }, // Period
+        { wch: 15 }, // Months
+        { wch: 25 }, // Historic EPF
+        { wch: 25 }, // Historic EPS
+        { wch: 25 }, // Arrear Base
+        { wch: 20 }, // Arrear EPF
+        { wch: 20 }, // Arrear EPS
+        { wch: 20 }, // Arrear EDLI
+        { wch: 15 }, // EE
+        { wch: 20 }, // ER EPF
+        { wch: 20 }  // ER EPS
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Arrear ECR details');
+    XLSX.writeFile(wb, `${fileName}.xlsx`);
 };
