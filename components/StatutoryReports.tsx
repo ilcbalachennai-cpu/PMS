@@ -24,7 +24,8 @@ import {
     generateEPFCodeImpactReport,
     generateESIForm5,
     generateArrearECRText,
-    generateArrearECRExcel
+    generateArrearECRExcel,
+    generateForm16PartBPDF
 } from '../services/reportService';
 
 interface StatutoryReportsProps {
@@ -165,6 +166,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     generatePFForm6A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile);
                 } else if (rangeModal.reportType === 'Bonus Statement') {
                     generateBonusReport(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile, rangeModal.format);
+                } else if (rangeModal.reportType === 'Form 16 (Part B)') {
+                    generateForm16PartBPDF(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
                 } else if (rangeModal.reportType === 'Form 5') {
                     generateESIForm5(payrollHistory, employees, rangeModal.halfYearPeriod, rangeModal.periodYear, companyProfile);
                 }
@@ -199,8 +202,6 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 generatePTReport(currentData, employees, fileName, companyProfile);
             } else if (reportName.includes('TDS')) {
                 generateTDSReport(currentData, employees, fileName, companyProfile);
-            } else if (reportName.includes('Form 16')) {
-                generateTDSReport(currentData, employees, `Form16_${fileName}`, companyProfile);
             } else if (reportName.includes('Gratuity')) {
                 generateGratuityReport(employees, companyProfile);
             } else if (reportName.includes('Social Security')) {
@@ -325,7 +326,6 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         reports={[
                             { label: 'Form B (Register of Wages)', action: () => handleDownload('Form B', 'PDF') },
                             { label: 'Form C (Muster Roll)', action: () => handleDownload('Form C', 'PDF') },
-                            { label: 'Code on Wages 2020 Report', action: () => handleDownload('Social Security', 'PDF') }
                         ]}
                     />
 
@@ -369,7 +369,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         reports={[
                             { label: 'Professional Tax (PT) Report', action: () => handleDownload('PT', 'Excel'), format: 'XLSX' },
                             { label: 'TDS / Income Tax Report', action: () => handleDownload('TDS', 'Excel'), format: 'XLSX' },
-                            { label: 'Form 16 (Part B) Preview', action: () => handleDownload('Form 16', 'PDF'), format: 'PDF' }
+                            { label: 'Form 16 (Part B) Preview', action: () => openRangeModal('Form 16 (Part B)'), format: 'PDF' }
                         ]}
                     />
 
@@ -421,7 +421,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                                             </div>
                                         </div>
                                     </div>
-                                    {rangeModal.reportType === 'Form 3A' && (
+                                    {['Form 3A', 'Form 16 (Part B)'].includes(rangeModal.reportType) && (
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase">Employee</label>
                                             <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({ ...rangeModal, selectedEmployee: e.target.value })}>

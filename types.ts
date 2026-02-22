@@ -284,6 +284,10 @@ export interface ArrearRecord {
   newDA: number;
   diffDA: number;
 
+  oldRetaining: number;
+  newRetaining: number;
+  diffRetaining: number;
+
   oldHRA: number;
   newHRA: number;
   diffHRA: number;

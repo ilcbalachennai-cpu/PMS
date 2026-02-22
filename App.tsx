@@ -442,7 +442,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   };
 
-  const handleRollover = () => {
+  const handleRollover = (updatedHistory?: PayrollResult[]) => {
     const currentIdx = monthsArr.indexOf(globalMonth);
     let nextMonth = globalMonth;
     let nextYear = globalYear;
@@ -475,7 +475,8 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     // ── 2. ADVANCE LEDGER: Carry NET balance (after payroll recovery) as Opening ──
     setAdvanceLedgers(prev => {
       // Get the finalized payroll results for the month being closed out
-      const finalizedResults = payrollHistory.filter(
+      const currentHistory = updatedHistory || payrollHistory;
+      const finalizedResults = currentHistory.filter(
         r => r.month === globalMonth && r.year === globalYear && r.status === 'Finalized'
       );
 

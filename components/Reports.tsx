@@ -30,7 +30,7 @@ interface ReportsProps {
     advanceLedgers: AdvanceLedger[];
     setAdvanceLedgers: (a: AdvanceLedger[]) => void;
     currentUser?: User;
-    onRollover: () => void;
+    onRollover: (history?: PayrollResult[]) => void;
     arrearHistory?: ArrearBatch[];
 }
 
@@ -140,7 +140,7 @@ const Reports: React.FC<ReportsProps> = ({
             message: 'Data Frozen and Locked Successfully',
             onClose: () => {
                 // TRIGGER ROLLOVER ONLY AFTER MODAL IS CLOSED
-                onRollover();
+                onRollover(updated);
             }
         });
     };
@@ -760,8 +760,8 @@ const Reports: React.FC<ReportsProps> = ({
                                                         <input
                                                             type="date"
                                                             className={`border rounded-lg px-3 py-2 text-xs w-full outline-none transition-all placeholder-slate-600 ${data.reason === 'ON LOP'
-                                                                    ? 'bg-slate-800/40 border-slate-700 text-slate-500 cursor-not-allowed'
-                                                                    : 'bg-[#0f172a] border-slate-600 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50'
+                                                                ? 'bg-slate-800/40 border-slate-700 text-slate-500 cursor-not-allowed'
+                                                                : 'bg-[#0f172a] border-slate-600 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50'
                                                                 }`}
                                                             value={data.reason === 'ON LOP' ? '' : data.dol}
                                                             max={maxDate}

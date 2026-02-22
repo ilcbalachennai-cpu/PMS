@@ -27,7 +27,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     const [percentageMode, setPercentageMode] = useState<'Flat' | 'Specific'>('Flat');
     const [flatPercentage, setFlatPercentage] = useState<number>(0);
     const [specificPercentages, setSpecificPercentages] = useState<Record<string, number>>({});
-    const [adhocIncrements, setAdhocIncrements] = useState<Record<string, { basic: number, da: number, hra: number, conveyance: number, washing: number, attire: number, special1: number, special2: number, special3: number }>>({});
+    const [adhocIncrements, setAdhocIncrements] = useState<Record<string, { basic: number, da: number, retaining: number, hra: number, conveyance: number, washing: number, attire: number, special1: number, special2: number, special3: number }>>({});
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const [effectiveMonth, setEffectiveMonth] = useState<string>(currentMonth);
@@ -36,12 +36,17 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     const [showConfirmation, setShowConfirmation] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
+    // New State for Explicit Arrear Processing Month Selection
+    const [processMonth, setProcessMonth] = useState<string>(currentMonth);
+    const [processYear, setProcessYear] = useState<number>(currentYear);
+    const [showProcessMonthModal, setShowProcessMonthModal] = useState<boolean>(true);
+
     // Initialize adhoc state
     useEffect(() => {
-        const initialAdhoc: Record<string, { basic: number, da: number, hra: number, conveyance: number, washing: number, attire: number, special1: number, special2: number, special3: number }> = {};
+        const initialAdhoc: Record<string, { basic: number, da: number, retaining: number, hra: number, conveyance: number, washing: number, attire: number, special1: number, special2: number, special3: number }> = {};
         employees.forEach(e => {
             if (!e.dol) {
-                initialAdhoc[e.id] = { basic: 0, da: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, special1: 0, special2: 0, special3: 0 };
+                initialAdhoc[e.id] = { basic: 0, da: 0, retaining: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, special1: 0, special2: 0, special3: 0 };
             }
         });
         setAdhocIncrements(initialAdhoc);
@@ -57,16 +62,17 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     }, [employees, searchQuery]);
 
     const calculateMonthsPassed = () => {
-        const currentIdx = months.indexOf(currentMonth);
+        const processIdx = months.indexOf(processMonth);
         const effectiveIdx = months.indexOf(effectiveMonth);
 
-        const monthsDiff = (currentYear - effectiveYear) * 12 + (currentIdx - effectiveIdx);
+        const monthsDiff = (processYear - effectiveYear) * 12 + (processIdx - effectiveIdx);
         return Math.max(0, monthsDiff);
     };
 
     const getProposedSalary = (emp: Employee) => {
         let newBasic = emp.basicPay;
         let newDA = emp.da || 0;
+        let newRetaining = emp.retainingAllowance || 0;
         let newHRA = emp.hra || 0;
         let newConveyance = emp.conveyance || 0;
         let newWashing = emp.washing || 0;
@@ -80,6 +86,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
             const factor = 1 + (pct / 100);
             newBasic = Math.round(emp.basicPay * factor);
             newDA = Math.round((emp.da || 0) * factor);
+            newRetaining = Math.round((emp.retainingAllowance || 0) * factor);
             newHRA = Math.round((emp.hra || 0) * factor);
             newConveyance = Math.round((emp.conveyance || 0) * factor);
             newWashing = Math.round((emp.washing || 0) * factor);
@@ -88,9 +95,10 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
             newSpecial2 = Math.round((emp.specialAllowance2 || 0) * factor);
             newSpecial3 = Math.round((emp.specialAllowance3 || 0) * factor);
         } else {
-            const inc = adhocIncrements[emp.id] || { basic: 0, da: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, special1: 0, special2: 0, special3: 0 };
+            const inc = adhocIncrements[emp.id] || { basic: 0, da: 0, retaining: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, special1: 0, special2: 0, special3: 0 };
             newBasic = emp.basicPay + (inc.basic || 0);
             newDA = (emp.da || 0) + (inc.da || 0);
+            newRetaining = (emp.retainingAllowance || 0) + (inc.retaining || 0);
             newHRA = (emp.hra || 0) + (inc.hra || 0);
             newConveyance = (emp.conveyance || 0) + (inc.conveyance || 0);
             newWashing = (emp.washing || 0) + (inc.washing || 0);
@@ -100,11 +108,11 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
             newSpecial3 = (emp.specialAllowance3 || 0) + (inc.special3 || 0);
         }
 
-        const oldGross = emp.basicPay + (emp.da || 0) + (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + (emp.attire || 0) + (emp.specialAllowance1 || 0) + (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0);
-        const newGross = newBasic + newDA + newHRA + newConveyance + newWashing + newAttire + newSpecial1 + newSpecial2 + newSpecial3;
+        const oldGross = emp.basicPay + (emp.da || 0) + (emp.retainingAllowance || 0) + (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + (emp.attire || 0) + (emp.specialAllowance1 || 0) + (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0);
+        const newGross = newBasic + newDA + newRetaining + newHRA + newConveyance + newWashing + newAttire + newSpecial1 + newSpecial2 + newSpecial3;
 
         return {
-            newBasic, newDA, newHRA, newConveyance, newWashing, newAttire, newSpecial1, newSpecial2, newSpecial3,
+            newBasic, newDA, newRetaining, newHRA, newConveyance, newWashing, newAttire, newSpecial1, newSpecial2, newSpecial3,
             oldGross, newGross
         };
     };
@@ -126,12 +134,13 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
             if (emp.dol) return emp; // Skip ex-employees for master update
 
             const {
-                newBasic, newDA, newHRA, newConveyance, newWashing, newAttire, newSpecial1, newSpecial2, newSpecial3,
+                newBasic, newDA, newRetaining, newHRA, newConveyance, newWashing, newAttire, newSpecial1, newSpecial2, newSpecial3,
                 oldGross, newGross
             } = getProposedSalary(emp);
 
             const oldBasic = emp.basicPay;
             const oldDA = emp.da || 0;
+            const oldRetaining = emp.retainingAllowance || 0;
             const oldHRA = emp.hra || 0;
             const oldConveyance = emp.conveyance || 0;
             const oldWashing = emp.washing || 0;
@@ -142,6 +151,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
 
             const diffBasic = newBasic - oldBasic;
             const diffDA = newDA - oldDA;
+            const diffRetaining = newRetaining - oldRetaining;
             const diffHRA = newHRA - oldHRA;
             const diffConveyance = newConveyance - oldConveyance;
             const diffWashing = newWashing - oldWashing;
@@ -159,6 +169,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                     name: emp.name,
                     oldBasic, newBasic, diffBasic,
                     oldDA, newDA, diffDA,
+                    oldRetaining, newRetaining, diffRetaining,
                     oldHRA, newHRA, diffHRA,
                     oldConveyance, newConveyance, diffConveyance,
                     oldWashing, newWashing, diffWashing,
@@ -178,6 +189,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                 ...emp,
                 basicPay: newBasic,
                 da: newDA,
+                retainingAllowance: newRetaining,
                 hra: newHRA,
                 conveyance: newConveyance,
                 washing: newWashing,
@@ -194,15 +206,15 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
         // 2. Save to History (Persistence for Reports Module)
         if (arrearRecords.length > 0 && setArrearHistory) {
             const newBatch: ArrearBatch = {
-                month: currentMonth,
-                year: currentYear,
+                month: processMonth,
+                year: processYear,
                 effectiveMonth,
                 effectiveYear,
                 records: arrearRecords
             };
             setArrearHistory(prev => {
                 // Replace existing batch for same month/year if exists, or append
-                const filtered = prev.filter(b => !(b.month === currentMonth && b.year === currentYear));
+                const filtered = prev.filter(b => !(b.month === processMonth && b.year === processYear));
                 return [...filtered, newBatch];
             });
         }
@@ -212,7 +224,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
             generateArrearReport(
                 arrearRecords,
                 effectiveMonth, effectiveYear,
-                currentMonth, currentYear,
+                processMonth, processYear,
                 generateReportFormat,
                 companyProfile
             );
@@ -220,7 +232,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
 
         setIsProcessing(false);
         setShowConfirmation(false);
-        alert(`Arrear Wages for the Month ${currentMonth} Year ${currentYear} is Processed & Employee Pay details also updated Successfully`);
+        alert(`Arrear Wages for the Month ${processMonth} Year ${processYear} is Processed & Employee Pay details also updated Successfully`);
     };
 
     return (
@@ -247,6 +259,19 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                     <div className="text-right">
                         <span className="text-[10px] font-bold text-slate-500 uppercase">Arrear Period</span>
                         <p className="text-xl font-black text-emerald-400">{calculateMonthsPassed()} <span className="text-xs text-slate-400 font-normal">Months</span></p>
+                    </div>
+                </div>
+
+                <div className="flex gap-4 items-end bg-indigo-900/40 p-3 rounded-xl border border-indigo-500/30">
+                    <div className="text-right">
+                        <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Processing For</span>
+                        <div className="text-lg font-black text-indigo-100">{processMonth} {processYear}</div>
+                        <button
+                            onClick={() => setShowProcessMonthModal(true)}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-300 underline mt-1 font-bold transition-colors"
+                        >
+                            Change Processing Month
+                        </button>
                     </div>
                 </div>
             </div>
@@ -328,6 +353,11 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                 {incrementType === 'Adhoc' && <th className="px-4 py-3 text-center bg-purple-900/40 text-purple-300">Incr (DA)</th>}
                                 <th className="px-4 py-3 text-right text-emerald-400 border-r border-slate-800">New DA</th>
 
+                                {/* Retaining */}
+                                <th className="px-4 py-3 text-right bg-slate-900/50">Curr Retn</th>
+                                {incrementType === 'Adhoc' && <th className="px-4 py-3 text-center bg-purple-900/40 text-purple-300">Incr (Retn)</th>}
+                                <th className="px-4 py-3 text-right text-emerald-400 border-r border-slate-800">New Retn</th>
+
                                 {/* HRA */}
                                 <th className="px-4 py-3 text-right bg-slate-900/50">Curr HRA</th>
                                 {incrementType === 'Adhoc' && <th className="px-4 py-3 text-center bg-purple-900/40 text-purple-300">Incr (HRA)</th>}
@@ -372,7 +402,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                         <tbody className="divide-y divide-slate-800">
                             {activeEmployees.map(emp => {
                                 const proposed = getProposedSalary(emp);
-                                const adhoc = adhocIncrements[emp.id] || { basic: 0, da: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, special1: 0, special2: 0, special3: 0 };
+                                const adhoc = adhocIncrements[emp.id] || { basic: 0, da: 0, retaining: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, special1: 0, special2: 0, special3: 0 };
 
                                 const renderAdhocInput = (field: keyof typeof adhoc) => (
                                     <td className="px-2 py-2 text-center bg-purple-900/10">
@@ -412,6 +442,11 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                         <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{emp.da || 0}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('da')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newDA}</td>
+
+                                        {/* Retaining */}
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{emp.retainingAllowance || 0}</td>
+                                        {incrementType === 'Adhoc' && renderAdhocInput('retaining')}
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newRetaining}</td>
 
                                         {/* HRA */}
                                         <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{emp.hra || 0}</td>
@@ -478,8 +513,10 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                             </div>
                             <h3 className="text-xl font-black text-white">Confirm Salary Revision</h3>
                             <p className="text-sm text-slate-400 leading-relaxed">
-                                This action will <b>permanently update all 9 tracked wage components</b> for all listed active employees in the Master Database.
+                                This action will <b>permanently update all 10 tracked wage components</b> for all listed active employees in the Master Database.
                                 <br /><br />
+                                Are you sure you want to process Arrears for: <br />
+                                <span className="text-lg text-emerald-400 font-black tracking-wide my-1 block">{processMonth} {processYear} ?</span>
                                 Calculated Arrears: <b>{calculateMonthsPassed()} Months</b>
                             </p>
                         </div>
@@ -495,6 +532,49 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                         <button onClick={() => setShowConfirmation(false)} className="w-full py-2.5 rounded-lg border border-slate-600 text-slate-400 font-bold hover:bg-slate-800 hover:text-white transition-all text-xs">
                             Cancel
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* PROCESSING MONTH SELECTION MODAL */}
+            {showProcessMonthModal && (
+                <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in zoom-in-95 duration-300">
+                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-blue-500/50 shadow-2xl overflow-hidden shadow-blue-900/20">
+                        <div className="bg-gradient-to-r from-blue-900 to-indigo-900 p-6 flex flex-col items-center justify-center border-b border-blue-500/30">
+                            <Calendar size={48} className="text-blue-300 mb-4 opacity-80" />
+                            <h3 className="text-xl font-black text-white text-center">Select Processing Month</h3>
+                            <p className="text-xs text-blue-200 text-center mt-2 opacity-80">Please confirm the month and year you are generating arrears for, to prevent accidental data entry.</p>
+                        </div>
+                        <div className="p-6 space-y-6">
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Processing Month</label>
+                                    <select
+                                        className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors"
+                                        value={processMonth}
+                                        onChange={e => setProcessMonth(e.target.value)}
+                                    >
+                                        {months.map(m => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Processing Year</label>
+                                    <select
+                                        className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors"
+                                        value={processYear}
+                                        onChange={e => setProcessYear(+e.target.value)}
+                                    >
+                                        {Array.from({ length: 5 }, (_, i) => currentYear - 2 + i).map(y => <option key={y} value={y}>{y}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowProcessMonthModal(false)}
+                                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-lg transition-transform transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
+                            >
+                                <CheckCircle2 size={18} /> CONFIRM MONTH
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

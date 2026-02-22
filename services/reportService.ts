@@ -34,13 +34,37 @@ export const numberToWords = (num: number): string => {
 };
 
 export const generateExcelReport = (data: any[], sheetName: string, fileName: string) => {
+    if (!data || data.length === 0) {
+        throw new Error('No Data Available to Generate Report');
+    }
+
     const ws = XLSX.utils.json_to_sheet(data);
+
+    // Auto-size columns based on headers and data
+    const objectMaxLength: { wch: number }[] = [];
+    const keys = Object.keys(data[0]);
+    for (let i = 0; i < keys.length; i++) {
+        const minWch = keys[i].length; // minimum width is the header length
+        const wch = data.reduce((w: number, r: any) => {
+            const val = r[keys[i]];
+            const valLen = val ? val.toString().length : 0;
+            return Math.max(w, valLen);
+        }, minWch);
+
+        // Add a little padding and clamp to max 50 chars to prevent excessively wide columns
+        objectMaxLength.push({ wch: Math.min(Math.max(wch + 2, 10), 50) });
+    }
+    ws['!cols'] = objectMaxLength;
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheetName.substring(0, 31)); // Sheet name max 31 chars
     XLSX.writeFile(wb, `${fileName}.xlsx`);
 };
 
 export const generatePDFTableReport = (title: string, headers: string[], data: any[][], fileName: string, orientation: 'p' | 'l', summary: string, company: CompanyProfile, columnStyles?: any) => {
+    if (!data || data.length === 0) {
+        throw new Error('No Data Available to Generate Report');
+    }
     const doc = new jsPDF(orientation);
     doc.setFontSize(14);
     doc.text(company.establishmentName || 'Company Name', 14, 15);
@@ -84,6 +108,7 @@ export const generateArrearReport = (
             'Name': r.name,
             'Old Basic': r.oldBasic, 'New Basic': r.newBasic, 'Diff Basic': r.diffBasic,
             'Old DA': r.oldDA, 'New DA': r.newDA, 'Diff DA': r.diffDA,
+            'Old Retn': r.oldRetaining, 'New Retn': r.newRetaining, 'Diff Retn': r.diffRetaining,
             'Old HRA': r.oldHRA, 'New HRA': r.newHRA, 'Diff HRA': r.diffHRA,
             'Old Conv': r.oldConveyance, 'New Conv': r.newConveyance, 'Diff Conv': r.diffConveyance,
             'Old Wash': r.oldWashing, 'New Wash': r.newWashing, 'Diff Wash': r.diffWashing,
@@ -100,7 +125,7 @@ export const generateArrearReport = (
         generateExcelReport(exportData, 'Arrears', fileName);
     } else {
         // For PDF, we condense to save horizontal space (focusing on Gross differences)
-        const headers = ['ID', 'Name', 'Old Basic', 'Diff Basic', 'Old DA', 'Diff DA', 'Old Gross', 'New Gross', 'Diff Gross', 'Months', 'Total Arrear'];
+        const headers = ['ID', 'Name', 'Old Basic', 'Diff Basic', 'Old DA', 'Diff DA', 'Old Retn', 'Diff Retn', 'Old Gross', 'New Gross', 'Diff Gross', 'Months', 'Total Arrear'];
         const rows = arrearData.map(r => [
             r.id,
             r.name,
@@ -108,6 +133,8 @@ export const generateArrearReport = (
             r.diffBasic,
             r.oldDA,
             r.diffDA,
+            r.oldRetaining,
+            r.diffRetaining,
             r.oldGross,
             r.newGross,
             r.diffGross,
@@ -138,15 +165,49 @@ export const generateStatePaySlip = (results: PayrollResult[], employees: Employ
 
 export const generateStateAdvanceRegister = (results: PayrollResult[], employees: Employee[], advanceLedgers: AdvanceLedger[], month: string, year: number, companyProfile: CompanyProfile, stateName: string, formName: string) => {
     const headers = ['ID', 'Name', 'Adv Date', 'Amount', 'Purpose', 'Installments', 'Recovered', 'Balance'];
-    const data = advanceLedgers.filter(a => a.totalAdvance > 0).map(a => {
-        const emp = employees.find(e => e.id === a.employeeId);
-        return [a.employeeId, emp?.name, '', a.totalAdvance, 'Salary Adv', a.emiCount || '', a.recovery || 0, a.balance];
+
+    // We need to look at the payroll results for the given month to see actual recovery 
+    // and figure out what the advance state was AT THAT TIME
+    const data: any[] = [];
+
+    results.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        const ledger = advanceLedgers.find(a => a.employeeId === r.employeeId);
+
+        // We show the employee in this month's register IF:
+        // 1. They had a recovery this month
+        // 2. OR they were granted an advance this month (we can't definitively tell dates from payroll results easily, but we'll assume if there's an active ledger or recovery they should be seen)
+        // 3. OR their balance > 0
+        const recoveryThisMonth = r.deductions?.advanceRecovery || 0;
+
+        // Accurate historical balance might be tricky if we only have the *current* ledger. 
+        // We will approximate: If they have a recovery > 0 this month, or a current ledger balance > 0, they appear.
+        if (recoveryThisMonth > 0 || (ledger && ledger.totalAdvance > 0)) {
+            // Because we don't store historical snapshots of ledgers in standard payroll (yet), 
+            // the 'Balance' will reflect the current live ledger balance minus anything recovered in *future* months...
+            // It's safer to just show what happened *this* month.
+            // Opening = Balance + Recovery (roughly) if this was the last run, but let's just show the recovery for the month
+            const currentBalance = ledger?.balance || 0;
+            const installmentCount = ledger?.emiCount || '';
+            const totalAdv = ledger?.totalAdvance || 0;
+
+            data.push([
+                r.employeeId,
+                emp?.name,
+                '', // Adv Date is not universally tracked in PayrollResult
+                totalAdv,
+                'Salary Adv',
+                installmentCount,
+                recoveryThisMonth,
+                currentBalance
+            ]);
+        }
     });
 
     const title = `${stateName} Shops & Establishment Act\n${formName} - Register of Advances (${month} ${year})`;
     const fileName = `${stateName.replace(/\s+/g, '')}_${formName.split(' ')[0]}_AdvReg_${month}_${year}`;
 
-    generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile);
+    generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile, { 3: { halign: 'right' }, 5: { halign: 'center' }, 6: { halign: 'right' }, 7: { halign: 'right' } });
 };
 
 export const generateSimplePaySheetPDF = (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
@@ -585,14 +646,296 @@ export const generatePFForm12A = (results: PayrollResult[], employees: Employee[
     doc.save(`PFForm12A_Revised_${month}_${year}.pdf`);
 };
 
+export const generateForm16PartBPDF = (
+    history: PayrollResult[],
+    employees: Employee[],
+    config: StatutoryConfig,
+    sM: string, sY: number,
+    eM: string, eY: number,
+    empId: string | undefined,
+    company: CompanyProfile
+) => {
+    // Basic Form 16 Annexure B Mockup based on Income Tax Format
+    const targetEmps = empId ? employees.filter(e => e.id === empId) : employees;
+    if (targetEmps.length === 0) {
+        throw new Error('No Data Available to Generate Report');
+    }
+
+    // Determine Financial Year
+    const fyString = `${sY}-${(sY + 1).toString().slice(2)}`;
+    const ayString = `${sY + 1}-${(sY + 2).toString().slice(2)}`;
+
+    targetEmps.forEach(emp => {
+        // Aggregate full year data for the employee (April to March)
+        let totalGrossSalary = 0;
+        let totalValOfPerquisites = 0;
+        let totalProfitLieuOfSalary = 0;
+
+        let totalHRAExempt = 0; // Requires declaration handling (simulated here)
+        let totalConveyanceExempt = 0;
+
+        let totalTaxOnEmployment = 0; // PT
+        let totalStandardDeduction = 50000; // Rs. 50,000 universally
+
+        let total80C = 0; // PF
+        let totalTaxDeducted = 0;
+
+        const fyMonths = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
+
+        fyMonths.forEach(m => {
+            const yr = (['January', 'February', 'March'].includes(m)) ? sY + 1 : sY;
+            const rec = history.find(r => r.employeeId === emp.id && r.month === m && r.year === yr);
+            if (rec) {
+                totalGrossSalary += (rec.earnings.total || 0);
+                totalTaxOnEmployment += (rec.deductions.pt || 0);
+                total80C += (rec.deductions.epf + rec.deductions.vpf || 0);
+                totalTaxDeducted += (rec.deductions.it || 0);
+            }
+        });
+
+        // Limit 80C to 1.5L
+        const allowed80C = Math.min(total80C, 150000);
+
+        const grossTotalIncome = Math.max(0, totalGrossSalary - totalStandardDeduction - totalTaxOnEmployment);
+        const totalIncome = Math.max(0, grossTotalIncome - allowed80C); // Simple Old Regime calc
+
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageW = 210;
+        let y = 15;
+
+        // Title
+        doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+        doc.text('FORM NO. 16', pageW / 2, y, { align: 'center' }); y += 6;
+        doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+        doc.text('[See rule 31 (1)(a)]', pageW / 2, y, { align: 'center' }); y += 5;
+        doc.setFontSize(12); doc.setFont('helvetica', 'bold');
+        doc.text('PART B (Annexure)', pageW / 2, y, { align: 'center' }); y += 8;
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+        doc.text('Details of Salary paid and any other income and tax deducted', pageW / 2, y, { align: 'center' }); y += 10;
+
+        // Header Table (Employer / Employee blocks)
+        doc.setLineWidth(0.3);
+        doc.rect(14, y, pageW - 28, 40);
+        doc.line(pageW / 2, y, pageW / 2, y + 40);
+
+        // Employer side
+        doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+        doc.text('Name and Address of the Employer', 16, y + 5);
+        doc.setFont('helvetica', 'normal');
+        doc.text((company.establishmentName || '').toUpperCase(), 16, y + 10);
+        doc.text(company.city || '', 16, y + 15);
+        doc.text(`PAN: ${company.pan || 'N/A'}`, 16, y + 25);
+        doc.text(`TAN: ${'N/A'}`, 16, y + 30); // Not tracked in profile yet
+
+        // Employee side
+        doc.setFont('helvetica', 'bold');
+        doc.text('Name and Address of the Employee', pageW / 2 + 2, y + 5);
+        doc.setFont('helvetica', 'normal');
+        doc.text((emp.name || '').toUpperCase(), pageW / 2 + 2, y + 10);
+        doc.text(emp.city || '', pageW / 2 + 2, y + 15);
+        doc.text(`PAN: ${emp.pan || 'N/A'}`, pageW / 2 + 2, y + 25);
+        doc.text(`Employee Ref: ${emp.id}`, pageW / 2 + 2, y + 30);
+        y += 45;
+
+        // Assessment Year blocks
+        doc.rect(14, y, pageW - 28, 15);
+        doc.line(pageW / 2, y, pageW / 2, y + 15);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Financial Year: ${fyString}`, 16, y + 6);
+        doc.text(`Assessment Year: ${ayString}`, pageW / 2 + 2, y + 6);
+        y += 20;
+
+        // Computation Table
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+        doc.text('Details of Salary Paid and any other income and tax deducted', 14, y); y += 4;
+
+        const tableData = [
+            ['1. Gross Salary', '', ''],
+            ['   (a) Salary as per section 17(1)', `Rs. ${totalGrossSalary.toFixed(2)}`, ''],
+            ['   (b) Value of perquisites 17(2)', `Rs. ${totalValOfPerquisites.toFixed(2)}`, ''],
+            ['   (c) Profit in lieu of salary 17(3)', `Rs. ${totalProfitLieuOfSalary.toFixed(2)}`, ''],
+            ['   (d) Total Gross Salary (a+b+c)', '', `Rs. ${(totalGrossSalary + totalValOfPerquisites + totalProfitLieuOfSalary).toFixed(2)}`],
+            ['2. Less: Allowances to the extent exempt u/s 10', '', `Rs. 0.00`], // Simplified
+            ['3. Balance (1(d) - 2)', '', `Rs. ${totalGrossSalary.toFixed(2)}`],
+            ['4. Deductions under section 16', '', ''],
+            ['   (a) Standard deduction u/s 16(ia)', `Rs. ${totalStandardDeduction.toFixed(2)}`, ''],
+            ['   (b) Entertainment allowance u/s 16(ii)', `Rs. 0.00`, ''],
+            ['   (c) Tax on employment u/s 16(iii) [PT]', `Rs. ${totalTaxOnEmployment.toFixed(2)}`, ''],
+            ['5. Total deductions under sect 16', '', `Rs. ${(totalStandardDeduction + totalTaxOnEmployment).toFixed(2)}`],
+            ['6. Income chargeable under the head "Salaries" (3 - 5)', '', `Rs. ${grossTotalIncome.toFixed(2)}`],
+            ['7. Add: Any other income reported by employee', '', `Rs. 0.00`],
+            ['8. Gross Total Income (6 + 7)', '', `Rs. ${grossTotalIncome.toFixed(2)}`],
+            ['9. Deductions under Chapter VI-A', '', ''],
+            ['   (a) Section 80C (EPF & VPF)', `Rs. ${total80C.toFixed(2)}`, `Rs. ${allowed80C.toFixed(2)}`],
+            ['10. Total Income (8 - 9)', '', `Rs. ${totalIncome.toFixed(2)}`],
+            ['11. Tax on Total Income', '', `Rs. ${totalTaxDeducted.toFixed(2)}`] // Simplified mapping to actual deducted IT
+        ];
+
+        autoTable(doc, {
+            body: tableData,
+            startY: y,
+            theme: 'grid',
+            styles: { fontSize: 8.5, cellPadding: 3, textColor: [30, 30, 30] },
+            columnStyles: {
+                0: { cellWidth: 100 },
+                1: { cellWidth: 40, halign: 'right' },
+                2: { cellWidth: 42, halign: 'right', fontStyle: 'bold' }
+            }
+        });
+
+        // Verification Block
+        const finalY = (doc as any).lastAutoTable.finalY + 15;
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+        doc.text('Verification', 14, finalY);
+        const certStr = `I, ______________________ son/daughter of ____________________ working in the capacity of ____________________ (designation) do hereby certify that the information given above is true, complete and correct and is based on the books of account, documents, TDS statements, and other available records.`;
+        const splitCert = doc.splitTextToSize(certStr, pageW - 28);
+        doc.text(splitCert, 14, finalY + 5);
+
+        doc.text('Place: ________________', 14, finalY + 25);
+        doc.text('Date:  ________________', 14, finalY + 32);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('(Signature of person responsible for deduction of tax)', pageW - 14, finalY + 32, { align: 'right' });
+
+        doc.save(`Form16_PartB_${emp.id}_FY${sY}-${String(eY).slice(2)}.pdf`);
+    });
+};
+
 export const generateFormB = (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
-    generateStateWageRegister(results, employees, month, year, companyProfile, 'Central Labour Law', 'Form B (Register of Wages)');
+    const doc = new jsPDF('l', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Corporate Header
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text((companyProfile.establishmentName || 'Company Name').toUpperCase(), pageWidth / 2, 15, { align: 'center' });
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text((companyProfile.city || '').toUpperCase(), pageWidth / 2, 21, { align: 'center' });
+
+    // Report Title
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Register of Wages Under Central Labour Law', pageWidth / 2, 30, { align: 'center' });
+    doc.text(`Form B - ${month} ${year}`, pageWidth / 2, 36, { align: 'center' });
+
+    // LIN
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Labour Identification Number : ${companyProfile.lin || '...........................'}`, 14, 45);
+
+    const headers = ['ID', 'Name', 'Designation', 'Basic', 'DA', 'Retaining\nAllowance', 'Other\nAllowance', 'OverTime', 'Gross', 'PF', 'ESI', 'Other\nDeductions', 'Net'];
+
+    const validResults = results.filter(r => r.payableDays > 0);
+    const data = validResults.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+
+        const basic = Math.round(r.earnings.basic || 0);
+        const da = Math.round(r.earnings.da || 0);
+        const retn = Math.round(r.earnings.retainingAllowance || 0);
+        const overtime = 0; // Overtime is not maintained in standard earnings currently
+
+        const gross = Math.round(r.earnings.total || 0);
+        const otherAllow = gross - basic - da - retn - overtime;
+
+        const pf = Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0));
+        const esi = Math.round(r.deductions.esi || 0);
+        const totalDeductions = Math.round(r.deductions.total || 0);
+        const otherDeductions = totalDeductions - pf - esi;
+        const net = Math.round(r.netPay || 0);
+
+        return [
+            r.employeeId,
+            emp?.name || '',
+            emp?.designation || '',
+            basic.toLocaleString('en-IN'),
+            da.toLocaleString('en-IN'),
+            retn.toLocaleString('en-IN'),
+            otherAllow.toLocaleString('en-IN'),
+            overtime.toLocaleString('en-IN'),
+            gross.toLocaleString('en-IN'),
+            pf.toLocaleString('en-IN'),
+            esi.toLocaleString('en-IN'),
+            otherDeductions.toLocaleString('en-IN'),
+            net.toLocaleString('en-IN')
+        ];
+    });
+
+    autoTable(doc, {
+        head: [headers],
+        body: data,
+        startY: 50,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 3, textColor: [50, 50, 50] },
+        headStyles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center', valign: 'middle' },
+        columnStyles: {
+            3: { halign: 'right' },
+            4: { halign: 'right' },
+            5: { halign: 'right' },
+            6: { halign: 'right' },
+            7: { halign: 'right' },
+            8: { halign: 'right' },
+            9: { halign: 'right' },
+            10: { halign: 'right' },
+            11: { halign: 'right' },
+            12: { halign: 'right' }
+        }
+    });
+
+    doc.save(`FormB_WageRegister_${month}_${year}.pdf`);
 };
 
 export const generateFormC = (results: PayrollResult[], employees: Employee[], attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile) => {
-    const headers = ['ID', 'Name', '1', '2', '3', '4', '5', '...', 'Total'];
-    const data = results.filter(r => r.payableDays > 0).map(r => [r.employeeId, employees.find(e => e.id === r.employeeId)?.name, 'P', 'P', 'P', 'P', 'P', '...', r.payableDays]);
-    generatePDFTableReport(`Form C (Muster Roll) - ${month} ${year}`, headers, data, `FormC_${month}_${year}`, 'l', '', companyProfile);
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthIndex = MONTHS.indexOf(month);
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+    // Generate Headers: ID, Name, 1, 2, ..., daysInMonth, Total
+    const daysHeaders = Array.from({ length: daysInMonth }, (_, k) => (k + 1).toString());
+    const headers = ['ID', 'Name', ...daysHeaders, 'Total'];
+
+    const validResults = results.filter(r => r.payableDays > 0);
+    const data = validResults.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+
+        // As a fallback for actual daily attendance, we distribute 'P' up to payableDays
+        // and leave others blank or '-'
+        const payable = Math.round(r.payableDays);
+        const dailyData = Array.from({ length: daysInMonth }, (_, k) => {
+            return (k < payable) ? 'P' : '-';
+        });
+
+        return [r.employeeId, emp?.name || '', ...dailyData, r.payableDays];
+    });
+
+    const doc = new jsPDF('l', 'mm', 'a4');
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text((companyProfile.establishmentName || 'Company Name').toUpperCase(), 14, 15);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Form C (Muster Roll) - ${month} ${year}`, 14, 22);
+
+    // Auto resize column styles for day columns to avoid spilling
+    const columnStyles: any = {};
+    for (let c = 2; c < 2 + daysInMonth; c++) {
+        columnStyles[c] = { cellWidth: 6, halign: 'center' };
+    }
+    columnStyles[2 + daysInMonth] = { halign: 'center', fontStyle: 'bold' };
+
+    autoTable(doc, {
+        head: [headers],
+        body: data,
+        startY: 30,
+        theme: 'grid',
+        styles: { fontSize: 7, cellPadding: 1, textColor: [30, 30, 30] },
+        headStyles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center', valign: 'middle' },
+        columnStyles: columnStyles
+    });
+
+    doc.save(`FormC_MusterRoll_${month}_${year}.pdf`);
 };
 
 export const generateTNFormR = (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile) => {
