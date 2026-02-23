@@ -56,6 +56,20 @@ const Reports: React.FC<ReportsProps> = ({
     const [isGenerating, setIsGenerating] = useState(false);
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
+    // New State for Arrear Report Generation Batch Selection
+    const [arrearSelectedPeriod, setArrearSelectedPeriod] = useState<string>('');
+
+    useEffect(() => {
+        if (arrearHistory && arrearHistory.length > 0) {
+            const currentValid = arrearHistory.find(b => `${b.month}-${b.year}` === arrearSelectedPeriod);
+            if (!currentValid) {
+                // Default to latest if not set or if current selection is invalid
+                const latest = arrearHistory[arrearHistory.length - 1];
+                setArrearSelectedPeriod(`${latest.month}-${latest.year}`);
+            }
+        }
+    }, [arrearHistory, arrearSelectedPeriod]);
+
     // General Modal State
     const [modalState, setModalState] = useState<{
         isOpen: boolean;
@@ -485,19 +499,24 @@ const Reports: React.FC<ReportsProps> = ({
 
                     generateAdvanceShortfallReport(shortfallData, month, year, format, companyProfile);
                 } else if (reportType === 'Arrear Report') {
-                    // Retrieve from Arrear History
-                    const batch = arrearHistory?.find(b => b.month === month && b.year === year);
+                    // Retrieve from Arrear History based on selected batch, not global month
+                    let batch: ArrearBatch | undefined;
+
+                    if (arrearHistory && arrearHistory.length > 0) {
+                        const [selectedMonth, selectedYear] = arrearSelectedPeriod.split('-');
+                        batch = arrearHistory.find(b => b.month === selectedMonth && b.year === parseInt(selectedYear, 10));
+                    }
 
                     if (!batch || !batch.records || batch.records.length === 0) {
-                        throw new Error(`No arrear calculation found for ${month} ${year}. Please process increments in Pay Process > Arrear Salary first.`);
+                        throw new Error(`No arrear calculation found. Please process increments in Pay Process > Arrear Salary first.`);
                     }
 
                     generateArrearReport(
                         batch.records,
                         batch.effectiveMonth,
                         batch.effectiveYear,
-                        month,
-                        year,
+                        batch.month,
+                        batch.year,
                         format,
                         companyProfile
                     );
@@ -632,9 +651,30 @@ const Reports: React.FC<ReportsProps> = ({
 
                             <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800">
                                 <p className="text-xs text-slate-400 leading-relaxed">
-                                    Generating <b>{reportType}</b> in <b>{format}</b> format for <b>{month} {year}</b>.
+                                    Generating <b>{reportType}</b> in <b>{format}</b> format
+                                    {reportType === 'Arrear Report' && arrearSelectedPeriod ?
+                                        ` for selected batch.` :
+                                        ` for ${month} ${year}.`
+                                    }
                                 </p>
                             </div>
+
+                            {reportType === 'Arrear Report' && arrearHistory && arrearHistory.length > 0 && (
+                                <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-2">
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Select Arrear Batch</label>
+                                    <select
+                                        value={arrearSelectedPeriod}
+                                        onChange={e => setArrearSelectedPeriod(e.target.value)}
+                                        className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-bold outline-none focus:border-indigo-500 transition-colors"
+                                    >
+                                        {arrearHistory.map(b => (
+                                            <option key={`${b.month}-${b.year}`} value={`${b.month}-${b.year}`}>
+                                                [{b.status || 'Finalized'}] Processed: {b.month} {b.year} (Eff: {b.effectiveMonth} {b.effectiveYear})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
                         </div>
                     </div>
 

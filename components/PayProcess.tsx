@@ -364,6 +364,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                             companyProfile={props.companyProfile}
                             arrearHistory={props.arrearHistory}
                             setArrearHistory={props.setArrearHistory}
+                            savedRecords={props.savedRecords}
                         />
                     ) : (
                         <div className="p-8 text-center text-slate-500">Arrear Module Error: Missing Data Access</div>

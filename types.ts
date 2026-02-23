@@ -332,6 +332,7 @@ export interface ArrearBatch {
   effectiveMonth: string;
   effectiveYear: number;
   records: ArrearRecord[];
+  status?: 'Draft' | 'Finalized';
 }
 
 export interface User {

@@ -516,12 +516,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       prev.filter(f => !(f.month === globalMonth && f.year === globalYear))
     );
 
-    // ── 4. ARREAR HISTORY: Remove batch for the finalized month ──
-    setArrearHistory(prev =>
-      prev.filter(b => !(b.month === globalMonth && b.year === globalYear))
-    );
-
-    // ── 5. Advance the global period ──
+    // ── 4. Advance the global period ──
     setGlobalMonth(nextMonth);
     setGlobalYear(nextYear);
   };
