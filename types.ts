@@ -222,6 +222,14 @@ export interface Employee {
   photoUrl?: string;
   form1Url?: string;
   form2Url?: string;
+
+  employeeDocuments?: {
+    resume?: string;
+    esiForm1?: string;
+    pfForm2?: string;
+    pfForm11?: string;
+  };
+
   serviceRecords: ServiceRecord[];
 }
 
