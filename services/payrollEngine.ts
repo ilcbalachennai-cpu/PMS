@@ -369,13 +369,13 @@ export const calculatePayroll = (
                 isESICodeWagesUsed = false;
             } else {
                 // Continued Coverage
-                esiEmployee = Math.ceil(esiWageBase * config.esiEmployeeRate);
-                esiEmployer = Math.ceil(esiWageBase * config.esiEmployerRate);
+                esiEmployee = Math.round(esiWageBase * config.esiEmployeeRate);
+                esiEmployer = Math.round(esiWageBase * config.esiEmployerRate);
                 esiRemark = 'Continued Coverage (Mid-Period)';
             }
         } else {
-            esiEmployee = Math.ceil(esiWageBase * config.esiEmployeeRate);
-            esiEmployer = Math.ceil(esiWageBase * config.esiEmployerRate);
+            esiEmployee = Math.round(esiWageBase * config.esiEmployeeRate);
+            esiEmployer = Math.round(esiWageBase * config.esiEmployerRate);
         }
     }
 

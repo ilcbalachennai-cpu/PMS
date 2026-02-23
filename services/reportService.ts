@@ -124,25 +124,119 @@ export const generateArrearReport = (
         }));
         generateExcelReport(exportData, 'Arrears', fileName);
     } else {
-        // For PDF, we condense to save horizontal space (focusing on Gross differences)
-        const headers = ['ID', 'Name', 'Old Basic', 'Diff Basic', 'Old DA', 'Diff DA', 'Old Retn', 'Diff Retn', 'Old Gross', 'New Gross', 'Diff Gross', 'Months', 'Total Arrear'];
-        const rows = arrearData.map(r => [
-            r.id,
-            r.name,
-            r.oldBasic,
-            r.diffBasic,
-            r.oldDA,
-            r.diffDA,
-            r.oldRetaining,
-            r.diffRetaining,
-            r.oldGross,
-            r.newGross,
-            r.diffGross,
-            r.months,
-            r.totalArrear
-        ]);
+        // --- Custom PDF Generation for Arrear Report ---
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        const pageW = 297;
+        let y = 15;
 
-        generatePDFTableReport(title, headers, rows, fileName, 'l', summary, companyProfile);
+        // Header
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'bold');
+        doc.text(companyProfile.establishmentName || 'Company Name', 14, y);
+        y += 6;
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        const cityState = [companyProfile.city, companyProfile.state].filter(Boolean).join(', ');
+        if (cityState) {
+            doc.text(cityState.toUpperCase(), 14, y);
+            y += 6;
+        }
+
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text(title, 14, y);
+        y += 6;
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100);
+        doc.text(summary, 14, y);
+        doc.setTextColor(0);
+        y += 8;
+
+        // Requested Columns: ID | Name | EBasic | IinBasic | RBasic | EDA | IinDA | RDA | ERtn.Alw | IinRtnAlw | RRetAlw | EOtherAlw | IinOtherAlw | ROtherAlw | EGross | TIncr | RGross
+        const headers = [
+            'ID', 'Name',
+            'EBasic', 'IinBasic', 'RBasic',
+            'EDA', 'IinDA', 'RDA',
+            'ERtn.Alw', 'IinRtnAlw', 'RRetAlw',
+            'EOtherAlw', 'IinOtherAlw', 'ROtherAlw',
+            'EGross', 'TIncr', 'RGross'
+        ];
+
+        const rows = arrearData.map(r => {
+            // EOtherAlw = HRA + Conveyance + Washing + Attire + Specials
+            const oldOther = r.oldHRA + r.oldConveyance + r.oldWashing + r.oldAttire + r.oldSpecial1 + r.oldSpecial2 + r.oldSpecial3;
+            const newOther = r.newHRA + r.newConveyance + r.newWashing + r.newAttire + r.newSpecial1 + r.newSpecial2 + r.newSpecial3;
+            const diffOther = newOther - oldOther;
+
+            return [
+                r.id,
+                r.name,
+                r.oldBasic, r.diffBasic, r.newBasic,
+                r.oldDA, r.diffDA, r.newDA,
+                r.oldRetaining, r.diffRetaining, r.newRetaining,
+                oldOther, diffOther, newOther,
+                r.oldGross, r.diffGross, r.newGross
+            ];
+        });
+
+        autoTable(doc, {
+            head: [headers],
+            body: rows,
+            startY: y,
+            theme: 'grid',
+            styles: { fontSize: 8, cellPadding: 2 },
+            headStyles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+            columnStyles: {
+                0: { halign: 'center' }, // ID
+                1: { halign: 'left' },   // Name
+                // Right align all numeric columns
+                ...Object.fromEntries(Array.from({ length: 15 }, (_, i) => [i + 2, { halign: 'right' }]))
+            },
+            didParseCell: (hookData) => {
+                // Style the Increment columns with a distinct color (e.g., deep green)
+                // Increment column indices: 3 (IinBasic), 6 (IinDA), 9 (IinRtnAlw), 12 (IinOtherAlw), 15 (TIncr)
+                const incrementCols = [3, 6, 9, 12, 15];
+
+                if (hookData.section === 'body' && incrementCols.includes(hookData.column.index)) {
+                    hookData.cell.styles.textColor = [39, 174, 96]; // Emerald / Greenish
+                    hookData.cell.styles.fontStyle = 'bold';
+                }
+
+                // Style the Revised columns slightly bolder to stand out
+                // Revised columns: 4 (RBasic), 7 (RDA), 10 (RRetAlw), 13 (ROtherAlw), 16 (RGross)
+                const revisedCols = [4, 7, 10, 13, 16];
+                if (hookData.section === 'body' && revisedCols.includes(hookData.column.index)) {
+                    hookData.cell.styles.fontStyle = 'bold';
+                    hookData.cell.styles.fillColor = [245, 245, 250]; // Very light background
+                }
+            }
+        });
+
+        const finalY = (doc as any).lastAutoTable.finalY + 10;
+
+        // Add Footnote explanations
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(100);
+
+        const footnote1 = "Abbreviations: E - Existing, Iin - Increment in, R - Revised";
+        const footnote2 = "EBasic: Existing Basic | IinBasic: Increment in Basic | RBasic: Revised Basic | EDA: Existing DA | IinDA: Increment in DA | RDA: Revised DA";
+        const footnote3 = "ERtn.Alw: Existing Retaining Allowance | IinRtnAlw: Increment in Retaining Allowance | RRetAlw: Revised Retaining Allowance";
+        const footnote4 = "EOtherAlw: Existing Other Allowances (Sum of HRA, Conveyance, Washing, Attire, Specials) | IinOtherAlw: Increment in Other Allow. | ROtherAlw: Revised Other Allow.";
+        const footnote5 = "EGross: Existing Gross Salary | TIncr: Total Increment | RGross: Revised Gross Salary";
+
+        let currentY = finalY;
+        doc.text("Note:", 14, currentY); currentY += 4;
+        doc.text(footnote1, 14, currentY); currentY += 4;
+        doc.text(footnote2, 14, currentY); currentY += 4;
+        doc.text(footnote3, 14, currentY); currentY += 4;
+        doc.text(footnote4, 14, currentY); currentY += 4;
+        doc.text(footnote5, 14, currentY);
+
+        doc.save(`${fileName}.pdf`);
     }
 };
 
@@ -2077,12 +2171,14 @@ export const generateArrearECRText = (
         const emp = employees.find(e => e.id === record.id);
         if (!emp || emp.isPFExempt || !emp.uanc) return; // Skip invalid or non-contributing employees
 
-        const arrearPFWagePerMonth = record.diffGross || record.monthlyIncrement;
+        const arrearPFWagePerMonth = record.diffBasic + (record.diffDA || 0) + (record.diffRetaining || 0);
         if (arrearPFWagePerMonth <= 0) return;
 
         let totalArrearEPF = 0;
         let totalArrearEPS = 0;
         let totalArrearEDLI = 0;
+        let totalEE_EPF = 0;
+        let totalER_EPS = 0;
 
         const coveredMonths = getCoveredMonths(effectiveIdx, effectiveYear, record.months);
 
@@ -2140,12 +2236,20 @@ export const generateArrearECRText = (
             totalArrearEPF += currentMonthArrearEPF;
             totalArrearEPS += currentMonthArrearEPS;
             totalArrearEDLI += currentMonthArrearEDLI;
+
+            // Address 1-rupee rounding disparity by accumulating mathematically rounded monthly shares
+            if (currentMonthArrearEPF > 0) {
+                totalEE_EPF += Math.round(currentMonthArrearEPF * 0.12);
+            }
+            if (currentMonthArrearEPS > 0) {
+                totalER_EPS += Math.round(currentMonthArrearEPS * 0.0833);
+            }
         });
 
         // 3. Final calculations for the text row
         if (totalArrearEPF > 0) {
-            const eeShare = Math.round(totalArrearEPF * 0.12);
-            const erEpsShare = Math.round(totalArrearEPS * 0.0833);
+            const eeShare = totalEE_EPF;
+            const erEpsShare = totalER_EPS;
             const erEpfShare = eeShare - erEpsShare;
 
             // Format: UAN#~#MemberName#~#ArrearEPFWages#~#ArrearEPSWages#~#ArrearEDLIWages#~#EEShare#~#ERepfShare#~#ERepsShare
@@ -2206,7 +2310,7 @@ export const generateArrearECRExcel = (
         const emp = employees.find(e => e.id === record.id);
         if (!emp || emp.isPFExempt || !emp.uanc) return;
 
-        const arrearPFWagePerMonth = record.diffBasic + record.diffDA;
+        const arrearPFWagePerMonth = record.diffBasic + (record.diffDA || 0) + (record.diffRetaining || 0);
         if (arrearPFWagePerMonth <= 0) return;
 
         let totalArrearEPF = 0;
@@ -2215,6 +2319,9 @@ export const generateArrearECRExcel = (
 
         let totalPastEPFWage = 0;
         let totalPastEPSWage = 0;
+
+        let totalEE_EPF = 0;
+        let totalER_EPS = 0;
 
         const coveredMonths = getCoveredMonths(effectiveIdx, effectiveYear, record.months);
         const periodLabel = coveredMonths.length > 1
@@ -2276,11 +2383,19 @@ export const generateArrearECRExcel = (
             totalArrearEPF += currentMonthArrearEPF;
             totalArrearEPS += currentMonthArrearEPS;
             totalArrearEDLI += currentMonthArrearEDLI;
+
+            // Accumulate mathematically rounded monthly shares
+            if (currentMonthArrearEPF > 0) {
+                totalEE_EPF += Math.round(currentMonthArrearEPF * 0.12);
+            }
+            if (currentMonthArrearEPS > 0) {
+                totalER_EPS += Math.round(currentMonthArrearEPS * 0.0833);
+            }
         });
 
         if (totalArrearEPF > 0) {
-            const eeShare = Math.round(totalArrearEPF * 0.12);
-            const erEpsShare = Math.round(totalArrearEPS * 0.0833);
+            const eeShare = totalEE_EPF;
+            const erEpsShare = totalER_EPS;
             const erEpfShare = eeShare - erEpsShare;
 
             rows.push({
