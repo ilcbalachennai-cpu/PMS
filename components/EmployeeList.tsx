@@ -363,7 +363,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     fileName,
                     'l',
                     `Total Records: ${targetEmps.length} | Export Date: ${dateStr}`,
-                    companyProfile
+                    companyProfile!
                 );
             }
             setExportModal({ ...exportModal, isOpen: false, password: '' });
@@ -398,7 +398,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                 fileName,
                 'p',
                 summaryText,
-                companyProfile
+                companyProfile!
             );
         }
     };
@@ -1455,7 +1455,20 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                                         </div>
                                         <div className="space-y-1.5">
                                             <label className="text-[10px] font-bold text-red-300 uppercase tracking-widest">Reason for Leaving</label>
-                                            <select id="leavingReasonInput" className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500" value={newEmpForm.leavingReason} onChange={e => setNewEmpForm({ ...newEmpForm, leavingReason: e.target.value, dol: e.target.value === '' ? '' : newEmpForm.dol })}>
+                                            <select
+                                                id="leavingReasonInput"
+                                                className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500"
+                                                value={newEmpForm.leavingReason}
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    const shouldClearDOL = val === '' || val === 'ON LOP';
+                                                    setNewEmpForm({
+                                                        ...newEmpForm,
+                                                        leavingReason: val,
+                                                        dol: shouldClearDOL ? '' : newEmpForm.dol
+                                                    });
+                                                }}
+                                            >
                                                 <option value="">Select Reason...</option>
                                                 <option value="ON LOP">ON LOP</option>
                                                 <option value="Resignation">Resignation</option>

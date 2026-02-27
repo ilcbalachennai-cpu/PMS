@@ -58,7 +58,15 @@ export const generateExcelReport = (data: any[], sheetName: string, fileName: st
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheetName.substring(0, 31)); // Sheet name max 31 chars
-    XLSX.writeFile(wb, `${fileName}.xlsx`);
+
+    // @ts-ignore
+    if (window.electronAPI) {
+        const u8 = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        // @ts-ignore
+        window.electronAPI.saveReport(fileName, u8, 'xlsx');
+    } else {
+        XLSX.writeFile(wb, `${fileName}.xlsx`);
+    }
 };
 
 export const generatePDFTableReport = (title: string, headers: string[], data: any[][], fileName: string, orientation: 'p' | 'l', summary: string, company: CompanyProfile, columnStyles?: any) => {
@@ -82,7 +90,20 @@ export const generatePDFTableReport = (title: string, headers: string[], data: a
         columnStyles: columnStyles
     });
 
-    doc.save(`${fileName}.pdf`);
+    // @ts-ignore
+    if (window.electronAPI) {
+        const blob = doc.output('blob');
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (reader.result instanceof ArrayBuffer) {
+                // @ts-ignore
+                window.electronAPI.saveReport(fileName, new Uint8Array(reader.result), 'pdf');
+            }
+        };
+        reader.readAsArrayBuffer(blob);
+    } else {
+        doc.save(`${fileName}.pdf`);
+    }
 };
 
 // ==========================================

@@ -3,6 +3,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch } from '../types';
+import { ModalType } from './Shared/CustomModal';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
 import PayrollProcessor from './PayrollProcessor';
@@ -33,6 +34,7 @@ interface PayProcessProps {
     setFines: (fines: FineRecord[]) => void;
     arrearHistory?: ArrearBatch[];
     setArrearHistory?: React.Dispatch<React.SetStateAction<ArrearBatch[]>>;
+    showAlert: (type: ModalType, title: string, message: string, onConfirm?: () => void) => void;
 }
 
 const PayProcess: React.FC<PayProcessProps> = (props) => {
@@ -365,6 +367,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                             arrearHistory={props.arrearHistory}
                             setArrearHistory={props.setArrearHistory}
                             savedRecords={props.savedRecords}
+                            showAlert={props.showAlert}
                         />
                     ) : (
                         <div className="p-8 text-center text-slate-500">Arrear Module Error: Missing Data Access</div>

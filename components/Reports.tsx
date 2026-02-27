@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, KeyRound, UserX, Save, RefreshCw, TrendingUp } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, ArrearBatch } from '../types';
 import {
     generateExcelReport,
@@ -12,6 +13,7 @@ import {
     generateArrearReport,
     formatDateInd
 } from '../services/reportService';
+import CustomModal, { ModalType } from './Shared/CustomModal';
 
 interface ReportsProps {
     employees: Employee[];
@@ -32,6 +34,7 @@ interface ReportsProps {
     currentUser?: User;
     onRollover: (history?: PayrollResult[]) => void;
     arrearHistory?: ArrearBatch[];
+    showAlert: (type: ModalType, title: string, message: string, onConfirm?: () => void) => void;
 }
 
 const Reports: React.FC<ReportsProps> = ({
@@ -49,7 +52,8 @@ const Reports: React.FC<ReportsProps> = ({
     advanceLedgers,
     currentUser,
     onRollover,
-    arrearHistory
+    arrearHistory,
+    showAlert
 }) => {
     const [reportType, setReportType] = useState<string>('Pay Sheet');
     const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
@@ -207,26 +211,64 @@ const Reports: React.FC<ReportsProps> = ({
                 })
                 .filter(Boolean) as { id: string; name: string; planned: number; actual: number; shortfall: number }[];
 
-            const confirmMessage = advShortfalls.length > 0 ? (
+            // DETECT EMPLOYEES LEAVING WITH PENDING ADVANCE
+            const periodStart = getPayrollPeriodStart();
+            const periodEnd = getPayrollPeriodEnd();
+            const leavingWithAdvance = currentResults
+                .map(r => {
+                    const emp = employees.find(e => e.id === r.employeeId);
+                    const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
+                    if (!emp || !emp.dol || !adv || (adv.balance || 0) <= 0) return null;
+
+                    // Check if DOL is in current month
+                    const dolDate = emp.dol;
+                    if (dolDate >= periodStart && dolDate <= periodEnd) {
+                        return { name: emp.name, balance: adv.balance };
+                    }
+                    return null;
+                })
+                .filter(Boolean) as { name: string; balance: number }[];
+
+            const confirmMessage = (advShortfalls.length > 0 || leavingWithAdvance.length > 0) ? (
                 <div className="text-left space-y-3">
                     <p className="text-slate-300 text-sm">Are you sure you want to finalize payroll for <b>{month} {year}</b>?</p>
-                    <div className="bg-amber-900/30 border border-amber-600/40 rounded-xl p-3">
-                        <p className="text-amber-400 text-xs font-bold uppercase tracking-widest mb-2">⚠ Advance Recovery Shortfall</p>
-                        <p className="text-amber-300/80 text-[11px] mb-2">Advance could not be fully recovered for the following employees due to insufficient salary:</p>
-                        <div className="max-h-40 overflow-y-auto space-y-1">
-                            {advShortfalls.map(s => (
-                                <div key={s.id} className="flex justify-between items-center text-xs bg-slate-800/60 px-2 py-1.5 rounded">
-                                    <span className="text-white font-semibold">{s.name}</span>
-                                    <span className="font-mono text-[10px] flex gap-2">
-                                        <span className="text-slate-400">Planned <span className="text-amber-400">₹{s.planned}</span></span>
-                                        <span className="text-slate-400">Recovered <span className="text-emerald-400">₹{s.actual}</span></span>
-                                        <span className="text-red-400 font-bold">Shortfall ₹{s.shortfall}</span>
-                                    </span>
-                                </div>
-                            ))}
+
+                    {leavingWithAdvance.length > 0 && (
+                        <div className="bg-red-900/30 border border-red-600/40 rounded-xl p-3">
+                            <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-2">
+                                <AlertTriangle size={14} /> Critical: Pending Advance for Exits
+                            </p>
+                            <p className="text-red-300/80 text-[11px] mb-2">The following employees are leaving service but still have an outstanding advance balance:</p>
+                            <div className="space-y-1">
+                                {leavingWithAdvance.map((s, idx) => (
+                                    <div key={idx} className="flex justify-between items-center text-xs bg-red-950/40 px-2 py-1.5 rounded border border-red-900/30">
+                                        <span className="text-white font-semibold">{s.name}</span>
+                                        <span className="text-red-400 font-bold font-mono">Pending ₹{s.balance.toLocaleString()}</span>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                        <p className="text-slate-500 text-[10px] mt-2">Shortfall will carry forward to next month's opening balance.</p>
-                    </div>
+                    )}
+
+                    {advShortfalls.length > 0 && (
+                        <div className="bg-amber-900/30 border border-amber-600/40 rounded-xl p-3">
+                            <p className="text-amber-400 text-xs font-bold uppercase tracking-widest mb-2">⚠ Advance Recovery Shortfall</p>
+                            <p className="text-amber-300/80 text-[11px] mb-2">Advance could not be fully recovered for these employees due to insufficient salary:</p>
+                            <div className="max-h-40 overflow-y-auto space-y-1">
+                                {advShortfalls.map(s => (
+                                    <div key={s.id} className="flex justify-between items-center text-xs bg-slate-800/60 px-2 py-1.5 rounded">
+                                        <span className="text-white font-semibold">{s.name}</span>
+                                        <span className="font-mono text-[10px] flex gap-2">
+                                            <span className="text-slate-400">Planned <span className="text-amber-400">₹{s.planned}</span></span>
+                                            <span className="text-slate-400">Recovered <span className="text-emerald-400">₹{s.actual}</span></span>
+                                            <span className="text-red-400 font-bold">Shortfall ₹{s.shortfall}</span>
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {advShortfalls.length > 0 && <p className="text-slate-500 text-[10px] mt-2">Shortfall will carry forward to next month's opening balance.</p>}
                 </div>
             ) : `Are you sure you want to finalize payroll for ${month} ${year}?\n\nThis will lock all attendance, leave, and advance records for this period.`;
 
@@ -267,21 +309,54 @@ const Reports: React.FC<ReportsProps> = ({
             return;
         }
 
-        const updatedEmployees = employees.map(emp => {
-            if (exitData[emp.id]) {
-                const { dol, reason } = exitData[emp.id];
-                if (reason === 'ON LOP') {
-                    // ON LOP: only save the reason; clear any previous DOL so the employee stays active
-                    return { ...emp, dol: '', leavingReason: reason };
-                }
-                return { ...emp, dol, leavingReason: reason };
-            }
-            return emp;
+        const employeesWithAdvance = Object.entries(exitData).filter(([id, data]) => {
+            if (data.reason === 'ON LOP') return false;
+            const adv = advanceLedgers.find(a => a.employeeId === id);
+            return adv && (adv.balance || 0) > 0;
         });
-        setEmployees(updatedEmployees);
-        setZeroWageEmployees([]);
-        setExitData({});
-        executeFreeze();
+
+        const performFreeze = () => {
+            const updatedEmployees = employees.map(emp => {
+                if (exitData[emp.id]) {
+                    const { dol, reason } = exitData[emp.id];
+                    if (reason === 'ON LOP') {
+                        // ON LOP: only save the reason; clear any previous DOL so the employee stays active
+                        return { ...emp, dol: '', leavingReason: reason };
+                    }
+                    return { ...emp, dol, leavingReason: reason };
+                }
+                return emp;
+            });
+            setEmployees(updatedEmployees);
+            setZeroWageEmployees([]);
+            setExitData({});
+            executeFreeze();
+        };
+
+        if (employeesWithAdvance.length > 0) {
+            const names = employeesWithAdvance.map(([id]) => employees.find(e => e.id === id)?.name || id).join(', ');
+            setModalState({
+                isOpen: true,
+                type: 'confirm',
+                title: 'Pending Advances Found',
+                message: (
+                    <div className="space-y-3">
+                        <p className="text-sm">The following employees are being marked as LEFT but still have outstanding advance balances:</p>
+                        <ul className="text-xs text-red-400 font-bold list-disc list-inside">
+                            {employeesWithAdvance.map(([id]) => {
+                                const emp = employees.find(e => e.id === id);
+                                const adv = advanceLedgers.find(a => a.employeeId === id);
+                                return <li key={id}>{emp?.name}: ₹{adv?.balance.toLocaleString()}</li>;
+                            })}
+                        </ul>
+                        <p className="text-xs text-slate-400">Are you sure you want to finalize their exit and freeze payroll?</p>
+                    </div>
+                ),
+                onConfirm: performFreeze
+            });
+        } else {
+            performFreeze();
+        }
     };
 
     const handleUnlock = () => {
@@ -775,6 +850,7 @@ const Reports: React.FC<ReportsProps> = ({
                                         <tr>
                                             <th className="px-4 py-3 rounded-tl-lg border-b border-slate-700">Employee Details</th>
                                             <th className="px-4 py-3 border-b border-slate-700">Date of Leaving</th>
+                                            <th className="px-4 py-3 border-b border-slate-700 w-24">Pending Adv</th>
                                             <th className="px-4 py-3 rounded-tr-lg border-b border-slate-700">Reason for Leaving</th>
                                         </tr>
                                     </thead>
@@ -814,10 +890,24 @@ const Reports: React.FC<ReportsProps> = ({
                                                         )}
                                                     </td>
                                                     <td className="px-4 py-3">
+                                                        <div className={`font-mono font-bold ${(() => {
+                                                            const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
+                                                            const pending = adv ? (adv.balance + (adv.recovery || 0)) : 0;
+                                                            return pending > 0 ? 'text-red-400' : 'text-slate-500';
+                                                        })()}`}>
+                                                            ₹{(() => {
+                                                                const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
+                                                                const pending = adv ? (adv.balance + (adv.recovery || 0)) : 0;
+                                                                return pending.toLocaleString();
+                                                            })()}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-3">
                                                         <select
                                                             className="bg-[#0f172a] border border-slate-600 rounded-lg px-3 py-2 text-white text-xs w-full focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 outline-none transition-all"
                                                             value={data.reason}
                                                             onChange={(e) => handleExitChange(r.employeeId, 'reason', e.target.value)}
+                                                            title="Select separation reason"
                                                         >
                                                             <option value="">Select Reason...</option>
                                                             <option value="ON LOP">ON LOP</option>

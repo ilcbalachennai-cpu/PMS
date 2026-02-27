@@ -31,7 +31,7 @@ const AIAssistant: React.FC = () => {
     setLoading(true);
 
     const advice = await getPayrollAdvice(userMsg);
-    setMessages(prev => [...prev, { role: 'assistant', content: advice }]);
+    setMessages(prev => [...prev, { role: 'assistant', content: advice || "I'm sorry, I couldn't process that request." }]);
     setLoading(false);
   };
 
@@ -53,23 +53,21 @@ const AIAssistant: React.FC = () => {
         </div>
       </div>
 
-      <div 
+      <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50"
       >
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[80%] flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                msg.role === 'user' ? 'bg-slate-200 text-slate-600' : 'bg-blue-600 text-white'
-              }`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-slate-200 text-slate-600' : 'bg-blue-600 text-white'
+                }`}>
                 {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
               </div>
-              <div className={`p-4 rounded-2xl text-sm leading-relaxed ${
-                msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-tr-none' 
+              <div className={`p-4 rounded-2xl text-sm leading-relaxed ${msg.role === 'user'
+                  ? 'bg-blue-600 text-white rounded-tr-none'
                   : 'bg-white border border-slate-200 text-slate-700 shadow-sm rounded-tl-none'
-              }`}>
+                }`}>
                 {msg.content.split('\n').map((line, idx) => (
                   <p key={idx} className={idx > 0 ? 'mt-2' : ''}>{line}</p>
                 ))}
@@ -95,15 +93,15 @@ const AIAssistant: React.FC = () => {
 
       <div className="p-4 bg-white border-t border-slate-100">
         <div className="relative">
-          <input 
-            type="text" 
+          <input
+            type="text"
             placeholder="Ask about EPF ceiling, TDS rates, Gratuity formula..."
             className="w-full pl-4 pr-12 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}
           />
-          <button 
+          <button
             onClick={handleSend}
             disabled={!input.trim() || loading}
             className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-300 transition-colors shadow-lg shadow-blue-100"

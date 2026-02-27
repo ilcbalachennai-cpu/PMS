@@ -1,8 +1,8 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
-import { TrendingUp, Calendar, Save, Calculator, AlertTriangle, CheckCircle2, Download, Lock } from 'lucide-react';
+import { TrendingUp, Calendar, Save, Calculator, AlertTriangle, CheckCircle2, Download, Lock, X } from 'lucide-react';
 import { Employee, CompanyProfile, ArrearBatch, ArrearRecord, PayrollResult } from '../types';
 import { generateArrearReport } from '../services/reportService';
+import { ModalType } from './Shared/CustomModal';
 
 interface ArrearManagerProps {
     employees: Employee[];
@@ -13,6 +13,7 @@ interface ArrearManagerProps {
     arrearHistory?: ArrearBatch[];
     setArrearHistory?: React.Dispatch<React.SetStateAction<ArrearBatch[]>>;
     savedRecords: PayrollResult[];
+    showAlert: (type: ModalType, title: string, message: string, onConfirm?: () => void) => void;
 }
 
 const ArrearManager: React.FC<ArrearManagerProps> = ({
@@ -23,7 +24,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     companyProfile,
     arrearHistory,
     setArrearHistory,
-    savedRecords
+    savedRecords,
+    showAlert
 }) => {
     const [incrementType, setIncrementType] = useState<'Percentage' | 'Adhoc'>('Percentage');
     const [percentageMode, setPercentageMode] = useState<'Flat' | 'Specific'>('Flat');
@@ -166,7 +168,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
 
     const handleSaveDraft = () => {
         if (calculateMonthsPassed() <= 0) {
-            alert("Effective date cannot be in the future or same month relative to current payroll period.");
+            showAlert('error', 'Invalid Period', "Effective date cannot be in the future or same month relative to current payroll period.");
             return;
         }
 
@@ -237,13 +239,9 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                 records: arrearRecords,
                 status: 'Draft'
             };
-            setArrearHistory(prev => {
-                const filtered = prev.filter(b => !(b.month === currentMonth && b.year === currentYear));
-                return [...filtered, newBatch];
-            });
-            alert(`Draft Arrear Wages successfully saved. Proceed to Pay Reports to generate the Arrear Salary PDF.`);
+            showAlert('success', 'Draft Saved', `Draft Arrear Wages successfully saved. Proceed to Pay Reports to generate the Arrear Salary PDF.`);
         } else {
-            alert(`No increments calculated to save as draft.`);
+            showAlert('info', 'No Data', `No increments calculated to save as draft.`);
         }
         setIsProcessing(false);
     };
@@ -256,7 +254,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
         setIsProcessing(true);
 
         if (!activeDraft) {
-            alert('No draft found to finalize.');
+            showAlert('error', 'No Draft', 'No draft found to finalize.');
             setIsProcessing(false);
             setShowConfirmation(false);
             return;
@@ -294,7 +292,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
 
         setIsProcessing(false);
         setShowConfirmation(false);
-        alert(`Arrear Wages permanently finalized! Employee Pay Details are updated successfully.`);
+        showAlert('success', 'Finalization Complete', `Arrear Wages permanently finalized! Employee Pay Details are updated successfully.`);
     };
 
     return (

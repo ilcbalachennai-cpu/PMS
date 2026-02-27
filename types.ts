@@ -21,7 +21,10 @@ export interface AdvanceLedger {
   manualPayment: number;    // Optional override; if > 0 disables emiCount
   recovery: number;         // Computed: manualPayment > 0 ? manualPayment : totalBalance / emiCount
   balance: number;          // opening + totalAdvance − recovery (carries forward as next month's opening)
+  monthlyInstallment?: number; // Added to match component usage
+  paidAmount?: number;         // Added to match component usage
 }
+
 
 export interface FineRecord {
   employeeId: string;
