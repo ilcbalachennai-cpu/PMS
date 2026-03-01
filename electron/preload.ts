@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         console.log("Preload: Calling close-app invoke");
         return ipcRenderer.invoke('close-app');
     },
+    getMachineId: () => ipcRenderer.invoke('get-machine-id'),
     getIsElectron: () => true
 });
 

@@ -736,7 +736,19 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     <button onClick={() => setShowRejoinPanel(true)} className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all font-bold text-xs">
                         <RotateCcw size={16} /> Rejoin
                     </button>
-                    <button onClick={() => { setEditingId(null); setNewEmpForm(getEmptyForm()); setIsSeparationUnlocked(true); setIsAdding(true); }} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-lg font-bold">
+                    <button
+                        onClick={() => {
+                            if (totalActive >= (Number(localStorage.getItem('app_data_size')) || 50)) {
+                                alert(`Employee Limit Reached: Your current license allows up to ${Number(localStorage.getItem('app_data_size')) || 50} active employees.`);
+                                return;
+                            }
+                            setEditingId(null);
+                            setNewEmpForm(getEmptyForm());
+                            setIsSeparationUnlocked(true);
+                            setIsAdding(true);
+                        }}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-lg font-bold"
+                    >
                         <Plus size={18} /> Add New
                     </button>
                 </div>
@@ -750,6 +762,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, on
                     </div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                         Active Employees: <span className="text-white text-xs ml-1 font-mono">{totalActive}</span>
+                        <span className="mx-2 text-slate-600">/</span>
+                        Limit: <span className="text-sky-400 text-xs font-mono">{localStorage.getItem('app_data_size') || '50'}</span>
                     </span>
                 </div>
             </div>

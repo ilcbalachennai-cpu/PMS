@@ -20,10 +20,13 @@ import {
     Database,
     Upload,
     Loader2,
-    UserCircle
+    UserCircle,
+    Power,
+    ArrowLeftCircle
 } from 'lucide-react';
 import { CompanyProfile, StatutoryConfig, User } from '../types';
 import { INITIAL_COMPANY_PROFILE, INITIAL_STATUTORY_CONFIG, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, BRAND_CONFIG } from '../constants';
+import { activateFullLicense, registerTrial, isValidKeyFormat } from '../services/licenseService';
 import CryptoJS from 'crypto-js';
 
 interface RegistrationProps {
@@ -38,6 +41,11 @@ interface RegistrationProps {
 
 const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert }) => {
     const [step, setStep] = useState(1);
+    const [userName, setUserName] = useState('');
+    const [userID, setUserID] = useState('');
+    const [licenseKey, setLicenseKey] = useState('');
+    const [regEmail, setRegEmail] = useState('');
+    const [regMobile, setRegMobile] = useState('');
     const [profile, setProfile] = useState<CompanyProfile>(INITIAL_COMPANY_PROFILE);
     const [config, setConfig] = useState<StatutoryConfig>(INITIAL_STATUTORY_CONFIG);
     const [adminPassword, setAdminPassword] = useState('');
@@ -50,34 +58,109 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     const [isProcessing, setIsProcessing] = useState(false);
     const backupFileRef = React.useRef<HTMLInputElement>(null);
     const passwordRef = React.useRef<HTMLInputElement>(null);
+    const decryptPasswordRef = React.useRef<HTMLInputElement>(null);
 
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    const containerRef = React.useRef<HTMLDivElement>(null);
 
-    // Auto-focus password on start
+    // Clear error when inputs change
     useEffect(() => {
-        if (step === 1 && passwordRef.current) {
-            passwordRef.current.focus();
-        }
+        setError('');
+    }, [userName, userID, regEmail, regMobile, adminPassword, confirmPassword, encryptionKey]);
+
+    // Auto-focus on step change
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (step === 1 && nameInputRef.current) {
+                nameInputRef.current.focus();
+            } else if (step === 2 && passwordRef.current) {
+                passwordRef.current.focus();
+            }
+        }, 400); // Wait for the 300ms animation to finish before focusing
+        return () => clearTimeout(timer);
     }, [step]);
 
-    const nextStep = () => {
+    const nameInputRef = React.useRef<HTMLInputElement>(null);
+
+    const nextStep = async () => {
         if (step === 1) {
-            const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{9,}$/;
+            if (!userName) {
+                setError('Full Name is required.');
+                return;
+            }
+            if (!userID) {
+                setError('User ID is required.');
+                return;
+            }
+            if (!regEmail || !regEmail.includes('@')) {
+                setError('A valid registered email is required.');
+                return;
+            }
+            if (regMobile.length < 10) {
+                setError('A valid mobile number is required.');
+                return;
+            }
+
+            setIsProcessing(true);
+            let result;
+
+            if (licenseKey) {
+                // Attempt Full License Activation
+                if (!isValidKeyFormat(licenseKey)) {
+                    setError('Please enter a valid 16-digit license key.');
+                    setIsProcessing(false);
+                    return;
+                }
+                result = await activateFullLicense(userName, userID, licenseKey, regEmail, regMobile);
+            } else {
+                // Attempt Trial Registration
+                result = await registerTrial(userName, userID, regEmail, regMobile);
+            }
+
+            setIsProcessing(false);
+
+            if (!result.success) {
+                setError(result.message || 'Verification Failed.');
+                if (result.message?.includes('Unauthorised')) {
+                    // Force shutdown as per user request for unauthorized access
+                    setTimeout(() => {
+                        // @ts-ignore
+                        window.electronAPI.closeApp();
+                    }, 3000);
+                }
+                return;
+            }
+
+            if (showAlert && result.message) {
+                showAlert('success', 'Verified', result.message);
+            }
+
+            // Auto-fill profile email from reg email
+            setProfile(prev => ({ ...prev, email: regEmail }));
+        }
+
+        if (step === 2) {
+            // Relaxed regex: 1 Upper, 1 Lower, 1 Num, 1 Special (wide range), 9+ chars
+            const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{9,}$/;
 
             if (!adminPassword) {
                 setError('Admin password is required.');
+                containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                 return;
             }
             if (adminPassword.length < 9) {
-                setError('Password must be at least 9 characters long.');
+                setError('Password is too short. It must be at least 9 characters long.');
+                containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                 return;
             }
             if (!passwordRegex.test(adminPassword)) {
-                setError('Password must contain at least one uppercase letter, one number, and one special character.');
+                setError('Password requirement not met: One uppercase, one lowercase, one number, and one special character are required.');
+                containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                 return;
             }
             if (adminPassword !== confirmPassword) {
-                setError('Passwords do not match.');
+                setError('Passwords do not match. Please retype them.');
+                containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                 return;
             }
         }
@@ -95,35 +178,68 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     };
 
     const executeRestore = () => {
+        setIsProcessing(true); // Immediate feedback
+        setError('');
+
+        console.log("🏦 Restore Process Initiated...");
+
         const file = backupFileRef.current?.files?.[0];
-        if (!file || !encryptionKey) {
-            setError('Please select a backup file and enter the decryption password.');
+        if (!file) {
+            console.warn("⚠️ No backup file selected.");
+            setError('Please select a backup file first.');
+            setIsProcessing(false);
             return;
         }
 
-        setIsProcessing(true);
-        setError('');
+        if (!encryptionKey) {
+            console.warn("⚠️ No decryption password provided.");
+            setError('Decryption password is required to unlock this backup.');
+            setIsProcessing(false);
+            return;
+        }
+
+        if (!adminPassword) {
+            console.warn("⚠️ Admin credentials lost.");
+            setError('Admin credentials from the previous step were not found. Please go back and re-enter your administrator details.');
+            setIsProcessing(false);
+            return;
+        }
 
         const reader = new FileReader();
+
+        reader.onerror = (err) => {
+            console.error("❌ FileReader Error:", err);
+            setIsProcessing(false);
+            setError('Failed to read the backup file. It might be in use by another program.');
+        };
+
         reader.onload = async (e) => {
+            console.log("📄 Backup file loaded into memory. Length:", (e.target?.result as string).length);
             try {
                 const encryptedContent = e.target?.result as string;
-                let decryptedString = '';
+                if (!encryptedContent) throw new Error("File is empty or corrupt");
 
+                let decryptedString = '';
                 try {
                     const bytes = CryptoJS.AES.decrypt(encryptedContent, encryptionKey);
                     decryptedString = bytes.toString(CryptoJS.enc.Utf8);
 
-                    if (!decryptedString) {
+                    if (!decryptedString || decryptedString.length < 10) {
                         throw new Error("Invalid Decryption Result");
                     }
                 } catch (cryptoErr) {
-                    throw new Error("Wrong Password or Corrupt File");
+                    console.error("Decryption Error:", cryptoErr);
+                    throw new Error("Incorrect Password: Could not decrypt the file.");
                 }
 
-                const data = JSON.parse(decryptedString);
+                let data;
+                try {
+                    data = JSON.parse(decryptedString);
+                } catch (parseErr) {
+                    throw new Error("Invalid Format: Decrypted data is not a valid backup.");
+                }
 
-                // Create Admin User from Step 1
+                // Create Admin User from state (collected in Step 2)
                 const adminUser: User = {
                     username: 'admin',
                     password: adminPassword,
@@ -132,8 +248,24 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     email: data.companyProfile?.email || data.app_company_profile?.email || 'admin@bharatpay.com'
                 };
 
-                // Clear current storage before restoration
-                localStorage.clear();
+                // Backup EVERYTHING critical before clearing (Strict Preservation)
+                const currentLicense = localStorage.getItem('app_license_secure');
+                const lastCheck = localStorage.getItem('app_license_last_check');
+                const mid = localStorage.getItem('app_machine_id');
+                const size = localStorage.getItem('app_data_size');
+
+                // Surgical Clear: Remove only data keys, PROTECT system and identity keys
+                Object.keys(localStorage).forEach(key => {
+                    if (key.startsWith('app_')) {
+                        const isSystemKey = key.includes('license') ||
+                            key === 'app_machine_id' ||
+                            key === 'app_setup_complete' ||
+                            key === 'app_data_size';
+                        if (!isSystemKey) {
+                            localStorage.removeItem(key);
+                        }
+                    }
+                });
 
                 // HELPER: Get value from unified or legacy key
                 const getVal = (key: string) => data[key] || data[`app_${key}`];
@@ -171,6 +303,12 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     localStorage.setItem('app_master_sites', JSON.stringify(masters.sites));
                 }
 
+                // Ensure License and Machine identity are still correct (re-apply to be safe)
+                if (currentLicense) localStorage.setItem('app_license_secure', currentLicense);
+                if (lastCheck) localStorage.setItem('app_license_last_check', lastCheck);
+                if (mid) localStorage.setItem('app_machine_id', mid);
+                if (size) localStorage.setItem('app_data_size', size);
+
                 // Apply newly set Admin password to the restored system
                 localStorage.setItem('app_users', JSON.stringify([adminUser]));
                 localStorage.setItem('app_setup_complete', 'true');
@@ -186,13 +324,10 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     onRestore(); // Refresh app
                 }
             } catch (err: any) {
-                console.error(err);
+                console.error("Restore Execution Failed:", err);
                 setIsProcessing(false);
-                let displayError = `Restoration Failed: ${err.message}`;
-                if (err.message === "Wrong Password or Corrupt File" || err.message.includes("Malformed UTF-8") || err.message === "Invalid Decryption Result") {
-                    displayError = "Incorrect decryption password or invalid backup file.";
-                }
-                setError(displayError);
+                setError(err.message || "An unexpected error occurred during restoration.");
+                containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
             }
         };
         reader.readAsText(file);
@@ -219,7 +354,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
     const renderStepIndicator = () => (
         <div className="flex items-center justify-center gap-4 mb-4">
-            {[1, 2, 3].map((s) => (
+            {[1, 2, 3, 4].map((s) => (
                 <React.Fragment key={s}>
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all duration-300 ${step === s
                         ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30 scale-110 ring-4 ring-blue-900/10'
@@ -229,7 +364,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         }`}>
                         {step > s ? <CheckCircle2 size={20} /> : s}
                     </div>
-                    {s < 3 && <div className={`w-12 h-0.5 rounded ${step > s ? 'bg-emerald-500' : 'bg-slate-800'}`} />}
+                    {s < 4 && <div className={`w-12 h-0.5 rounded ${step > s ? 'bg-emerald-500' : 'bg-slate-800'}`} />}
                 </React.Fragment>
             ))}
         </div>
@@ -251,6 +386,15 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
             {/* Registration Card */}
             <div className="w-full max-w-6xl relative z-10 bg-[#1e293b] border border-slate-700 rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row md:h-[min(800px,90vh)]">
+                {/* Quit Application Button */}
+                <button
+                    onClick={() => (window as any).electronAPI?.closeApp()}
+                    className="absolute top-6 right-6 z-20 p-2.5 bg-slate-800/50 hover:bg-red-600/10 text-red-500 hover:text-red-400 rounded-xl border border-slate-700 hover:border-red-500/50 transition-all flex items-center gap-2 group"
+                    title="Quit Application"
+                >
+                    <Power size={18} className="group-hover:scale-110 transition-transform" />
+                    <span className="text-[10px] font-black uppercase tracking-widest px-1 hidden md:block">Quit Application</span>
+                </button>
 
                 {/* Left: Branding & Info */}
                 <div className="md:w-5/12 bg-[#0f172a] p-8 md:p-10 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 text-center relative overflow-hidden group shrink-0">
@@ -297,7 +441,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 </div>
 
                 {/* Right: Registration Content */}
-                <div className="flex-1 p-6 md:p-8 flex flex-col overflow-y-auto no-scrollbar">
+                <div ref={containerRef} className="flex-1 p-6 md:p-8 flex flex-col overflow-y-auto no-scrollbar">
                     <div className="mb-4 text-center flex flex-col items-center">
                         <h2 className="text-xl font-black text-white mb-1 uppercase tracking-tight">System Initialization</h2>
                         <p className="text-xs text-slate-400 max-w-sm">Complete the following steps to personalize your BharatPay Pro environment.</p>
@@ -312,8 +456,104 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         </div>
                     )}
 
-                    {/* Step 1: Administrator Registration */}
+                    {/* Step 1: License Activation */}
                     {step === 1 && (
+                        <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
+                            <div className="bg-blue-900/10 border border-blue-500/20 p-6 rounded-2xl">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <ShieldCheck className="text-blue-400" size={28} />
+                                    <h3 className="font-bold text-xl text-white">License Activation</h3>
+                                </div>
+                                <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+                                    Please enter your 16-digit license key and registered contact details. The application will be tied to this machine's hardware ID.
+                                </p>
+
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="md:col-span-2 space-y-2">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Full Name / Authorized Person *</label>
+                                            <div className="relative">
+                                                <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                                                <input
+                                                    ref={nameInputRef}
+                                                    type="text"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all uppercase placeholder:normal-case"
+                                                    placeholder="Enter Full Name"
+                                                    value={userName}
+                                                    onChange={e => setUserName(e.target.value.toUpperCase())}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">User ID *</label>
+                                            <div className="relative">
+                                                <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                                                    placeholder="Enter your User ID"
+                                                    value={userID}
+                                                    onChange={e => setUserID(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">License Key (Leave empty for Trial)</label>
+                                            <input
+                                                type="text"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white font-mono text-center tracking-[0.2em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                                                placeholder="XXXX-XXXX-XXXX-XXXX"
+                                                value={licenseKey}
+                                                onChange={e => setLicenseKey(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 16))}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Registered Email ID</label>
+                                            <div className="relative">
+                                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                                                <input
+                                                    type="email"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                                                    placeholder="mail@example.com"
+                                                    value={regEmail}
+                                                    onChange={e => setRegEmail(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Mobile Number</label>
+                                            <div className="relative">
+                                                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                                                <input
+                                                    type="tel"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                                                    placeholder="9876543210"
+                                                    value={regMobile}
+                                                    onChange={e => setRegMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end">
+                                <button
+                                    onClick={nextStep}
+                                    disabled={isProcessing}
+                                    className="group px-10 py-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black uppercase tracking-widest rounded-xl shadow-2xl shadow-blue-500/20 transition-all flex items-center gap-3"
+                                >
+                                    {isProcessing ? <Loader2 size={24} className="animate-spin" /> : <>Verify & Activate <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" /></>}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Step 2: Administrator Registration */}
+                    {step === 2 && (
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                             <div className="bg-blue-900/5 border border-blue-500/10 p-4 rounded-xl">
                                 <div className="flex items-center gap-3 mb-2">
@@ -351,7 +591,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                         </div>
                                         <div className="px-1 py-1">
                                             <p className="text-[9px] text-[#FF9933] font-medium tracking-tight">
-                                                Requirement: Min 9 characters, 1 Uppercase, 1 Number, 1 Special character.
+                                                Requirement: Min 9 characters, 1 Uppercase, 1 Lowercase, 1 Number, 1 Special character.
                                             </p>
                                         </div>
                                     </div>
@@ -371,7 +611,13 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                 </div>
                             </div>
 
-                            <div className="flex justify-end">
+                            <div className="flex justify-between">
+                                <button
+                                    onClick={prevStep}
+                                    className="px-8 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all flex items-center gap-2"
+                                >
+                                    <ArrowLeft size={20} /> Back
+                                </button>
                                 <button
                                     onClick={nextStep}
                                     className="group px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xl shadow-blue-500/20 transition-all flex items-center gap-2"
@@ -382,8 +628,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         </div>
                     )}
 
-                    {/* Step 2: Choice (Restore vs Manual) */}
-                    {step === 2 && (
+                    {/* Step 3: Choice (Restore vs Manual) */}
+                    {step === 3 && (
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                             {!showRestoreFields ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -427,6 +673,12 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 accept=".enc"
                                                 title="Select Backup File"
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-400 file:bg-blue-600 file:border-none file:text-white file:px-4 file:py-1.5 file:rounded-lg file:mr-4 file:font-bold hover:file:bg-blue-700"
+                                                onChange={(e) => {
+                                                    if (e.target.files && e.target.files.length > 0) {
+                                                        // Auto-focus the password field after selecting a file
+                                                        setTimeout(() => decryptPasswordRef.current?.focus(), 100);
+                                                    }
+                                                }}
                                             />
                                         </div>
 
@@ -435,6 +687,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                             <div className="relative">
                                                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                                 <input
+                                                    ref={decryptPasswordRef}
                                                     type="password"
                                                     value={encryptionKey}
                                                     onChange={e => setEncryptionKey(e.target.value)}
@@ -474,8 +727,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         </div>
                     )}
 
-                    {/* Step 3: Company Profile */}
-                    {step === 3 && (
+                    {/* Step 4: Company Profile */}
+                    {step === 4 && (
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                             <div className="bg-[#1e293b]/50 border border-slate-800 p-4 rounded-2xl space-y-4">
                                 <div className="flex items-center gap-3 mb-1">
@@ -566,8 +819,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         </div>
                     )}
 
-                    {/* Step 4: Statutory (New step index because of choice) */}
-                    {step === 4 && (
+                    {/* Step 5: Statutory */}
+                    {step === 5 && (
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="bg-emerald-900/5 border border-emerald-500/10 p-4 rounded-xl space-y-3">

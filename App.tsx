@@ -24,7 +24,11 @@ import {
   Youtube,
   Maximize,
   Minimize,
-  MessageSquare
+  MessageSquare,
+  ArrowRight,
+  Lock,
+  Power,
+  RefreshCw
 } from 'lucide-react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
@@ -38,6 +42,7 @@ import AIAssistant from './components/AIAssistant';
 import PFCalculator from './components/PFCalculator';
 import Registration from './components/Registration';
 import CustomModal, { ModalType } from './components/Shared/CustomModal';
+import { validateLicenseStartup, getStoredLicense, fetchLatestMessages } from './services/licenseService';
 
 import {
   User,
@@ -63,10 +68,10 @@ import {
 
 const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-const NavigationItem = ({ view, icon: Icon, label, activeView, setActiveView, isSidebarOpen, depth = 0 }: { view: View, icon: any, label: string, activeView: View, setActiveView: (v: View) => void, isSidebarOpen: boolean, depth?: number }) => (
+const NavigationItem = ({ view, icon: Icon, label, activeView, setActiveView, isSidebarOpen, depth = 0, disabled = false }: { view: View, icon: any, label: string, activeView: View, setActiveView: (v: View) => void, isSidebarOpen: boolean, depth?: number, disabled?: boolean }) => (
   <button
-    onClick={() => setActiveView(view)}
-    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${activeView === view
+    onClick={() => !disabled && setActiveView(view)}
+    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${disabled ? 'opacity-40 cursor-not-allowed grayscale' : ''} ${activeView === view
       ? 'bg-blue-500 text-white shadow-lg'
       : 'text-slate-300 hover:bg-blue-900/50 hover:text-white'
       } ${depth > 0 ? 'ml-2 border-l border-slate-700 pl-4 w-[95%]' : ''}`}
@@ -163,11 +168,54 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const [activeView, setActiveView] = useState<View>(View.Dashboard);
   const [isResetting, setIsResetting] = useState(false);
+  const [skipSetupRedirect, setSkipSetupRedirect] = useState(false);
   const mainContentRef = useRef<HTMLElement>(null);
-  const [settingsTab, setSettingsTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER'>('STATUTORY');
+  const [settingsTab, setSettingsTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE'>('STATUTORY');
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showLoginMessage, setShowLoginMessage] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [licenseStatus, setLicenseStatus] = useState<{ checked: boolean; valid: boolean; message: string }>({ checked: false, valid: false, message: '' });
+  const [showRegistrationManual, setShowRegistrationManual] = useState(false);
+  const [dataSizeLimit, setDataSizeLimit] = useState<number>(() => {
+    const license = getStoredLicense();
+    return license?.dataSize || 50;
+  });
+
+  // --- LICENSE ENFORCEMENT ---
+  const verifyLicense = async () => {
+    const result = await validateLicenseStartup();
+    if (!result.valid) {
+      setLicenseStatus({ checked: true, valid: false, message: result.message || 'License Verification Failed' });
+    } else {
+      const license = getStoredLicense();
+      if (license?.dataSize) {
+        setDataSizeLimit(license.dataSize);
+      }
+      setLicenseStatus({ checked: true, valid: true, message: '' });
+
+      // Initial fetch of messages if license is valid
+      checkNewMessages();
+    }
+  };
+
+  useEffect(() => {
+    verifyLicense();
+
+    // Setup periodic message check (every 1 hour)
+    const interval = setInterval(checkNewMessages, 3600000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const checkNewMessages = async () => {
+    const updates = await fetchLatestMessages();
+    if (updates) {
+      setCompanyProfile(prev => ({
+        ...prev,
+        flashNews: updates.scrollNews,
+        postLoginMessage: updates.statutory
+      }));
+    }
+  };
 
   const [alertConfig, setAlertConfig] = useState<{
     isOpen: boolean;
@@ -386,12 +434,12 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   }, [activeView, currentUser]);
 
   useEffect(() => {
-    // Only force Settings view if we have no employees and NOT already in Settings
-    if (employees.length === 0 && activeView !== View.Settings) {
+    // Only force Settings view if we have no employees and NOT already in Settings and not skipped
+    if (employees.length === 0 && activeView !== View.Settings && !skipSetupRedirect) {
       setActiveView(View.Settings);
-      setSettingsTab('COMPANY');
+      setSettingsTab('DATA');
     }
-  }, [employees.length, activeView, isSetupComplete]);
+  }, [employees.length, activeView, isSetupComplete, skipSetupRedirect]);
 
   useEffect(() => {
     const handleFullScreenChange = () => setIsFullScreen(!!document.fullscreenElement);
@@ -409,6 +457,10 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const handleUpdateLogo = (url: string) => { setLogoUrl(url); safeSave('app_logo', url); };
 
   const handleAddEmployee = (newEmp: Employee) => {
+    if (employees.length >= dataSizeLimit) {
+      showAlert('warning', 'Employee Limit Reached', `Your current license/trial is limited to ${dataSizeLimit} employees. Please upgrade your license to add more.`);
+      return;
+    }
     setEmployees(prev => [...prev, newEmp]);
     setAttendances(prev => [...prev, { employeeId: newEmp.id, month: globalMonth, year: globalYear, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 }]);
     setLeaveLedgers(prev => [...prev, { employeeId: newEmp.id, el: { opening: 0, eligible: 1.5, encashed: 0, availed: 0, balance: 1.5 }, sl: { eligible: 1, availed: 0, balance: 1 }, cl: { availed: 0, accumulation: 0, balance: 0 } }]);
@@ -416,12 +468,25 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   };
 
   const handleBulkAddEmployees = (newEmps: Employee[]) => {
+    const currentCount = employees.length;
+    const remainingSpace = dataSizeLimit - currentCount;
+
+    if (remainingSpace <= 0) {
+      showAlert('warning', 'Employee Limit reached', "Cannot import more employees. Limit reached.");
+      return;
+    }
+
+    const availableEmps = newEmps.slice(0, remainingSpace);
+    if (availableEmps.length < newEmps.length) {
+      showAlert('info', 'Partial Import', `Only ${availableEmps.length} out of ${newEmps.length} employees imported due to license limits.`);
+    }
+
     const currentIds = new Set(employees.map(e => e.id));
-    const trulyNewEmps = newEmps.filter(e => !currentIds.has(e.id));
+    const trulyNewEmps = availableEmps.filter(e => !currentIds.has(e.id));
     setEmployees(curr => {
       const empMap = new Map<string, Employee>();
       curr.forEach(e => empMap.set(e.id, e));
-      newEmps.forEach(newEmp => {
+      availableEmps.forEach(newEmp => {
         const existing = empMap.get(newEmp.id);
         if (existing) {
           empMap.set(newEmp.id, { ...newEmp, photoUrl: existing.photoUrl, serviceRecords: [...existing.serviceRecords, ...newEmp.serviceRecords] });
@@ -464,6 +529,10 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     localStorage.setItem('app_users', JSON.stringify(savedUsers));
     localStorage.setItem('app_setup_complete', 'true');
     setIsSetupComplete(true);
+    setShowRegistrationManual(false);
+
+    // Re-verify the license which should now be valid after registration
+    verifyLicense();
 
     showAlert('success', 'Setup Complete', `BharatPay Pro is now ready for ${data.companyProfile.establishmentName}. Please sign in with your admin password.`);
   };
@@ -534,6 +603,14 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     setGlobalYear(nextYear);
   };
 
+  const handleViewChange = (view: View) => {
+    if (employees.length === 0 && !skipSetupRedirect && view !== View.Settings) {
+      showAlert('info', 'Action Required', 'Company Profile & Statutory Compliance pre-exist. Please choose "START AFRESH" or "RESTORE BACKUP" in the Configuration section before accessing other functions.');
+      return;
+    }
+    setActiveView(view);
+  };
+
   const handleNuclearReset = () => {
     setIsResetting(true);
     localStorage.clear();
@@ -562,6 +639,8 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const effectiveUser = (currentUser || { id: 'setup', name: 'Initial Setup', role: 'Administrator', username: 'setup', password: '', email: '' }) as User;
   const isSettingsAccessible = effectiveUser.role === 'Developer' || effectiveUser.role === 'Administrator';
 
+  const isNavLocked = employees.length === 0 && !skipSetupRedirect;
+
   // --- RENDER ---
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-[#020617] text-white">
@@ -578,7 +657,117 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
       />
 
-      {(!isSetupComplete && employees.length === 0) ? (
+      {/* --- STARTUP LICENSE LOCK --- */}
+      {!licenseStatus.valid && licenseStatus.checked && !showRegistrationManual && (
+        <div className="fixed inset-0 z-[500] bg-[#020617] flex items-center justify-center p-2 md:p-4 overflow-hidden">
+          <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+            <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[100px]"></div>
+            <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-red-900/10 rounded-full blur-[100px]"></div>
+          </div>
+
+          <div className="w-full max-w-6xl relative z-10 bg-[#1e293b] border border-slate-700 rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row md:h-[min(800px,90vh)]">
+            <div className="md:w-5/12 bg-[#0f172a] p-8 md:p-10 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 text-center relative overflow-hidden group shrink-0">
+              <div className="absolute inset-0 bg-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+              <div className="relative z-10 flex flex-col items-center gap-8">
+                <div className="relative">
+                  <div className="absolute -inset-4 bg-gradient-to-tr from-blue-600 to-emerald-600 rounded-full blur-xl opacity-20 group-hover:opacity-40 transition-opacity duration-700"></div>
+                  <div className="relative flex items-center justify-center w-32 h-32 rounded-full bg-white shadow-2xl p-[6px] overflow-hidden border-4 border-[#1e293b] transform group-hover:scale-105 transition-transform duration-500">
+                    <img src={BRAND_CONFIG.logoUrl} alt={BRAND_CONFIG.companyName} className="w-full h-full object-cover rounded-full" />
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="inline-flex items-center gap-3 px-4 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full mb-2">
+                      <IndianRupee size={16} className="text-[#FF9933]" />
+                      <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">Enterprise Payroll Solutions</span>
+                    </div>
+                    <h1 className="text-4xl font-black tracking-tighter leading-none">
+                      <span className="text-[#FF9933] drop-shadow-sm">Bharat</span>
+                      <span className="text-white drop-shadow-md">Pay</span>
+                      <span className="text-[#4ADE80]">{BRAND_CONFIG.appNameSuffix}</span>
+                    </h1>
+                  </div>
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.3em]">{BRAND_CONFIG.tagline}</p>
+                </div>
+                <div className="pt-8 flex flex-col items-center gap-2">
+                  <span className="text-[10px] text-slate-500 font-bold tracking-widest uppercase opacity-60">Architected & Engineered by</span>
+                  <div className="flex items-center gap-3 px-5 py-2.5 bg-slate-900/50 border border-slate-800 rounded-2xl">
+                    <span className="text-sm font-black text-[#FF9933] tracking-wide">{BRAND_CONFIG.companyName}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 p-10 md:p-16 flex flex-col justify-center items-center text-center bg-[#1e293b] relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 rounded-full blur-[80px] -mr-32 -mt-32"></div>
+              <div className="relative z-10 w-full max-w-sm space-y-8">
+                {!getStoredLicense() ? (
+                  <>
+                    <div className="space-y-4">
+                      <div className="w-20 h-20 bg-amber-500/10 rounded-3xl flex items-center justify-center text-amber-500 border border-amber-500/20 mx-auto transform rotate-3">
+                        <ShieldCheck size={40} strokeWidth={1.5} />
+                      </div>
+                      <h2 className="text-3xl font-black text-white tracking-tight uppercase">System Initialization</h2>
+                      <p className="text-slate-400 text-sm leading-relaxed">No trial or active license found. Please register to begin.</p>
+                    </div>
+                    <div className="space-y-4 pt-4">
+                      <button onClick={() => setShowRegistrationManual(true)} className="w-full py-4 bg-gradient-to-r from-[#FF9933] to-[#e68a2e] text-white font-black rounded-xl shadow-xl shadow-amber-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] uppercase tracking-[0.2em] text-sm flex items-center justify-center gap-3">
+                        First Time Registration <ArrowRight size={20} />
+                      </button>
+                      <button onClick={() => (window as any).electronAPI?.closeApp()} className="w-full py-3 bg-slate-800/50 hover:bg-red-600/10 text-red-500 font-bold rounded-xl border border-slate-700 hover:border-red-500/30 transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2">
+                        <Power size={14} /> Quit Application
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-4">
+                      <div className="w-20 h-20 bg-red-500/10 rounded-3xl flex items-center justify-center text-red-500 border border-red-500/20 mx-auto animate-pulse">
+                        <Lock size={40} strokeWidth={1.5} />
+                      </div>
+                      <h2 className="text-3xl font-black text-white tracking-tight uppercase">System Locked</h2>
+                      <p className="text-slate-400 text-sm leading-relaxed">{licenseStatus.message}</p>
+                      <div className="mt-4 p-3 bg-slate-950/50 border border-slate-800 rounded-lg">
+                        <p className="text-[9px] text-slate-500 font-mono uppercase tracking-widest break-all">HWID: {getStoredLicense()?.machineId || 'UNAUTHORIZED'}</p>
+                      </div>
+                    </div>
+                    <div className="pt-6 space-y-4">
+                      <button onClick={() => (window as any).electronAPI?.closeApp()} className="w-full py-4 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl shadow-xl shadow-red-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] uppercase tracking-[0.2em] text-sm flex items-center justify-center gap-2">
+                        <Power size={18} /> Quit Application
+                      </button>
+                      <button onClick={() => {
+                        if (window.confirm("ARE YOU SURE?\n\nThis will clear the current license and reset system identity. You will need to re-register.\n\nYour Data will NOT be touched.")) {
+                          localStorage.removeItem('app_license_secure');
+                          localStorage.removeItem('app_license');
+                          localStorage.removeItem('app_machine_id');
+                          window.location.reload();
+                        }
+                      }} className="w-full py-3 bg-slate-800/50 hover:bg-amber-600/10 text-amber-500 font-bold rounded-xl border border-slate-700 hover:border-amber-500/30 transition-all uppercase tracking-widest text-[10px] flex items-center justify-center gap-2">
+                        <RefreshCw size={14} /> Reset License & Identity
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MAIN FLOW --- */}
+      {!licenseStatus.checked ? (
+        <div className="fixed inset-0 bg-[#020617] flex items-center justify-center z-[1000]">
+          <div className="flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-700">
+            <div className="relative w-24 h-24 bg-white rounded-full p-2.5 shadow-2xl border-2 border-blue-500/30">
+              <img src={BRAND_CONFIG.logoUrl} alt="Logo" className="w-full h-full object-contain" />
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce"></div>
+              <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Security Verification</span>
+            </div>
+          </div>
+        </div>
+      ) : (showRegistrationManual || (!isSetupComplete && employees.length === 0)) ? (
         <Registration onComplete={handleRegistrationComplete} onRestore={() => window.location.reload()} showAlert={showAlert} />
       ) : !currentUser ? (
         <Login onLogin={handleLogin} currentLogo={logoUrl} setLogo={handleUpdateLogo} />
@@ -586,19 +775,19 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         <>
           {showLoginMessage && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-              <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-blue-500/50 shadow-2xl p-0 flex flex-col gap-0 relative overflow-hidden">
+              <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-blue-500/50 shadow-2xl overflow-hidden relative">
                 <div className="bg-blue-900/30 p-4 border-b border-blue-500/30 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <MessageSquare className="text-blue-400" size={20} />
                     <h3 className="font-bold text-white">System Notice</h3>
                   </div>
-                  <button onClick={() => setShowLoginMessage(false)} className="text-slate-400 hover:text-white transition-colors"><X size={20} /></button>
+                  <button onClick={() => setShowLoginMessage(false)} className="text-slate-400 hover:text-white"><X size={20} /></button>
                 </div>
                 <div className="p-6 bg-[#0f172a]/50">
-                  <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap font-medium">{companyProfile.postLoginMessage}</div>
+                  <div className="text-sm text-slate-300 whitespace-pre-wrap">{companyProfile.postLoginMessage}</div>
                 </div>
                 <div className="p-4 bg-[#1e293b] border-t border-slate-800 flex justify-end">
-                  <button onClick={() => setShowLoginMessage(false)} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg transition-colors text-sm">OK, I Understand</button>
+                  <button onClick={() => setShowLoginMessage(false)} className="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg text-sm">OK, I Understand</button>
                 </div>
               </div>
             </div>
@@ -606,50 +795,28 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
           <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} transition-all duration-300 bg-[#0f172a] border-r border-slate-800 flex flex-col`}>
             <div className="p-6 flex items-center gap-3 border-b border-slate-800">
-              <div className="bg-[#4169E1] p-2 rounded-lg text-white shrink-0 shadow-lg shadow-blue-500/20"><IndianRupee size={24} className="text-[#FF9933]" /></div>
-              {isSidebarOpen && (
-                <div className="flex flex-col">
-                  <span className="text-2xl font-black tracking-tight leading-none"><span className="text-[#FF9933]">Bharat</span><span className="text-white">Pay</span><span className="text-[#4ADE80] ml-0.5">Pro</span></span>
-                  <span className="text-[10px] font-bold text-white mt-1.5 tracking-wider uppercase opacity-80">Powered by ILCbala</span>
-                </div>
-              )}
+              <div className="bg-[#4169E1] p-2 rounded-lg text-white"><IndianRupee size={24} className="text-[#FF9933]" /></div>
+              {isSidebarOpen && <span className="text-2xl font-black"><span className="text-[#FF9933]">Bharat</span>Pay<span className="text-[#4ADE80]">Pro</span></span>}
             </div>
-
-            <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
-              <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />
-              <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />
+            <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
+              <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} setActiveView={handleViewChange} isSidebarOpen={isSidebarOpen} disabled={isNavLocked && activeView !== View.Dashboard} />
+              <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} setActiveView={handleViewChange} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
               <SidebarHeader title="Pay Process" isSidebarOpen={isSidebarOpen} />
-              <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />
+              <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} setActiveView={handleViewChange} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
               <SidebarHeader title="Analytics" isSidebarOpen={isSidebarOpen} />
-              <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />
-              <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />
-              <NavigationItem view={View.PFCalculator} icon={Calculator} label="PF ECR Calculator" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />
+              <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} setActiveView={handleViewChange} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+              <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} setActiveView={handleViewChange} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+              <NavigationItem view={View.PFCalculator} icon={Calculator} label="PF ECR Calculator" activeView={activeView} setActiveView={handleViewChange} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
               <SidebarHeader title="System" isSidebarOpen={isSidebarOpen} />
-              <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />
-              <NavigationItem view={View.AI_Assistant} icon={Bot} label="Compliance AI" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />
-              {isSettingsAccessible && (
-                <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />
-              )}
+              <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" activeView={activeView} setActiveView={handleViewChange} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+              <NavigationItem view={View.AI_Assistant} icon={Bot} label="Compliance AI" activeView={activeView} setActiveView={handleViewChange} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+              {isSettingsAccessible && <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} setActiveView={handleViewChange} isSidebarOpen={isSidebarOpen} />}
             </nav>
-
             <div className="p-4 border-t border-slate-800 bg-[#0b1120]">
-              {isSidebarOpen ? (
-                <div className="flex items-center gap-3 mb-4 px-2">
-                  <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-300 border border-slate-600 shrink-0"><UserCircle size={24} /></div>
-                  <div className="overflow-hidden">
-                    <p className="text-sm font-bold text-white truncate">{effectiveUser.name}</p>
-                    <p className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">{effectiveUser.role}</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex justify-center mb-4"><UserCircle size={24} className="text-slate-400" /></div>
-              )}
-              <button onClick={handleLogout} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-red-400 hover:bg-red-900/20 hover:text-red-300 transition-colors`}>
-                <LogOut size={18} />
-                {isSidebarOpen && <span className="font-bold text-sm">Sign Out</span>}
+              <button onClick={handleLogout} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-red-400 hover:bg-red-900/20 transition-colors`}>
+                <LogOut size={18} /> {isSidebarOpen && <span className="font-bold text-sm">Sign Out</span>}
               </button>
             </div>
-
             <div className="p-2 border-t border-slate-800">
               <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="w-full flex justify-center p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
                 {isSidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
@@ -657,57 +824,47 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             </div>
           </aside>
 
-          <main ref={mainContentRef} className="flex-1 overflow-y-auto">
+          <main ref={mainContentRef} className="flex-1 overflow-y-auto bg-slate-950">
             <header className="bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 h-20 flex items-center justify-between px-8 sticky top-0 z-10 gap-6">
               <div className="shrink-0 max-w-[30%]">
                 <h2 className="text-xl font-black text-white tracking-wide flex items-center gap-2 truncate">
                   <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center overflow-hidden shrink-0 border border-slate-600">
-                    <img src={logoUrl} alt="Establishment Logo" className="w-full h-full object-cover" />
+                    <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
                   </div>
                   <span className="truncate">{companyProfile.establishmentName || BRAND_CONFIG.companyName}</span>
                 </h2>
-                <p className="text-[10px] text-slate-400 font-bold pl-11 flex items-center gap-1.5 mt-1 truncate"><MapPin size={10} className="text-slate-500 shrink-0" />{companyProfile.city ? `${companyProfile.city}, ${companyProfile.state}` : 'Corporate HQ • Industrial Estate, Chennai, TN'}</p>
               </div>
               <div className="flex-1 flex flex-col justify-center overflow-hidden h-full max-w-[45%] gap-1">
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/50 border border-slate-800 rounded-lg w-full relative overflow-hidden group">
-                  <div className="shrink-0 p-1.5 bg-amber-900/30 rounded text-amber-400 z-10 border border-amber-900/30"><Megaphone size={14} className="animate-pulse" /></div>
+                  <div className="shrink-0 p-1.5 bg-amber-900/30 rounded text-amber-400 border border-amber-900/30"><Megaphone size={14} className="animate-pulse" /></div>
                   <div className="overflow-hidden relative w-full h-5 flex items-center">
-                    <div className="animate-marquee whitespace-nowrap text-xs font-bold text-amber-100 uppercase tracking-widest absolute">{companyProfile.flashNews || 'Welcome to BharatPay Pro! Stay compliant with latest labour laws.'}</div>
+                    <div className="animate-marquee whitespace-nowrap text-xs font-bold text-amber-100 uppercase tracking-widest absolute">{companyProfile.flashNews || 'Welcome to BharatPay Pro!'}</div>
                   </div>
-                  <div className="absolute left-10 top-0 bottom-0 w-4 bg-gradient-to-r from-slate-900/90 to-transparent z-10 pointer-events-none"></div>
-                  <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-l from-slate-900/90 to-transparent z-10 pointer-events-none"></div>
                 </div>
-                <a href="https://www.youtube.com/@ILCbala" target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 text-[10px] font-bold text-slate-400 hover:text-red-400 transition-colors"><Youtube size={12} className="text-red-500" />Labour Laws and Hon'ble Court judgments -Decoded</a>
               </div>
               <div className="flex items-center gap-4 shrink-0">
-                <button onClick={toggleFullScreen} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-full border border-slate-700 transition-all hover:scale-105 shadow-lg" title={isFullScreen ? "Exit Full Screen" : "Enter Full Screen"}>{isFullScreen ? <Minimize size={18} /> : <Maximize size={18} />}</button>
+                <button onClick={toggleFullScreen} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-full border border-slate-700 transition-all hover:scale-105 shadow-lg">{isFullScreen ? <Minimize size={18} /> : <Maximize size={18} />}</button>
                 <div className="relative group overflow-hidden rounded-full p-[1px]">
                   <span className="absolute inset-[-1000%] animate-[spin_3s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#059669_0%,#3b82f6_50%,#059669_100%)]" />
                   <div className="inline-flex h-full w-full items-center justify-center rounded-full bg-[#0f172a] px-5 py-2 backdrop-blur-3xl">
                     <div className="flex items-center gap-2.5">
-                      <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 duration-1000"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>
-                      <span className="text-xs font-black tracking-[0.15em] text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-sky-400 to-emerald-400 animate-pulse whitespace-nowrap">{getFinancialYearLabel()}</span>
+                      <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>
+                      <span className="text-xs font-black tracking-[0.15em] text-emerald-400 animate-pulse">{getFinancialYearLabel()}</span>
                     </div>
                   </div>
                 </div>
               </div>
             </header>
             <div className="p-8 max-w-7xl mx-auto">
-              {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={handleDashboardNavigation} />}
-              {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} />}
+              {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={handleViewChange} />}
               {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} />}
               {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} showAlert={showAlert} />}
               {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={handleRollover} arrearHistory={arrearHistory} showAlert={showAlert} />}
-              {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} onNuclearReset={() => {
-                showAlert('danger', 'Factory Reset', '🚨 CRITICAL WARNING: This will DELETE ALL DATA and cannot be undone. Are you absolutely sure?', () => {
-                  handleNuclearReset();
-                });
-              }} showAlert={showAlert} />}
+              {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} />}
+              {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
               {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} />}
-              {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={onRefresh} initialTab={settingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onNuclearReset={() => {
-                showAlert('danger', 'Factory Reset', '🚨 CRITICAL WARNING: This will DELETE ALL DATA and cannot be undone. Are you absolutely sure?', () => {
-                  handleNuclearReset();
-                });
+              {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={onRefresh} initialTab={settingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); setActiveView(View.Dashboard); }} onNuclearReset={() => {
+                showAlert('danger', 'Factory Reset', '🚨 CRITICAL WARNING: This will DELETE ALL DATA and cannot be undone.', () => { handleNuclearReset(); });
               }} showAlert={showAlert} />}
               {activeView === View.AI_Assistant && <AIAssistant />}
             </div>

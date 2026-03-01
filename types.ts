@@ -368,10 +368,18 @@ export enum View {
 
 export interface LicenseData {
   key: string;
-  status: 'Active' | 'Inactive' | 'Expired';
-  registeredTo: string;
-  expiryDate: string;
+  status: 'Active' | 'Inactive' | 'Expired' | 'Trial' | 'REGISTERED' | 'ACTIVE';
+  userName: string;
+  userID: string;
+  registeredTo: string; // Mail ID
+  registeredMobile?: string;
   machineId: string;
+  password?: string;
+  dataSize: number;
+  startDate: string;
+  expiryDate: string;
+  isTrial: boolean;
+  checksum?: string; // For integrity check
 }
 
 export interface AppVersion {

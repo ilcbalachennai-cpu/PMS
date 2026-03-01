@@ -1,9 +1,11 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
-import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
+import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
+import { fetchLatestMessages, activateFullLicense, getStoredLicense, isValidKeyFormat } from '../services/licenseService';
+import { LicenseData } from '../types';
 
 interface SettingsProps {
     config: StatutoryConfig;
@@ -16,15 +18,16 @@ interface SettingsProps {
     setLeavePolicy: (policy: LeavePolicy) => void;
     onRestore: () => void;
     onNuclearReset: () => void;
-    initialTab?: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER';
+    initialTab?: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE';
     userRole?: string;
     currentUser?: User;
     isSetupMode?: boolean;
+    onSkipSetupRedirect?: () => void;
     showAlert?: (type: any, title: string, message: string, onConfirm?: () => void) => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, showAlert }) => {
-    const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER'>(isSetupMode ? 'DATA' : initialTab);
+const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, showAlert }) => {
+    const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE'>(isSetupMode ? 'DATA' : initialTab);
 
     // SCHEMA MIGRATION: Merge current config with defaults to prevent crashes on new features
     const [formData, setFormData] = useState<StatutoryConfig>(() => {
@@ -65,6 +68,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     }, [initialTab, isSetupMode]);
 
     const [showResetModal, setShowResetModal] = useState(false);
+    const [showPayrollResetModal, setShowPayrollResetModal] = useState(false);
     const [resetPassword, setResetPassword] = useState('');
     const [resetError, setResetError] = useState('');
 
@@ -73,6 +77,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT'>('EXPORT');
     const backupFileRef = useRef<HTMLInputElement>(null);
 
+    const [selectedBackupFile, setSelectedBackupFile] = useState<File | null>(null);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [authPassword, setAuthPassword] = useState('');
     const [authError, setAuthError] = useState('');
@@ -81,8 +86,37 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
 
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [isActivating, setIsActivating] = useState(false);
     const [processProgress, setProcessProgress] = useState(0);
     const [processStatus, setProcessStatus] = useState('');
+
+    // License Management State
+    const [licenseInfo, setLicenseInfo] = useState<LicenseData | null>(() => getStoredLicense());
+    const [newLicenseKey, setNewLicenseKey] = useState('');
+    const [newUserName, setNewUserName] = useState(licenseInfo?.userName || '');
+    const [newRegEmail, setNewRegEmail] = useState('');
+    const [newRegMobile, setNewRegMobile] = useState('');
+    const [newUserID, setNewUserID] = useState(licenseInfo?.userID || '');
+    const [currentMachineId, setCurrentMachineId] = useState('');
+    const fullNameRef = useRef<HTMLInputElement>(null);
+
+    // License Form Synchronization
+    useEffect(() => {
+        if (licenseInfo) {
+            setNewRegEmail(licenseInfo.registeredTo || '');
+            setNewRegMobile(licenseInfo.registeredMobile || '');
+            setNewUserName(licenseInfo.userName || '');
+            setNewUserID(licenseInfo.userID || '');
+        }
+    }, [licenseInfo]);
+
+    // License Activation Focus
+    useEffect(() => {
+        if (activeTab === 'LICENSE') {
+            setTimeout(() => fullNameRef.current?.focus(), 400);
+        }
+    }, [activeTab]);
 
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -194,7 +228,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     };
 
     const executeImport = () => {
-        const file = backupFileRef.current?.files?.[0];
+        const file = selectedBackupFile;
         if (!file || !encryptionKey) {
             showAlert?.('warning', 'Missing Information', 'Please select a file and enter the decryption password.');
             return;
@@ -233,15 +267,30 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 setProcessProgress(80);
                 await delay(400);
 
-                const currentSession = localStorage.getItem('app_session_user');
-                const currentLicense = localStorage.getItem('app_license');
-                const currentSetup = localStorage.getItem('app_setup_complete');
+                // Preserve critical system keys
+                const session = localStorage.getItem('app_session_user');
+                const licenseSecure = localStorage.getItem('app_license_secure');
+                const mid = localStorage.getItem('app_machine_id');
+                const lastCheck = localStorage.getItem('app_license_last_check');
+                const size = localStorage.getItem('app_data_size');
+                const setup = localStorage.getItem('app_setup_complete');
 
-                localStorage.clear();
+                // Surgical Clear: Remove data keys but KEEP identity
+                const dataKeys = [
+                    'app_employees', 'app_config', 'app_company_profile', 'app_attendance',
+                    'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
+                    'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo', 'app_users'
+                ];
+                dataKeys.forEach(k => localStorage.removeItem(k));
+                localStorage.removeItem('app_license'); // Cleanup legacy key if any
 
-                if (currentSession) localStorage.setItem('app_session_user', currentSession);
-                if (currentLicense) localStorage.setItem('app_license', currentLicense);
-                localStorage.setItem('app_setup_complete', currentSetup || 'true');
+                // Re-apply preserved keys just in case
+                if (session) localStorage.setItem('app_session_user', session);
+                if (licenseSecure) localStorage.setItem('app_license_secure', licenseSecure);
+                if (mid) localStorage.setItem('app_machine_id', mid);
+                if (lastCheck) localStorage.setItem('app_license_last_check', lastCheck);
+                if (size) localStorage.setItem('app_data_size', size);
+                localStorage.setItem('app_setup_complete', setup || 'true');
 
                 // HELPER: Get value from unified or legacy key
                 const getVal = (key: string) => data[key] || data[`app_${key}`];
@@ -286,6 +335,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
                 setIsProcessing(false);
                 setShowBackupModal(false);
+                setSelectedBackupFile(null);
+                setEncryptionKey('');
 
                 setTimeout(() => {
                     showAlert?.('success', 'System Restored', 'The data has been restored successfully. Click OK to refresh the application.', () => {
@@ -307,7 +358,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     };
 
     const initiateRestore = () => {
-        const file = backupFileRef.current?.files?.[0];
+        const file = selectedBackupFile;
         if (!file || !encryptionKey) {
             showAlert?.('warning', 'Input Required', 'Please select a backup file and enter the decryption password.');
             return;
@@ -421,31 +472,62 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         }
     };
 
+    const executePayrollReset = () => {
+        if (resetPassword === currentUser?.password || (isSetupMode && resetPassword === 'setup')) {
+            localStorage.removeItem('app_employees');
+            localStorage.removeItem('app_attendance');
+            localStorage.removeItem('app_leave_ledgers');
+            localStorage.removeItem('app_advance_ledgers');
+            localStorage.removeItem('app_payroll_history');
+            localStorage.removeItem('app_fines');
+            localStorage.removeItem('app_arrear_history');
+            // We keep company profile, config, and license
+            setShowPayrollResetModal(false);
+            showAlert?.('success', 'Payroll Reset Complete', 'All employee and payroll data has been cleared. The application will now reload.', () => {
+                onRestore();
+            });
+        } else {
+            setResetError("Incorrect Login Password. Access Denied.");
+        }
+    };
+
     return (
         <div className="max-w-4xl space-y-8 text-white relative">
-            {/* ... (rest of the render method remains identical to existing, omitting for brevity as it is unchanged) */}
-            {!isSetupMode && (
-                <div className="sticky top-20 z-30 bg-[#020617] pt-2 flex gap-4 border-b border-slate-700 overflow-x-auto pb-1 scrollbar-hide">
-                    <button onClick={() => setActiveTab('STATUTORY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                        <ShieldCheck size={16} /> Statutory Rules
+            <input
+                type="file"
+                ref={backupFileRef}
+                className="hidden"
+                accept=".enc"
+                onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                        setSelectedBackupFile(file);
+                        setBackupMode('IMPORT');
+                        setShowBackupModal(true);
+                    }
+                }}
+            />
+            <div className="sticky top-20 z-30 bg-[#020617] pt-2 flex gap-4 border-b border-slate-700 overflow-x-auto pb-1 scrollbar-hide">
+                <button onClick={() => setActiveTab('STATUTORY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <ShieldCheck size={16} /> Statutory Rules
+                </button>
+                <button onClick={() => setActiveTab('COMPANY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'COMPANY' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <Building2 size={16} /> Company Profile
+                </button>
+                <button onClick={() => setActiveTab('DATA')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DATA' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <Database size={16} /> Data Management
+                </button>
+                {userRole === 'Developer' && (
+                    <button onClick={() => setActiveTab('DEVELOPER')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DEVELOPER' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                        <Megaphone size={16} /> Developer Message Board
                     </button>
-                    <button onClick={() => setActiveTab('COMPANY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'COMPANY' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                        <Building2 size={16} /> Company Profile
-                    </button>
-                    <button onClick={() => setActiveTab('DATA')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DATA' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                        <Database size={16} /> Data Management
-                    </button>
-                    {userRole === 'Developer' && (
-                        <button onClick={() => setActiveTab('DEVELOPER')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DEVELOPER' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                            <Lock size={16} /> Developer Options
-                        </button>
-                    )}
-                </div>
-            )}
+                )}
+                <button onClick={() => setActiveTab('LICENSE')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'LICENSE' ? 'border-pink-500 text-pink-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <ShieldCheck size={16} /> License Management
+                </button>
+            </div>
 
-            {/* ... (Existing Content for STATUTORY, COMPANY, DEVELOPER tabs) ... */}
             {activeTab === 'STATUTORY' && (
-                // ... same content ...
                 <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-300">
                     {/* ... Content of Statutory ... */}
                     <div className="bg-amber-900/20 border border-amber-700/50 p-6 rounded-2xl flex gap-4 text-amber-200">
@@ -689,7 +771,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 </div>
             )}
 
-            {/* ... (COMPANY & DEVELOPER tabs remain unchanged) ... */}
             {activeTab === 'COMPANY' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                     {/* ... Company Branding & Profile ... */}
@@ -759,31 +840,75 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             )}
 
             {activeTab === 'DEVELOPER' && userRole === 'Developer' && (
-                <div className="bg-[#1e293b] rounded-2xl border border-indigo-900/40 shadow-xl overflow-hidden p-8 animate-in fade-in slide-in-from-bottom-4">
-                    <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+                <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20">
-                                <Lock size={24} />
+                                <Megaphone size={24} />
                             </div>
                             <div>
-                                <h3 className="font-bold text-indigo-400 uppercase tracking-widest text-sm">System & Developer Controls</h3>
-                                <p className="text-xs text-slate-400">Restricted parameters for application maintenance.</p>
+                                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Developer Message Board</h2>
+                                <p className="text-xs text-slate-400">Global Scrolling News & Statutory Compliance Updates</p>
                             </div>
                         </div>
+                        <button
+                            onClick={async () => {
+                                setIsSyncing(true);
+                                const result = await fetchLatestMessages();
+                                setIsSyncing(false);
+                                if (result && (result.scrollNews || result.statutory)) {
+                                    setProfileData(prev => ({
+                                        ...prev,
+                                        flashNews: result.scrollNews || prev.flashNews,
+                                        postLoginMessage: result.statutory || prev.postLoginMessage
+                                    }));
+                                    showAlert?.('success', 'Sync Complete', 'Latest developer messages fetched from cloud.');
+                                } else {
+                                    showAlert?.('info', 'Up to Date', 'You already have the latest messages or are offline.');
+                                }
+                            }}
+                            disabled={isSyncing}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20"
+                        >
+                            {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
+                            {isSyncing ? 'SYNCING...' : 'SYNC WITH CLOUD'}
+                        </button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Megaphone size={12} className="text-amber-500" /> Dashboard News Ticker</label>
-                            <textarea rows={3} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 text-xs font-medium" value={profileData.flashNews || ''} onChange={e => setProfileData({ ...profileData, flashNews: e.target.value })} placeholder="Enter scrolling news text..." />
+                    <div className="grid grid-cols-1 gap-6">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Dashboard News Ticker (Marquee)</label>
+                            <textarea
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[100px]"
+                                placeholder="Enter scrolling news message..."
+                                value={profileData.flashNews || ''}
+                                onChange={e => setProfileData({ ...profileData, flashNews: e.target.value })}
+                            />
                         </div>
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Globe size={12} className="text-sky-500" /> AI Studio Integration URL</label>
-                            <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 text-xs font-mono" value={profileData.externalAppUrl || ''} onChange={e => setProfileData({ ...profileData, externalAppUrl: e.target.value })} placeholder="https://..." />
-                        </div>
-                        <div className="md:col-span-2 space-y-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><MessageSquare size={12} className="text-indigo-400" /> Post-Login Modal Message</label>
-                            <textarea rows={4} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 text-xs font-mono" value={profileData.postLoginMessage || ''} onChange={e => setProfileData({ ...profileData, postLoginMessage: e.target.value })} placeholder="Markdown supported for system notices..." />
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">AI Studio Integration URL</label>
+                                <div className="relative">
+                                    <Globe className="absolute left-3 top-3 text-slate-500" size={18} />
+                                    <input
+                                        type="url"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pl-10 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
+                                        placeholder="https://..."
+                                        value={profileData.externalAppUrl || ''}
+                                        onChange={e => setProfileData({ ...profileData, externalAppUrl: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Post-Login Modal Message</label>
+                                <textarea
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[80px]"
+                                    placeholder="Enter statutory compliance or system message..."
+                                    value={profileData.postLoginMessage || ''}
+                                    onChange={e => setProfileData({ ...profileData, postLoginMessage: e.target.value })}
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -800,30 +925,94 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <p className="text-xs text-slate-400">Secure backup and restore operations.</p>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {hasData && (
-                            <div className="bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-blue-500/50 transition-all group">
-                                <div className="p-3 bg-blue-900/20 text-blue-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
-                                    <Download size={24} />
+
+                    {isSetupMode ? (
+                        <div className="space-y-8 py-4">
+                            {/* Pro-active Info Note - Only if company name has been customized (Partial Reset) */}
+                            {companyProfile.establishmentName !== INITIAL_COMPANY_PROFILE.establishmentName && (
+                                <div className="bg-indigo-600/10 border border-indigo-500/30 p-5 rounded-2xl flex items-start gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                                    <div className="p-2.5 bg-indigo-600/20 text-indigo-400 rounded-xl">
+                                        <AlertCircle size={24} />
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-indigo-200 mb-1 leading-tight">System Ready for Input</h4>
+                                        <p className="text-sm text-indigo-300/80 leading-relaxed font-medium italic">
+                                            "Company Profile & Statutory Compliance pre-exist. Proceed to add Employee and Attendance through 'START AFRESH' or restore full data through 'BACKUP DATA'."
+                                        </p>
+                                    </div>
                                 </div>
-                                <h4 className="font-bold text-white mb-2">Backup Data</h4>
-                                <p className="text-xs text-slate-400 mb-6 leading-relaxed">Create a secure, encrypted backup file (.enc) of your entire system data.</p>
-                                <button onClick={() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); }} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2">
-                                    <Download size={16} /> Create Backup
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                {/* Option 1: Start Fresh */}
+                                <div className="bg-[#0f172a] p-8 rounded-2xl border border-blue-500/20 hover:border-blue-500/50 transition-all flex flex-col items-center text-center group">
+                                    <div className="w-16 h-16 bg-blue-900/20 text-blue-400 rounded-2xl flex items-center justify-center mb-6 border border-blue-500/20 group-hover:scale-110 transition-transform">
+                                        <Plus size={32} />
+                                    </div>
+                                    <h4 className="text-xl font-black text-white mb-2 uppercase tracking-tight">Enter Fresh Data</h4>
+                                    <p className="text-sm text-slate-400 leading-relaxed mb-6">Start with an empty database. You can manually enter employee details from the Employee Master.</p>
+                                    <button
+                                        onClick={onSkipSetupRedirect}
+                                        className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-3 mt-auto"
+                                    >
+                                        START FRESH <ArrowRight size={18} />
+                                    </button>
+                                </div>
+
+                                {/* Option 2: Restore */}
+                                <div className="bg-[#0f172a] p-8 rounded-2xl border border-emerald-500/20 hover:border-emerald-500/50 transition-all flex flex-col items-center text-center group">
+                                    <div className="w-16 h-16 bg-emerald-900/20 text-emerald-400 rounded-2xl flex items-center justify-center mb-6 border border-emerald-500/20 group-hover:scale-110 transition-transform">
+                                        <Upload size={32} />
+                                    </div>
+                                    <h4 className="text-xl font-black text-white mb-2 uppercase tracking-tight">Restore from Backup</h4>
+                                    <p className="text-sm text-slate-400 leading-relaxed mb-6">Restoring data from a prior encrypted backup file (.enc) including all history.</p>
+                                    <button
+                                        onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }}
+                                        className="w-full py-4 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-xl font-bold transition-all flex items-center justify-center gap-3 mt-auto"
+                                    >
+                                        <Upload size={18} /> RESTORE BACKUP
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {hasData && (
+                                <div className="bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-blue-500/50 transition-all group">
+                                    <div className="p-3 bg-blue-900/20 text-blue-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
+                                        <Download size={24} />
+                                    </div>
+                                    <h4 className="font-bold text-white mb-2">Backup Data</h4>
+                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">Create a secure, encrypted backup file (.enc) of your entire system data.</p>
+                                    <button onClick={() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); }} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2">
+                                        <Download size={16} /> Create Backup
+                                    </button>
+                                </div>
+                            )}
+                            <div className={`bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-emerald-500/50 transition-all group ${!hasData ? 'md:col-span-2' : ''}`}>
+                                <div className="p-3 bg-emerald-900/20 text-emerald-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
+                                    <Upload size={24} />
+                                </div>
+                                <h4 className="font-bold text-white mb-2">Restore Data</h4>
+                                <p className="text-xs text-slate-400 mb-6 leading-relaxed">Restore system from an encrypted file. Overwrites current session.</p>
+                                <button onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }} className="w-full py-3 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-lg font-bold transition-all flex items-center justify-center gap-2">
+                                    <Upload size={16} /> Restore Backup
                                 </button>
                             </div>
-                        )}
-                        <div className={`bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-emerald-500/50 transition-all group ${!hasData ? 'md:col-span-2' : ''}`}>
-                            <div className="p-3 bg-emerald-900/20 text-emerald-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
-                                <Upload size={24} />
-                            </div>
-                            <h4 className="font-bold text-white mb-2">Restore Data</h4>
-                            <p className="text-xs text-slate-400 mb-6 leading-relaxed">Restore system from an encrypted file. Overwrites current session.</p>
-                            <button onClick={() => { setBackupMode('IMPORT'); setShowBackupModal(true); setEncryptionKey(''); }} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-sm shadow-lg shadow-emerald-900/20 transition-all flex items-center justify-center gap-2">
-                                <Upload size={16} /> Restore Backup
-                            </button>
+                            {hasData && (
+                                <div className="bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-amber-500/50 transition-all group md:col-span-2">
+                                    <div className="p-3 bg-amber-900/20 text-amber-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
+                                        <Trash2 size={24} />
+                                    </div>
+                                    <h4 className="font-bold text-white mb-2">Payroll Data Reset</h4>
+                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">Remove only employee and payroll records. <span className="text-amber-400 font-bold">Keeps Statutory Rules and Company Profile intact.</span></p>
+                                    <button onClick={() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); }} className="w-full py-3 bg-amber-600/20 hover:bg-amber-600 text-amber-400 hover:text-white border border-amber-600/50 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2">
+                                        <RefreshCw size={16} /> Reset Employee Database
+                                    </button>
+                                </div>
+                            )}
                         </div>
-                    </div>
+                    )}
                     <div className="pt-6 border-t border-slate-800">
                         <div className="bg-red-900/10 border border-red-900/30 p-4 rounded-xl flex items-center justify-between">
                             <div className="flex items-center gap-4">
@@ -875,11 +1064,34 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 </div>
             )}
 
+            {showPayrollResetModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                        <button onClick={() => setShowPayrollResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <div className="flex flex-col items-center gap-2">
+                            <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full border border-amber-900/50 mb-2">
+                                <Trash2 size={32} />
+                            </div>
+                            <h3 className="text-xl font-black text-white text-center uppercase">Payroll Reset</h3>
+                            <p className="text-xs text-amber-300 text-center leading-relaxed">Warning: This will delete ALL employees and payroll history but preserve your Company & Statutory Profile.</p>
+                        </div>
+                        <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                            <div className="flex items-center gap-2 text-sm text-slate-400 mb-2"><KeyRound size={16} /><span>Confirm Identity</span></div>
+                            <input type="password" placeholder="Enter Login Password" autoFocus className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
+                            {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
+                        </div>
+                        <button onClick={executePayrollReset} className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-900/20 transition-all flex items-center justify-center gap-2">
+                            <CheckCircle2 size={18} /> CONFIRM PAYROLL RESET
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {showBackupModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
                         {!isProcessing && (
-                            <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                            <button onClick={() => { setShowBackupModal(false); setSelectedBackupFile(null); setEncryptionKey(''); }} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         )}
                         <div className="flex flex-col items-center gap-2">
                             <div className={`p-4 rounded-full border mb-2 transition-all duration-500 ${processProgress === 100 ? 'bg-emerald-900/30 text-emerald-400 border-emerald-500/50' : isProcessing ? 'bg-indigo-900/30 text-indigo-400 border-indigo-500/50' : 'bg-blue-900/20 text-blue-400 border-blue-900/50'}`}>
@@ -905,8 +1117,18 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="space-y-4 mt-2 w-full">
                                 {backupMode === 'IMPORT' && (
                                     <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase">Select Backup File</label>
-                                        <input type="file" ref={backupFileRef} className="w-full text-xs text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700" accept=".enc" />
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase">Selected Backup File</label>
+                                        <div className="flex gap-2">
+                                            <div className="flex-1 bg-slate-900/50 border border-slate-700 rounded-lg p-2.5 text-xs text-emerald-400 font-mono truncate flex items-center gap-2">
+                                                <FileText size={14} /> {selectedBackupFile?.name || 'No file selected'}
+                                            </div>
+                                            <button
+                                                onClick={() => backupFileRef.current?.click()}
+                                                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-[10px] font-black uppercase tracking-widest rounded-lg border border-slate-700 transition-all text-slate-300"
+                                            >
+                                                Change
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                                 <div className="space-y-1">
@@ -922,7 +1144,129 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 </div>
             )}
 
-            {/* ... (Overwrite and Auth Modals remain same) ... */}
+            {activeTab === 'LICENSE' && (
+                <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                        <div className="p-2 bg-pink-900/30 text-pink-400 rounded-lg border border-pink-500/20">
+                            <ShieldCheck size={24} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-black text-white uppercase tracking-tighter">License Management</h2>
+                            <p className="text-xs text-slate-400">System Activation & Machine Lock Status</p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="space-y-6">
+                            <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
+                                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                    <Lock size={14} className="text-pink-500" /> Current License Info
+                                </h3>
+
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                                        <span className="text-xs text-slate-400">Status</span>
+                                        <span className={`text-xs font-black uppercase px-2 py-0.5 rounded ${licenseInfo?.isTrial ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                                            {licenseInfo?.status || 'UNREGISTERED'}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                                        <span className="text-xs text-slate-400">User ID</span>
+                                        <span className="text-xs font-mono text-white">{licenseInfo?.userID || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                                        <span className="text-xs text-slate-400">Email ID</span>
+                                        <span className="text-[10px] text-slate-300 truncate max-w-[150px]" title={licenseInfo?.registeredTo}>{licenseInfo?.registeredTo || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                                        <span className="text-xs text-slate-400">Mobile No</span>
+                                        <span className="text-xs font-mono text-white">{licenseInfo?.registeredMobile || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                                        <span className="text-xs text-slate-400">Machine ID</span>
+                                        <span className="text-[10px] font-mono text-slate-300 truncate max-w-[150px]" title={licenseInfo?.machineId}>{licenseInfo?.machineId || 'Fetching...'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 text-pink-400 font-bold">
+                                        <span className="text-xs text-slate-400">Expiry Date</span>
+                                        <span className="text-xs">{licenseInfo?.expiryDate || 'N/A'}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-blue-900/10 border border-blue-500/20 rounded-xl">
+                                <p className="text-[10px] text-blue-300 leading-relaxed italic">
+                                    * License is locked to this Machine ID. To move BharatPay Pro to another computer, please contact support for a license reset.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-6">
+                            <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-6">
+                                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                    <ArrowRight size={14} className="text-blue-500" /> Re-Activate System
+                                </h3>
+
+                                <div className="space-y-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">Full Name / Authorized Person</label>
+                                        <input ref={fullNameRef} type="text" placeholder="Enter Full Name" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserName} onChange={e => setNewUserName(e.target.value)} />
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">User ID</label>
+                                            <input type="text" placeholder="User ID" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-mono focus:ring-2 focus:ring-blue-500/50 outline-none transition-all uppercase" value={newUserID} onChange={e => setNewUserID(e.target.value.toUpperCase())} />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">License Key (16-Digit)</label>
+                                            <input type="text" placeholder="XXXX-XXXX-XXXX-XXXX" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-mono focus:ring-2 focus:ring-pink-500/50 outline-none transition-all uppercase" value={newLicenseKey} onChange={e => setNewLicenseKey(e.target.value.toUpperCase())} />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">Email ID</label>
+                                            <input type="email" title="Registered Email" placeholder="Email Address" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegEmail} onChange={e => setNewRegEmail(e.target.value)} />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">Mobile No</label>
+                                            <input type="tel" title="Activation Mobile Number" placeholder="10-digit mobile" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegMobile} onChange={e => setNewRegMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} />
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={async () => {
+                                            if (!isValidKeyFormat(newLicenseKey)) {
+                                                showAlert?.('warning', 'Invalid Input', 'Please enter a valid 16-digit license key.');
+                                                return;
+                                            }
+                                            if (!newUserName || !newUserID || !newRegEmail || !newRegMobile) {
+                                                showAlert?.('warning', 'Input Required', 'All fields are required for activation.');
+                                                return;
+                                            }
+
+                                            setIsActivating(true);
+                                            const result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile);
+                                            setIsActivating(false);
+
+                                            if (result.success) {
+                                                showAlert?.('success', 'Success', 'License activated and machine locked successfully.');
+                                                setLicenseInfo(getStoredLicense());
+                                                setNewLicenseKey('');
+                                            } else {
+                                                showAlert?.('error', 'Failed', result.message || 'Activation Failed.');
+                                            }
+                                        }}
+                                        disabled={isActivating}
+                                        title="Activate License"
+                                        className="w-full py-4 bg-pink-600 hover:bg-pink-700 disabled:opacity-50 text-white font-black uppercase tracking-widest rounded-xl shadow-xl shadow-pink-500/20 transition-all flex items-center justify-center gap-3"
+                                    >
+                                        {isActivating ? <Loader2 size={24} className="animate-spin" /> : <>Re-Activate System <ArrowRight size={20} /></>}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             {showOverwriteConfirm && (
                 <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">

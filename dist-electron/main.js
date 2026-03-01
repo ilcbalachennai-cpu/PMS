@@ -135,6 +135,20 @@ electron_1.ipcMain.handle('close-app', async () => {
     console.log("Application exiting now...");
     electron_1.app.exit(0);
 });
+// 5. Machine ID Retrieval (Native Windows)
+electron_1.ipcMain.handle('get-machine-id', async () => {
+    try {
+        const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
+        const output = execSync('wmic csproduct get uuid').toString();
+        // The output is usually something like "UUID\r\n[some-id]\r\n"
+        const lines = output.split(/\r?\n/).filter(line => line.trim() && !line.includes('UUID'));
+        return lines[0].trim();
+    }
+    catch (e) {
+        console.error('Failed to get machine ID:', e);
+        return 'UNKNOWN-MACHINE-ID';
+    }
+});
 console.log("-----------------------------------------");
 console.log("ELECTRON MAIN PROCESS: HANDLERS READY");
 console.log("-----------------------------------------");
