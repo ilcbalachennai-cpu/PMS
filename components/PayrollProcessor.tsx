@@ -4,7 +4,7 @@ import { Play, Save, RefreshCw, Lock, FileText, Table, Eye, Check, AlertCircle, 
 import * as XLSX from 'xlsx';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, FineRecord } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
-import { numberToWords, formatDateInd } from '../services/reportService';
+import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName } from '../services/reportService';
 
 interface PayrollProcessorProps {
     employees: Employee[];
@@ -288,7 +288,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         setModalState({ isOpen: true, type: 'success', title: 'Draft Saved', message: `Payroll for ${month} ${year} saved successfully.` });
     };
 
-    const handleExportDraft = () => {
+    const handleExportDraft = async () => {
         if (results.length === 0) return;
 
         // Use full results for export, including 0 wages employees
@@ -336,7 +336,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Draft Payroll");
-        XLSX.writeFile(wb, `Draft_Payroll_${month}_${year}.xlsx`);
+        const fileName = getStandardFileName('Draft_Payroll', companyProfile, month, year);
+        await generateExcelWorkbook(wb, fileName);
     };
 
     const totalNet = results.reduce((acc, curr) => acc + (curr?.netPay || 0), 0);

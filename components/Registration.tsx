@@ -76,7 +76,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
             } else if (step === 2 && passwordRef.current) {
                 passwordRef.current.focus();
             }
-        }, 400); // Wait for the 300ms animation to finish before focusing
+        }, 50); // Immediate focus
         return () => clearTimeout(timer);
     }, [step]);
 
@@ -163,6 +163,10 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                 return;
             }
+
+            if (showAlert) {
+                showAlert('success', 'Credentials Set', 'Administrator password has been configured successfully.');
+            }
         }
         setError('');
         setStep(s => s + 1);
@@ -241,9 +245,9 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
                 // Create Admin User from state (collected in Step 2)
                 const adminUser: User = {
-                    username: 'admin',
+                    username: userID || 'admin',
                     password: adminPassword,
-                    name: 'System Administrator',
+                    name: userName || 'System Administrator',
                     role: 'Administrator',
                     email: data.companyProfile?.email || data.app_company_profile?.email || 'admin@bharatpay.com'
                 };
@@ -312,7 +316,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 // Apply newly set Admin password to the restored system
                 localStorage.setItem('app_users', JSON.stringify([adminUser]));
                 localStorage.setItem('app_setup_complete', 'true');
-                localStorage.setItem('app_session_user', JSON.stringify(adminUser));
+                sessionStorage.setItem('app_session_user', JSON.stringify(adminUser));
 
                 await delay(800);
                 setIsProcessing(false);
@@ -343,18 +347,34 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
             companyProfile: profile,
             statutoryConfig: config,
             adminUser: {
-                username: 'admin',
+                username: userID || 'admin',
                 password: adminPassword,
-                name: 'System Administrator',
+                name: userName || 'System Administrator',
                 role: 'Administrator',
                 email: profile.email || 'admin@bharatpay.com'
             }
         });
     };
 
+    const handleFreshSetup = () => {
+        setIsProcessing(true);
+        // Pre-fill empty data to bypass steps 4 and 5
+        onComplete({
+            companyProfile: INITIAL_COMPANY_PROFILE,
+            statutoryConfig: INITIAL_STATUTORY_CONFIG,
+            adminUser: {
+                username: userID || 'admin',
+                password: adminPassword,
+                name: userName || 'System Administrator',
+                role: 'Administrator',
+                email: regEmail || 'admin@bharatpay.com'
+            }
+        });
+    };
+
     const renderStepIndicator = () => (
         <div className="flex items-center justify-center gap-4 mb-4">
-            {[1, 2, 3, 4].map((s) => (
+            {[1, 2, 3].map((s) => (
                 <React.Fragment key={s}>
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all duration-300 ${step === s
                         ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30 scale-110 ring-4 ring-blue-900/10'
@@ -364,7 +384,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         }`}>
                         {step > s ? <CheckCircle2 size={20} /> : s}
                     </div>
-                    {s < 4 && <div className={`w-12 h-0.5 rounded ${step > s ? 'bg-emerald-500' : 'bg-slate-800'}`} />}
+                    {s < 3 && <div className={`w-12 h-0.5 rounded ${step > s ? 'bg-emerald-500' : 'bg-slate-800'}`} />}
                 </React.Fragment>
             ))}
         </div>
@@ -404,11 +424,11 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         {/* Logo Section */}
                         <div className="relative">
                             <div className="absolute -inset-4 bg-gradient-to-tr from-blue-600 to-emerald-600 rounded-full blur-xl opacity-20 group-hover:opacity-40 transition-opacity duration-700"></div>
-                            <div className="relative flex items-center justify-center w-32 h-32 rounded-full bg-white shadow-2xl p-[6px] overflow-hidden border-4 border-[#1e293b] transform group-hover:scale-105 transition-transform duration-500">
+                            <div className="relative flex items-center justify-center w-32 h-32 rounded-full bg-transparent shadow-2xl overflow-hidden border-4 border-white transform group-hover:scale-105 transition-transform duration-500">
                                 <img
                                     src={BRAND_CONFIG.logoUrl}
                                     alt={BRAND_CONFIG.companyName}
-                                    className="w-full h-full object-cover rounded-full"
+                                    className="w-full h-full object-cover"
                                 />
                             </div>
                         </div>
@@ -427,15 +447,15 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                 </h1>
                             </div>
                             <div className="h-1 w-24 bg-gradient-to-r from-transparent via-blue-500 to-transparent mx-auto rounded-full opacity-50"></div>
-                            <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.3em]">DECODING INDIAN LABOUR LAWS</p>
                         </div>
 
                         {/* Developer Section */}
-                        <div className="pt-8 flex flex-col items-center gap-2">
+                        <div className="pt-4 flex flex-col items-center gap-2">
                             <span className="text-[10px] text-slate-500 font-bold tracking-widest uppercase opacity-60">Architected & Engineered by</span>
                             <div className="flex items-center gap-3 px-5 py-2.5 bg-slate-900/50 border border-slate-800 rounded-2xl">
                                 <span className="text-sm font-black text-[#FF9933] tracking-wide">{BRAND_CONFIG.companyName}</span>
                             </div>
+                            <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">Decoding Indian Labour Laws</p>
                         </div>
                     </div>
                 </div>
@@ -477,8 +497,9 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 <input
                                                     ref={nameInputRef}
                                                     type="text"
-                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all uppercase placeholder:normal-case"
-                                                    placeholder="Enter Full Name"
+                                                    autoFocus
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all uppercase placeholder:normal-case placeholder:text-slate-500"
+                                                    placeholder="Your Name - as mentioned in App request mail"
                                                     value={userName}
                                                     onChange={e => setUserName(e.target.value.toUpperCase())}
                                                 />
@@ -490,7 +511,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                                 <input
                                                     type="text"
-                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                     placeholder="Enter your User ID"
                                                     value={userID}
                                                     onChange={e => setUserID(e.target.value)}
@@ -501,7 +522,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">License Key (Leave empty for Trial)</label>
                                             <input
                                                 type="text"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white font-mono text-center tracking-[0.2em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white font-mono text-center tracking-[0.2em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                 placeholder="XXXX-XXXX-XXXX-XXXX"
                                                 value={licenseKey}
                                                 onChange={e => setLicenseKey(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 16))}
@@ -516,7 +537,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                                 <input
                                                     type="email"
-                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                     placeholder="mail@example.com"
                                                     value={regEmail}
                                                     onChange={e => setRegEmail(e.target.value)}
@@ -529,7 +550,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                                 <input
                                                     type="tel"
-                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                     placeholder="9876543210"
                                                     value={regMobile}
                                                     onChange={e => setRegMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
@@ -562,37 +583,51 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                 </div>
                                 <p className="text-sm text-slate-400 mb-4 leading-relaxed">Register your primary administrative credentials. These will be required to access the system once the setup is complete.</p>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Admin Username</label>
-                                        <div className="relative">
-                                            <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">UserID (Login ID)</label>
+                                        <div className="relative group">
+                                            <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400 opacity-60" size={18} />
                                             <input
                                                 type="text"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all opacity-70 cursor-not-allowed"
-                                                value="admin"
+                                                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl p-3.5 pl-10 text-slate-400 font-bold cursor-not-allowed select-none transition-all"
+                                                value={userID}
                                                 readOnly
-                                                title="Username is fixed as 'admin'"
+                                                disabled
+                                                title={`Username is permanently set to: ${userID}`}
                                             />
+                                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                                                <span className="text-[9px] font-black text-blue-500/50 uppercase tracking-tighter">Read Only</span>
+                                                <Lock size={14} className="text-slate-700" />
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Admin Password</label>
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Set Password</label>
                                         <div className="relative">
                                             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                             <input
                                                 ref={passwordRef}
                                                 type="password"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono"
+                                                autoFocus
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono placeholder:text-slate-500 placeholder:font-sans"
                                                 placeholder="Enter secure password"
                                                 value={adminPassword}
                                                 onChange={e => setAdminPassword(e.target.value)}
                                             />
                                         </div>
-                                        <div className="px-1 py-1">
-                                            <p className="text-[9px] text-[#FF9933] font-medium tracking-tight">
-                                                Requirement: Min 9 characters, 1 Uppercase, 1 Lowercase, 1 Number, 1 Special character.
-                                            </p>
+                                        <div className="mt-2 p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl space-y-2">
+                                            <div className="flex items-center gap-2 text-blue-400">
+                                                <ShieldAlert size={14} />
+                                                <span className="text-[9px] font-black uppercase tracking-widest">Password Complexity Rules</span>
+                                            </div>
+                                            <ul className="text-[9px] text-slate-400 font-medium grid grid-cols-2 gap-x-4 gap-y-1 list-disc pl-4">
+                                                <li>At least 9 characters</li>
+                                                <li>One Capital Letter (A-Z)</li>
+                                                <li>One Small Letter (a-z)</li>
+                                                <li>One Numeric (0-9)</li>
+                                                <li className="col-span-2">One Special Character (@, #, $, %, etc.)</li>
+                                            </ul>
                                         </div>
                                     </div>
                                     <div className="md:col-start-2 space-y-2">
@@ -601,7 +636,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                             <input
                                                 type="password"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono placeholder:text-slate-500 placeholder:font-sans"
                                                 placeholder="Retype password"
                                                 value={confirmPassword}
                                                 onChange={e => setConfirmPassword(e.target.value)}
@@ -646,7 +681,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                     </div>
 
                                     <div
-                                        onClick={nextStep}
+                                        onClick={handleFreshSetup}
                                         className="bg-[#0f172a] p-8 rounded-2xl border-2 border-slate-800 hover:border-emerald-500/50 transition-all cursor-pointer group flex flex-col items-center text-center"
                                     >
                                         <div className="w-16 h-16 rounded-full bg-emerald-900/20 text-emerald-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
@@ -654,7 +689,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                         </div>
                                         <h3 className="text-xl font-bold mb-3 text-slate-100">Manual Configuration</h3>
                                         <p className="text-sm text-slate-400 leading-relaxed px-4">Start fresh by defining your establishment profile and statutory rules manually. Best for new installations.</p>
-                                        <div className="mt-8 px-6 py-2 bg-emerald-600 group-hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors">Start Fresh Setup</div>
+                                        <div className="mt-8 px-6 py-2 bg-emerald-600 group-hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors flex items-center gap-2">Start Fresh Setup <ArrowRight size={16} /></div>
                                     </div>
                                 </div>
                             ) : (
@@ -724,179 +759,6 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                     <ArrowLeft size={16} /> Back to Administration Step
                                 </button>
                             )}
-                        </div>
-                    )}
-
-                    {/* Step 4: Company Profile */}
-                    {step === 4 && (
-                        <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-                            <div className="bg-[#1e293b]/50 border border-slate-800 p-4 rounded-2xl space-y-4">
-                                <div className="flex items-center gap-3 mb-1">
-                                    <Building2 className="text-amber-400" size={24} />
-                                    <h3 className="font-bold text-lg">Establishment Details</h3>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="md:col-span-2 space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Establishment Name *</label>
-                                        <input
-                                            type="text"
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-amber-500/50 outline-none transition-all"
-                                            placeholder="e.g. Bharat Solutions Private Limited"
-                                            value={profile.establishmentName}
-                                            onChange={e => setProfile({ ...profile, establishmentName: e.target.value })}
-                                        />
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">City</label>
-                                        <div className="relative">
-                                            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                                            <input
-                                                type="text"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-amber-500/50 outline-none transition-all"
-                                                placeholder="e.g. Chennai"
-                                                value={profile.city}
-                                                onChange={e => setProfile({ ...profile, city: e.target.value })}
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">State</label>
-                                        <select
-                                            title="Select State"
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-amber-500/50 outline-none transition-all"
-                                            value={profile.state}
-                                            onChange={e => setProfile({ ...profile, state: e.target.value })}
-                                        >
-                                            {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-                                        </select>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Nature of Business</label>
-                                        <select
-                                            title="Nature of Business"
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-amber-500/50 outline-none transition-all"
-                                            value={profile.natureOfBusiness}
-                                            onChange={e => setProfile({ ...profile, natureOfBusiness: e.target.value })}
-                                        >
-                                            {NATURE_OF_BUSINESS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                        </select>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Email (Official)</label>
-                                        <div className="relative">
-                                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                                            <input
-                                                type="email"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-amber-500/50 outline-none transition-all"
-                                                placeholder="hr@company.com"
-                                                value={profile.email}
-                                                onChange={e => setProfile({ ...profile, email: e.target.value })}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-between">
-                                <button
-                                    onClick={prevStep}
-                                    className="px-8 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all flex items-center gap-2"
-                                >
-                                    <ArrowLeft size={20} /> Back
-                                </button>
-                                <button
-                                    onClick={nextStep}
-                                    className="group px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xl shadow-blue-500/20 transition-all flex items-center gap-2"
-                                >
-                                    Statutory Setup <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Step 5: Statutory */}
-                    {step === 5 && (
-                        <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="bg-emerald-900/5 border border-emerald-500/10 p-4 rounded-xl space-y-3">
-                                    <div className="flex items-center gap-3">
-                                        <ShieldCheck className="text-emerald-400" size={20} />
-                                        <h3 className="font-bold text-sm">PF & ESI Configuration</h3>
-                                    </div>
-                                    <div className="space-y-3">
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-bold text-slate-500 uppercase">EPF Ceiling (₹)</label>
-                                            <input
-                                                type="number"
-                                                title="EPF Ceiling"
-                                                placeholder="15000"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono"
-                                                value={config.epfCeiling}
-                                                onChange={e => setConfig({ ...config, epfCeiling: +e.target.value })}
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label>
-                                            <input
-                                                type="number"
-                                                title="ESI Ceiling"
-                                                placeholder="21000"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono"
-                                                value={config.esiCeiling}
-                                                onChange={e => setConfig({ ...config, esiCeiling: +e.target.value })}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="bg-sky-900/5 border border-sky-500/10 p-4 rounded-xl space-y-3">
-                                    <div className="flex items-center gap-3">
-                                        <Landmark className="text-sky-400" size={20} />
-                                        <h3 className="font-bold text-sm">Professional Tax</h3>
-                                    </div>
-                                    <div className="space-y-3">
-                                        <div className="flex items-center justify-between p-2 bg-slate-950/50 rounded-lg border border-slate-800">
-                                            <span className="text-xs text-slate-300">Enable PT Calculation</span>
-                                            <input
-                                                type="checkbox"
-                                                title="Enable Professional Tax"
-                                                className="w-5 h-5 accent-sky-500"
-                                                checked={config.enableProfessionalTax}
-                                                onChange={e => setConfig({ ...config, enableProfessionalTax: e.target.checked })}
-                                            />
-                                        </div>
-                                        <p className="text-[10px] text-slate-500 italic">Default slabs are set for {profile.state}. You can refine these later in Configuration.</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="bg-amber-900/5 border border-amber-500/10 p-4 rounded-xl flex gap-3">
-                                <ShieldAlert className="text-amber-500 shrink-0" size={20} />
-                                <div>
-                                    <p className="text-xs font-bold text-amber-200">Legal Compliance Disclaimer</p>
-                                    <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">By finalizing, you acknowledge that initial payroll parameters are set as per standard Indian Labour Laws. You can customize these at any time in the Configuration panel.</p>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-between pt-4">
-                                <button
-                                    onClick={prevStep}
-                                    className="px-8 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all flex items-center gap-2"
-                                >
-                                    <ArrowLeft size={20} /> Back
-                                </button>
-                                <button
-                                    onClick={handleFinish}
-                                    className="px-10 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black uppercase tracking-widest rounded-xl shadow-xl shadow-emerald-500/20 transition-all flex items-center gap-2"
-                                >
-                                    Complete Registration <CheckCircle2 size={20} />
-                                </button>
-                            </div>
                         </div>
                     )}
 

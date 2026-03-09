@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, Shield, ShieldCheck, User, Maximize, Minimize, Power } from 'lucide-react';
 import { User as UserType } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
+import { validateLicenseStartup } from '../services/licenseService';
 
 interface LoginProps {
   onLogin: (user: UserType) => void;
@@ -16,6 +17,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [bridgeReady, setBridgeReady] = useState(!!(window as any).electronAPI);
+  const usernameRef = useRef<HTMLInputElement>(null);
 
   // Monitor bridge status
   useEffect(() => {
@@ -41,6 +43,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
     return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
   }, []);
 
+  // Auto-focus on mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (usernameRef.current) {
+        usernameRef.current.focus();
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
+
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(err => {
@@ -53,47 +65,90 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
     }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
-    setTimeout(() => {
-      try {
-        // Get registered users from localStorage
-        const savedUsersRaw = localStorage.getItem('app_users');
-        let allUsers = MOCK_USERS;
+    // Simulate loading delay
+    await new Promise(resolve => setTimeout(resolve, 800));
 
-        if (savedUsersRaw) {
-          try {
-            const savedUsers: UserType[] = JSON.parse(savedUsersRaw);
-            // Combine, allowing saved users to override mock users with same username (like 'admin')
-            allUsers = [
-              ...savedUsers,
-              ...MOCK_USERS.filter(mu => !savedUsers.some(su => su.username === mu.username))
-            ];
-          } catch (e) {
-            console.error("Failed to parse app_users", e);
+    try {
+      // Get registered users from localStorage
+      const savedUsersRaw = localStorage.getItem('app_users');
+      let allUsers = MOCK_USERS;
+
+      if (savedUsersRaw) {
+        try {
+          const savedUsers: UserType[] = JSON.parse(savedUsersRaw);
+          // Combine, allowing saved users to override mock users with same username (like 'admin')
+          allUsers = [
+            ...savedUsers,
+            ...MOCK_USERS.filter(mu => !savedUsers.some(su => su.username === mu.username))
+          ];
+        } catch (e) {
+          console.error("Failed to parse app_users", e);
+        }
+      }
+
+      const cleanUsername = username.trim();
+      const cleanPassword = password.trim();
+
+      // Debug: Log all available usernames (only in dev)
+      const isDev = (import.meta as any).env.DEV || (import.meta as any).env.MODE === 'development';
+      if (isDev) {
+        console.log("🔐 Login Attempt:", { username: cleanUsername });
+        console.log("👥 Local User DB:", allUsers.map(u => ({ username: u.username, role: u.role })));
+      }
+
+      const user = allUsers.find(
+        (u) =>
+          String(u.username).trim() === cleanUsername &&
+          String(u.password).trim() === cleanPassword
+      );
+
+      if (user) {
+        console.log("✅ Login successful for:", cleanUsername);
+        onLogin(user);
+      } else {
+        // --- CLOUD FALLBACK ---
+        // If local login fails, try a one-time cloud sync to see if credentials were updated remotely
+        console.log("⚠️ Local login failed. Attempting cloud sync fallback...");
+        const syncResult = await validateLicenseStartup();
+
+        if (syncResult.valid) {
+          // Re-read users after sync
+          const updatedUsersRaw = localStorage.getItem('app_users');
+          if (updatedUsersRaw) {
+            const updatedUsers: UserType[] = JSON.parse(updatedUsersRaw);
+            const syncedUser = updatedUsers.find(
+              (u) =>
+                String(u.username).trim() === cleanUsername &&
+                String(u.password).trim() === cleanPassword
+            );
+
+            if (syncedUser) {
+              console.log("✅ Login successful via Cloud Sync for:", cleanUsername);
+              onLogin(syncedUser);
+              return;
+            }
           }
         }
 
-        const user = allUsers.find(
-          (u) => u.username === username && u.password === password
-        );
-
-        if (user) {
-          console.log("Login successful for:", username);
-          onLogin(user);
+        // If still fails, try case-insensitive username for helpful error
+        const userWithDifferentCase = allUsers.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+        if (userWithDifferentCase) {
+          setError('Invalid password. (Note: Usernames are case-sensitive)');
         } else {
           setError('Invalid credentials. Please check your username and password.');
-          setIsLoading(false);
         }
-      } catch (err) {
-        console.error("Critical login failure:", err);
-        setError('An unexpected error occurred during login. Please try again.');
         setIsLoading(false);
       }
-    }, 800);
+    } catch (err) {
+      console.error("Critical login failure:", err);
+      setError('An unexpected error occurred during login. Please try again.');
+      setIsLoading(false);
+    }
   };
 
   const autofill = (u: string, p: string) => {
@@ -130,11 +185,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
             {/* Logo Section */}
             <div className="relative">
               <div className="absolute -inset-4 bg-gradient-to-tr from-blue-600 to-emerald-600 rounded-full blur-xl opacity-20 group-hover:opacity-40 transition-opacity duration-700"></div>
-              <div className="relative flex items-center justify-center w-40 h-40 rounded-full bg-white shadow-2xl p-[6px] overflow-hidden border-4 border-[#1e293b] transform group-hover:scale-105 transition-transform duration-500">
+              <div className="relative flex items-center justify-center w-40 h-40 rounded-full bg-transparent shadow-2xl overflow-hidden border-4 border-white transform group-hover:scale-105 transition-transform duration-500">
                 <img
                   src={BRAND_CONFIG.logoUrl}
                   alt={BRAND_CONFIG.companyName}
-                  className="w-full h-full object-cover rounded-full"
+                  className="w-full h-full object-cover"
                 />
               </div>
             </div>
@@ -153,15 +208,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
                 </h1>
               </div>
               <div className="h-1 w-24 bg-gradient-to-r from-transparent via-blue-500 to-transparent mx-auto rounded-full opacity-50"></div>
-              <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.3em]">DECODING INDIAN LABOUR LAWS</p>
             </div>
 
             {/* Developer Section */}
-            <div className="pt-8 flex flex-col items-center gap-2">
+            <div className="pt-4 flex flex-col items-center gap-2">
               <span className="text-[10px] text-slate-500 font-bold tracking-widest uppercase opacity-60">Architected & Engineered by</span>
               <div className="flex items-center gap-3 px-5 py-2.5 bg-slate-900/50 border border-slate-800 rounded-2xl">
                 <span className="text-sm font-black text-[#FF9933] tracking-wide">{BRAND_CONFIG.companyName}</span>
               </div>
+              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">Decoding Indian Labour Laws</p>
             </div>
           </div>
         </div>
@@ -188,10 +243,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
                 <div className="relative group">
                   <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
                   <input
+                    ref={usernameRef}
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-600 text-sm"
+                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm"
                     placeholder="Enter username"
                   />
                 </div>
@@ -205,7 +261,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-600 text-sm"
+                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm"
                     placeholder="••••••••"
                   />
                 </div>
@@ -254,19 +310,35 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
             {/* Quick Access Roles */}
             <div className="mt-8 pt-6 border-t border-slate-800">
               <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-3 text-center">Quick Access Roles</p>
-              <div className="grid grid-cols-3 gap-2">
-                <button onClick={() => autofill('dev', 'dev@123')} className="flex flex-col items-center justify-center p-2 rounded-lg bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30 transition-all group">
-                  <Shield className="text-amber-500 mb-1 group-hover:scale-110 transition-transform" size={16} />
-                  <span className="text-[10px] font-bold text-amber-500">Developer</span>
-                </button>
-                <button onClick={() => autofill('admin', 'admin@123')} className="flex flex-col items-center justify-center p-2 rounded-lg bg-blue-900/10 hover:bg-blue-900/20 border border-blue-900/30 transition-all group">
-                  <ShieldCheck className="text-blue-500 mb-1 group-hover:scale-110 transition-transform" size={16} />
-                  <span className="text-[10px] font-bold text-blue-500">Admin</span>
-                </button>
-                <button onClick={() => autofill('user', 'user@123')} className="flex flex-col items-center justify-center p-2 rounded-lg bg-emerald-900/10 hover:bg-emerald-900/20 border border-emerald-900/30 transition-all group">
-                  <User className="text-emerald-500 mb-1 group-hover:scale-110 transition-transform" size={16} />
-                  <span className="text-[10px] font-bold text-emerald-500">User</span>
-                </button>
+              <div className="grid grid-cols-2 gap-2 max-w-sm mx-auto">
+                {(() => {
+                  const savedUsersRaw = localStorage.getItem('app_users');
+                  let displayUsers = MOCK_USERS.filter(u => u.username === 'admin' || u.username === 'user');
+
+                  if (savedUsersRaw) {
+                    try {
+                      const savedUsers: UserType[] = JSON.parse(savedUsersRaw);
+                      if (savedUsers.length > 0) {
+                        // Priority 1: Registered Administrator
+                        const admin = savedUsers.find(u => u.role === 'Administrator');
+                        // Priority 2: Registered User
+                        const user = savedUsers.find(u => u.role === 'User');
+
+                        displayUsers = [
+                          admin || savedUsers[0],
+                          user || (savedUsers.length > 1 ? savedUsers[1] : displayUsers[1])
+                        ].filter(Boolean);
+                      }
+                    } catch (e) { }
+                  }
+
+                  return displayUsers.map((u, i) => (
+                    <button key={i} onClick={() => autofill(u.username, u.password || '')} className={`flex flex-col items-center justify-center p-2 rounded-lg bg-${u.role === 'Administrator' ? 'blue' : 'emerald'}-900/10 hover:bg-${u.role === 'Administrator' ? 'blue' : 'emerald'}-900/20 border border-${u.role === 'Administrator' ? 'blue' : 'emerald'}-900/30 transition-all group`}>
+                      {u.role === 'Administrator' ? <ShieldCheck className="text-blue-500 mb-1 group-hover:scale-110 transition-transform" size={16} /> : <UserIcon className="text-emerald-500 mb-1 group-hover:scale-110 transition-transform" size={16} />}
+                      <span className={`text-[10px] font-bold text-${u.role === 'Administrator' ? 'blue' : 'emerald'}-500 truncate w-full px-1`}>{u.name}</span>
+                    </button>
+                  ));
+                })()}
               </div>
             </div>
           </div>

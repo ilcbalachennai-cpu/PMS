@@ -25,7 +25,8 @@ import {
     generateESIForm5,
     generateArrearECRText,
     generateArrearECRExcel,
-    generateForm16PartBPDF
+    generateForm16PartBPDF,
+    getStandardFileName
 } from '../services/reportService';
 
 interface StatutoryReportsProps {
@@ -124,12 +125,12 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         periodYear: globalYear
     });
 
-    const [msgModal, setMsgModal] = useState<{
-        isOpen: boolean;
-        title: string;
-        message: string;
-        type: 'error' | 'success';
-    }>({ isOpen: false, title: '', message: '', type: 'error' });
+    const [msgModal, setMsgModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'error' | 'success'; onConfirm?: () => void }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        type: 'error'
+    });
 
     const openRangeModal = (reportType: string) => {
         const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
@@ -154,75 +155,102 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         });
     };
 
-    const handleGenerateRange = () => {
+    const handleGenerateRange = async () => {
         // Close the modal first so the dismiss animation is visible before the
         // browser file-save dialog appears (which would otherwise block the UI update)
         setRangeModal({ ...rangeModal, isOpen: false });
-        setTimeout(() => {
-            try {
-                if (rangeModal.reportType === 'Form 3A') {
-                    generatePFForm3A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
-                } else if (rangeModal.reportType === 'Form 6A') {
-                    generatePFForm6A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile);
-                } else if (rangeModal.reportType === 'Bonus Statement') {
-                    generateBonusReport(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile, rangeModal.format);
-                } else if (rangeModal.reportType === 'Form 16 (Part B)') {
-                    generateForm16PartBPDF(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
-                } else if (rangeModal.reportType === 'Form 5') {
-                    generateESIForm5(payrollHistory, employees, rangeModal.halfYearPeriod, rangeModal.periodYear, companyProfile);
-                }
-            } catch (e: any) {
-                setMsgModal({ isOpen: true, title: 'Error', message: e.message, type: 'error' });
-            }
-        }, 0);
-    };
-
-    const handleDownload = (reportName: string, format: string) => {
-        const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
-        const fileName = `${reportName.replace(/ /g, '_')}_${globalMonth}_${globalYear}`;
 
         try {
+            let savedPath: string | null = null;
+            if (rangeModal.reportType === 'Form 3A') {
+                savedPath = await generatePFForm3A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
+            } else if (rangeModal.reportType === 'Form 6A') {
+                savedPath = await generatePFForm6A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile);
+            } else if (rangeModal.reportType === 'Bonus Statement') {
+                savedPath = await generateBonusReport(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile, rangeModal.format);
+            } else if (rangeModal.reportType === 'Form 16 (Part B)') {
+                savedPath = await generateForm16PartBPDF(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
+            } else if (rangeModal.reportType === 'Form 5') {
+                savedPath = await generateESIForm5(payrollHistory, employees, rangeModal.halfYearPeriod, rangeModal.periodYear, companyProfile);
+            }
+
+            setMsgModal({
+                isOpen: true,
+                title: 'Report Generated',
+                message: `Successfully generated ${rangeModal.reportType}!\n\nThe folder will open after you close this message.`,
+                type: 'success',
+                onConfirm: () => {
+                    if (savedPath && (window as any).electronAPI) {
+                        (window as any).electronAPI.openItemLocation(savedPath);
+                    }
+                }
+            });
+
+        } catch (e: any) {
+            setMsgModal({ isOpen: true, title: 'Error', message: e.message, type: 'error' });
+        }
+    };
+
+    const handleDownload = async (reportName: string, format: string) => {
+        const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
+        const fileName = getStandardFileName(reportName, companyProfile, globalMonth, globalYear);
+
+        try {
+            let savedPath: string | null = null;
             if (reportName === 'PF ECR Arrears') {
                 const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
                 if (!batch) throw new Error(`No arrears processed for the period ${globalMonth} ${globalYear}`);
                 if (format === 'Excel') {
-                    generateArrearECRExcel(batch, payrollHistory, employees, config, fileName);
+                    savedPath = await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName);
                 } else {
-                    generateArrearECRText(batch, payrollHistory, employees, config, fileName);
+                    savedPath = await generateArrearECRText(batch, payrollHistory, employees, config, fileName);
                 }
             } else if (reportName.includes('PF ECR')) {
-                generatePFECR(currentData, employees, config, format as any, fileName);
+                savedPath = await generatePFECR(currentData, employees, config, format as any, fileName);
             } else if (reportName.includes('ESI Code Wages')) {
-                generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
+                savedPath = await generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('ESI Exit')) {
-                generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
+                savedPath = await generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
             } else if (reportName.includes('ESI')) {
-                generateESIReturn(currentData, employees, format as any, fileName, companyProfile);
+                savedPath = await generateESIReturn(currentData, employees, format as any, fileName, companyProfile);
             } else if (reportName.includes('PT')) {
-                generatePTReport(currentData, employees, fileName, companyProfile);
+                savedPath = await generatePTReport(currentData, employees, fileName, companyProfile);
             } else if (reportName.includes('TDS')) {
-                generateTDSReport(currentData, employees, fileName, companyProfile);
+                savedPath = await generateTDSReport(currentData, employees, fileName, companyProfile);
             } else if (reportName.includes('Gratuity')) {
-                generateGratuityReport(employees, companyProfile);
+                savedPath = await generateGratuityReport(employees, companyProfile);
             } else if (reportName.includes('Social Security')) {
-                generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
+                savedPath = await generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('EPF Code Impact')) {
-                generateEPFCodeImpactReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
+                savedPath = await generateEPFCodeImpactReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('Form 12A')) {
-                generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
+                savedPath = await generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('Form B')) {
-                generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
+                savedPath = await generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
             } else if (reportName.includes('Form C')) {
-                generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
+                savedPath = await generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
             }
             // STATE SPECIFIC LOGIC
             else if (reportName === 'Wage Register') {
-                generateStateWageRegister(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.wage);
+                savedPath = await generateStateWageRegister(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.wage);
             } else if (reportName === 'Pay Slip') {
-                generateStatePaySlip(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.slip);
+                savedPath = await generateStatePaySlip(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.slip);
             } else if (reportName === 'Advance Register') {
-                generateStateAdvanceRegister(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
+                savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
             }
+
+            setMsgModal({
+                isOpen: true,
+                title: 'Report Generated',
+                message: `Successfully generated ${reportName}!\n\nThe folder will open after you close this message.`,
+                type: 'success',
+                onConfirm: () => {
+                    if (savedPath && (window as any).electronAPI) {
+                        (window as any).electronAPI.openItemLocation(savedPath);
+                    }
+                }
+            });
+
         } catch (e: any) {
             setMsgModal({ isOpen: true, title: 'Report Generation Failed', message: e.message, type: 'error' });
         }
@@ -258,10 +286,10 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     <p className="text-slate-400 text-sm">Lawful compliance reporting for EPF, ESI, PT, and State Acts.</p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <select value={globalMonth} onChange={e => setGlobalMonth(e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
+                    <select aria-label="Select global month" value={globalMonth} onChange={e => setGlobalMonth(e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
                         {months.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
-                    <select value={globalYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
+                    <select aria-label="Select global year" value={globalYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
                         {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
                     </select>
                 </div>
@@ -336,6 +364,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         color="teal"
                         headerAction={
                             <select
+                                aria-label="Select state"
                                 value={selectedState}
                                 onChange={e => setSelectedState(e.target.value)}
                                 className="bg-[#1e293b] border border-teal-500/30 text-teal-400 text-[10px] font-bold rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-teal-500"
@@ -380,7 +409,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             {rangeModal.isOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setRangeModal({ ...rangeModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button type="button" aria-label="Close" onClick={() => setRangeModal({ ...rangeModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
                             <Calendar size={24} className="text-blue-400" />
                             <div>
@@ -394,11 +423,11 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Contribution Period</label>
                                     <div className="flex gap-2">
-                                        <select className="flex-1 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.halfYearPeriod} onChange={e => setRangeModal({ ...rangeModal, halfYearPeriod: e.target.value as any })}>
+                                        <select aria-label="Select half year period" className="flex-1 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.halfYearPeriod} onChange={e => setRangeModal({ ...rangeModal, halfYearPeriod: e.target.value as any })}>
                                             <option value="Apr-Sep">Apr - Sep</option>
                                             <option value="Oct-Mar">Oct - Mar</option>
                                         </select>
-                                        <select className="w-24 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.periodYear} onChange={e => setRangeModal({ ...rangeModal, periodYear: +e.target.value })}>
+                                        <select aria-label="Select period year" className="w-24 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.periodYear} onChange={e => setRangeModal({ ...rangeModal, periodYear: +e.target.value })}>
                                             {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
                                         </select>
                                     </div>
@@ -409,22 +438,22 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase">Start</label>
                                             <div className="flex gap-1">
-                                                <select className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.startMonth} onChange={e => setRangeModal({ ...rangeModal, startMonth: e.target.value })}>{months.map(m => <option key={m} value={m}>{m.slice(0, 3)}</option>)}</select>
-                                                <select className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startYear} onChange={e => setRangeModal({ ...rangeModal, startYear: +e.target.value })}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                                <select aria-label="Select start month" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.startMonth} onChange={e => setRangeModal({ ...rangeModal, startMonth: e.target.value })}>{months.map(m => <option key={m} value={m}>{m.slice(0, 3)}</option>)}</select>
+                                                <select aria-label="Select start year" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startYear} onChange={e => setRangeModal({ ...rangeModal, startYear: +e.target.value })}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
                                             </div>
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase">End</label>
                                             <div className="flex gap-1">
-                                                <select className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.endMonth} onChange={e => setRangeModal({ ...rangeModal, endMonth: e.target.value })}>{months.map(m => <option key={m} value={m}>{m.slice(0, 3)}</option>)}</select>
-                                                <select className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endYear} onChange={e => setRangeModal({ ...rangeModal, endYear: +e.target.value })}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                                <select aria-label="Select end month" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.endMonth} onChange={e => setRangeModal({ ...rangeModal, endMonth: e.target.value })}>{months.map(m => <option key={m} value={m}>{m.slice(0, 3)}</option>)}</select>
+                                                <select aria-label="Select end year" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endYear} onChange={e => setRangeModal({ ...rangeModal, endYear: +e.target.value })}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
                                             </div>
                                         </div>
                                     </div>
                                     {['Form 3A', 'Form 16 (Part B)'].includes(rangeModal.reportType) && (
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase">Employee</label>
-                                            <select className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({ ...rangeModal, selectedEmployee: e.target.value })}>
+                                            <select aria-label="Select employee" className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({ ...rangeModal, selectedEmployee: e.target.value })}>
                                                 <option value="ALL">All Employees</option>
                                                 {employees.map(e => <option key={e.id} value={e.id}>{e.name} ({e.id})</option>)}
                                             </select>
@@ -445,7 +474,10 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             {msgModal.isOpen && (
                 <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setMsgModal({ ...msgModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button type="button" aria-label="Close" onClick={() => {
+                            if (msgModal.onConfirm) msgModal.onConfirm();
+                            setMsgModal({ ...msgModal, isOpen: false });
+                        }} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className={`p-3 rounded-full border ${msgModal.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50'}`}>
                                 {msgModal.type === 'error' ? <AlertTriangle size={24} /> : <CheckCircle size={24} />}
@@ -453,7 +485,10 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                             <h3 className="text-lg font-bold text-white text-center">{msgModal.title}</h3>
                             <p className="text-sm text-slate-400 text-center">{msgModal.message}</p>
                         </div>
-                        <button onClick={() => setMsgModal({ ...msgModal, isOpen: false })} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
+                        <button type="button" onClick={() => {
+                            if (msgModal.onConfirm) msgModal.onConfirm();
+                            setMsgModal({ ...msgModal, isOpen: false });
+                        }} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
                     </div>
                 </div>
             )}

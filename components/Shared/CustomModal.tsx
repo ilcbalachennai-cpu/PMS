@@ -1,7 +1,7 @@
 import React from 'react';
-import { X, CheckCircle2, AlertCircle, Info, AlertTriangle } from 'lucide-react';
+import { X, CheckCircle2, AlertCircle, Info, AlertTriangle, Loader2 } from 'lucide-react';
 
-export type ModalType = 'success' | 'error' | 'info' | 'warning' | 'confirm' | 'danger';
+export type ModalType = 'success' | 'error' | 'info' | 'warning' | 'confirm' | 'danger' | 'loading';
 
 interface CustomModalProps {
     isOpen: boolean;
@@ -10,7 +10,7 @@ interface CustomModalProps {
     onSecondaryConfirm?: () => void;
     type: ModalType;
     title: string;
-    message: string;
+    message: string | React.ReactNode;
     confirmLabel?: string;
     secondaryConfirmLabel?: string;
     cancelLabel?: string;
@@ -67,6 +67,13 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     bg: 'bg-red-900/20',
                     button: 'bg-red-600 hover:bg-red-700 shadow-red-900/20'
                 };
+            case 'loading':
+                return {
+                    icon: <Loader2 className="text-blue-400 animate-spin" size={32} />,
+                    border: 'border-blue-500/30',
+                    bg: 'bg-blue-900/10',
+                    button: ''
+                };
             default:
                 return {
                     icon: <Info className="text-blue-400" size={32} />,
@@ -93,43 +100,45 @@ const CustomModal: React.FC<CustomModalProps> = ({
                 </div>
 
                 <div className="p-8 bg-slate-900/20">
-                    <p className="text-sm text-slate-300 leading-relaxed text-center font-medium">
+                    <div className="text-sm text-slate-300 leading-relaxed text-center font-medium">
                         {message}
-                    </p>
+                    </div>
                 </div>
 
-                <div className="p-4 bg-[#1e293b] border-t border-slate-700/50 flex gap-3">
-                    {(type === 'confirm' || type === 'danger') && (
-                        <button
-                            onClick={onClose}
-                            className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all border border-slate-700 text-sm"
-                        >
-                            {cancelLabel}
-                        </button>
-                    )}
-                    {onSecondaryConfirm && secondaryConfirmLabel && (
+                {type !== 'loading' && (
+                    <div className="p-4 bg-[#1e293b] border-t border-slate-700/50 flex gap-3">
+                        {(type === 'confirm' || type === 'danger') && (
+                            <button
+                                onClick={onClose}
+                                className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all border border-slate-700 text-sm"
+                            >
+                                {cancelLabel}
+                            </button>
+                        )}
+                        {onSecondaryConfirm && secondaryConfirmLabel && (
+                            <button
+                                onClick={() => {
+                                    onClose();
+                                    onSecondaryConfirm();
+                                }}
+                                className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all border border-slate-700 text-sm"
+                            >
+                                {secondaryConfirmLabel}
+                            </button>
+                        )}
                         <button
                             onClick={() => {
                                 onClose();
-                                onSecondaryConfirm();
+                                if (onConfirm) onConfirm();
                             }}
-                            className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all border border-slate-700 text-sm"
+                            className={`flex-1 px-4 py-2.5 ${styles.button} text-white font-black uppercase tracking-widest rounded-xl shadow-lg transition-all active:scale-95 text-xs`}
                         >
-                            {secondaryConfirmLabel}
+                            {confirmLabel}
                         </button>
-                    )}
-                    <button
-                        onClick={() => {
-                            onClose();
-                            if (onConfirm) onConfirm();
-                        }}
-                        className={`flex-1 px-4 py-2.5 ${styles.button} text-white font-black uppercase tracking-widest rounded-xl shadow-lg transition-all active:scale-95 text-xs`}
-                    >
-                        {confirmLabel}
-                    </button>
-                </div>
+                    </div>
+                )}
 
-                {(type !== 'confirm' && type !== 'danger') && (
+                {(type !== 'confirm' && type !== 'danger' && type !== 'loading') && (
                     <button
                         onClick={onClose}
                         className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors"

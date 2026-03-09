@@ -2,7 +2,7 @@
 import { LicenseData, AppVersion } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
-const GOOGLE_SCRIPT_URL = "YOUR_GOOGLE_SCRIPT_WEB_APP_URL";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYnFPLmvE1vCxLXVG53Ja1qx2VIeMZAz1b2v1-Kgh1k5b1bgo5lZnGM5Y3--r-uKbd/exec";
 
 export interface ActivationResult {
   success: boolean;
@@ -11,6 +11,12 @@ export interface ActivationResult {
   expiryDate?: string;
   isTrial?: boolean;
   data?: any;
+  latestVersion?: string;
+  downloadUrl?: string;
+  recoveryData?: {
+    adminUser?: string;
+    adminPass?: string;
+  };
 }
 
 /**
@@ -82,13 +88,18 @@ export const getStoredLicense = (): LicenseData | null => {
 
     // Integrity Check
     const { checksum, ...rest } = data;
-    if (checksum !== generateChecksum(rest)) {
-      console.error("License Integrity Compromised!");
+    const calculatedChecksum = generateChecksum(rest);
+    if (checksum !== calculatedChecksum) {
+      console.error("License Integrity Compromised! Expected:", checksum, "Got:", calculatedChecksum);
+      console.error("Data payload that failed:", JSON.stringify(rest));
       return null;
     }
 
     return data;
-  } catch (e) { return null; }
+  } catch (e) {
+    console.error("Exception in getStoredLicense:", e);
+    return null;
+  }
 };
 
 /**
@@ -97,6 +108,21 @@ export const getStoredLicense = (): LicenseData | null => {
 export const isValidKeyFormat = (key: string): boolean => {
   const cleanKey = key.replace(/[^0-9A-Z]/g, '');
   return cleanKey.length === 16;
+};
+
+const fetchFromApi = async (url: string, options: any) => {
+  try {
+    // @ts-ignore
+    if (window.electronAPI && window.electronAPI.apiFetch) {
+      // @ts-ignore
+      return await window.electronAPI.apiFetch(url, options);
+    }
+    const res = await fetch(url, options);
+    return await res.json();
+  } catch (error) {
+    console.error("API Fetch Error:", error);
+    throw error;
+  }
 };
 
 /**
@@ -113,6 +139,11 @@ export const registerTrial = async (
   // --- DEMO MODE FALLBACK ---
   if (GOOGLE_SCRIPT_URL.includes("YOUR_GOOGLE_SCRIPT")) {
     await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate delay
+
+    const demoExpiry = new Date();
+    demoExpiry.setDate(demoExpiry.getDate() + 14); // 14-days for offline demo
+    const demoExpiryStr = `${demoExpiry.getDate().toString().padStart(2, '0')}-${(demoExpiry.getMonth() + 1).toString().padStart(2, '0')}-${demoExpiry.getFullYear()}`;
+
     const demoData: LicenseData = {
       key: "TRIAL",
       userName: userName,
@@ -122,7 +153,7 @@ export const registerTrial = async (
       registeredMobile: mobile,
       machineId: machineId,
       startDate: new Date().toLocaleDateString('en-GB').replace(/\//g, '-'),
-      expiryDate: "31-12-2026",
+      expiryDate: demoExpiryStr,
       dataSize: 50,
       status: "REGISTERED",
       isTrial: true,
@@ -133,16 +164,27 @@ export const registerTrial = async (
     const scrambled = scramble(JSON.stringify(demoData));
     localStorage.setItem('app_license_secure', scrambled);
     localStorage.setItem('app_data_size', "50");
+    localStorage.setItem('app_machine_id', machineId);
+
+    // @ts-ignore
+    if (window.electronAPI) {
+      // @ts-ignore
+      window.electronAPI.dbSet('app_license_secure', scrambled);
+      // @ts-ignore
+      window.electronAPI.dbSet('app_data_size', "50");
+      // @ts-ignore
+      window.electronAPI.dbSet('app_machine_id', machineId);
+    }
 
     return {
       success: true,
-      message: "DEMO MODE: Registration Successful (Offline). Valid until 31-12-2026",
+      message: `DEMO MODE: Registration Successful (Offline). Valid until ${demoExpiryStr}`,
       data: demoData
     };
   }
 
   try {
-    const response = await fetch(GOOGLE_SCRIPT_URL, {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({
         action: 'REGISTER_TRIAL',
@@ -153,30 +195,43 @@ export const registerTrial = async (
         machineId
       })
     });
-
-    const result = await response.json();
     // ... rest of the logic
-
-    if (result.success && result.data) {
+    if (result.success) {
+      const respData = result.data || {};
       const licenseData: LicenseData = {
-        ...result.data,
         key: 'TRIAL',
+        status: respData.status || 'REGISTERED',
+        userName: userName,
+        userID: userID,
+        registeredTo: email,
+        registeredMobile: String(mobile),
+        machineId: machineId,
+        password: respData.password || "AS_REGISTERED",
+        dataSize: Number(respData.dataSize || 50),
+        startDate: respData.startDate || new Date().toLocaleDateString('en-GB').replace(/\//g, '-'),
+        expiryDate: respData.expiryDate || "",
+        isTrial: true,
         checksum: ''
       };
-      licenseData.checksum = generateChecksum(result.data);
 
+      licenseData.checksum = generateChecksum(licenseData);
       const scrambled = scramble(JSON.stringify(licenseData));
       localStorage.setItem('app_license_secure', scrambled);
       localStorage.setItem('app_data_size', String(licenseData.dataSize));
+      localStorage.setItem('app_machine_id', licenseData.machineId);
 
-      // Also sync to electron DB if available
-      // @ts-ignore
-      if (window.electronAPI) window.electronAPI.dbSet('app_license_secure', scrambled);
+      // Sync to electron DB
+      if ((window as any).electronAPI) {
+        await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
+        await (window as any).electronAPI.dbSet('app_data_size', String(licenseData.dataSize));
+        await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
+      }
+      localStorage.setItem('app_license_last_check', new Date().toISOString().split('T')[0]);
     }
 
     return result;
-  } catch (error) {
-    return { success: false, message: "Connection Error: Check internet or Backend URL." };
+  } catch (error: any) {
+    return { success: false, message: `Registration Error: ${error.message || "Unknown Failure"}` };
   }
 };
 
@@ -198,37 +253,54 @@ export const activateFullLicense = async (
   }
 
   try {
-    const response = await fetch(GOOGLE_SCRIPT_URL, {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({
         action: 'ACTIVATE_LICENSE',
+        licenseKey: cleanKey,
         userName,
         userID,
-        licenseKey: cleanKey,
         email,
         mobile,
         machineId
       })
     });
-    const result = await response.json();
 
-    if (result.success && result.data) {
+    if (result.success) {
+      const respData = result.data || {};
       const licenseData: LicenseData = {
-        ...result.data,
+        key: cleanKey,
+        status: respData.status || 'REGISTERED',
+        userName: userName,
+        userID: userID,
+        registeredTo: email,
+        registeredMobile: String(mobile),
+        machineId: machineId,
+        password: respData.password || "AS_REGISTERED",
+        dataSize: Number(respData.dataSize || 5000),
+        startDate: respData.startDate || new Date().toLocaleDateString('en-GB').replace(/\//g, '-'),
+        expiryDate: respData.expiryDate || "",
+        isTrial: false,
         checksum: ''
       };
-      licenseData.checksum = generateChecksum(result.data);
 
+      licenseData.checksum = generateChecksum(licenseData);
       const scrambled = scramble(JSON.stringify(licenseData));
       localStorage.setItem('app_license_secure', scrambled);
       localStorage.setItem('app_data_size', String(licenseData.dataSize));
+      localStorage.setItem('app_machine_id', licenseData.machineId);
 
-      // @ts-ignore
-      if (window.electronAPI) window.electronAPI.dbSet('app_license_secure', scrambled);
+      // Sync to electron DB
+      if ((window as any).electronAPI) {
+        await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
+        await (window as any).electronAPI.dbSet('app_data_size', String(licenseData.dataSize));
+        await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
+      }
+      localStorage.setItem('app_license_last_check', new Date().toISOString().split('T')[0]);
     }
     return result;
-  } catch (error) {
-    return { success: false, message: "Activation failed. Please check your internet connection." };
+  } catch (error: any) {
+    return { success: false, message: `Activation Error: ${error.message || "Unknown Failure"}` };
   }
 };
 
@@ -251,7 +323,10 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
   }
 
   // 2. Expiry Check (Local)
-  const expiry = new Date(stored.expiryDate);
+  // Parse DD-MM-YYYY robustly
+  const [day, month, year] = stored.expiryDate.split('-');
+  const expiry = new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59);
+
   if (expiry < new Date()) {
     return {
       valid: false,
@@ -262,46 +337,131 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
   // 3. Daily Online Verification Sync
   const lastCheck = localStorage.getItem('app_license_last_check');
   const today = new Date().toISOString().split('T')[0];
+  const isDev = (import.meta as any).env.DEV || (import.meta as any).env.MODE === 'development';
 
-  if (lastCheck !== today && GOOGLE_SCRIPT_URL !== "YOUR_GOOGLE_SCRIPT_WEB_APP_URL") {
+  // Perform online sync only if first login of the day (or dev mode)
+  if ((lastCheck !== today || isDev) && (GOOGLE_SCRIPT_URL as string) !== "YOUR_GOOGLE_SCRIPT_WEB_APP_URL") {
     try {
-      console.log("🌐 Performing Daily License Sync...");
-      const response = await fetch(GOOGLE_SCRIPT_URL, {
+      console.log(`🌐 Performing Daily ${stored.isTrial ? 'Trial' : 'License'} Sync...`);
+
+      // Get current admin for credential sync/backup
+      const usersRaw = localStorage.getItem('app_users');
+      const users = usersRaw ? JSON.parse(usersRaw) : [];
+      const adminUser = users.find((u: any) => u.role === 'Administrator') || users[0];
+
+      console.log("📤 Sending Validation Request:", {
+        action: 'VALIDATE_STARTUP',
+        licenseKey: stored.isTrial ? 'TRIAL' : stored.key,
+        email: stored.registeredTo,
+        mobile: stored.registeredMobile,
+        machineId: currentMachineId,
+        userID: stored.userID,
+      });
+
+      const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
         method: 'POST',
         body: JSON.stringify({
           action: 'VALIDATE_STARTUP',
-          licenseKey: stored.key,
+          licenseKey: stored.isTrial ? 'TRIAL' : stored.key,
           email: stored.registeredTo,
           mobile: stored.registeredMobile,
-          machineId: currentMachineId
+          machineId: currentMachineId,
+          userID: stored.userID,
+          appPassword: adminUser?.password // Sync current app password back to cloud
         })
       });
-      const result = await response.json();
+
+      console.log("📥 Validation Response:", result);
 
       if (!result.success) {
         return { valid: false, message: result.message };
       }
 
-      localStorage.setItem('app_license_last_check', today);
+      if (result.success) {
+        const cloudData = result.data || {};
+
+        // 1. Sync Data Limit
+        if (cloudData.dataSize) {
+          const newLimit = Number(cloudData.dataSize);
+          if (newLimit !== stored.dataSize) {
+            stored.dataSize = newLimit;
+            stored.checksum = generateChecksum(stored);
+            const scrambled = scramble(JSON.stringify(stored));
+            localStorage.setItem('app_license_secure', scrambled);
+            localStorage.setItem('app_data_size', String(newLimit));
+            // @ts-ignore
+            if (window.electronAPI) {
+              // @ts-ignore
+              window.electronAPI.dbSet('app_license_secure', scrambled);
+              // @ts-ignore
+              window.electronAPI.dbSet('app_data_size', String(newLimit));
+            }
+            console.log(`✅ Data Limit synced from cloud: ${newLimit}`);
+          }
+        }
+
+        // 2. Version Check
+        if (cloudData.latestVersion) {
+          localStorage.setItem('app_latest_version', cloudData.latestVersion);
+          if (cloudData.downloadUrl) localStorage.setItem('app_download_url', cloudData.downloadUrl);
+        }
+
+        // 3. Smart Admin Recovery & Sync
+        const usersRawAfterSync = localStorage.getItem('app_users');
+        let localUsers = usersRawAfterSync ? JSON.parse(usersRawAfterSync) : [];
+
+        if (cloudData.adminUser || cloudData.adminPass) {
+          const cloudAdminUser = cloudData.adminUser;
+          const cloudAdminPass = cloudData.adminPass;
+
+          const adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
+
+          if (adminIndex !== -1) {
+            // Update existing if changed in cloud
+            if (localUsers[adminIndex].username !== cloudAdminUser || localUsers[adminIndex].password !== cloudAdminPass) {
+              localUsers[adminIndex].username = cloudAdminUser;
+              localUsers[adminIndex].password = cloudAdminPass;
+              localStorage.setItem('app_users', JSON.stringify(localUsers));
+              // @ts-ignore
+              if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
+            }
+          } else if (localUsers.length === 0) {
+            // Recover missing admin
+            const recoveredAdmin = {
+              username: cloudAdminUser || 'admin',
+              password: cloudAdminPass || 'admin@123',
+              name: stored.userName || 'System Administrator',
+              role: 'Administrator',
+              email: stored.registeredTo
+            };
+            localUsers = [recoveredAdmin];
+            localStorage.setItem('app_users', JSON.stringify(localUsers));
+            // @ts-ignore
+            if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
+          }
+        }
+
+        localStorage.setItem('app_license_last_check', today);
+        console.log("✅ Daily License/Trial Sync Complete.");
+      }
     } catch (e) {
-      console.warn("Offline: Skipping daily sync.");
+      console.warn("Offline: Using cached license status.");
     }
   }
 
   return { valid: true };
 };
 
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = "1.0.8";
 /**
  * Fetches the latest developer messages from Google Sheets
  */
 export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statutory: string } | null> => {
   try {
-    const response = await fetch(GOOGLE_SCRIPT_URL, {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: "POST",
       body: JSON.stringify({ action: "GET_MESSAGES" })
     });
-    const result = await response.json();
 
     if (result.success && result.messages) {
       const { scrollNews, statutory } = result.messages;
@@ -327,6 +487,13 @@ export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statu
 
       if (updated) {
         localStorage.setItem('app_company_profile', JSON.stringify(storedProfile));
+
+        // Also check for version here if available in messages
+        if (result.latestVersion) {
+          localStorage.setItem('app_latest_version', result.latestVersion);
+          if (result.downloadUrl) localStorage.setItem('app_download_url', result.downloadUrl);
+        }
+
         return {
           scrollNews: storedProfile.flashNews,
           statutory: storedProfile.postLoginMessage

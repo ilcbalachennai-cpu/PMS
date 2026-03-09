@@ -317,8 +317,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                     <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Effective From</label>
                         <div className="flex gap-2">
-                            <select className="bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none" value={effectiveMonth} onChange={e => setEffectiveMonth(e.target.value)}>{months.map(m => <option key={m} value={m}>{m}</option>)}</select>
-                            <select className="bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none" value={effectiveYear} onChange={e => setEffectiveYear(+e.target.value)}>{Array.from({ length: 5 }, (_, i) => currentYear - 2 + i).map(y => <option key={y} value={y}>{y}</option>)}</select>
+                            <select disabled={isLocked} className="bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none disabled:opacity-50 disabled:cursor-not-allowed" value={effectiveMonth} onChange={e => setEffectiveMonth(e.target.value)}>{months.map(m => <option key={m} value={m}>{m}</option>)}</select>
+                            <select disabled={isLocked} className="bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none disabled:opacity-50 disabled:cursor-not-allowed" value={effectiveYear} onChange={e => setEffectiveYear(+e.target.value)}>{Array.from({ length: 5 }, (_, i) => currentYear - 2 + i).map(y => <option key={y} value={y}>{y}</option>)}</select>
                         </div>
                     </div>
                     <div className="text-right">

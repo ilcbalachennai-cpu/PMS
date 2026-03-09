@@ -11,7 +11,9 @@ import {
     generateLeaveLedgerReport,
     generateAdvanceShortfallReport,
     generateArrearReport,
-    formatDateInd
+    formatDateInd,
+    getStandardFileName,
+    getBackupFileName
 } from '../services/reportService';
 import CustomModal, { ModalType } from './Shared/CustomModal';
 
@@ -77,7 +79,7 @@ const Reports: React.FC<ReportsProps> = ({
     // General Modal State
     const [modalState, setModalState] = useState<{
         isOpen: boolean;
-        type: 'confirm' | 'success' | 'error';
+        type: 'confirm' | 'success' | 'error' | 'loading';
         title: string;
         message: string | React.ReactNode;
         onConfirm?: () => void;
@@ -143,27 +145,41 @@ const Reports: React.FC<ReportsProps> = ({
         }
     };
 
-    const executeFreeze = () => {
-        const updated = savedRecords.map(r => {
-            if (r.month === month && r.year === year) return { ...r, status: 'Finalized' as const };
-            return r;
-        });
-        setSavedRecords(updated);
+    const executeFreeze = async () => {
+        try {
+            const updated = savedRecords.map(r => {
+                if (r.month === month && r.year === year) return { ...r, status: 'Finalized' as const };
+                return r;
+            });
+            setSavedRecords(updated);
 
-        // SHOW SUCCESS MESSAGE
-        setModalState({
-            isOpen: true,
-            type: 'success',
-            title: 'Operation Successful',
-            message: 'Data Frozen and Locked Successfully',
-            onClose: () => {
-                // TRIGGER ROLLOVER ONLY AFTER MODAL IS CLOSED
-                onRollover(updated);
-            }
-        });
+            // SHOW SUCCESS MESSAGE
+            setModalState({
+                isOpen: true,
+                type: 'success',
+                title: 'Operation Successful',
+                message: (
+                    <div className="space-y-2 text-left">
+                        <p>Data Frozen and Locked Successfully.</p>
+                        <p className="text-[10px] text-slate-400 italic font-medium">Automatic backups (Before & After Confirmation) have been secured in the Data Backup folder.</p>
+                    </div>
+                ),
+                onClose: () => {
+                    // TRIGGER ROLLOVER ONLY AFTER MODAL IS CLOSED
+                    onRollover(updated);
+                }
+            });
+        } catch (e: any) {
+            setModalState({
+                isOpen: true,
+                type: 'error',
+                title: 'Freeze Failed',
+                message: `An error occurred during finalization: ${e.message}`
+            });
+        }
     };
 
-    const handleFreeze = () => {
+    const handleFreeze = async () => {
         if (currentUser?.role !== 'Developer' && currentUser?.role !== 'Administrator') {
             setModalState({ isOpen: true, type: 'error', title: 'Access Denied', message: 'Only Administrators can freeze payroll.' });
             return;
@@ -176,6 +192,48 @@ const Reports: React.FC<ReportsProps> = ({
 
         if (!hasData) {
             setModalState({ isOpen: true, type: 'error', title: 'No Draft Found', message: 'Please calculate and "Save Draft" in the Pay Process module before freezing.' });
+            return;
+        }
+
+        // --- NEW: AUTOMATIC BACKUP (BC - Before Confirmation) ---
+        // Triggered immediately upon clicking the button to capture state BEFORE any confirmation or exit data entry
+        // We explicitly delay this for 3 seconds so the user can see it and the OS registers a distinct timestamp
+        setModalState({
+            isOpen: true,
+            type: 'loading',
+            title: 'Securing Pre-Freeze Data',
+            message: "Creating 'Before Confirmation' snapshot. Please wait 3 seconds..."
+        });
+
+        try {
+            // Wait for 3 seconds to guarantee state separation
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            const backupFileName = getBackupFileName('BC', companyProfile, month, year);
+            // @ts-ignore
+            const backupRes = await window.electronAPI.createDataBackup(backupFileName);
+
+            if (!backupRes.success) {
+                setModalState({
+                    isOpen: true,
+                    type: 'error',
+                    title: 'Backup Failed',
+                    message: `Automatic backup (BC) failed: ${backupRes.error || 'Unknown error'}. For data safety, payroll cannot be locked until a snapshot is created.`,
+                    onClose: () => setModalState({ ...modalState, isOpen: false })
+                });
+                return;
+            }
+            console.log(`[Reports] BC Backup created: ${backupRes.path}`);
+            // Success - Close loading modal to proceed
+            setModalState({ ...modalState, isOpen: false });
+        } catch (backupErr: any) {
+            setModalState({
+                isOpen: true,
+                type: 'error',
+                title: 'Backup Error',
+                message: `Could not create 'Before Confirmation' backup: ${backupErr.message}`,
+                onClose: () => setModalState({ ...modalState, isOpen: false })
+            });
             return;
         }
 
@@ -289,7 +347,7 @@ const Reports: React.FC<ReportsProps> = ({
         }));
     };
 
-    const processExitAndFreeze = () => {
+    const processExitAndFreeze = async () => {
         // ON LOP employees: DOL is optional — they remain active in the system
         const invalidEntries = Object.entries(exitData).filter(([_, val]) => {
             const data = val as { dol: string, reason: string };
@@ -315,7 +373,7 @@ const Reports: React.FC<ReportsProps> = ({
             return adv && (adv.balance || 0) > 0;
         });
 
-        const performFreeze = () => {
+        const performFreeze = async () => {
             const updatedEmployees = employees.map(emp => {
                 if (exitData[emp.id]) {
                     const { dol, reason } = exitData[emp.id];
@@ -330,7 +388,7 @@ const Reports: React.FC<ReportsProps> = ({
             setEmployees(updatedEmployees);
             setZeroWageEmployees([]);
             setExitData({});
-            executeFreeze();
+            await executeFreeze();
         };
 
         if (employeesWithAdvance.length > 0) {
@@ -355,7 +413,7 @@ const Reports: React.FC<ReportsProps> = ({
                 onConfirm: performFreeze
             });
         } else {
-            performFreeze();
+            await performFreeze();
         }
     };
 
@@ -391,218 +449,235 @@ const Reports: React.FC<ReportsProps> = ({
         }
     };
 
-    const generateReport = () => {
+    const generateReport = async () => {
         // Exception for Arrear Report: It relies on History, not Lock state
-        if (reportType !== 'Arrear Report' && !isLocked) return;
+        if (reportType !== 'Arrear Report' && !isLocked) {
+            setModalState({
+                isOpen: true,
+                type: 'error', // use the Alert design
+                title: 'Data Not Frozen',
+                message: 'You must finalize this payroll period before reports can be generated.\n\nPlease click the "Confirm & Freeze Data" button at the top right of this screen.'
+            });
+            return;
+        }
 
         setIsGenerating(true);
-        setTimeout(() => {
-            try {
-                if ((reportType === 'Pay Sheet' || reportType === 'Pay Slips' || reportType === 'Bank Statement') && currentResults.length === 0) {
-                    throw new Error("No payroll data found for this period. Please run & save payroll in Pay Process first.");
-                }
+        try {
+            if ((reportType === 'Pay Sheet' || reportType === 'Pay Slips' || reportType === 'Bank Statement') && currentResults.length === 0) {
+                throw new Error("No payroll data found for this period. Please run & save payroll in Pay Process first.");
+            }
 
-                if (reportType === 'Pay Sheet') {
-                    const validResults = currentResults.filter(r => r.earnings?.total > 0);
-                    if (validResults.length === 0) throw new Error("No employees with wages found. Check if payroll has been processed with attendance.");
+            let savedPath: string | null = null;
 
-                    if (format === 'Excel') {
-                        const excelData = validResults.map(r => {
-                            const emp = employees.find(e => e.id === r.employeeId);
-                            return {
-                                'ID': r.employeeId,
-                                'Name': emp?.name,
-                                'Designation': emp?.designation,
-                                'Days Paid': r.payableDays,
-                                'Basic': r.earnings?.basic,
-                                'DA': r.earnings?.da,
-                                'Retaining Allw': r.earnings?.retainingAllowance,
-                                'HRA': r.earnings?.hra,
-                                'Conveyance': r.earnings?.conveyance,
-                                'Washing': r.earnings?.washing,
-                                'Attire': r.earnings?.attire,
-                                'Special Allw 1': r.earnings?.special1,
-                                'Special Allw 2': r.earnings?.special2,
-                                'Special Allw 3': r.earnings?.special3,
-                                'Bonus': r.earnings?.bonus,
-                                'Leave Encash': r.earnings?.leaveEncashment,
-                                'GROSS EARNINGS': r.earnings?.total,
-                                'PF (EE)': r.deductions?.epf,
-                                'VPF': r.deductions?.vpf,
-                                'ESI (EE)': r.deductions?.esi,
-                                'Prof Tax': r.deductions?.pt,
-                                'Income Tax': r.deductions?.it,
-                                'LWF': r.deductions?.lwf,
-                                'Advance': r.deductions?.advanceRecovery,
-                                'Fine': r.deductions?.fine,
-                                'TOTAL DEDUCTIONS': r.deductions?.total,
-                                'NET PAY': r.netPay
-                            };
-                        });
-                        // Grand Total row
-                        const sum = (key: keyof typeof excelData[0]) =>
-                            excelData.reduce((acc, row) => acc + (Number(row[key]) || 0), 0);
-                        excelData.push({
-                            'ID': '',
-                            'Name': 'GRAND TOTAL',
-                            'Designation': '',
-                            'Days Paid': sum('Days Paid'),
-                            'Basic': sum('Basic'),
-                            'DA': sum('DA'),
-                            'Retaining Allw': sum('Retaining Allw'),
-                            'HRA': sum('HRA'),
-                            'Conveyance': sum('Conveyance'),
-                            'Washing': sum('Washing'),
-                            'Attire': sum('Attire'),
-                            'Special Allw 1': sum('Special Allw 1'),
-                            'Special Allw 2': sum('Special Allw 2'),
-                            'Special Allw 3': sum('Special Allw 3'),
-                            'Bonus': sum('Bonus'),
-                            'Leave Encash': sum('Leave Encash'),
-                            'GROSS EARNINGS': sum('GROSS EARNINGS'),
-                            'PF (EE)': sum('PF (EE)'),
-                            'VPF': sum('VPF'),
-                            'ESI (EE)': sum('ESI (EE)'),
-                            'Prof Tax': sum('Prof Tax'),
-                            'Income Tax': sum('Income Tax'),
-                            'LWF': sum('LWF'),
-                            'Advance': sum('Advance'),
-                            'Fine': sum('Fine'),
-                            'TOTAL DEDUCTIONS': sum('TOTAL DEDUCTIONS'),
-                            'NET PAY': sum('NET PAY')
-                        });
-                        generateExcelReport(excelData, 'Pay Sheet', `PaySheet_${month}_${year}`);
-                    } else {
-                        generateSimplePaySheetPDF(validResults, employees, month, year, companyProfile);
-                    }
-                } else if (reportType === 'Pay Slips') {
-                    const slipRecords = currentResults.filter(r => r.netPay > 0);
-                    if (slipRecords.length === 0) throw new Error("No employees with positive Net Pay found for Pay Slips.");
-                    generatePaySlipsPDF(slipRecords, employees, month, year, companyProfile);
-                } else if (reportType === 'Bank Statement') {
-                    const bankRecords = currentResults.filter(r => r.netPay > 0);
-                    if (bankRecords.length === 0) throw new Error("No employees with positive Net Pay found for Bank Statement.");
+            if (reportType === 'Pay Sheet') {
+                const validResults = currentResults.filter(r => r.earnings?.total > 0);
+                if (validResults.length === 0) throw new Error("No employees with wages found. Check if payroll has been processed with attendance.");
 
-                    if (format === 'Excel') {
-                        const data = bankRecords.map(r => {
-                            const emp = employees.find(e => e.id === r.employeeId);
-                            return {
-                                'Emp ID': r.employeeId,
-                                'Name': emp?.name,
-                                'Bank Name': '-',
-                                'Account No': emp?.bankAccount,
-                                'IFSC': emp?.ifsc,
-                                'Amount': r.netPay
-                            };
-                        });
-                        generateExcelReport(data, 'Bank Statement', `Bank_Statement_${month}_${year}`);
-                    } else {
-                        generateBankStatementPDF(bankRecords, employees, month, year, companyProfile);
-                    }
-                } else if (reportType === 'Leave Ledger') {
-                    const resultsMap = new Map<string, PayrollResult>(currentResults.map(r => [r.employeeId, r]));
-                    const periodStart = new Date(year, months.indexOf(month), 1);
-                    const periodEnd = new Date(year, months.indexOf(month) + 1, 0);
-
-                    const activeEmps = employees.filter(emp => {
-                        const doj = new Date(emp.doj);
-                        if (doj > periodEnd) return false;
-                        if (emp.dol) {
-                            const dol = new Date(emp.dol);
-                            if (dol < periodStart) return false;
-                        }
-                        return true;
+                if (format === 'Excel') {
+                    const excelData = validResults.map(r => {
+                        const emp = employees.find(e => e.id === r.employeeId);
+                        return {
+                            'ID': r.employeeId,
+                            'Name': emp?.name,
+                            'Designation': emp?.designation,
+                            'Days Paid': r.payableDays,
+                            'Basic': Math.round(r.earnings?.basic || 0),
+                            'DA': Math.round(r.earnings?.da || 0),
+                            'Retaining Allw': Math.round(r.earnings?.retainingAllowance || 0),
+                            'HRA': Math.round(r.earnings?.hra || 0),
+                            'Conveyance': Math.round(r.earnings?.conveyance || 0),
+                            'Washing': Math.round(r.earnings?.washing || 0),
+                            'Attire': Math.round(r.earnings?.attire || 0),
+                            'Special Allw 1': Math.round(r.earnings?.special1 || 0),
+                            'Special Allw 2': Math.round(r.earnings?.special2 || 0),
+                            'Special Allw 3': Math.round(r.earnings?.special3 || 0),
+                            'Bonus': Math.round(r.earnings?.bonus || 0),
+                            'Leave Encash': Math.round(r.earnings?.leaveEncashment || 0),
+                            'GROSS EARNINGS': Math.round(r.earnings?.total || 0),
+                            'PF (EE)': Math.round(r.deductions?.epf || 0),
+                            'VPF': Math.round(r.deductions?.vpf || 0),
+                            'ESI (EE)': Math.round(r.deductions?.esi || 0),
+                            'Prof Tax': Math.round(r.deductions?.pt || 0),
+                            'Income Tax': Math.round(r.deductions?.it || 0),
+                            'LWF': Math.round(r.deductions?.lwf || 0),
+                            'Advance': Math.round(r.deductions?.advanceRecovery || 0),
+                            'Fine': Math.round(r.deductions?.fine || 0),
+                            'TOTAL DEDUCTIONS': Math.round(r.deductions?.total || 0),
+                            'NET PAY': Math.round(r.netPay || 0)
+                        };
                     });
 
-                    if (activeEmps.length === 0) throw new Error("No active employees found for the selected period.");
+                    // Grand Total row
+                    const sum = (key: string) =>
+                        excelData.reduce((acc, row: any) => acc + (Number(row[key]) || 0), 0);
 
-                    if (format === 'Excel') {
-                        const data = activeEmps.map(e => {
-                            const snapshot = resultsMap.get(e.id)?.leaveSnapshot;
-                            const liveLedger = leaveLedgers.find(led => led.employeeId === e.id);
-                            const l = snapshot || liveLedger || {
-                                el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
-                                sl: { eligible: 0, availed: 0, balance: 0 },
-                                cl: { accumulation: 0, availed: 0, balance: 0 }
-                            };
-                            const elUsed = (l.el.availed || 0) + (l.el.encashed || 0);
+                    const grandTotal: any = {
+                        'ID': '',
+                        'Name': 'GRAND TOTAL',
+                        'Designation': '',
+                        'Days Paid': sum('Days Paid'),
+                        'Basic': sum('Basic'),
+                        'DA': sum('DA'),
+                        'Retaining Allw': sum('Retaining Allw'),
+                        'HRA': sum('HRA'),
+                        'Conveyance': sum('Conveyance'),
+                        'Washing': sum('Washing'),
+                        'Attire': sum('Attire'),
+                        'Special Allw 1': sum('Special Allw 1'),
+                        'Special Allw 2': sum('Special Allw 2'),
+                        'Special Allw 3': sum('Special Allw 3'),
+                        'Bonus': sum('Bonus'),
+                        'Leave Encash': sum('Leave Encash'),
+                        'GROSS EARNINGS': sum('GROSS EARNINGS'),
+                        'PF (EE)': sum('PF (EE)'),
+                        'VPF': sum('VPF'),
+                        'ESI (EE)': sum('ESI (EE)'),
+                        'Prof Tax': sum('Prof Tax'),
+                        'Income Tax': sum('Income Tax'),
+                        'LWF': sum('LWF'),
+                        'Advance': sum('Advance'),
+                        'Fine': sum('Fine'),
+                        'TOTAL DEDUCTIONS': sum('TOTAL DEDUCTIONS'),
+                        'NET PAY': sum('NET PAY')
+                    };
+                    excelData.push(grandTotal);
 
-                            return {
-                                'ID': e.id,
-                                'Name': e.name,
-                                'EL Opening': l.el.opening || 0,
-                                'EL Credit': l.el.eligible || 0,
-                                'EL Used': elUsed,
-                                'EL Balance': l.el.balance || 0,
-                                'SL Credit': l.sl.eligible || 0,
-                                'SL Availed': l.sl.availed || 0,
-                                'SL Balance': l.sl.balance || 0,
-                                'CL Credit': l.cl.accumulation || 0,
-                                'CL Availed': l.cl.availed || 0,
-                                'CL Balance': l.cl.balance || 0
-                            };
-                        });
-                        generateExcelReport(data, 'Leave Ledger', `LeaveLedger_${month}_${year}`);
-                    } else {
-                        // Pass leaveLedgers to the PDF generator to populate data
-                        generateLeaveLedgerReport(currentResults, activeEmps, leaveLedgers, month, year, 'AC', companyProfile);
-                    }
+                    const fileName = getStandardFileName('PaySheet', companyProfile, month, year);
+                    savedPath = await generateExcelReport(excelData, 'Pay Sheet', fileName);
+                } else {
+                    savedPath = await generateSimplePaySheetPDF(validResults, employees, month, year, companyProfile);
+                }
+            } else if (reportType === 'Pay Slips') {
+                const slipRecords = currentResults.filter(r => r.netPay > 0);
+                if (slipRecords.length === 0) throw new Error("No employees with positive Net Pay found for Pay Slips.");
+                savedPath = await generatePaySlipsPDF(slipRecords, employees, month, year, companyProfile);
+            } else if (reportType === 'Bank Statement') {
+                const bankRecords = currentResults.filter(r => r.netPay > 0);
+                if (bankRecords.length === 0) throw new Error("No employees with positive Net Pay found for Bank Statement.");
 
-                } else if (reportType === 'Advance Shortfall') {
-                    const shortfallData = currentResults.map(r => {
+                if (format === 'Excel') {
+                    const data = bankRecords.map(r => {
                         const emp = employees.find(e => e.id === r.employeeId);
-                        const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
-                        if (!adv || (adv.recovery || 0) === 0) return null;
-
-                        const recovered = r.deductions?.advanceRecovery || 0;
-                        const planned = adv.recovery;
-                        const shortfall = planned - recovered;
-                        if (shortfall <= 0) return null;
                         return {
-                            id: r.employeeId,
-                            name: emp?.name,
-                            target: planned,
-                            recovered,
-                            shortfall
+                            'Emp ID': r.employeeId,
+                            'Name': emp?.name,
+                            'Bank Name': emp?.bankName || '-',
+                            'Account No': emp?.bankAccount,
+                            'IFSC': emp?.ifsc,
+                            'Amount': r.netPay
                         };
-                    }).filter(d => d !== null);
+                    });
+                    const fileName = getStandardFileName('Bank_Statement', companyProfile, month, year);
+                    savedPath = await generateExcelReport(data, 'Bank Statement', fileName);
+                } else {
+                    savedPath = await generateBankStatementPDF(bankRecords, employees, month, year, companyProfile);
+                }
+            } else if (reportType === 'Leave Ledger') {
+                const resultsMap = new Map<string, PayrollResult>(currentResults.map(r => [r.employeeId, r]));
+                const periodStart = new Date(year, months.indexOf(month), 1);
+                const periodEnd = new Date(year, months.indexOf(month) + 1, 0);
 
-                    if (shortfallData.length === 0) {
-                        setModalState({ isOpen: true, type: 'error', title: 'No Data Available', message: 'No Data Available to Report' });
-                        return;
+                const activeEmps = employees.filter(emp => {
+                    const doj = new Date(emp.doj);
+                    if (doj > periodEnd) return false;
+                    if (emp.dol) {
+                        const dol = new Date(emp.dol);
+                        if (dol < periodStart) return false;
                     }
+                    return true;
+                });
 
-                    generateAdvanceShortfallReport(shortfallData, month, year, format, companyProfile);
-                } else if (reportType === 'Arrear Report') {
-                    // Retrieve from Arrear History based on selected batch, not global month
-                    let batch: ArrearBatch | undefined;
+                if (activeEmps.length === 0) throw new Error("No active employees found for the selected period.");
 
-                    if (arrearHistory && arrearHistory.length > 0) {
-                        const [selectedMonth, selectedYear] = arrearSelectedPeriod.split('-');
-                        batch = arrearHistory.find(b => b.month === selectedMonth && b.year === parseInt(selectedYear, 10));
-                    }
+                if (format === 'Excel') {
+                    const data = activeEmps.map(e => {
+                        const snapshot = resultsMap.get(e.id)?.leaveSnapshot;
+                        const liveLedger = leaveLedgers.find(led => led.employeeId === e.id);
+                        const l = snapshot || liveLedger || {
+                            el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
+                            sl: { eligible: 0, availed: 0, balance: 0 },
+                            cl: { accumulation: 0, availed: 0, balance: 0 }
+                        };
+                        const elUsed = (l.el.availed || 0) + (l.el.encashed || 0);
 
-                    if (!batch || !batch.records || batch.records.length === 0) {
-                        throw new Error(`No arrear calculation found. Please process increments in Pay Process > Arrear Salary first.`);
-                    }
+                        return {
+                            'ID': e.id,
+                            'Name': e.name,
+                            'EL Opening': l.el.opening || 0,
+                            'EL Credit': l.el.eligible || 0,
+                            'EL Used': elUsed,
+                            'EL Balance': l.el.balance || 0,
+                            'SL Credit': l.sl.eligible || 0,
+                            'SL Availed': l.sl.availed || 0,
+                            'SL Balance': l.sl.balance || 0,
+                            'CL Credit': l.cl.accumulation || 0,
+                            'CL Availed': l.cl.availed || 0,
+                            'CL Balance': l.cl.balance || 0
+                        };
+                    });
+                    const fileName = getStandardFileName('LeaveLedger', companyProfile, month, year);
+                    savedPath = await generateExcelReport(data, 'Leave Ledger', fileName);
+                } else {
+                    savedPath = await generateLeaveLedgerReport(currentResults, activeEmps, leaveLedgers, month, year, 'AC', companyProfile);
+                }
+            } else if (reportType === 'Advance Shortfall') {
+                const shortfallData = currentResults.map(r => {
+                    const emp = employees.find(e => e.id === r.employeeId);
+                    const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
+                    if (!adv || (adv.recovery || 0) === 0) return null;
 
-                    generateArrearReport(
-                        batch.records,
-                        batch.effectiveMonth,
-                        batch.effectiveYear,
-                        batch.month,
-                        batch.year,
-                        format,
-                        companyProfile
-                    );
+                    const recovered = r.deductions?.advanceRecovery || 0;
+                    const planned = adv.recovery;
+                    const shortfall = planned - recovered;
+                    if (shortfall <= 0) return null;
+                    return {
+                        id: r.employeeId,
+                        name: emp?.name,
+                        target: planned,
+                        recovered,
+                        shortfall
+                    };
+                }).filter(Boolean) as any[];
+
+                if (shortfallData.length === 0) {
+                    setModalState({ isOpen: true, type: 'error', title: 'No Data Available', message: 'No Data Available to Report' });
+                    return;
                 }
 
-            } catch (e: any) {
-                setModalState({ isOpen: true, type: 'error', title: 'Generation Failed', message: e.message });
-            } finally {
-                setIsGenerating(false);
+                savedPath = await generateAdvanceShortfallReport(shortfallData, month, year, format, companyProfile);
+            } else if (reportType === 'Arrear Report') {
+                let batch: ArrearBatch | undefined;
+                if (arrearHistory && arrearHistory.length > 0) {
+                    const [selectedMonth, selectedYear] = arrearSelectedPeriod.split('-');
+                    batch = arrearHistory.find(b => b.month === selectedMonth && b.year === parseInt(selectedYear, 10));
+                }
+                if (!batch || !batch.records || batch.records.length === 0) {
+                    throw new Error(`No arrear calculation found. Please process increments in Pay Process > Arrear Salary first.`);
+                }
+                savedPath = await generateArrearReport(batch.records, batch.effectiveMonth, batch.effectiveYear, batch.month, batch.year, format, companyProfile);
+            } else if (reportType === 'Master Template') {
+                const fileName = getStandardFileName('MasterTemplate', companyProfile, month, year);
+                savedPath = await generateExcelReport(employees, 'Employees', fileName);
             }
-        }, 500);
+
+            setModalState({
+                isOpen: true,
+                type: 'success',
+                title: 'Report Generated',
+                message: `Successfully generated ${reportType}!\n\nThe folder will open after you close this message.`,
+                onConfirm: () => {
+                    setModalState(prev => ({ ...prev, isOpen: false }));
+                    if (savedPath && (window as any).electronAPI) {
+                        (window as any).electronAPI.openItemLocation(savedPath);
+                    }
+                }
+            });
+
+        } catch (e: any) {
+            setModalState({ isOpen: true, type: 'error', title: 'Generation Failed', message: e.message });
+        } finally {
+            setIsGenerating(false);
+        }
     };
 
     const handleModalClose = () => {
@@ -755,9 +830,9 @@ const Reports: React.FC<ReportsProps> = ({
 
                     <button
                         onClick={generateReport}
-                        disabled={isGenerating || (reportType !== 'Arrear Report' && !isLocked)}
+                        disabled={isGenerating}
                         className={`w-full py-4 font-black rounded-xl shadow-lg flex items-center justify-center gap-3 transition-all mt-6 ${(reportType !== 'Arrear Report' && !isLocked)
-                            ? 'bg-slate-700 text-slate-400 cursor-not-allowed border border-slate-600'
+                            ? 'bg-slate-800 hover:bg-slate-700 text-amber-500 border border-slate-700'
                             : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20'
                             }`}
                     >
@@ -765,7 +840,7 @@ const Reports: React.FC<ReportsProps> = ({
                             <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" />
                         ) : (reportType !== 'Arrear Report' && !isLocked) ? (
                             <>
-                                <Lock size={20} /> FINALIZE PAYROLL TO DOWNLOAD
+                                <Lock size={20} /> LOCK PAYROLL TO DOWNLOAD (CLICK HERE)
                             </>
                         ) : (
                             <>

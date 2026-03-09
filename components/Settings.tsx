@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -18,7 +18,7 @@ interface SettingsProps {
     setLeavePolicy: (policy: LeavePolicy) => void;
     onRestore: () => void;
     onNuclearReset: () => void;
-    initialTab?: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE';
+    initialTab?: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS';
     userRole?: string;
     currentUser?: User;
     isSetupMode?: boolean;
@@ -27,7 +27,7 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, showAlert }) => {
-    const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE'>(isSetupMode ? 'DATA' : initialTab);
+    const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(isSetupMode ? 'COMPANY' : initialTab);
 
     // SCHEMA MIGRATION: Merge current config with defaults to prevent crashes on new features
     const [formData, setFormData] = useState<StatutoryConfig>(() => {
@@ -36,11 +36,11 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             ...config,
             higherContributionComponents: {
                 ...INITIAL_STATUTORY_CONFIG.higherContributionComponents,
-                ...(config.higherContributionComponents || {})
+                ...config.higherContributionComponents
             },
             leaveWagesComponents: {
                 ...INITIAL_STATUTORY_CONFIG.leaveWagesComponents,
-                ...(config.leaveWagesComponents || {})
+                ...config.leaveWagesComponents
             },
             incomeTaxCalculationType: config.incomeTaxCalculationType || INITIAL_STATUTORY_CONFIG.incomeTaxCalculationType
         };
@@ -64,7 +64,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     }, []);
 
     useEffect(() => {
-        setActiveTab(isSetupMode ? 'DATA' : initialTab);
+        setActiveTab(isSetupMode ? 'COMPANY' : initialTab);
     }, [initialTab, isSetupMode]);
 
     const [showResetModal, setShowResetModal] = useState(false);
@@ -90,6 +90,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [isActivating, setIsActivating] = useState(false);
     const [processProgress, setProcessProgress] = useState(0);
     const [processStatus, setProcessStatus] = useState('');
+    const [isSqliteFile, setIsSqliteFile] = useState(false);
 
     // License Management State
     const [licenseInfo, setLicenseInfo] = useState<LicenseData | null>(() => getStoredLicense());
@@ -100,6 +101,59 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [newUserID, setNewUserID] = useState(licenseInfo?.userID || '');
     const [currentMachineId, setCurrentMachineId] = useState('');
     const fullNameRef = useRef<HTMLInputElement>(null);
+
+    // ── User Management State ──
+    const [appUsers, setAppUsers] = useState<User[]>(() => {
+        try { return JSON.parse(localStorage.getItem('app_users') || '[]'); } catch { return []; }
+    });
+    const [umForm, setUmForm] = useState({ name: '', username: '', password: '', role: 'User' as 'Administrator' | 'User' });
+    const [umEditId, setUmEditId] = useState<string | null>(null);
+    const [umShowPwd, setUmShowPwd] = useState(false);
+    const [umError, setUmError] = useState('');
+    const umNameRef = useRef<HTMLInputElement>(null);
+
+    const saveAppUsers = (users: User[]) => {
+        setAppUsers(users);
+        localStorage.setItem('app_users', JSON.stringify(users));
+        // @ts-ignore
+        if (window.electronAPI) window.electronAPI.dbSet('app_users', users);
+    };
+
+    const handleUmSave = () => {
+        setUmError('');
+        if (!umForm.name.trim() || !umForm.username.trim() || !umForm.password.trim()) {
+            setUmError('All fields are required.'); return;
+        }
+        const existing = appUsers.find(u => u.username === umForm.username && u.username !== umEditId);
+        if (existing) { setUmError('Username already exists.'); return; }
+
+        if (umEditId) {
+            // Edit mode — update the matched user
+            const updated = appUsers.map(u => u.username === umEditId ? { ...u, name: umForm.name, password: umForm.password, role: umForm.role } : u);
+            saveAppUsers(updated);
+        } else {
+            // Add new user
+            const newUser: User = { name: umForm.name, username: umForm.username, password: umForm.password, role: umForm.role, email: '' };
+            saveAppUsers([...appUsers, newUser]);
+        }
+        setUmForm({ name: '', username: '', password: '', role: 'User' });
+        setUmEditId(null);
+        setUmShowPwd(false);
+    };
+
+    const handleUmEdit = (u: User) => {
+        setUmForm({ name: u.name, username: u.username, password: u.password ?? '', role: (u.role === 'Administrator' ? 'Administrator' : 'User') });
+        setUmEditId(u.username);
+        setUmShowPwd(false);
+        setUmError('');
+        setTimeout(() => umNameRef.current?.focus(), 100);
+    };
+
+    const handleUmDelete = (username: string) => {
+        if (username === currentUser?.username) { setUmError("You cannot delete your own account."); return; }
+        saveAppUsers(appUsers.filter(u => u.username !== username));
+    };
+
 
     // License Form Synchronization
     useEffect(() => {
@@ -151,7 +205,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         }
     };
 
-    const handleEncryptedExport = () => {
+    const handleEncryptedExport = async () => {
         if (!encryptionKey) {
             showAlert?.('warning', 'Security Required', 'Please enter a secure password to encrypt your data file.');
             return;
@@ -179,6 +233,11 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 fines: JSON.parse(localStorage.getItem('app_fines') || '[]'), // Include Fines
                 leavePolicy: JSON.parse(localStorage.getItem('app_leave_policy') || '{}'), // Include Leave Policy
                 arrearHistory: JSON.parse(localStorage.getItem('app_arrear_history') || '[]'), // Include Arrear History
+                users: JSON.parse(localStorage.getItem('app_users') || '[]'), // Include Users for login restore
+                developerMetadata: {
+                    lastNewsDate: localStorage.getItem('app_last_news_date') || "",
+                    lastStatutoryDate: localStorage.getItem('app_last_statutory_date') || ""
+                },
                 masters: {
                     designations: JSON.parse(localStorage.getItem('app_master_designations') || '[]'),
                     divisions: JSON.parse(localStorage.getItem('app_master_divisions') || '[]'),
@@ -206,42 +265,151 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             const compName = companyProfile.establishmentName ? companyProfile.establishmentName.replace(/[^a-zA-Z0-9]/g, '_') : 'Company';
 
             a.download = `${compName}_Backup_${fyStart}-${fyEnd}.enc`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
 
-            setProcessProgress(100);
-            setProcessStatus('Export Complete');
+            // @ts-ignore
+            if (window.electronAPI && window.electronAPI.runBackup) {
+                setProcessStatus('Saving to BharatPP location...');
+                // @ts-ignore
+                const res = await window.electronAPI.runBackup(encrypted);
+                if (res.success) {
+                    setProcessProgress(100);
+                    setProcessStatus('Backup Saved Successfully');
+                    showAlert?.('success', 'Safe Local Backup Created', `Your data has been encrypted and saved to the BharatPP/Data backup directory as: ${res.fileName}`);
+                } else {
+                    throw new Error(res.error || "Failed to save file to BharatPP directory.");
+                }
+            } else {
+                // Fallback for Web/Browser
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                setProcessProgress(100);
+                setProcessStatus('Export Complete');
+            }
 
             setTimeout(() => {
                 setShowBackupModal(false);
                 setEncryptionKey('');
                 setIsProcessing(false);
-            }, 1000);
+            }, 1500);
 
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
             setIsProcessing(false);
-            showAlert?.('error', 'Export Failed', 'Encryption failed. Please try again.');
+            showAlert?.('error', 'Export Failed', e.message || 'Encryption failed. Please try again.');
         }
     };
 
-    const executeImport = () => {
+    const executeImport = async () => {
         const file = selectedBackupFile;
-        if (!file || !encryptionKey) {
+        // Optimization: SQLite files don't need decryption password
+        if (!file || (!encryptionKey && !isSqliteFile)) {
             showAlert?.('warning', 'Missing Information', 'Please select a file and enter the decryption password.');
             return;
         }
 
         setIsProcessing(true);
         setProcessProgress(0);
+
+        // Immediate logic for SQLite restoration to avoid unnecessary FileReader overhead
+        if (isSqliteFile) {
+            try {
+                setProcessStatus('Restoring Database File...');
+                setProcessProgress(40);
+                // @ts-ignore
+                const res = await window.electronAPI.restoreSqliteBackup((file as any).path);
+                if (res.success) {
+                    setProcessProgress(100);
+                    setProcessStatus('Database Restored Successfully!');
+
+                    // CRITICAL FIX: Extract all relevant data from the newly restored SQLite database
+                    // and populate localStorage. This ensures the app reloads with the restored state
+                    // without losing critical un-backed-up system keys (like partial older backups).
+                    const dataKeys = [
+                        'app_employees', 'app_config', 'app_company_profile',
+                        'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
+                        'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo',
+                        'app_master_designations', 'app_master_divisions', 'app_master_branches', 'app_master_sites'
+                    ];
+
+                    const systemKeys = [
+                        'app_license_secure', 'app_data_size', 'app_machine_id', 'app_setup_complete', 'app_users'
+                    ];
+
+                    for (const k of dataKeys) {
+                        // @ts-ignore
+                        const dbRes = await window.electronAPI.dbGet(k);
+                        if (dbRes.success && dbRes.data !== null && dbRes.data !== undefined) {
+                            localStorage.setItem(k, typeof dbRes.data === 'string' ? dbRes.data : JSON.stringify(dbRes.data));
+                        } else {
+                            localStorage.removeItem(k); // If it's a data key missing in DB, it wasn't there at backup time
+                        }
+                    }
+
+                    for (const k of systemKeys) {
+                        // @ts-ignore
+                        const dbRes = await window.electronAPI.dbGet(k);
+                        if (dbRes.success && dbRes.data !== null && dbRes.data !== undefined) {
+                            localStorage.setItem(k, typeof dbRes.data === 'string' ? dbRes.data : JSON.stringify(dbRes.data));
+                        }
+                        // We DO NOT remove systemKeys if missing in DB, to prevent breaking license/login on older backups.
+                    }
+
+
+                    await delay(500);
+                    setIsProcessing(false);
+                    setShowBackupModal(false);
+                    setSelectedBackupFile(null);
+                    setEncryptionKey('');
+                    setTimeout(() => {
+                        showAlert?.('success', 'System Restore Successful', (
+                            <div className="space-y-3 text-left">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <div className="p-2 bg-emerald-500/20 rounded-full border border-emerald-500/30">
+                                        <CheckCircle2 size={24} className="text-emerald-400" />
+                                    </div>
+                                    <h4 className="text-lg font-black text-white uppercase tracking-tighter">Restore Complete</h4>
+                                </div>
+                                <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl space-y-2">
+                                    <p className="text-xs text-slate-300 leading-relaxed font-medium italic">
+                                        "Your entire establishment profile, payroll history, and system configurations have been successfully recovered from the backup vault."
+                                    </p>
+                                    <div className="h-px bg-slate-800/80 w-full" />
+                                    <p className="text-[10px] text-slate-500 font-mono break-all">{file.name}</p>
+                                </div>
+                                <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                    <AlertCircle size={14} className="text-amber-500 shrink-0" />
+                                    <p className="text-[10px] text-amber-500 font-bold uppercase tracking-widest">Session Reload Required to Finalize</p>
+                                </div>
+                            </div>
+                        ) as any, () => {
+                            onRestore();
+                        });
+                    }, 100);
+                    return;
+                } else {
+                    throw new Error(res.error || "Failed to restore database file.");
+                }
+            } catch (err: any) {
+                console.error(err);
+                setIsProcessing(false);
+                showAlert?.('error', 'Restoration Failed', `Restore Error: ${err.message}`);
+                return;
+            }
+        }
+
         setProcessStatus('Reading backup file...');
 
         const reader = new FileReader();
         reader.onload = async (e) => {
             try {
-                const encryptedContent = e.target?.result as string;
+                const content = e.target?.result;
+                if (!content) throw new Error("Could not read file content");
+
+
+                // Fallback to existing encrypted JSON logic
+                const encryptedContent = content as string;
                 setProcessStatus('Decrypting data...');
                 setProcessProgress(40);
                 await delay(300);
@@ -268,7 +436,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 await delay(400);
 
                 // Preserve critical system keys
-                const session = localStorage.getItem('app_session_user');
+                const session = sessionStorage.getItem('app_session_user');
                 const licenseSecure = localStorage.getItem('app_license_secure');
                 const mid = localStorage.getItem('app_machine_id');
                 const lastCheck = localStorage.getItem('app_license_last_check');
@@ -285,7 +453,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 localStorage.removeItem('app_license'); // Cleanup legacy key if any
 
                 // Re-apply preserved keys just in case
-                if (session) localStorage.setItem('app_session_user', session);
+                if (session) sessionStorage.setItem('app_session_user', session);
                 if (licenseSecure) localStorage.setItem('app_license_secure', licenseSecure);
                 if (mid) localStorage.setItem('app_machine_id', mid);
                 if (lastCheck) localStorage.setItem('app_license_last_check', lastCheck);
@@ -307,6 +475,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 const arrearHistory = getVal('arrearHistory');
                 const logo = getVal('logo');
                 const users = getVal('users');
+                const devMeta = getVal('developerMetadata');
 
                 if (employees) localStorage.setItem('app_employees', JSON.stringify(employees));
                 if (config) localStorage.setItem('app_config', JSON.stringify(config));
@@ -319,7 +488,13 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 if (leavePolicy) localStorage.setItem('app_leave_policy', JSON.stringify(leavePolicy));
                 if (arrearHistory) localStorage.setItem('app_arrear_history', JSON.stringify(arrearHistory));
                 if (logo) localStorage.setItem('app_logo', JSON.stringify(logo));
-                if (users) localStorage.setItem('app_users', JSON.stringify(users));
+                if (users) {
+                    localStorage.setItem('app_users', JSON.stringify(users));
+                    // @ts-ignore
+                    if (window.electronAPI) window.electronAPI.dbSet('app_users', users);
+                }
+                if (devMeta?.lastNewsDate) localStorage.setItem('app_last_news_date', devMeta.lastNewsDate);
+                if (devMeta?.lastStatutoryDate) localStorage.setItem('app_last_statutory_date', devMeta.lastStatutoryDate);
 
                 const masters = data.masters || data.app_masters;
                 if (masters) {
@@ -339,7 +514,27 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 setEncryptionKey('');
 
                 setTimeout(() => {
-                    showAlert?.('success', 'System Restored', 'The data has been restored successfully. Click OK to refresh the application.', () => {
+                    showAlert?.('success', 'Data Import Successful', (
+                        <div className="space-y-3 text-left">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="p-2 bg-emerald-500/20 rounded-full border border-emerald-500/30">
+                                    <CheckCircle2 size={24} className="text-emerald-400" />
+                                </div>
+                                <h4 className="text-lg font-black text-white uppercase tracking-tighter">Import Complete</h4>
+                            </div>
+                            <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl space-y-2">
+                                <p className="text-xs text-slate-300 leading-relaxed font-medium italic">
+                                    "Your payroll records, master data, and statutory configurations have been successfully synchronized from the provided .enc backup file."
+                                </p>
+                                <div className="h-px bg-slate-800/80 w-full" />
+                                <p className="text-[10px] text-slate-500 font-mono break-all">{file.name}</p>
+                            </div>
+                            <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                <AlertCircle size={14} className="text-amber-500 shrink-0" />
+                                <p className="text-[10px] text-amber-500 font-bold uppercase tracking-widest">Session Reload Required to Finalize</p>
+                            </div>
+                        </div>
+                    ) as any, () => {
                         onRestore();
                     });
                 }, 100);
@@ -359,7 +554,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
     const initiateRestore = () => {
         const file = selectedBackupFile;
-        if (!file || !encryptionKey) {
+        // Bypassing encryptionKey check if it's an automatic SQLite backup
+        if (!file || (!encryptionKey && !isSqliteFile)) {
             showAlert?.('warning', 'Input Required', 'Please select a backup file and enter the decryption password.');
             return;
         }
@@ -466,6 +662,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
     const executeFactoryReset = () => {
         if (resetPassword === currentUser?.password || (isSetupMode && resetPassword === 'setup')) {
+            setIsProcessing(true);
             onNuclearReset();
         } else {
             setResetError("Incorrect Login Password. Access Denied.");
@@ -474,6 +671,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
     const executePayrollReset = () => {
         if (resetPassword === currentUser?.password || (isSetupMode && resetPassword === 'setup')) {
+            setIsProcessing(true);
             localStorage.removeItem('app_employees');
             localStorage.removeItem('app_attendance');
             localStorage.removeItem('app_leave_ledgers');
@@ -482,10 +680,13 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             localStorage.removeItem('app_fines');
             localStorage.removeItem('app_arrear_history');
             // We keep company profile, config, and license
-            setShowPayrollResetModal(false);
-            showAlert?.('success', 'Payroll Reset Complete', 'All employee and payroll data has been cleared. The application will now reload.', () => {
-                onRestore();
-            });
+            setTimeout(() => {
+                setIsProcessing(false);
+                setShowPayrollResetModal(false);
+                showAlert?.('success', 'Payroll Reset Complete', 'All employee and payroll data has been cleared. The application will now reload.', () => {
+                    onRestore();
+                });
+            }, 800); // Artificial delay to ensure UI loading state registers clearly
         } else {
             setResetError("Incorrect Login Password. Access Denied.");
         }
@@ -496,6 +697,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             <input
                 type="file"
                 ref={backupFileRef}
+                id="backup-file-input"
+                title="Select Backup File"
                 className="hidden"
                 accept=".enc"
                 onChange={(e) => {
@@ -503,6 +706,24 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                     if (file) {
                         setSelectedBackupFile(file);
                         setBackupMode('IMPORT');
+                        // Reset SQLite detection
+                        setIsSqliteFile(false);
+
+                        // Check Signature using ArrayBuffer (safer for binary)
+                        const reader = new FileReader();
+                        reader.onload = (re) => {
+                            const buffer = re.target?.result as ArrayBuffer;
+                            if (buffer) {
+                                const arr = new Uint8Array(buffer);
+                                const signature = String.fromCharCode(...arr);
+                                if (signature.startsWith('SQLite format 3')) {
+                                    setIsSqliteFile(true);
+                                    setEncryptionKey(''); // Not needed for SQLite
+                                }
+                            }
+                        };
+                        reader.readAsArrayBuffer(file.slice(0, 16));
+
                         setShowBackupModal(true);
                     }
                 }}
@@ -519,12 +740,27 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 </button>
                 {userRole === 'Developer' && (
                     <button onClick={() => setActiveTab('DEVELOPER')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DEVELOPER' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                        <Megaphone size={16} /> Developer Message Board
+                        <Megaphone size={16} /> Developer Options
                     </button>
                 )}
-                <button onClick={() => setActiveTab('LICENSE')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'LICENSE' ? 'border-pink-500 text-pink-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                    <ShieldCheck size={16} /> License Management
-                </button>
+                {!isSetupMode && (
+                    <button onClick={() => setActiveTab('LICENSE')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'LICENSE' ? 'border-pink-500 text-pink-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                        <ShieldCheck size={16} /> License Management
+                    </button>
+                )}
+                {(licenseInfo || !isSetupMode || appUsers.length > 0) && (
+                    <button onClick={() => setActiveTab('USERS')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'USERS' ? 'border-sky-500 text-sky-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                        <Users size={16} /> User Management
+                    </button>
+                )}
+                {isSetupMode && (
+                    <div className="ml-auto flex items-center pb-2 pl-4">
+                        <button onClick={handleSave} className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-black transition-all shadow-lg ${saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`} title="Save Configuration Elements">
+                            {saved ? <CheckCircle2 size={14} /> : <Save size={14} />}
+                            {saved ? 'SAVED' : 'SAVE CONFIGURATION'}
+                        </button>
+                    </div>
+                )}
             </div>
 
             {activeTab === 'STATUTORY' && (
@@ -547,8 +783,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <Landmark className="text-blue-400" size={20} />
                                     <h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">Provident Fund (EPF)</h3>
                                 </div>
-                                <label className="flex items-center gap-2 cursor-pointer p-1.5 bg-amber-900/20 rounded-lg border border-amber-500/20 hover:bg-amber-900/30 transition-all">
-                                    <input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-amber-500 bg-slate-900 accent-amber-500" checked={formData.enableHigherContribution || false} onChange={e => setFormData({ ...formData, enableHigherContribution: e.target.checked })} />
+                                <label htmlFor="enable-higher-contrib" className="flex items-center gap-2 cursor-pointer p-1.5 bg-amber-900/20 rounded-lg border border-amber-500/20 hover:bg-amber-900/30 transition-all">
+                                    <input id="enable-higher-contrib" type="checkbox" className="w-4 h-4 rounded border-slate-700 text-amber-500 bg-slate-900 accent-amber-500" checked={formData.enableHigherContribution || false} onChange={e => setFormData({ ...formData, enableHigherContribution: e.target.checked })} title="Enable Higher Contribution Rules" />
                                     <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Enable Higher Contribution Rules</span>
                                 </label>
                             </div>
@@ -565,12 +801,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="space-y-1">
-                                                <label className="text-[10px] font-bold text-slate-500 uppercase">Statutory Ceiling (₹)</label>
-                                                <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfCeiling} onChange={e => setFormData({ ...formData, epfCeiling: +e.target.value })} />
+                                                <label htmlFor="epf-ceiling" className="text-[10px] font-bold text-slate-500 uppercase">Statutory Ceiling (₹)</label>
+                                                <input id="epf-ceiling" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfCeiling} onChange={e => setFormData({ ...formData, epfCeiling: +e.target.value })} title="Statutory Ceiling Amount" />
                                             </div>
                                             <div className="space-y-1">
-                                                <label className="text-[10px] font-bold text-slate-500 uppercase">Employee Rate (%)</label>
-                                                <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfEmployeeRate * 100} onChange={e => setFormData({ ...formData, epfEmployeeRate: +e.target.value / 100 })} />
+                                                <label htmlFor="epf-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase">Employee Rate (%)</label>
+                                                <input id="epf-employee-rate" type="number" step="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfEmployeeRate * 100} onChange={e => setFormData({ ...formData, epfEmployeeRate: +e.target.value / 100 })} title="Employee PF Contribution Rate" />
                                             </div>
                                         </div>
                                     </div>
@@ -581,7 +817,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                                 <label className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Higher Applicability</label>
                                                 <div className="grid grid-cols-1 gap-2">
                                                     {['By Employee', 'By Employee & Employer'].map(type => (
-                                                        <button key={type} onClick={() => setFormData({ ...formData, higherContributionType: type as any })} className={`py-2 px-4 text-left text-xs font-bold rounded-lg border transition-all flex items-center justify-between ${formData.higherContributionType === type ? 'bg-amber-600 border-amber-400 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>{type}{formData.higherContributionType === type ? <CheckCircle2 size={14} /> : <div className="w-3.5 h-3.5 rounded-full border border-slate-700" />}</button>
+                                                        <button key={type} onClick={() => setFormData({ ...formData, higherContributionType: type as any })} className={`py-2 px-4 text-left text-xs font-bold rounded-lg border transition-all flex items-center justify-between ${formData.higherContributionType === type ? 'bg-amber-600 border-amber-400 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`} title={`Select ${type} as Higher Contribution Type`}>{type}{formData.higherContributionType === type ? <CheckCircle2 size={14} /> : <div className="w-3.5 h-3.5 rounded-full border border-slate-700" />}</button>
                                                     ))}
                                                 </div>
                                             </div>
@@ -602,7 +838,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                                 const components = formData.higherContributionComponents || INITIAL_STATUTORY_CONFIG.higherContributionComponents;
                                                 const isActive = components[comp.key as keyof typeof components];
                                                 return (
-                                                    <button key={comp.key} onClick={() => handleHigherContributionToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-amber-600 border-amber-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>
+                                                    <button key={comp.key} onClick={() => handleHigherContributionToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-amber-600 border-amber-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`} title={`Toggle ${comp.label} for Higher Contribution`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>
                                                 );
                                             })}
                                         </div>
@@ -615,8 +851,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="flex items-center gap-3 border-b border-slate-800 pb-3"><ShieldCheck className="text-pink-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-pink-400">ESI Corporation</h3></div>
                             <div className="space-y-4">
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiCeiling} onChange={e => setFormData({ ...formData, esiCeiling: +e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">EE Rate (%)</label><input type="number" step="0.001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiEmployeeRate * 100} onChange={e => setFormData({ ...formData, esiEmployeeRate: +e.target.value / 100 })} /></div>
+                                    <div className="space-y-1"><label htmlFor="esi-ceiling" className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label><input id="esi-ceiling" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiCeiling} onChange={e => setFormData({ ...formData, esiCeiling: +e.target.value })} title="ESI Eligibility Ceiling" /></div>
+                                    <div className="space-y-1"><label htmlFor="esi-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase">EE Rate (%)</label><input id="esi-employee-rate" type="number" step="0.001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiEmployeeRate * 100} onChange={e => setFormData({ ...formData, esiEmployeeRate: +e.target.value / 100 })} title="Employee ESI Rate" /></div>
                                 </div>
                             </div>
                         </div>
@@ -629,7 +865,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
                                 <div className="flex items-center gap-2 mb-2"><Percent size={14} className="text-amber-400" /><span className="text-[10px] font-bold text-slate-400 uppercase">Annual Bonus Policy</span></div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Rate (%)</label><input type="number" step="0.0001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={(formData.bonusRate * 100).toFixed(2)} onChange={e => setFormData({ ...formData, bonusRate: +e.target.value / 100 })} /></div>
+                                    <div className="space-y-1"><label htmlFor="bonus-rate" className="text-[10px] font-bold text-slate-500 uppercase">Rate (%)</label><input id="bonus-rate" type="number" step="0.0001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={(formData.bonusRate * 100).toFixed(2)} onChange={e => setFormData({ ...formData, bonusRate: +e.target.value / 100 })} title="Annual Bonus Rate" /></div>
                                     <div className="flex flex-col justify-end"><span className="text-[9px] text-slate-500 italic">Standard: 8.33% Min</span></div>
                                 </div>
                             </div>
@@ -648,10 +884,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
                                 <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><span className="text-xs font-bold text-slate-300 uppercase">Earned Leave (EL)</span></div>
                                 <div className="space-y-2">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.el.label} onChange={e => handleLeavePolicyChange('el', 'label', e.target.value)} /></div>
+                                    <div className="space-y-1"><label htmlFor="el-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="el-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.el.label} onChange={e => handleLeavePolicyChange('el', 'label', e.target.value)} title="Earned Leave Label" /></div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxPerYear} onChange={e => handleLeavePolicyChange('el', 'maxPerYear', +e.target.value)} /></div>
-                                        <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxCarryForward} onChange={e => handleLeavePolicyChange('el', 'maxCarryForward', +e.target.value)} /></div>
+                                        <div className="space-y-1"><label htmlFor="el-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="el-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxPerYear} onChange={e => handleLeavePolicyChange('el', 'maxPerYear', +e.target.value)} title="Maximum EL per Year" /></div>
+                                        <div className="space-y-1"><label htmlFor="el-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="el-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxCarryForward} onChange={e => handleLeavePolicyChange('el', 'maxCarryForward', +e.target.value)} title="Maximum EL Carry Forward" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -659,10 +895,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
                                 <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><span className="text-xs font-bold text-slate-300 uppercase">Sick Leave (SL)</span></div>
                                 <div className="space-y-2">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.sl.label} onChange={e => handleLeavePolicyChange('sl', 'label', e.target.value)} /></div>
+                                    <div className="space-y-1"><label htmlFor="sl-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="sl-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.sl.label} onChange={e => handleLeavePolicyChange('sl', 'label', e.target.value)} title="Sick Leave Label" /></div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxPerYear} onChange={e => handleLeavePolicyChange('sl', 'maxPerYear', +e.target.value)} /></div>
-                                        <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxCarryForward} onChange={e => handleLeavePolicyChange('sl', 'maxCarryForward', +e.target.value)} /></div>
+                                        <div className="space-y-1"><label htmlFor="sl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="sl-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxPerYear} onChange={e => handleLeavePolicyChange('sl', 'maxPerYear', +e.target.value)} title="Maximum SL per Year" /></div>
+                                        <div className="space-y-1"><label htmlFor="sl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="sl-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxCarryForward} onChange={e => handleLeavePolicyChange('sl', 'maxCarryForward', +e.target.value)} title="Maximum SL Carry Forward" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -670,10 +906,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
                                 <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><span className="text-xs font-bold text-slate-300 uppercase">Casual Leave (CL)</span></div>
                                 <div className="space-y-2">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.cl.label} onChange={e => handleLeavePolicyChange('cl', 'label', e.target.value)} /></div>
+                                    <div className="space-y-1"><label htmlFor="cl-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="cl-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.cl.label} onChange={e => handleLeavePolicyChange('cl', 'label', e.target.value)} title="Casual Leave Label" /></div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxPerYear} onChange={e => handleLeavePolicyChange('cl', 'maxPerYear', +e.target.value)} /></div>
-                                        <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxCarryForward} onChange={e => handleLeavePolicyChange('cl', 'maxCarryForward', +e.target.value)} /></div>
+                                        <div className="space-y-1"><label htmlFor="cl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="cl-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxPerYear} onChange={e => handleLeavePolicyChange('cl', 'maxPerYear', +e.target.value)} title="Maximum CL per Year" /></div>
+                                        <div className="space-y-1"><label htmlFor="cl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="cl-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxCarryForward} onChange={e => handleLeavePolicyChange('cl', 'maxCarryForward', +e.target.value)} title="Maximum CL Carry Forward" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -689,7 +925,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 {[{ key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' }, { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Special 1' }, { key: 'special2', label: 'Special 2' }, { key: 'special3', label: 'Special 3' }].map(comp => {
                                     const components = formData.leaveWagesComponents || INITIAL_STATUTORY_CONFIG.leaveWagesComponents;
                                     const isActive = components[comp.key as keyof typeof components];
-                                    return <button key={comp.key} onClick={() => handleLeaveWagesToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>;
+                                    return <button key={comp.key} onClick={() => handleLeaveWagesToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`} title={`Toggle ${comp.label} for Leave Encashment`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>;
                                 })}
                             </div>
                             <div className="flex justify-end"><span className="text-[10px] text-slate-500 italic">* Default logic uses Basic + DA. Adjust according to company policy.</span></div>
@@ -701,8 +937,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
                             <div className="flex items-center gap-3"><ScrollText className="text-amber-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-amber-400">Professional Tax (PT) Matrix</h3></div>
                             <div className="flex items-center gap-4">
-                                <select className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedStatePreset} onChange={handleStatePresetChange}>{Object.keys(PT_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
-                                <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900" checked={formData.enableProfessionalTax} onChange={e => setFormData({ ...formData, enableProfessionalTax: e.target.checked })} /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable PT</span></label>
+                                <select id="pt-preset-select" className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedStatePreset} onChange={handleStatePresetChange} title="Select State Professional Tax Preset">{Object.keys(PT_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
+                                <label htmlFor="enable-pt" className="flex items-center gap-2 cursor-pointer"><input id="enable-pt" type="checkbox" className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900" checked={formData.enableProfessionalTax} onChange={e => setFormData({ ...formData, enableProfessionalTax: e.target.checked })} title="Enable Professional Tax Deduction" /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable PT</span></label>
                             </div>
                         </div>
                         {formData.enableProfessionalTax && (
@@ -714,10 +950,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         <tbody className="divide-y divide-slate-800">
                                             {formData.ptSlabs.map((slab, i) => (
                                                 <tr key={i} className="group">
-                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.min} onChange={e => handleSlabChange(i, 'min', +e.target.value)} /></td>
-                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.max} onChange={e => handleSlabChange(i, 'max', +e.target.value)} /></td>
-                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} /></td>
-                                                    <td className="py-3 text-right"><button onClick={() => handleDeleteSlab(i)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button></td>
+                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.min} onChange={e => handleSlabChange(i, 'min', +e.target.value)} title="Minimum Earnings for Slab" /></td>
+                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.max} onChange={e => handleSlabChange(i, 'max', +e.target.value)} title="Maximum Earnings for Slab" /></td>
+                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} title="PT Amount for Slab" /></td>
+                                                    <td className="py-3 text-right"><button onClick={() => handleDeleteSlab(i)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete PT Slab"><Trash2 size={14} /></button></td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -733,15 +969,15 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
                             <div className="flex items-center gap-3"><HandCoins className="text-emerald-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Labour Welfare Fund (LWF)</h3></div>
                             <div className="flex items-center gap-4">
-                                <select className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedLWFState} onChange={handleLWFStateChange}>{Object.keys(LWF_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
-                                <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" className="w-4 h-4 rounded border-slate-700 text-emerald-500 bg-slate-900" checked={formData.enableLWF} onChange={e => setFormData({ ...formData, enableLWF: e.target.checked })} /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable LWF</span></label>
+                                <select id="lwf-state-select" className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedLWFState} onChange={handleLWFStateChange} title="Select State Labour Welfare Fund Preset">{Object.keys(LWF_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
+                                <label htmlFor="enable-lwf" className="flex items-center gap-2 cursor-pointer"><input id="enable-lwf" type="checkbox" className="w-4 h-4 rounded border-slate-700 text-emerald-500 bg-slate-900" checked={formData.enableLWF} onChange={e => setFormData({ ...formData, enableLWF: e.target.checked })} title="Enable Labour Welfare Fund Deduction" /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable LWF</span></label>
                             </div>
                         </div>
                         {formData.enableLWF && (
                             <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
-                                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Cycle</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white" value={formData.lwfDeductionCycle} onChange={e => setFormData({ ...formData, lwfDeductionCycle: e.target.value as any })}><option value="Monthly">Monthly</option><option value="HalfYearly">Half-Yearly</option><option value="Yearly">Yearly</option></select></div>
-                                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">EE Contribution (₹)</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployeeContribution} onChange={e => setFormData({ ...formData, lwfEmployeeContribution: +e.target.value })} /></div>
-                                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">ER Contribution (₹)</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployerContribution} onChange={e => setFormData({ ...formData, lwfEmployerContribution: +e.target.value })} /></div>
+                                <div className="space-y-1"><label htmlFor="lwf-cycle" className="text-[10px] font-bold text-slate-500 uppercase">Cycle</label><select id="lwf-cycle" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white" value={formData.lwfDeductionCycle} onChange={e => setFormData({ ...formData, lwfDeductionCycle: e.target.value as any })} title="LWF Deduction Cycle"><option value="Monthly">Monthly</option><option value="HalfYearly">Half-Yearly</option><option value="Yearly">Yearly</option></select></div>
+                                <div className="space-y-1"><label htmlFor="lwf-ee-contrib" className="text-[10px] font-bold text-slate-500 uppercase">EE Contribution (₹)</label><input id="lwf-ee-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployeeContribution} onChange={e => setFormData({ ...formData, lwfEmployeeContribution: +e.target.value })} title="Employee LWF Contribution" /></div>
+                                <div className="space-y-1"><label htmlFor="lwf-er-contrib" className="text-[10px] font-bold text-slate-500 uppercase">ER Contribution (₹)</label><input id="lwf-er-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployerContribution} onChange={e => setFormData({ ...formData, lwfEmployerContribution: +e.target.value })} title="Employer LWF Contribution" /></div>
                                 <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Total (₹)</label><div className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-emerald-400 font-mono font-bold">{(formData.lwfEmployeeContribution + formData.lwfEmployerContribution).toLocaleString()}</div></div>
                             </div>
                         )}
@@ -778,8 +1014,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4"><ImageIcon className="text-amber-400" size={24} /><h3 className="font-bold text-sky-400 uppercase tracking-widest text-sm">Establishment Branding</h3></div>
                         <div className="flex flex-col md:flex-row items-center gap-8">
                             <div className="relative group shrink-0">
-                                <div className="w-32 h-32 rounded-full border-4 border-slate-800 bg-white shadow-2xl overflow-hidden"><img src={currentLogo} className="w-full h-full object-cover" alt="Establishment Logo" /></div>
-                                <button onClick={() => logoInputRef.current?.click()} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-full flex items-center justify-center transition-opacity"><Camera className="text-white" size={24} /></button>
+                                <div className="relative flex items-center justify-center w-32 h-32 rounded-full bg-[#0a0f1d] shadow-2xl overflow-hidden border-4 border-white"><img src={currentLogo} className="w-full h-full object-cover" alt="Establishment Logo" /></div>
+                                <button onClick={() => logoInputRef.current?.click()} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-full flex items-center justify-center transition-opacity" title="Upload Logo"><Camera className="text-white" size={24} /></button>
                             </div>
                             <div className="space-y-4"><div><h4 className="font-bold text-white text-lg">Company Logo</h4><p className="text-xs text-slate-400 mt-1">This logo will appear on all Pay Slips, Reports, and the Login screen.</p></div><button onClick={() => logoInputRef.current?.click()} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-900/20 flex items-center gap-2"><Upload size={14} /> Upload New Logo</button><input ref={logoInputRef} type="file" className="hidden" accept="image/*" onChange={handleLogoChange} /></div>
                         </div>
@@ -793,45 +1029,45 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1">Legal Identity & Identification</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.establishmentName} onChange={e => setProfileData({ ...profileData, establishmentName: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Trade Name (If Any)</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.tradeName} onChange={e => setProfileData({ ...profileData, tradeName: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)*</label><input type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500" value={profileData.cin} onChange={e => setProfileData({ ...profileData, cin: e.target.value })} placeholder="U00000XX0000XXX000000" /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-sky-400 uppercase">LIN No (Labour ID)*</label><input type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500" value={profileData.lin} onChange={e => setProfileData({ ...profileData, lin: e.target.value })} placeholder="L0000000000" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label><input id="profile-est-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500 uppercase" placeholder="Your Name - as mentioned in App request mail" value={profileData.establishmentName} onChange={e => setProfileData({ ...profileData, establishmentName: e.target.value.toUpperCase() })} title="Establishment Name" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-trade-name" className="text-[10px] font-bold text-slate-400 uppercase">Trade Name (If Any)</label><input id="profile-trade-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Trade Name" value={profileData.tradeName} onChange={e => setProfileData({ ...profileData, tradeName: e.target.value })} title="Trade Name" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-cin" className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)*</label><input id="profile-cin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.cin} onChange={e => setProfileData({ ...profileData, cin: e.target.value })} placeholder="U00000XX0000XXX000000" title="Corporate Identification Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-lin" className="text-[10px] font-bold text-sky-400 uppercase">LIN No (Labour ID)*</label><input id="profile-lin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.lin} onChange={e => setProfileData({ ...profileData, lin: e.target.value })} placeholder="L0000000000" title="Labour Identification Number" /></div>
                                 </div>
                             </div>
                             {/* ... Registration Codes ... */}
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Registration Codes</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">PF Code</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.pfCode} onChange={e => setProfileData({ ...profileData, pfCode: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">ESI Code</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.esiCode} onChange={e => setProfileData({ ...profileData, esiCode: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">GST No</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.gstNo} onChange={e => setProfileData({ ...profileData, gstNo: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">PAN No</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.pan} onChange={e => setProfileData({ ...profileData, pan: e.target.value })} /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pf-code" className="text-[10px] font-bold text-slate-400 uppercase">PF Code</label><input id="profile-pf-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PF Code" value={profileData.pfCode} onChange={e => setProfileData({ ...profileData, pfCode: e.target.value })} title="PF Code Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-esi-code" className="text-[10px] font-bold text-slate-400 uppercase">ESI Code</label><input id="profile-esi-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="ESI Code" value={profileData.esiCode} onChange={e => setProfileData({ ...profileData, esiCode: e.target.value })} title="ESI Code Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-gst-no" className="text-[10px] font-bold text-slate-400 uppercase">GST No</label><input id="profile-gst-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="GST Number" value={profileData.gstNo} onChange={e => setProfileData({ ...profileData, gstNo: e.target.value })} title="GST Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pan-no" className="text-[10px] font-bold text-slate-400 uppercase">PAN No</label><input id="profile-pan-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PAN Number" value={profileData.pan} onChange={e => setProfileData({ ...profileData, pan: e.target.value })} title="PAN Number" /></div>
                                 </div>
                             </div>
                             {/* ... Address ... */}
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Address Details (Registered Office)</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Door No / Flat No</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.doorNo} onChange={e => setProfileData({ ...profileData, doorNo: e.target.value })} /></div>
-                                    <div className="space-y-1 md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Building Name / Landmark</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.buildingName} onChange={e => setProfileData({ ...profileData, buildingName: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Street</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.street} onChange={e => setProfileData({ ...profileData, street: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Locality</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.locality} onChange={e => setProfileData({ ...profileData, locality: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Area</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.area} onChange={e => setProfileData({ ...profileData, area: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.city} onChange={e => setProfileData({ ...profileData, city: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">State / Union Territory</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.state} onChange={e => setProfileData({ ...profileData, state: e.target.value })}>{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Pin Code</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.pincode} onChange={e => setProfileData({ ...profileData, pincode: e.target.value })} /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-door-no" className="text-[10px] font-bold text-slate-400 uppercase">Door No / Flat No</label><input id="profile-door-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Door No" value={profileData.doorNo} onChange={e => setProfileData({ ...profileData, doorNo: e.target.value })} title="Door/Flat Number" /></div>
+                                    <div className="space-y-1 md:col-span-2"><label htmlFor="profile-building" className="text-[10px] font-bold text-slate-400 uppercase">Building Name / Landmark</label><input id="profile-building" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Building Name" value={profileData.buildingName} onChange={e => setProfileData({ ...profileData, buildingName: e.target.value })} title="Building Name or Landmark" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-street" className="text-[10px] font-bold text-slate-400 uppercase">Street</label><input id="profile-street" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Street" value={profileData.street} onChange={e => setProfileData({ ...profileData, street: e.target.value })} title="Street Name" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-locality" className="text-[10px] font-bold text-slate-400 uppercase">Locality</label><input id="profile-locality" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Locality" value={profileData.locality} onChange={e => setProfileData({ ...profileData, locality: e.target.value })} title="Locality" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-area" className="text-[10px] font-bold text-slate-400 uppercase">Area</label><input id="profile-area" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Area" value={profileData.area} onChange={e => setProfileData({ ...profileData, area: e.target.value })} title="Area Name" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-city" className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label><input id="profile-city" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="City" value={profileData.city} onChange={e => setProfileData({ ...profileData, city: e.target.value })} title="City or Town" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-state" className="text-[10px] font-bold text-slate-400 uppercase">State / Union Territory</label><select id="profile-state" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.state} onChange={e => setProfileData({ ...profileData, state: e.target.value })} title="Select State">{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pincode" className="text-[10px] font-bold text-slate-400 uppercase">Pin Code</label><input id="profile-pincode" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="600001" value={profileData.pincode} onChange={e => setProfileData({ ...profileData, pincode: e.target.value })} title="Pincode" /></div>
                                 </div>
                             </div>
                             {/* ... Contact ... */}
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Contact & Online Presence</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Mobile No</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.mobile} onChange={e => setProfileData({ ...profileData, mobile: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Land Line (Telephone)</label><input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.telephone} onChange={e => setProfileData({ ...profileData, telephone: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Mail size={10} /> Official Email</label><input type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.email} onChange={e => setProfileData({ ...profileData, email: e.target.value })} /></div>
-                                    <div className="space-y-1 md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Globe size={10} /> Corporate Website</label><input type="url" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono" value={profileData.website} onChange={e => setProfileData({ ...profileData, website: e.target.value })} /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Nature of Business</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.natureOfBusiness} onChange={e => setProfileData({ ...profileData, natureOfBusiness: e.target.value })}>{NATURE_OF_BUSINESS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select></div>
+                                    <div className="space-y-1"><label htmlFor="profile-mobile" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Mobile No</label><input id="profile-mobile" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="Mobile Number" value={profileData.mobile} onChange={e => setProfileData({ ...profileData, mobile: e.target.value })} title="Mobile Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-telephone" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Land Line (Telephone)</label><input id="profile-telephone" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="Landline" value={profileData.telephone} onChange={e => setProfileData({ ...profileData, telephone: e.target.value })} title="Telephone Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-email" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Mail size={10} /> Official Email</label><input id="profile-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="mail@example.com" value={profileData.email} onChange={e => setProfileData({ ...profileData, email: e.target.value })} title="Official Email Address" /></div>
+                                    <div className="space-y-1 md:col-span-2"><label htmlFor="profile-website" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Globe size={10} /> Corporate Website</label><input id="profile-website" type="url" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="https://www.example.com" value={profileData.website} onChange={e => setProfileData({ ...profileData, website: e.target.value })} title="Corporate Website URL" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-business-nature" className="text-[10px] font-bold text-slate-400 uppercase">Nature of Business</label><select id="profile-business-nature" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.natureOfBusiness} onChange={e => setProfileData({ ...profileData, natureOfBusiness: e.target.value })} title="Select Nature of Business">{NATURE_OF_BUSINESS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select></div>
                                 </div>
                             </div>
                         </div>
@@ -847,7 +1083,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <Megaphone size={24} />
                             </div>
                             <div>
-                                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Developer Message Board</h2>
+                                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Developer Options</h2>
                                 <p className="text-xs text-slate-400">Global Scrolling News & Statutory Compliance Updates</p>
                             </div>
                         </div>
@@ -869,6 +1105,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             }}
                             disabled={isSyncing}
                             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20"
+                            title="Sync News with Cloud"
                         >
                             {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
                             {isSyncing ? 'SYNCING...' : 'SYNC WITH CLOUD'}
@@ -877,36 +1114,42 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
                     <div className="grid grid-cols-1 gap-6">
                         <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Dashboard News Ticker (Marquee)</label>
+                            <label htmlFor="dev-flash-news" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Dashboard News Ticker (Marquee)</label>
                             <textarea
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[100px]"
+                                id="dev-flash-news"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[100px] placeholder:text-slate-500/60"
                                 placeholder="Enter scrolling news message..."
                                 value={profileData.flashNews || ''}
                                 onChange={e => setProfileData({ ...profileData, flashNews: e.target.value })}
+                                title="Flash News Message"
                             />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-2">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">AI Studio Integration URL</label>
+                                <label htmlFor="dev-ai-url" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">AI Studio Integration URL</label>
                                 <div className="relative">
                                     <Globe className="absolute left-3 top-3 text-slate-500" size={18} />
                                     <input
+                                        id="dev-ai-url"
                                         type="url"
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pl-10 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pl-10 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-500/60"
                                         placeholder="https://..."
                                         value={profileData.externalAppUrl || ''}
                                         onChange={e => setProfileData({ ...profileData, externalAppUrl: e.target.value })}
+                                        title="External AI Application URL"
                                     />
                                 </div>
                             </div>
                             <div className="space-y-2">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Post-Login Modal Message</label>
+                                <label htmlFor="dev-post-login" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Post-Login Modal Message</label>
                                 <textarea
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[80px]"
+                                    id="dev-post-login"
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[80px] placeholder:text-slate-500/60"
                                     placeholder="Enter statutory compliance or system message..."
                                     value={profileData.postLoginMessage || ''}
                                     onChange={e => setProfileData({ ...profileData, postLoginMessage: e.target.value })}
+                                    title="Post-Login Information Message"
                                 />
                             </div>
                         </div>
@@ -1044,7 +1287,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             {showResetModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Modal"><X size={20} /></button>}
                         <div className="flex flex-col items-center gap-2">
                             <div className="p-4 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2">
                                 <AlertTriangle size={32} />
@@ -1054,11 +1297,11 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                         <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
                             <div className="flex items-center gap-2 text-sm text-slate-400 mb-2"><KeyRound size={16} /><span>Confirm Identity</span></div>
-                            <input type="password" placeholder="Enter Login Password" autoFocus className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executeFactoryReset()} />
+                            <input type="password" placeholder="Enter Login Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all disabled:opacity-50`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executeFactoryReset()} />
                             {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
                         </div>
-                        <button onClick={executeFactoryReset} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-900/20 transition-all flex items-center justify-center gap-2">
-                            <Trash2 size={18} /> CONFIRM DELETE ALL DATA
+                        <button onClick={executeFactoryReset} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-900/20 transition-all flex items-center justify-center gap-2">
+                            {isProcessing ? <><Loader2 size={18} className="animate-spin" /> ERASING DATA...</> : <><Trash2 size={18} /> CONFIRM DELETE ALL DATA</>}
                         </button>
                     </div>
                 </div>
@@ -1067,7 +1310,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             {showPayrollResetModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowPayrollResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button onClick={() => setShowPayrollResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Modal"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full border border-amber-900/50 mb-2">
                                 <Trash2 size={32} />
@@ -1077,11 +1320,11 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                         <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
                             <div className="flex items-center gap-2 text-sm text-slate-400 mb-2"><KeyRound size={16} /><span>Confirm Identity</span></div>
-                            <input type="password" placeholder="Enter Login Password" autoFocus className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
+                            <input type="password" placeholder="Enter Login Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all disabled:opacity-50`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
                             {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
                         </div>
-                        <button onClick={executePayrollReset} className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-900/20 transition-all flex items-center justify-center gap-2">
-                            <CheckCircle2 size={18} /> CONFIRM PAYROLL RESET
+                        <button onClick={executePayrollReset} disabled={isProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-900/20 transition-all flex items-center justify-center gap-2">
+                            {isProcessing ? <><Loader2 size={18} className="animate-spin" /> CLEARING PAYROLL DATA...</> : <><CheckCircle2 size={18} /> CONFIRM PAYROLL RESET</>}
                         </button>
                     </div>
                 </div>
@@ -1091,7 +1334,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
                         {!isProcessing && (
-                            <button onClick={() => { setShowBackupModal(false); setSelectedBackupFile(null); setEncryptionKey(''); }} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                            <button onClick={() => { setShowBackupModal(false); setSelectedBackupFile(null); setEncryptionKey(''); }} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Modal"><X size={20} /></button>
                         )}
                         <div className="flex flex-col items-center gap-2">
                             <div className={`p-4 rounded-full border mb-2 transition-all duration-500 ${processProgress === 100 ? 'bg-emerald-900/30 text-emerald-400 border-emerald-500/50' : isProcessing ? 'bg-indigo-900/30 text-indigo-400 border-indigo-500/50' : 'bg-blue-900/20 text-blue-400 border-blue-900/50'}`}>
@@ -1131,11 +1374,20 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         </div>
                                     </div>
                                 )}
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">{backupMode === 'EXPORT' ? 'Set Encryption Password' : 'Enter Decryption Password'}</label>
-                                    <input type="password" placeholder="Enter Password" className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={encryptionKey} onChange={(e) => setEncryptionKey(e.target.value)} />
-                                </div>
-                                <button onClick={backupMode === 'EXPORT' ? () => requireAuth(handleEncryptedExport) : () => { const file = backupFileRef.current?.files?.[0]; if (!file || !encryptionKey) { showAlert?.('warning', 'Input Required', 'Please select a file and enter password.'); return; } requireAuth(initiateRestore); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                                {!isSqliteFile && (
+                                    <div className="space-y-1">
+                                        <label htmlFor="backup-encryption-key" className="text-[10px] font-bold text-slate-500 uppercase">{backupMode === 'EXPORT' ? 'Set Encryption Password' : 'Enter Decryption Password'}</label>
+                                        <input id="backup-encryption-key" type="password" placeholder="Enter Password" className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={encryptionKey} onChange={(e) => setEncryptionKey(e.target.value)} title={backupMode === 'EXPORT' ? 'Backup Encryption Password' : 'Backup Decryption Password'} />
+                                    </div>
+                                )}
+                                {isSqliteFile && (
+                                    <div className="bg-emerald-900/10 border border-emerald-500/20 p-3 rounded-xl">
+                                        <p className="text-[10px] text-emerald-400 leading-relaxed font-bold">
+                                            Auto-detected Database Backup. No file password required.
+                                        </p>
+                                    </div>
+                                )}
+                                <button onClick={backupMode === 'EXPORT' ? () => requireAuth(handleEncryptedExport) : () => { const file = selectedBackupFile; if (!file || (!encryptionKey && !isSqliteFile)) { showAlert?.('warning', 'Input Required', 'Please select a file and enter password.'); return; } requireAuth(initiateRestore); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
                                     {backupMode === 'EXPORT' ? 'DOWNLOAD BACKUP' : 'RESTORE DATA'}
                                 </button>
                             </div>
@@ -1159,35 +1411,61 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="space-y-6">
                             <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
-                                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                    <Lock size={14} className="text-pink-500" /> Current License Info
-                                </h3>
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                        <Lock size={14} className="text-pink-500" /> Current License Info
+                                    </h3>
+                                    <button
+                                        onClick={async () => {
+                                            setIsSyncing(true);
+                                            try {
+                                                const { validateLicenseStartup } = await import('../services/licenseService');
+                                                await validateLicenseStartup();
+                                                setLicenseInfo(getStoredLicense());
+                                                showAlert?.('success', 'Sync Complete', 'License data successfully refreshed from cloud.');
+                                            } catch (err) {
+                                                showAlert?.('error', 'Sync Failed', 'Could not connect to cloud services.');
+                                            } finally {
+                                                setIsSyncing(false);
+                                            }
+                                        }}
+                                        disabled={isSyncing}
+                                        className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-[10px] font-black uppercase tracking-widest rounded-lg border border-slate-700 transition-all text-sky-400 disabled:opacity-50"
+                                    >
+                                        <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
+                                        {isSyncing ? 'Syncing...' : 'Sync Cloud'}
+                                    </button>
+                                </div>
 
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
                                         <span className="text-xs text-slate-400">Status</span>
-                                        <span className={`text-xs font-black uppercase px-2 py-0.5 rounded ${licenseInfo?.isTrial ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                                        <span className={`text-xs font-black uppercase px-2 py-0.5 rounded ${licenseInfo?.isTrial ? 'bg-amber-500/10 text-amber-500' : licenseInfo?.status === 'REGISTERED' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
                                             {licenseInfo?.status || 'UNREGISTERED'}
                                         </span>
                                     </div>
                                     <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
                                         <span className="text-xs text-slate-400">User ID</span>
-                                        <span className="text-xs font-mono text-white">{licenseInfo?.userID || 'N/A'}</span>
+                                        <span className={`text-xs font-mono ${licenseInfo?.userID ? 'text-white' : 'text-slate-500 italic'}`}>{licenseInfo?.userID || 'N/A'}</span>
                                     </div>
                                     <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
                                         <span className="text-xs text-slate-400">Email ID</span>
-                                        <span className="text-[10px] text-slate-300 truncate max-w-[150px]" title={licenseInfo?.registeredTo}>{licenseInfo?.registeredTo || 'N/A'}</span>
+                                        <span className={`text-[10px] truncate max-w-[150px] ${licenseInfo?.registeredTo ? 'text-slate-300' : 'text-slate-500 italic'}`} title={licenseInfo?.registeredTo}>{licenseInfo?.registeredTo || 'N/A'}</span>
                                     </div>
                                     <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
                                         <span className="text-xs text-slate-400">Mobile No</span>
-                                        <span className="text-xs font-mono text-white">{licenseInfo?.registeredMobile || 'N/A'}</span>
+                                        <span className={`text-xs font-mono ${licenseInfo?.registeredMobile ? 'text-white' : 'text-slate-500 italic'}`}>{licenseInfo?.registeredMobile || 'N/A'}</span>
                                     </div>
                                     <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
                                         <span className="text-xs text-slate-400">Machine ID</span>
-                                        <span className="text-[10px] font-mono text-slate-300 truncate max-w-[150px]" title={licenseInfo?.machineId}>{licenseInfo?.machineId || 'Fetching...'}</span>
+                                        <span className={`text-[10px] font-mono truncate max-w-[150px] ${licenseInfo?.machineId ? 'text-slate-300' : 'text-slate-500 italic'}`} title={licenseInfo?.machineId}>{licenseInfo?.machineId || 'Fetching...'}</span>
                                     </div>
-                                    <div className="flex justify-between items-center py-2 text-pink-400 font-bold">
-                                        <span className="text-xs text-slate-400">Expiry Date</span>
+                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                                        <span className="text-xs text-slate-400">Employee Data Limit</span>
+                                        <span className={`text-xs font-mono font-black ${licenseInfo?.dataSize ? 'text-emerald-400' : 'text-slate-500 italic'}`}>{licenseInfo?.dataSize || 'N/A'}</span>
+                                    </div>
+                                    <div className={`flex justify-between items-center py-2 font-bold ${licenseInfo?.expiryDate ? 'text-pink-400' : 'text-slate-500 italic'}`}>
+                                        <span className="text-xs text-slate-400 font-normal">Expiry Date</span>
                                         <span className="text-xs">{licenseInfo?.expiryDate || 'N/A'}</span>
                                     </div>
                                 </div>
@@ -1208,27 +1486,27 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
                                 <div className="space-y-4">
                                     <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">Full Name / Authorized Person</label>
-                                        <input ref={fullNameRef} type="text" placeholder="Enter Full Name" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserName} onChange={e => setNewUserName(e.target.value)} />
+                                        <label htmlFor="license-full-name" className="text-[10px] font-bold text-slate-500 uppercase pl-1">Full Name / Authorized Person</label>
+                                        <input id="license-full-name" ref={fullNameRef} type="text" placeholder="Your Name - as mentioned in App request mail" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserName} onChange={e => setNewUserName(e.target.value)} title="Full Name for License" />
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">User ID</label>
-                                            <input type="text" placeholder="User ID" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-mono focus:ring-2 focus:ring-blue-500/50 outline-none transition-all uppercase" value={newUserID} onChange={e => setNewUserID(e.target.value.toUpperCase())} />
+                                            <label htmlFor="license-user-id" className="text-[10px] font-bold text-slate-500 uppercase pl-1">User ID</label>
+                                            <input id="license-user-id" type="text" placeholder="User ID" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-mono focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserID} onChange={e => setNewUserID(e.target.value)} title="License User ID" />
                                         </div>
                                         <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">License Key (16-Digit)</label>
-                                            <input type="text" placeholder="XXXX-XXXX-XXXX-XXXX" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-mono focus:ring-2 focus:ring-pink-500/50 outline-none transition-all uppercase" value={newLicenseKey} onChange={e => setNewLicenseKey(e.target.value.toUpperCase())} />
+                                            <label htmlFor="license-key-input" className="text-[10px] font-bold text-slate-500 uppercase pl-1">License Key (16-Digit)</label>
+                                            <input id="license-key-input" type="text" placeholder="XXXX-XXXX-XXXX-XXXX" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white placeholder:text-slate-500 text-sm font-mono focus:ring-2 focus:ring-pink-500/50 outline-none transition-all uppercase" value={newLicenseKey} onChange={e => setNewLicenseKey(e.target.value.toUpperCase())} title="16-Digit License Key" />
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">Email ID</label>
-                                            <input type="email" title="Registered Email" placeholder="Email Address" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegEmail} onChange={e => setNewRegEmail(e.target.value)} />
+                                            <label htmlFor="license-email" className="text-[10px] font-bold text-slate-500 uppercase pl-1">Email ID</label>
+                                            <input id="license-email" type="email" title="Registered Email" placeholder="Email Address" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegEmail} onChange={e => setNewRegEmail(e.target.value)} />
                                         </div>
                                         <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase pl-1">Mobile No</label>
-                                            <input type="tel" title="Activation Mobile Number" placeholder="10-digit mobile" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegMobile} onChange={e => setNewRegMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} />
+                                            <label htmlFor="license-mobile" className="text-[10px] font-bold text-slate-500 uppercase pl-1">Mobile No</label>
+                                            <input id="license-mobile" type="tel" title="Activation Mobile Number" placeholder="10-digit mobile" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegMobile} onChange={e => setNewRegMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} />
                                         </div>
                                     </div>
 
@@ -1265,12 +1543,113 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             </div>
                         </div>
                     </div>
+
                 </div>
             )}
+            {activeTab === 'USERS' && (
+                <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                        <div className="p-2 bg-sky-900/30 text-sky-400 rounded-lg border border-sky-500/20">
+                            <Users size={24} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-black text-white uppercase tracking-tighter">User Management</h2>
+                            <p className="text-xs text-slate-400">Account Control & Access Permissions</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-6">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-sky-900/30 text-sky-400 rounded-lg border border-sky-500/20"><Users size={20} /></div>
+                            <div>
+                                <h3 className="text-sm font-black text-white uppercase tracking-tighter">App User Management</h3>
+                                <p className="text-xs text-slate-400">Create & manage BharatPay Pro login accounts</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Left: User List */}
+                            <div className="bg-slate-900/50 rounded-2xl border border-slate-800 overflow-hidden">
+                                <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-2">
+                                    <Users size={14} className="text-sky-400" />
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Existing Users ({appUsers.length})</span>
+                                </div>
+                                {appUsers.length === 0 ? (
+                                    <div className="p-6 text-center text-slate-500 text-xs italic">No users created yet.</div>
+                                ) : (
+                                    <div className="divide-y divide-slate-800/60">
+                                        {appUsers.map(u => (
+                                            <div key={u.username} className="px-4 py-3 flex items-center justify-between hover:bg-slate-800/40 transition-colors group">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`p-1.5 rounded-lg ${u.role === 'Administrator' ? 'bg-amber-900/20 text-amber-500' : 'bg-slate-800 text-slate-400'}`}>
+                                                        <ShieldCheck size={14} />
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xs font-black text-white uppercase tracking-tighter">{u.name}</div>
+                                                        <div className="text-[10px] text-slate-500 flex items-center gap-2">
+                                                            <span>@{u.username}</span>
+                                                            <span className="w-1 h-1 rounded-full bg-slate-700"></span>
+                                                            <span className={`uppercase font-bold ${u.role === 'Administrator' ? 'text-amber-600' : 'text-slate-500'}`}>{u.role}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <button onClick={() => handleUmEdit(u)} className="p-1.5 hover:bg-slate-700 text-sky-400 rounded-md transition-colors" title="Edit User"><Edit2 size={14} /></button>
+                                                    <button onClick={() => { if (u.username === currentUser?.username) { showAlert?.('error', 'Action Restricted', 'Cannot delete your own account.'); } else { requireAuth(() => handleUmDelete(u.username)); } }} className="p-1.5 hover:bg-red-900/20 text-red-400 rounded-md transition-colors" title="Delete User"><Trash2 size={14} /></button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Right: Add/Edit Form */}
+                            <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
+                                <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                    {umEditId ? <Edit2 size={12} className="text-sky-400" /> : <UserPlus size={12} className="text-sky-400" />}
+                                    {umEditId ? 'Modify Account' : 'Create New Account'}
+                                </h3>
+
+                                <div className="space-y-3">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Full Name</label>
+                                        <input ref={umNameRef} type="text" value={umForm.name} onChange={e => setUmForm({ ...umForm, name: e.target.value })} placeholder="Enter user's full name" className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Username / ID</label>
+                                        <input type="text" value={umForm.username} onChange={e => setUmForm({ ...umForm, username: e.target.value.toLowerCase().replace(/\s/g, '') })} placeholder="Pick a unique login ID" disabled={!!umEditId} className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none disabled:opacity-50" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Login Password</label>
+                                        <div className="relative">
+                                            <input type={umShowPwd ? 'text' : 'password'} value={umForm.password} onChange={e => setUmForm({ ...umForm, password: e.target.value })} placeholder="Enter secure password" className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none pr-10" />
+                                            <button onClick={() => setUmShowPwd(!umShowPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-sky-400 transition-colors">{umShowPwd ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">System Role</label>
+                                        <div className="flex gap-2 p-1 bg-slate-800 rounded-xl border border-slate-700">
+                                            {(['Administrator', 'User'] as const).map(role => (
+                                                <button key={role} onClick={() => setUmForm({ ...umForm, role })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${umForm.role === role ? 'bg-sky-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>{role}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {umError && <div className="p-2 bg-red-900/20 border border-red-500/20 rounded-lg text-[10px] text-red-400 flex items-center gap-2"><AlertCircle size={12} /> {umError}</div>}
+                                    <div className="flex gap-2 pt-2">
+                                        {umEditId && <button onClick={() => { setUmEditId(null); setUmForm({ name: '', username: '', password: '', role: 'User' }); }} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all">Cancel</button>}
+                                        <button onClick={handleUmSave} className="flex-[2] py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-black uppercase text-[10px] tracking-widest rounded-xl shadow-lg shadow-sky-500/20 transition-all flex items-center justify-center gap-2">{umEditId ? 'Update User' : 'Save User'}</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {showOverwriteConfirm && (
                 <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowOverwriteConfirm(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button onClick={() => setShowOverwriteConfirm(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Modal"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2">
                                 <AlertTriangle size={32} />
@@ -1291,7 +1670,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             {showAuthModal && (
                 <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-indigo-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Authentication Modal"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className="p-4 bg-indigo-900/20 text-indigo-500 rounded-full border border-indigo-900/50 mb-2">
                                 <KeyRound size={32} />
@@ -1299,7 +1678,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <h3 className="text-xl font-black text-white text-center">AUTHORIZE ACTION</h3>
                         </div>
                         <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <input type="password" placeholder="Login Password" autoFocus className={`w-full bg-[#0f172a] border ${authError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all`} value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }} onKeyDown={(e) => e.key === 'Enter' && handleAuthSubmit()} />
+                            <label htmlFor="auth-pwd" className="sr-only">Login Password</label>
+                            <input id="auth-pwd" type="password" placeholder="Login Password" autoFocus className={`w-full bg-[#0f172a] border ${authError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all`} value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }} onKeyDown={(e) => e.key === 'Enter' && handleAuthSubmit()} title="Login Password" />
                             {authError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{authError}</p>}
                         </div>
                         <button onClick={handleAuthSubmit} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">

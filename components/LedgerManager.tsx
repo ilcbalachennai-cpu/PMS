@@ -2,7 +2,8 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2, UserX, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Employee, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy } from '../types';
+import { Employee, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile, Attendance } from '../types';
+import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
 
 interface LedgerManagerProps {
     employees: Employee[];
@@ -19,6 +20,7 @@ interface LedgerManagerProps {
     hideContextSelector?: boolean;
     viewMode?: 'leave' | 'advance';
     isReadOnly?: boolean;
+    companyProfile: CompanyProfile;
 }
 
 const LedgerManager: React.FC<LedgerManagerProps> = ({
@@ -32,7 +34,8 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
     savedRecords,
     hideContextSelector = false,
     viewMode = 'leave',
-    isReadOnly = false
+    isReadOnly = false,
+    companyProfile
 }) => {
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -197,7 +200,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
         }, 500);
     };
 
-    const downloadTemplate = () => {
+    const downloadTemplate = async () => {
         const wb = XLSX.utils.book_new();
 
         if (viewMode === 'leave') {
@@ -226,7 +229,8 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
             XLSX.utils.book_append_sheet(wb, ws, "Advance_Ledger");
         }
 
-        XLSX.writeFile(wb, `${viewMode}_Ledger_Template.xlsx`);
+        const fileName = getStandardFileName(`${viewMode}_Ledger_Template`, companyProfile, month, year);
+        await generateExcelWorkbook(wb, fileName);
     };
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {

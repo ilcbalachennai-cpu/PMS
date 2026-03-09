@@ -3,6 +3,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch } from '../types';
+import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
 import { ModalType } from './Shared/CustomModal';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
@@ -62,7 +63,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         </button>
     );
 
-    const downloadMasterTemplate = () => {
+    const downloadMasterTemplate = async () => {
         const headers = [
             "Employee ID", "Name",
             "Present Days", "EL (Availed)", "EL Encash", "SL (Sick)", "CL (Casual)", "LOP",
@@ -98,7 +99,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Master_Input");
-        XLSX.writeFile(wb, `Master_Payroll_Template_${props.month}_${props.year}.xlsx`);
+        const fileName = getStandardFileName('Master_Payroll_Template', props.companyProfile, props.month, props.year);
+        await generateExcelWorkbook(wb, fileName);
     };
 
     const handleMasterImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -323,6 +325,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         leaveLedgers={props.leaveLedgers}
                         setLeaveLedgers={props.setLeaveLedgers}
                         hideContextSelector={true}
+                        companyProfile={props.companyProfile}
                     />
                 </div>
 
@@ -341,6 +344,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         savedRecords={props.savedRecords}
                         hideContextSelector={true}
                         viewMode="advance"
+                        companyProfile={props.companyProfile}
                     />
                 </div>
 
@@ -353,6 +357,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         year={props.year}
                         savedRecords={props.savedRecords}
                         hideContextSelector={true}
+                        companyProfile={props.companyProfile}
                     />
                 </div>
 

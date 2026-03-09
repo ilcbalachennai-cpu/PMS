@@ -1,7 +1,7 @@
 {
   "name": "bharatpay-pro",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.9",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -10,15 +10,39 @@
     "preview": "vite preview",
     "dev:electron": "concurrently \"npm run dev\" \"npm run electron:serve\"",
     "electron:serve": "wait-on tcp:3000 && npx tsc -p electron/tsconfig.json && node -e \"const fs=require('fs'); if(!fs.existsSync('dist-electron')) fs.mkdirSync('dist-electron'); fs.writeFileSync('dist-electron/package.json', '{\\\"type\\\": \\\"commonjs\\\"}')\" && cross-env NODE_ENV=development electron .",
-    "build:electron": "npm run build && npx tsc -p electron/tsconfig.json && node -e \"const fs=require('fs'); if(!fs.existsSync('dist-electron')) fs.mkdirSync('dist-electron'); fs.writeFileSync('dist-electron/package.json', '{\\\"type\\\": \\\"commonjs\\\"}')\" && electron-builder",
+    "build:electron": "npm run build && node electron/build.cjs && electron-builder",
     "rebuild": "electron-rebuild -f -w better-sqlite3"
+  },
+  "build": {
+    "appId": "com.ilcbala.bharatpaypro",
+    "productName": "BPP_APP",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "BPP_APP_V01.0.9.EXE"
+    },
+    "files": [
+      "dist",
+      "dist-electron",
+      "package.json"
+    ]
   },
   "dependencies": {
     "@google/genai": "^1.42.0",
-    "bcrypt": "^5.1.1",
     "better-sqlite3": "^11.5.0",
+    "bytenode": "^1.5.7",
     "crypto-js": "4.2.0",
     "date-fns": "^4.1.0",
+    "follow-redirects": "^1.15.11",
     "fs-extra": "^11.2.0",
     "jspdf": "2.5.1",
     "jspdf-autotable": "3.8.2",
@@ -33,7 +57,6 @@
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",
     "@tailwindcss/vite": "^4.2.1",
-    "@types/bcrypt": "^5.0.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^22.14.0",
@@ -45,7 +68,9 @@
     "cross-env": "^7.0.3",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3",
+    "javascript-obfuscator": "^5.3.0",
     "postcss": "^8.5.6",
+    "rollup-plugin-javascript-obfuscator": "^1.0.4",
     "tailwindcss": "^4.2.1",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
