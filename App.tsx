@@ -401,8 +401,25 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
       // 1. Download if not already ready
       if (!updateDownloaded) {
-        const url = downloadUrl || localStorage.getItem('app_download_url');
-        if (!url) return setIsUpdateDownloading(false);
+        let finalUrl = "";
+        try {
+          // Detect architecture requirements
+          // @ts-ignore
+          const osVersion = await window.electronAPI.getOSVersion();
+          const isLegacyWin = osVersion.startsWith('6.'); // Windows 7 (6.1), 8 (6.2), 8.1 (6.3)
+          
+          if (isLegacyWin) {
+             console.log("OS: Legacy Windows detected. Selecting Win7 package.");
+             finalUrl = localStorage.getItem('app_download_url_win7') || "";
+          } else {
+             console.log("OS: Modern Windows detected. Selecting Win10 package.");
+             finalUrl = downloadUrl || localStorage.getItem('app_download_url') || "";
+          }
+        } catch (e) {
+          finalUrl = downloadUrl || localStorage.getItem('app_download_url') || "";
+        }
+
+        if (!finalUrl) return setIsUpdateDownloading(false);
 
         // --- NEW: Download with 10s Timeout for UI responsiveness ---
         let downloadTimedOut = false;
@@ -415,7 +432,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
         try {
           await Promise.race([
-            (window as any).electronAPI.startUpdateDownload(url),
+            (window as any).electronAPI.startUpdateDownload(finalUrl),
             timeoutPromise
           ]);
         } catch (err: any) {

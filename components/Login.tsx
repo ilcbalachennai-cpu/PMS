@@ -210,9 +210,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
     }
   };
 
-  const autofill = (u: string, p: string) => {
+  const autofill = (u: string) => {
     setUsername(u);
-    setPassword(p);
+    setPassword('');
+    // Auto-focus password field after filling username
+    const passInput = document.querySelector('input[type="password"]') as HTMLInputElement;
+    if (passInput) passInput.focus();
   };
 
   return (
@@ -375,31 +378,51 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
               <div className="grid grid-cols-2 gap-2 max-w-sm mx-auto">
                 {(() => {
                   const savedUsersRaw = localStorage.getItem('app_users');
-                  let displayUsers = MOCK_USERS.filter(u => u.username === 'admin' || u.username === 'user');
-
+                  let localUsers: UserType[] = [];
+                  
                   if (savedUsersRaw) {
                     try {
-                      const savedUsers: UserType[] = JSON.parse(savedUsersRaw);
-                      if (savedUsers.length > 0) {
-                        // Priority 1: Registered Administrator
-                        const admin = savedUsers.find(u => u.role === 'Administrator');
-                        // Priority 2: Registered User
-                        const user = savedUsers.find(u => u.role === 'User');
-
-                        displayUsers = [
-                          admin || savedUsers[0],
-                          user || (savedUsers.length > 1 ? savedUsers[1] : displayUsers[1])
-                        ].filter(Boolean);
-                      }
+                      localUsers = JSON.parse(savedUsersRaw);
                     } catch (e) { }
                   }
 
-                  return displayUsers.map((u, i) => (
-                    <button key={i} onClick={() => autofill(u.username, u.password || '')} className={`flex flex-col items-center justify-center p-2 rounded-lg bg-${u.role === 'Administrator' ? 'blue' : 'emerald'}-900/10 hover:bg-${u.role === 'Administrator' ? 'blue' : 'emerald'}-900/20 border border-${u.role === 'Administrator' ? 'blue' : 'emerald'}-900/30 transition-all group`}>
-                      {u.role === 'Administrator' ? <ShieldCheck className="text-blue-500 mb-1 group-hover:scale-110 transition-transform" size={16} /> : <UserIcon className="text-emerald-500 mb-1 group-hover:scale-110 transition-transform" size={16} />}
-                      <span className={`text-[10px] font-bold text-${u.role === 'Administrator' ? 'blue' : 'emerald'}-500 truncate w-full px-1`}>{u.name}</span>
+                  const admin = localUsers.find(u => u.role === 'Administrator');
+                  const payrollUser = localUsers.find(u => u.role === 'User');
+
+                  return [
+                    // Admin Slot
+                    <button 
+                      key="admin" 
+                      onClick={() => admin && autofill(admin.username)} 
+                      disabled={!admin}
+                      className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
+                        admin 
+                          ? 'bg-blue-900/10 hover:bg-blue-900/20 border border-blue-900/30' 
+                          : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
+                      }`}
+                    >
+                      <ShieldCheck className={`${admin ? 'text-blue-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
+                      <span className={`text-[10px] font-bold ${admin ? 'text-blue-500' : 'text-slate-500'} truncate w-full px-1`}>
+                        {admin ? admin.name : 'ADMIN INACTIVE'}
+                      </span>
+                    </button>,
+                    // User Slot (Payroll Executive)
+                    <button 
+                      key="user" 
+                      onClick={() => payrollUser && autofill(payrollUser.username)} 
+                      disabled={!payrollUser}
+                      className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
+                        payrollUser 
+                          ? 'bg-emerald-900/10 hover:bg-emerald-900/20 border border-emerald-900/30' 
+                          : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
+                      }`}
+                    >
+                      <UserIcon className={`${payrollUser ? 'text-emerald-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
+                      <span className={`text-[10px] font-bold ${payrollUser ? 'text-emerald-500' : 'text-slate-500'} truncate w-full px-1`}>
+                        {payrollUser ? payrollUser.name : 'PAYROLL INACTIVE'}
+                      </span>
                     </button>
-                  ));
+                  ];
                 })()}
               </div>
             </div>

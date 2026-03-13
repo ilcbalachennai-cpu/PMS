@@ -404,6 +404,7 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
         if (cloudData.latestVersion) {
           localStorage.setItem('app_latest_version', cloudData.latestVersion);
           if (cloudData.downloadUrl) localStorage.setItem('app_download_url', cloudData.downloadUrl);
+          if (cloudData.downloadUrlWin7) localStorage.setItem('app_download_url_win7', cloudData.downloadUrlWin7);
         }
 
         // 3. Smart Admin Recovery & Sync
@@ -515,6 +516,7 @@ export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statu
         if (result.latestVersion) {
           localStorage.setItem('app_latest_version', result.latestVersion);
           if (result.downloadUrl) localStorage.setItem('app_download_url', result.downloadUrl);
+          if (result.downloadUrlWin7) localStorage.setItem('app_download_url_win7', result.downloadUrlWin7);
         }
 
         return {

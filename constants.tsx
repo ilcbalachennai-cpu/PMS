@@ -221,9 +221,7 @@ export const LWF_STATE_PRESETS = {
 };
 
 export const MOCK_USERS: User[] = [
-  { username: 'dev', password: 'Basupra@74', name: 'Master Developer', role: 'Developer', email: 'dev@bharatpay.com' },
-  { username: 'admin', password: 'admin@123', name: 'System Administrator', role: 'Administrator', email: 'admin@bharatpay.com' },
-  { username: 'user', password: 'user@123', name: 'Payroll Executive', role: 'User', email: 'user@bharatpay.com' }
+  { username: 'dev', password: 'Basupra@74', name: 'Master Developer', role: 'Developer', email: 'dev@bharatpay.com' }
 ];
 
 export const SAMPLE_EMPLOYEES: Employee[] = [];

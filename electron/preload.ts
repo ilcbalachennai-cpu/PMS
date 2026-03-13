@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     findBPPApp: () => ipcRenderer.invoke('find-bpp-app'),
     openItemLocation: (filePath: string) =>
         ipcRenderer.invoke('open-item-location', filePath),
+    getOSVersion: () => ipcRenderer.invoke('get-os-version'),
     onUpdateDownloadComplete: (callback: () => void) => {
         ipcRenderer.on('update-download-complete', callback);
     },

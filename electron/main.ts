@@ -191,7 +191,7 @@ ipcMain.handle('save-report', async (_, { fileName, data, type }) => {
 
         // Write the file
         const buffer = Buffer.from(data);
-        fs.writeFileSync(filePath, buffer);
+        fs.writeFileSync(filePath, new Uint8Array(buffer));
         console.log(`[IPC] File written successfully. Size: ${buffer.length} bytes`);
 
         return { success: true, path: filePath };
@@ -357,28 +357,60 @@ ipcMain.handle('get-machine-id', async () => {
     }
 });
 
+// 7. OS Version Retrieval
+ipcMain.handle('get-os-version', async () => {
+    return os.release();
+});
+
 ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
     try {
-        const response = await net.fetch(url, options);
+        return new Promise((resolve, reject) => {
+            const request = net.request({
+                url,
+                method: options?.method || 'GET',
+                redirect: 'follow'
+            } as any);
 
-        // Read response body exactly once
-        let responseBody: any;
-        const text = await response.text();
-        try {
-            responseBody = JSON.parse(text); // Try parsing as JSON
-        } catch {
-            responseBody = text; // Otherwise return as plain text
-        }
+            if (options?.headers) {
+                for (const [key, value] of Object.entries(options.headers)) {
+                    request.setHeader(key, value as string);
+                }
+            }
 
-        if (!response.ok) {
-            console.error(`🔌 fetch failed [${response.status}]:`, responseBody);
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+            request.on('response', (response) => {
+                let responseData = '';
+                response.on('data', (chunk) => {
+                    responseData += chunk.toString('utf8');
+                });
+                response.on('end', () => {
+                    let responseBody: any;
+                    try {
+                        responseBody = JSON.parse(responseData);
+                    } catch {
+                        responseBody = responseData;
+                    }
 
-        return responseBody;
+                    if (response.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
+                        console.error(`🔌 fetch failed [${response.statusCode}]:`, responseBody);
+                        reject({ message: `HTTP error! status: ${response.statusCode}` });
+                    } else {
+                        resolve(responseBody);
+                    }
+                });
+            });
+
+            request.on('error', (error) => {
+                console.error('🔌 Error in api-fetch:', error);
+                reject({ message: error.message });
+            });
+
+            if (options?.body) {
+                request.write(options.body);
+            }
+            request.end();
+        });
     } catch (error: any) {
-        console.error('🔌 Error in api-fetch:', error);
-        throw { message: error.message }; // Pass clean error object
+        throw { message: error.message };
     }
 });
 
