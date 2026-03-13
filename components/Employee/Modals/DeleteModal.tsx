@@ -24,7 +24,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
                     <h3 className="text-lg font-bold flex items-center gap-2">
                         <Trash2 size={20} /> Irreversible Deletion
                     </h3>
-                    <button onClick={onClose} className="text-red-400/60 hover:text-red-400"><X size={20} /></button>
+                    <button onClick={onClose} title="Close Deletion Modal" aria-label="Close Deletion Modal" className="text-red-400/60 hover:text-red-400"><X size={20} /></button>
                 </div>
                 <div className="p-8 space-y-6">
                     <div className="p-4 bg-red-900/10 border border-red-900/20 rounded-xl flex gap-4">

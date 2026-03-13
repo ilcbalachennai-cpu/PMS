@@ -188,7 +188,7 @@ export const generateArrearReport = async (
     } else {
         // --- Custom PDF Generation for Arrear Report ---
         const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-        const pageW = 297;
+        // const pageW = 297; // available for future use
         let y = 15;
 
         // Header
@@ -288,7 +288,7 @@ export const generateArrearReport = async (
         const footnote2 = "EBasic: Existing Basic | IinBasic: Increment in Basic | RBasic: Revised Basic | EDA: Existing DA | IinDA: Increment in DA | RDA: Revised DA";
         const footnote3 = "ERtn.Alw: Existing Retaining Allowance | IinRtnAlw: Increment in Retaining Allowance | RRetAlw: Revised Retaining Allowance";
         const footnote4 = "EOtherAlw: Existing Other Allowances (Sum of HRA, Conveyance, Washing, Attire, Specials) | IinOtherAlw: Increment in Other Allow. | ROtherAlw: Revised Other Allow.";
-        const footnote5 = "EGross: Existing Gross Salary | TIncr: Total Increment | RGross: Revised Gross Salary";
+        // const footnote5 = "EGross: Existing Gross Salary | TIncr: Total Increment | RGross: Revised Gross Salary"; // available for future use
 
         let currentY = finalY;
         doc.text("Note:", 14, currentY); currentY += 4;
@@ -445,7 +445,7 @@ export const generatePaySlipsPDF = async (results: PayrollResult[], employees: E
         const splitAddr = doc.splitTextToSize(address, 160); doc.text(splitAddr, 105, y, { align: 'center' }); y += (splitAddr.length * 4) + 6;
         doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 0, 0); doc.text(customTitle || `Pay Slip - ${month} ${year}`, 105, y, { align: 'center' });
         doc.setLineWidth(0.5); doc.line(80, y + 2, 130, y + 2); y += 10;
-        const startY = y; const col1X = 14; const col2X = 110; const labelWidth = 35;
+        /* const startY = y; */ const col1X = 14; const col2X = 110; const labelWidth = 35;
         doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.text("Employee Name", col1X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.name, col1X + labelWidth, y);
         doc.setFont('helvetica', 'bold'); doc.text("Designation", col2X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.designation, col2X + labelWidth, y); y += 6;
         doc.setFont('helvetica', 'bold'); doc.text("Employee ID", col1X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.id, col1X + labelWidth, y);
@@ -490,7 +490,7 @@ export const generateBankStatementPDF = async (results: PayrollResult[], employe
     return await generatePDFTableReport(`Bank Statement - ${month} ${year}`, headers, data, fileName, 'p', '', companyProfile, { 4: { halign: 'right' } });
 };
 
-export const generateLeaveLedgerReport = async (results: PayrollResult[], employees: Employee[], leaveLedgers: LeaveLedger[], month: string, year: number, format: string, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateLeaveLedgerReport = async (_results: PayrollResult[], employees: Employee[], leaveLedgers: LeaveLedger[], month: string, year: number, _format: string, companyProfile: CompanyProfile): Promise<string | null> => {
     const headers = ['ID', 'Name', 'EL Open', 'EL Credit', 'EL Used', 'EL Bal', 'SL Bal', 'CL Bal'];
     const data = employees.map(e => { const l = leaveLedgers.find(led => led.employeeId === e.id); if (!l) return [e.id, e.name, '-', '-', '-', '-', '-', '-']; return [e.id, e.name, l.el.opening, l.el.eligible, (l.el.availed + l.el.encashed), l.el.balance, l.sl.balance, l.cl.balance]; });
     const fileName = getStandardFileName('LeaveLedger', companyProfile, month, year);
@@ -502,7 +502,7 @@ export const generateAdvanceShortfallReport = async (data: any[], month: string,
     if (format === 'Excel') { return await generateExcelReport(data, 'Shortfall', fileName); } else { const headers = ['ID', 'Name', 'Target EMI', 'Recovered', 'Shortfall']; const rows = data.map(d => [d.id, d.name, d.target, d.recovered, d.shortfall]); return await generatePDFTableReport(`Advance Shortfall Report - ${month} ${year}`, headers, rows, fileName, 'p', '', companyProfile, { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }); }
 };
 
-export const generatePFECR = async (results: PayrollResult[], employees: Employee[], config: StatutoryConfig, format: 'Excel' | 'Text', fileName: string): Promise<string | null> => {
+export const generatePFECR = async (results: PayrollResult[], employees: Employee[], _config: StatutoryConfig, format: 'Excel' | 'Text', fileName: string): Promise<string | null> => {
     // Build one row per employee
     const allRows = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
@@ -656,10 +656,10 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
     return null; // Should not reach here
 };
 
-export const generatePFForm12A = async (results: PayrollResult[], employees: Employee[], config: StatutoryConfig, companyProfile: CompanyProfile, month: string, year: number): Promise<string | null> => {
-    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const mIdx = MONTHS.indexOf(month);
-    const daysInMonth = new Date(year, mIdx + 1, 0).getDate();
+export const generatePFForm12A = async (results: PayrollResult[], employees: Employee[], _config: StatutoryConfig, companyProfile: CompanyProfile, month: string, year: number): Promise<string | null> => {
+    // const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    // const mIdx = MONTHS.indexOf(month);
+    // const daysInMonth = new Date(year, mIdx + 1, 0).getDate(); // available for future use
 
     // ── Compute totals from payroll results (same logic as ECR) ──────────────
     let totalGrossWages = 0, totalEPFWages = 0, totalEPSWages = 0;
@@ -720,7 +720,7 @@ export const generatePFForm12A = async (results: PayrollResult[], employees: Emp
 
     // Mid col
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(0);
-    const shortMonth = month.slice(0, 3);
+    // const shortMonth = month.slice(0, 3); // available for future use
     const midLines = [
         '| Employees Provident Fund And Misc. Provision Act 1952',
         '| Employees Pension Scheme [Paragraph 20 (4)]',
@@ -850,7 +850,7 @@ export const generatePFForm12A = async (results: PayrollResult[], employees: Emp
 export const generateForm16PartBPDF = async (
     history: PayrollResult[],
     employees: Employee[],
-    config: StatutoryConfig,
+    _config: StatutoryConfig,
     sM: string, sY: number,
     eM: string, eY: number,
     empId: string | undefined,
@@ -872,8 +872,8 @@ export const generateForm16PartBPDF = async (
         let totalValOfPerquisites = 0;
         let totalProfitLieuOfSalary = 0;
 
-        let totalHRAExempt = 0; // Requires declaration handling (simulated here)
-        let totalConveyanceExempt = 0;
+        // let totalHRAExempt = 0; // TODO: Requires declaration handling
+        // let totalConveyanceExempt = 0; // TODO: Requires declaration handling
 
         let totalTaxOnEmployment = 0; // PT
         let totalStandardDeduction = 50000; // Rs. 50,000 universally
@@ -1006,6 +1006,7 @@ export const generateForm16PartBPDF = async (
         }
         return res.path || null;
     }
+    return null;
 };
 
 export const generateFormB = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
@@ -1100,7 +1101,7 @@ export const generateFormB = async (results: PayrollResult[], employees: Employe
     return res.path || null;
 };
 
-export const generateFormC = async (results: PayrollResult[], employees: Employee[], attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateFormC = async (results: PayrollResult[], employees: Employee[], _attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
     const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const monthIndex = MONTHS.indexOf(month);
     const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
@@ -1162,7 +1163,7 @@ export const generateTNFormR = async (results: PayrollResult[], employees: Emplo
     return await generateStateWageRegister(results, employees, month, year, companyProfile, 'Tamil Nadu', 'Form R');
 };
 
-export const generateTNFormT = async (results: PayrollResult[], employees: Employee[], attendances: Attendance[], leaveLedgers: LeaveLedger[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateTNFormT = async (results: PayrollResult[], employees: Employee[], _attendances: Attendance[], _leaveLedgers: LeaveLedger[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
     return await generateStatePaySlip(results, employees, month, year, companyProfile, 'Tamil Nadu', 'Form T');
 };
 
@@ -1173,13 +1174,13 @@ export const generateTNFormP = async (results: PayrollResult[], employees: Emplo
 export const generatePFForm3A = async (
     history: PayrollResult[],
     employees: Employee[],
-    config: StatutoryConfig,
-    sM: string, sY: number,
-    eM: string, eY: number,
+    _config: StatutoryConfig,
+    _sM: string, sY: number,
+    _eM: string, _eY: number,
     empId: string | undefined,
     company: CompanyProfile
 ): Promise<string | null> => {
-    const ALL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    // const ALL_MONTHS = [...]; // Using fyMonths directly instead
 
     // Determine FY: Apr (startYear) → Mar (startYear+1)
     // sY is the start year of the financial year (e.g. 2025 for FY 2025-26)
@@ -1297,17 +1298,18 @@ export const generatePFForm3A = async (
         }
         return res.path || null;
     }
+    return null;
 };
 
 export const generatePFForm6A = async (
     history: PayrollResult[],
     employees: Employee[],
     config: StatutoryConfig,
-    sM: string, sY: number,
-    eM: string, eY: number,
+    _sM: string, sY: number,
+    _eM: string, _eY: number,
     company: CompanyProfile
 ): Promise<string | null> => {
-    const MONTHS_ALL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    // const MONTHS_ALL = [...]; // Using fyMonths directly instead
 
     // Financial Year months Apr(sY) → Mar(sY+1)
     const fyStart = sY;
@@ -1600,7 +1602,7 @@ export const generateGratuityReport = async (employees: Employee[], companyProfi
     return await generatePDFTableReport('Gratuity Liability Statement', headers, data, fileName, 'l', '', companyProfile);
 };
 
-export const generateBonusReport = async (history: PayrollResult[], employees: Employee[], config: StatutoryConfig, sM: string, sY: number, eM: string, eY: number, company: CompanyProfile, format: 'PDF' | 'Excel'): Promise<string | null> => {
+export const generateBonusReport = async (_history: PayrollResult[], employees: Employee[], _config: StatutoryConfig, sM: string, sY: number, _eM: string, _eY: number, company: CompanyProfile, format: 'PDF' | 'Excel'): Promise<string | null> => {
     const headers = ['ID', 'Name', 'Wages', 'Bonus Payable'];
     const data = employees.map(e => [e.id, e.name, '0', '0']);
     const fileName = getStandardFileName('Bonus_Report', company, sM, sY);
@@ -1851,7 +1853,7 @@ export const generateESIForm5 = async (payrollHistory: PayrollResult[], employee
 // NEW EXPORTS (Fixing Errors)
 // ==========================================
 
-export const generateESIReturn = async (results: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateESIReturn = async (results: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string, _companyProfile: CompanyProfile): Promise<string | null> => {
     // Note: ESI is only applicable for employees not exempt. 
     // The report normally shows all covered employees.
     const data = results
@@ -1918,7 +1920,7 @@ export const generateESIReturn = async (results: PayrollResult[], employees: Emp
     return null;
 };
 
-export const generatePTReport = (results: PayrollResult[], employees: Employee[], fileName: string, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generatePTReport = (results: PayrollResult[], employees: Employee[], fileName: string, _companyProfile: CompanyProfile): Promise<string | null> => {
     const data = results.filter(r => r.deductions.pt > 0).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
         return {
@@ -1931,7 +1933,7 @@ export const generatePTReport = (results: PayrollResult[], employees: Employee[]
     return generateExcelReport(data, 'PT Report', fileName);
 };
 
-export const generateTDSReport = (results: PayrollResult[], employees: Employee[], fileName: string, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateTDSReport = (results: PayrollResult[], employees: Employee[], fileName: string, _companyProfile: CompanyProfile): Promise<string | null> => {
     const data = results.filter(r => r.deductions.it > 0).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
         return {
@@ -2007,7 +2009,7 @@ export const generateESICodeWagesReport = async (results: PayrollResult[], emplo
     const pageW = 297;
     let y = 12;
 
-    const DARK_NAVY: [number, number, number] = [13, 21, 96];
+    // const DARK_NAVY: [number, number, number] = [13, 21, 96]; // reserved for styling
 
     // Company header
     doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(0);
@@ -2218,7 +2220,7 @@ export const generateEPFCodeImpactReport = async (results: PayrollResult[], empl
         }
     });
 
-    const finalY = (doc as any).lastAutoTable.finalY + 5;
+    (doc as any).lastAutoTable.finalY; // end of table reference
     doc.setFontSize(7.5); doc.setFont('helvetica', 'italic'); doc.setTextColor(80);
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const res = await electronSaveReport(fileName, u8, 'pdf');
@@ -2353,7 +2355,7 @@ export const generateArrearECRText = async (
     // 4. Download logic
     if (lines.length === 0) {
         alert("No valid Arrear ECR records to generate.");
-        return;
+        return null;
     }
 
     const content = lines.join('\n');
@@ -2517,7 +2519,7 @@ export const generateArrearECRExcel = async (
 
     if (rows.length === 0) {
         alert("No valid Arrear ECR records to generate Excel.");
-        return;
+        return null;
     }
 
     const ws = XLSX.utils.json_to_sheet(rows);

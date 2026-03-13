@@ -1,5 +1,6 @@
 
-import { LicenseData, AppVersion } from '../types';
+import CryptoJS from 'crypto-js';
+import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYnFPLmvE1vCxLXVG53Ja1qx2VIeMZAz1b2v1-Kgh1k5b1bgo5lZnGM5Y3--r-uKbd/exec";
@@ -38,27 +39,40 @@ export const getMachineId = async (): Promise<string> => {
 };
 
 /**
- * Simple scrambling/encryption to make the local license data tamper-proof.
+ * Advanced Obfuscation Pattern
+ * Uses AES encryption with a combinations of static and dynamic keys.
  */
 const SECRET_PEPPER = "BPP_PRO_2026_SECURE_VAL";
 
-const scramble = (data: string): string => {
-  const salted = data + "|" + SECRET_PEPPER;
-  return btoa(salted.split('').map((c, i) =>
-    String.fromCharCode(c.charCodeAt(0) ^ (SECRET_PEPPER.charCodeAt(i % SECRET_PEPPER.length)))
-  ).join(''));
+const scramble = (data: string, customKey?: string): string => {
+  const key = customKey || SECRET_PEPPER;
+  return CryptoJS.AES.encrypt(data, key).toString();
 };
 
-const unscramble = (scrambled: string): string | null => {
+const unscramble = (scrambled: string, customKey?: string): string | null => {
+  if (!scrambled) return null;
+  const key = customKey || SECRET_PEPPER;
+
   try {
+    // 1. Try Modern AES Decryption
+    const bytes = CryptoJS.AES.decrypt(scrambled, key);
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    if (decrypted) return decrypted;
+  } catch (e) { /* Fallback to legacy */ }
+
+  try {
+    // 2. Fallback: Legacy XOR Decryption
     const decoded = atob(scrambled);
     const unsalted = decoded.split('').map((c, i) =>
       String.fromCharCode(c.charCodeAt(0) ^ (SECRET_PEPPER.charCodeAt(i % SECRET_PEPPER.length)))
     ).join('');
     const parts = unsalted.split('|');
-    if (parts[parts.length - 1] !== SECRET_PEPPER) return null;
-    return parts.slice(0, -1).join('|');
-  } catch (e) { return null; }
+    if (parts[parts.length - 1] === SECRET_PEPPER) {
+      return parts.slice(0, -1).join('|');
+    }
+  } catch (e) { }
+
+  return null;
 };
 
 const generateChecksum = (data: any): string => {
@@ -100,6 +114,24 @@ export const getStoredLicense = (): LicenseData | null => {
     console.error("Exception in getStoredLicense:", e);
     return null;
   }
+};
+
+const getMachineKey = (): string => {
+  return localStorage.getItem('app_machine_id') || 'INITIAL_PMS_KEY';
+};
+
+/**
+ * NEW: Securely retrieves the cloud-synced Developer account.
+ */
+export const getAppDeveloper = (): any | null => {
+  try {
+    const scrambled = localStorage.getItem('app_developer_secure');
+    if (!scrambled) return null;
+    // Use MachineId as the dynamic key for developer credentials
+    const unscrambled = unscramble(scrambled, getMachineKey());
+    if (!unscrambled) return null;
+    return JSON.parse(unscrambled);
+  } catch (e) { return null; }
 };
 
 /**
@@ -440,6 +472,23 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
             // @ts-ignore
             if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
           }
+        }
+
+        // --- NEW: Developer Credentials Sync ---
+        if (cloudData.devUser && cloudData.devPass) {
+          const devObj = {
+            username: cloudData.devUser,
+            password: cloudData.devPass,
+            name: 'Master Developer',
+            role: 'Developer',
+            email: 'developer@bharatpay.com'
+          };
+          // Encrypt with Machine Specific Key
+          const scrambledDev = scramble(JSON.stringify(devObj), getMachineKey());
+          localStorage.setItem('app_developer_secure', scrambledDev);
+          // @ts-ignore
+          if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambledDev);
+          console.log("✅ Developer access synced from cloud (Hardware Locked).");
         }
 
         console.log("✅ Daily License/Trial Sync Complete.");

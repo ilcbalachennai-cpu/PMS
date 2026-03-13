@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useMemo } from 'react';
-import { CalendarDays, ClipboardList, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp } from 'lucide-react';
+import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch } from '../types';
 import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
@@ -53,6 +53,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
     const TabButton = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
         <button
             onClick={() => setActiveTab(id)}
+            title={`Switch to ${label} tab`}
+            aria-label={`Switch to ${label} tab`}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all text-xs whitespace-nowrap ${activeTab === id
                 ? 'bg-blue-600 text-white shadow-lg'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -263,7 +265,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
 
                     <div className="flex flex-wrap items-center gap-2">
                         <div className="flex items-center gap-2 p-1 bg-slate-900/50 rounded-lg border border-slate-800">
-                            <button onClick={downloadMasterTemplate} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-600 transition-all text-[10px] font-bold uppercase" title="Consolidated Template">
+                            <button onClick={downloadMasterTemplate} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-600 transition-all text-[10px] font-bold uppercase" title="Download Master Template" aria-label="Download Master Payroll Template">
                                 <FileSpreadsheet size={14} className="text-emerald-500" /> Master Template
                             </button>
                             <button
@@ -271,17 +273,20 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                                 disabled={isImporting || isLocked}
                                 className={`flex items-center gap-1.5 px-3 py-1.5 text-white rounded-md shadow-lg transition-all text-[10px] font-bold uppercase ${isLocked ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-900/20'}`}
                                 title={isLocked ? "Payroll is Finalized" : "Import Consolidated Data"}
+                                aria-label={isLocked ? "Payroll is Finalized" : "Import Consolidated Data (Attendance, Advances, Fines)"}
                             >
                                 {isImporting ? <div className="animate-spin rounded-full h-3 w-3 border-2 border-white/30 border-t-white" /> : (isLocked ? <Lock size={14} /> : <Upload size={14} />)}
                                 Import All (1, 2 & 3)
                             </button>
-                            <input ref={masterFileInputRef} type="file" className="hidden" accept=".xlsx, .xls" onChange={handleMasterImport} />
+                            <input ref={masterFileInputRef} title="Master File Input" aria-label="Master File Input" type="file" className="hidden" accept=".xlsx, .xls" onChange={handleMasterImport} />
                         </div>
 
                         <div className="w-[1px] h-6 bg-slate-700 mx-1 hidden lg:block"></div>
 
                         <button
                             onClick={() => setIsGatewayOpen(true)}
+                            title="Change Processing Period"
+                            aria-label="Change Payroll Processing Period"
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0f172a] hover:bg-slate-800 text-slate-300 hover:text-white rounded-md border border-slate-700 transition-all text-[10px] font-bold uppercase"
                         >
                             <RefreshCw size={12} />
@@ -406,7 +411,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             {showSuccessModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-emerald-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowSuccessModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button title="Close Modal" aria-label="Close Modal" onClick={() => setShowSuccessModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-3 text-center">
                             <div className="p-4 bg-emerald-900/30 text-emerald-400 rounded-full border border-emerald-500/50 mb-2 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
                                 <CheckCircle2 size={40} />
@@ -420,7 +425,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                                 Proceed to run Calculate Sheet
                             </p>
                         </div>
-                        <button onClick={() => setShowSuccessModal(false)} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 mt-2">
+                        <button onClick={() => setShowSuccessModal(false)} title="Continue to Payroll Processing" aria-label="Continue to Payroll Processing" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 mt-2">
                             CONTINUE <ArrowRight size={18} />
                         </button>
                     </div>

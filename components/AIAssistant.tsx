@@ -96,6 +96,8 @@ const AIAssistant: React.FC = () => {
           <input
             type="text"
             placeholder="Ask about EPF ceiling, TDS rates, Gratuity formula..."
+            title="Search or Ask AI"
+            aria-label="Ask about EPF ceiling, TDS rates, Gratuity formula..."
             className="w-full pl-4 pr-12 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -104,6 +106,8 @@ const AIAssistant: React.FC = () => {
           <button
             onClick={handleSend}
             disabled={!input.trim() || loading}
+            title="Send Message"
+            aria-label="Send Message"
             className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-300 transition-colors shadow-lg shadow-blue-100"
           >
             <Send size={18} />

@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Employee, CompanyProfile } from '../types';
-import { generateExcelReport, generatePDFTableReport, formatDateInd, getStandardFileName } from './reportService';
+import { generateExcelReport, generatePDFTableReport, getStandardFileName } from './reportService';
 
 /**
  * Generates an Excel Template for Employee Import

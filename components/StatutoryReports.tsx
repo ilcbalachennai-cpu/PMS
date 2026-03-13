@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, FileText, Download, ScrollText, Landmark, Lock, Heart, HandCoins, Percent, Building, Calendar, X, FileSpreadsheet, Eye, Scale, BookOpen, User, LogOut, ReceiptText, ClipboardList, Info, AlertTriangle, CheckCircle, MapPin } from 'lucide-react';
+import { ShieldCheck, Download, ScrollText, Landmark, Lock, HandCoins, Calendar, X, BookOpen, ReceiptText, Info, AlertTriangle, CheckCircle } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile, ArrearBatch } from '../types';
 import { INDIAN_STATES } from '../constants';
 import {
@@ -8,7 +8,6 @@ import {
     generateESIReturn,
     generatePTReport,
     generateTDSReport,
-    generateCodeOnWagesReport,
     generatePFForm12A,
     generateFormB,
     generateFormC,
@@ -93,7 +92,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     globalYear,
     setGlobalYear,
     attendances = [],
-    leaveLedgers = [],
+    leaveLedgers: _leaveLedgers = [],
     advanceLedgers = [],
     arrearHistory = []
 }) => {

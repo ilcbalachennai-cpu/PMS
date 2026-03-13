@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldAlert, KeyRound, X, Loader2 } from 'lucide-react';
+import { ShieldAlert, KeyRound, X } from 'lucide-react';
 
 interface AuthModalProps {
     isOpen: boolean;
@@ -31,7 +31,7 @@ const AuthModal: React.FC<AuthModalProps> = ({
                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
                         <ShieldAlert size={20} className="text-amber-400" /> {title}
                     </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                    <button onClick={onClose} title="Close Verification" aria-label="Close Verification" className="text-slate-400 hover:text-white"><X size={20} /></button>
                 </div>
                 <div className="p-8 space-y-6">
                     <div className="text-center space-y-2">

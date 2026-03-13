@@ -38,11 +38,15 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                     {employees.map((emp) => (
                         <tr
                             key={emp.id}
-                            onClick={() => onSelectEmp(emp)}
-                            className={`cursor-pointer hover:bg-slate-800/50 ${selectedEmp?.id === emp.id ? 'bg-blue-900/40 border-l-4 border-blue-500' : 'border-l-4 border-transparent'} ${emp.dol ? 'opacity-60 grayscale' : ''}`}
+                            className={`hover:bg-slate-800/50 ${selectedEmp?.id === emp.id ? 'bg-blue-900/40 border-l-4 border-blue-500' : 'border-l-4 border-transparent'} ${emp.dol ? 'opacity-60 grayscale' : ''}`}
                         >
                             <td className="px-3 py-3 overflow-hidden">
-                                <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => onSelectEmp(emp)}
+                                    title={`View details for ${emp.name}`}
+                                    aria-label={`View details for ${emp.name}`}
+                                    className="flex items-center gap-2 w-full text-left outline-none focus:ring-2 focus:ring-blue-500/50 rounded-lg p-0.5"
+                                >
                                     <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center border border-slate-600 overflow-hidden shrink-0 relative">
                                         {emp.photoUrl ? <img src={emp.photoUrl} className="w-full h-full object-cover" alt={emp.name} /> : <User2 size={16} className="text-slate-400" />}
                                         {emp.dol && <div className="absolute inset-0 bg-red-900/60 flex items-center justify-center font-black text-[7px] text-white">LEFT</div>}
@@ -51,7 +55,7 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                                         <div className="font-bold text-white text-xs truncate uppercase leading-tight">{emp.name}</div>
                                         <div className="text-[9px] text-slate-500 font-mono truncate">{emp.id}</div>
                                     </div>
-                                </div>
+                                </button>
                             </td>
                             <td className="px-2 py-3 overflow-hidden">
                                 <div className="text-[9px] text-sky-400 font-bold uppercase truncate">{emp.designation}</div>
@@ -68,15 +72,17 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                                     <button
                                         onClick={(e) => { e.stopPropagation(); onEdit(emp); }}
                                         className="text-slate-400 hover:text-blue-400 p-1.5 hover:bg-blue-900/30 rounded-lg transition-all"
-                                        title="Edit Profile"
+                                        title={`Edit ${emp.name}'s Profile`}
+                                        aria-label={`Edit ${emp.name}'s Profile`}
                                     >
                                         <Edit2 size={14} />
                                     </button>
                                     {(currentUser?.role === 'Developer' || currentUser?.role === 'Administrator') && (
                                         <button
-                                            onClick={(e) => onDelete(emp, e)}
+                                            onClick={(e) => { e.stopPropagation(); onDelete(emp, e); }}
                                             className="text-slate-400 hover:text-red-400 p-1.5 hover:bg-red-900/20 rounded-lg transition-all"
-                                            title="Delete Record"
+                                            title={`Delete ${emp.name}'s Record`}
+                                            aria-label={`Delete ${emp.name}'s Record`}
                                         >
                                             <Trash2 size={14} />
                                         </button>

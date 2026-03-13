@@ -33,7 +33,7 @@ const ImportSummaryModal: React.FC<ImportSummaryModalProps> = ({
                             Processed {summary.total} rows from Excel file.
                         </p>
                     </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                    <button onClick={onClose} title="Close Import Result" aria-label="Close Import Result" className="text-slate-400 hover:text-white"><X size={20} /></button>
                 </div>
 
                 <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">

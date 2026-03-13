@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, HelpCircle, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, MapPin, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Briefcase, Database, Loader2, CheckCircle2, Megaphone, HandCoins, MessageSquare, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2 } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -99,8 +99,16 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [newRegEmail, setNewRegEmail] = useState('');
     const [newRegMobile, setNewRegMobile] = useState('');
     const [newUserID, setNewUserID] = useState(licenseInfo?.userID || '');
-    const [currentMachineId, setCurrentMachineId] = useState('');
+    const [_currentMachineId] = useState('');
     const fullNameRef = useRef<HTMLInputElement>(null);
+    const progressRef = useRef<HTMLDivElement>(null);
+
+    // Sync progress bar width via Ref to bypass "no-inline-styles" linter
+    useEffect(() => {
+        if (progressRef.current) {
+            progressRef.current.style.width = `${processProgress}%`;
+        }
+    }, [processProgress]);
 
     // ── User Management State ──
     const [appUsers, setAppUsers] = useState<User[]>(() => {
@@ -731,33 +739,33 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 }}
             />
             <div className="sticky top-20 z-30 bg-[#020617] pt-2 flex gap-4 border-b border-slate-700 overflow-x-auto pb-1 scrollbar-hide">
-                <button onClick={() => setActiveTab('STATUTORY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                     <ShieldCheck size={16} /> Statutory Rules
                 </button>
-                <button onClick={() => setActiveTab('COMPANY')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'COMPANY' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                <button onClick={() => setActiveTab('COMPANY')} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'COMPANY' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                     <Building2 size={16} /> Company Profile
                 </button>
-                <button onClick={() => setActiveTab('DATA')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DATA' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                <button onClick={() => setActiveTab('DATA')} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DATA' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                     <Database size={16} /> Data Management
                 </button>
                 {userRole === 'Developer' && (
-                    <button onClick={() => setActiveTab('DEVELOPER')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DEVELOPER' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <button onClick={() => setActiveTab('DEVELOPER')} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DEVELOPER' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                         <Megaphone size={16} /> Developer Options
                     </button>
                 )}
                 {!isSetupMode && (
-                    <button onClick={() => setActiveTab('LICENSE')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'LICENSE' ? 'border-pink-500 text-pink-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'LICENSE' ? 'border-pink-500 text-pink-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                         <ShieldCheck size={16} /> License Management
                     </button>
                 )}
                 {(licenseInfo || !isSetupMode || appUsers.length > 0) && (
-                    <button onClick={() => setActiveTab('USERS')} className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'USERS' ? 'border-sky-500 text-sky-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <button onClick={() => setActiveTab('USERS')} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'USERS' ? 'border-sky-500 text-sky-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                         <Users size={16} /> User Management
                     </button>
                 )}
                 {isSetupMode && (
                     <div className="ml-auto flex items-center pb-2 pl-4">
-                        <button onClick={handleSave} className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-black transition-all shadow-lg ${saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`} title="Save Configuration Elements">
+                        <button onClick={handleSave} className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-black transition-all shadow-lg ${saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`} title="Save Configuration" aria-label="Save Configuration">
                             {saved ? <CheckCircle2 size={14} /> : <Save size={14} />}
                             {saved ? 'SAVED' : 'SAVE CONFIGURATION'}
                         </button>
@@ -797,8 +805,22 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase">Compliance Basis</label>
                                             <div className="grid grid-cols-2 gap-2">
-                                                <button onClick={() => handlePFTypeChange('Statutory')} className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Statutory' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>Statutory (12%)</button>
-                                                <button onClick={() => handlePFTypeChange('Voluntary')} className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Voluntary' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>Voluntary (10%)</button>
+                                                <button
+                                                    onClick={() => handlePFTypeChange('Statutory')}
+                                                    title="Set PF Compliance to Statutory (12%)"
+                                                    aria-label="Set PF Compliance to Statutory (12%)"
+                                                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Statutory' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
+                                                >
+                                                    Statutory (12%)
+                                                </button>
+                                                <button
+                                                     onClick={() => handlePFTypeChange('Voluntary')}
+                                                     title="Set PF Compliance to Voluntary (10%)"
+                                                     aria-label="Set PF Compliance to Voluntary (10%)"
+                                                     className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Voluntary' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
+                                                 >
+                                                     Voluntary (10%)
+                                                 </button>
                                             </div>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
@@ -853,8 +875,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="flex items-center gap-3 border-b border-slate-800 pb-3"><ShieldCheck className="text-pink-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-pink-400">ESI Corporation</h3></div>
                             <div className="space-y-4">
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1"><label htmlFor="esi-ceiling" className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label><input id="esi-ceiling" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiCeiling} onChange={e => setFormData({ ...formData, esiCeiling: +e.target.value })} title="ESI Eligibility Ceiling" /></div>
-                                    <div className="space-y-1"><label htmlFor="esi-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase">EE Rate (%)</label><input id="esi-employee-rate" type="number" step="0.001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiEmployeeRate * 100} onChange={e => setFormData({ ...formData, esiEmployeeRate: +e.target.value / 100 })} title="Employee ESI Rate" /></div>
+                                    <div className="space-y-1"><label htmlFor="esi-ceiling" className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label><input id="esi-ceiling" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiCeiling} onChange={e => setFormData({ ...formData, esiCeiling: +e.target.value })} title="ESI Eligibility Ceiling" aria-label="ESI Eligibility Ceiling" /></div>
+                                    <div className="space-y-1"><label htmlFor="esi-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase">EE Rate (%)</label><input id="esi-employee-rate" type="number" step="0.001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiEmployeeRate * 100} onChange={e => setFormData({ ...formData, esiEmployeeRate: +e.target.value / 100 })} title="Employee ESI Rate" aria-label="Employee ESI Rate" /></div>
                                 </div>
                             </div>
                         </div>
@@ -865,14 +887,14 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center gap-3"><Heart className="text-red-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-red-400">Employee Welfare (Bonus & Gratuity)</h3></div>
                         <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                                <div className="flex items-center gap-2 mb-2"><Percent size={14} className="text-amber-400" /><span className="text-[10px] font-bold text-slate-400 uppercase">Annual Bonus Policy</span></div>
+                                <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><Percent size={14} className="text-amber-400" /><span className="text-xs font-bold text-slate-300 uppercase">Annual Bonus Policy</span></div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1"><label htmlFor="bonus-rate" className="text-[10px] font-bold text-slate-500 uppercase">Rate (%)</label><input id="bonus-rate" type="number" step="0.0001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={(formData.bonusRate * 100).toFixed(2)} onChange={e => setFormData({ ...formData, bonusRate: +e.target.value / 100 })} title="Annual Bonus Rate" /></div>
+                                    <div className="space-y-1"><label htmlFor="bonus-rate" className="text-[10px] font-bold text-slate-500 uppercase">Rate (%)</label><input id="bonus-rate" type="number" step="0.0001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={(formData.bonusRate * 100).toFixed(2)} onChange={e => setFormData({ ...formData, bonusRate: +e.target.value / 100 })} title="Annual Bonus Rate" aria-label="Annual Bonus Rate" /></div>
                                     <div className="flex flex-col justify-end"><span className="text-[9px] text-slate-500 italic">Standard: 8.33% Min</span></div>
                                 </div>
                             </div>
                             <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                                <div className="flex items-center gap-2 mb-2"><Building2 size={14} className="text-blue-400" /><span className="text-[10px] font-bold text-slate-400 uppercase">LIC Gratuity Policy</span></div>
+                                <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><Building2 size={14} className="text-blue-400" /><span className="text-xs font-bold text-slate-300 uppercase">LIC Gratuity Policy</span></div>
                                 <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Calculation Basis (Formula)</label><div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-blue-300 font-mono">(Basic + DA) * (15/26) * Years</div><p className="text-[9px] text-slate-500 mt-2">Calculated as per LIC Master Policy for Statutory Gratuity (Act 1972).</p></div>
                             </div>
                         </div>
@@ -886,10 +908,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
                                 <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><span className="text-xs font-bold text-slate-300 uppercase">Earned Leave (EL)</span></div>
                                 <div className="space-y-2">
-                                    <div className="space-y-1"><label htmlFor="el-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="el-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.el.label} onChange={e => handleLeavePolicyChange('el', 'label', e.target.value)} title="Earned Leave Label" /></div>
+                                    <div className="space-y-1"><label htmlFor="el-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="el-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.el.label} onChange={e => handleLeavePolicyChange('el', 'label', e.target.value)} title="Earned Leave Label" aria-label="Earned Leave Label" /></div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1"><label htmlFor="el-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="el-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxPerYear} onChange={e => handleLeavePolicyChange('el', 'maxPerYear', +e.target.value)} title="Maximum EL per Year" /></div>
-                                        <div className="space-y-1"><label htmlFor="el-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="el-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxCarryForward} onChange={e => handleLeavePolicyChange('el', 'maxCarryForward', +e.target.value)} title="Maximum EL Carry Forward" /></div>
+                                        <div className="space-y-1"><label htmlFor="el-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="el-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxPerYear} onChange={e => handleLeavePolicyChange('el', 'maxPerYear', +e.target.value)} title="Maximum EL per Year" aria-label="Maximum EL per Year" /></div>
+                                        <div className="space-y-1"><label htmlFor="el-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="el-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxCarryForward} onChange={e => handleLeavePolicyChange('el', 'maxCarryForward', +e.target.value)} title="Maximum EL Carry Forward" aria-label="Maximum EL Carry Forward" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -897,10 +919,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
                                 <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><span className="text-xs font-bold text-slate-300 uppercase">Sick Leave (SL)</span></div>
                                 <div className="space-y-2">
-                                    <div className="space-y-1"><label htmlFor="sl-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="sl-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.sl.label} onChange={e => handleLeavePolicyChange('sl', 'label', e.target.value)} title="Sick Leave Label" /></div>
+                                    <div className="space-y-1"><label htmlFor="sl-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="sl-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.sl.label} onChange={e => handleLeavePolicyChange('sl', 'label', e.target.value)} title="Sick Leave Label" aria-label="Sick Leave Label" /></div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1"><label htmlFor="sl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="sl-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxPerYear} onChange={e => handleLeavePolicyChange('sl', 'maxPerYear', +e.target.value)} title="Maximum SL per Year" /></div>
-                                        <div className="space-y-1"><label htmlFor="sl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="sl-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxCarryForward} onChange={e => handleLeavePolicyChange('sl', 'maxCarryForward', +e.target.value)} title="Maximum SL Carry Forward" /></div>
+                                        <div className="space-y-1"><label htmlFor="sl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="sl-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxPerYear} onChange={e => handleLeavePolicyChange('sl', 'maxPerYear', +e.target.value)} title="Maximum SL per Year" aria-label="Maximum SL per Year" /></div>
+                                        <div className="space-y-1"><label htmlFor="sl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="sl-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxCarryForward} onChange={e => handleLeavePolicyChange('sl', 'maxCarryForward', +e.target.value)} title="Maximum SL Carry Forward" aria-label="Maximum SL Carry Forward" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -908,10 +930,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
                                 <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><span className="text-xs font-bold text-slate-300 uppercase">Casual Leave (CL)</span></div>
                                 <div className="space-y-2">
-                                    <div className="space-y-1"><label htmlFor="cl-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="cl-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.cl.label} onChange={e => handleLeavePolicyChange('cl', 'label', e.target.value)} title="Casual Leave Label" /></div>
+                                    <div className="space-y-1"><label htmlFor="cl-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="cl-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.cl.label} onChange={e => handleLeavePolicyChange('cl', 'label', e.target.value)} title="Casual Leave Label" aria-label="Casual Leave Label" /></div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1"><label htmlFor="cl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="cl-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxPerYear} onChange={e => handleLeavePolicyChange('cl', 'maxPerYear', +e.target.value)} title="Maximum CL per Year" /></div>
-                                        <div className="space-y-1"><label htmlFor="cl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="cl-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxCarryForward} onChange={e => handleLeavePolicyChange('cl', 'maxCarryForward', +e.target.value)} title="Maximum CL Carry Forward" /></div>
+                                        <div className="space-y-1"><label htmlFor="cl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="cl-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxPerYear} onChange={e => handleLeavePolicyChange('cl', 'maxPerYear', +e.target.value)} title="Maximum CL per Year" aria-label="Maximum CL per Year" /></div>
+                                        <div className="space-y-1"><label htmlFor="cl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="cl-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxCarryForward} onChange={e => handleLeavePolicyChange('cl', 'maxCarryForward', +e.target.value)} title="Maximum CL Carry Forward" aria-label="Maximum CL Carry Forward" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -927,7 +949,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 {[{ key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' }, { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Special 1' }, { key: 'special2', label: 'Special 2' }, { key: 'special3', label: 'Special 3' }].map(comp => {
                                     const components = formData.leaveWagesComponents || INITIAL_STATUTORY_CONFIG.leaveWagesComponents;
                                     const isActive = components[comp.key as keyof typeof components];
-                                    return <button key={comp.key} onClick={() => handleLeaveWagesToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`} title={`Toggle ${comp.label} for Leave Encashment`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>;
+                                    return <button key={comp.key} onClick={() => handleLeaveWagesToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`} title={`Toggle ${comp.label} for Leave Encashment`} aria-label={`Toggle ${comp.label} for Leave Encashment`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>;
                                 })}
                             </div>
                             <div className="flex justify-end"><span className="text-[10px] text-slate-500 italic">* Default logic uses Basic + DA. Adjust according to company policy.</span></div>
@@ -939,28 +961,28 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
                             <div className="flex items-center gap-3"><ScrollText className="text-amber-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-amber-400">Professional Tax (PT) Matrix</h3></div>
                             <div className="flex items-center gap-4">
-                                <select id="pt-preset-select" className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedStatePreset} onChange={handleStatePresetChange} title="Select State Professional Tax Preset">{Object.keys(PT_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
-                                <label htmlFor="enable-pt" className="flex items-center gap-2 cursor-pointer"><input id="enable-pt" type="checkbox" className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900" checked={formData.enableProfessionalTax} onChange={e => setFormData({ ...formData, enableProfessionalTax: e.target.checked })} title="Enable Professional Tax Deduction" /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable PT</span></label>
+                                <select id="pt-preset-select" className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedStatePreset} onChange={handleStatePresetChange} title="Select State Professional Tax Preset" aria-label="Select State Professional Tax Preset">{Object.keys(PT_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
+                                <label htmlFor="enable-pt" className="flex items-center gap-2 cursor-pointer"><input id="enable-pt" type="checkbox" className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900" checked={formData.enableProfessionalTax} onChange={e => setFormData({ ...formData, enableProfessionalTax: e.target.checked })} title="Enable Professional Tax Deduction" aria-label="Enable Professional Tax Deduction" /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable PT</span></label>
                             </div>
                         </div>
                         {formData.enableProfessionalTax && (
                             <div className="p-6 space-y-6">
-                                <div className="flex items-center gap-4"><span className="text-[10px] font-bold text-slate-500 uppercase">Deduction Cycle:</span><div className="flex gap-2">{['Monthly', 'HalfYearly'].map(c => (<button key={c} onClick={() => setFormData({ ...formData, ptDeductionCycle: c as any })} className={`px-4 py-1.5 rounded-full text-[10px] font-bold border transition-all ${formData.ptDeductionCycle === c ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>{c}</button>))}</div></div>
+                                <div className="flex items-center gap-4"><span className="text-[10px] font-bold text-slate-500 uppercase">Deduction Cycle:</span><div className="flex gap-2">{['Monthly', 'HalfYearly'].map(c => (<button key={c} onClick={() => setFormData({ ...formData, ptDeductionCycle: c as any })} title={`Set PT Cycle to ${c}`} aria-label={`Set PT Cycle to ${c}`} className={`px-4 py-1.5 rounded-full text-[10px] font-bold border transition-all ${formData.ptDeductionCycle === c ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>{c}</button>))}</div></div>
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left">
                                         <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800"><tr><th className="pb-3">Min Earnings (₹)</th><th className="pb-3">Max Earnings (₹)</th><th className="pb-3">Deduction (₹)</th><th className="pb-3 text-right">Action</th></tr></thead>
                                         <tbody className="divide-y divide-slate-800">
                                             {formData.ptSlabs.map((slab, i) => (
                                                 <tr key={i} className="group">
-                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.min} onChange={e => handleSlabChange(i, 'min', +e.target.value)} title="Minimum Earnings for Slab" /></td>
-                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.max} onChange={e => handleSlabChange(i, 'max', +e.target.value)} title="Maximum Earnings for Slab" /></td>
-                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} title="PT Amount for Slab" /></td>
-                                                    <td className="py-3 text-right"><button onClick={() => handleDeleteSlab(i)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete PT Slab"><Trash2 size={14} /></button></td>
+                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.min} onChange={e => handleSlabChange(i, 'min', +e.target.value)} title="Minimum Earnings for Slab" aria-label="Minimum Earnings for Slab" /></td>
+                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.max} onChange={e => handleSlabChange(i, 'max', +e.target.value)} title="Maximum Earnings for Slab" aria-label="Maximum Earnings for Slab" /></td>
+                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} title="PT Amount for Slab" aria-label="PT Amount for Slab" /></td>
+                                                    <td className="py-3 text-right"><button onClick={() => handleDeleteSlab(i)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete PT Slab" aria-label="Delete PT Slab"><Trash2 size={14} /></button></td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
-                                    <button onClick={handleAddSlab} className="mt-4 flex items-center gap-2 text-[10px] font-bold text-sky-400 hover:text-sky-300"><Plus size={14} /> Add Slab Row</button>
+                                    <button onClick={handleAddSlab} title="Add New PT Slab Row" aria-label="Add New PT Slab Row" className="mt-4 flex items-center gap-2 text-[10px] font-bold text-sky-400 hover:text-sky-300"><Plus size={14} /> Add Slab Row</button>
                                 </div>
                             </div>
                         )}
@@ -971,15 +993,15 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
                             <div className="flex items-center gap-3"><HandCoins className="text-emerald-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Labour Welfare Fund (LWF)</h3></div>
                             <div className="flex items-center gap-4">
-                                <select id="lwf-state-select" className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedLWFState} onChange={handleLWFStateChange} title="Select State Labour Welfare Fund Preset">{Object.keys(LWF_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
-                                <label htmlFor="enable-lwf" className="flex items-center gap-2 cursor-pointer"><input id="enable-lwf" type="checkbox" className="w-4 h-4 rounded border-slate-700 text-emerald-500 bg-slate-900" checked={formData.enableLWF} onChange={e => setFormData({ ...formData, enableLWF: e.target.checked })} title="Enable Labour Welfare Fund Deduction" /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable LWF</span></label>
+                                <select id="lwf-state-select" className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none" value={selectedLWFState} onChange={handleLWFStateChange} title="Select State Labour Welfare Fund Preset" aria-label="Select State Labour Welfare Fund Preset">{Object.keys(LWF_STATE_PRESETS).map(s => <option key={s} value={s}>{s} Preset</option>)}</select>
+                                <label htmlFor="enable-lwf" className="flex items-center gap-2 cursor-pointer"><input id="enable-lwf" type="checkbox" className="w-4 h-4 rounded border-slate-700 text-emerald-500 bg-slate-900" checked={formData.enableLWF} onChange={e => setFormData({ ...formData, enableLWF: e.target.checked })} title="Enable Labour Welfare Fund Deduction" aria-label="Enable Labour Welfare Fund Deduction" /><span className="text-[10px] font-bold text-slate-400 uppercase">Enable LWF</span></label>
                             </div>
                         </div>
                         {formData.enableLWF && (
                             <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
-                                <div className="space-y-1"><label htmlFor="lwf-cycle" className="text-[10px] font-bold text-slate-500 uppercase">Cycle</label><select id="lwf-cycle" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white" value={formData.lwfDeductionCycle} onChange={e => setFormData({ ...formData, lwfDeductionCycle: e.target.value as any })} title="LWF Deduction Cycle"><option value="Monthly">Monthly</option><option value="HalfYearly">Half-Yearly</option><option value="Yearly">Yearly</option></select></div>
-                                <div className="space-y-1"><label htmlFor="lwf-ee-contrib" className="text-[10px] font-bold text-slate-500 uppercase">EE Contribution (₹)</label><input id="lwf-ee-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployeeContribution} onChange={e => setFormData({ ...formData, lwfEmployeeContribution: +e.target.value })} title="Employee LWF Contribution" /></div>
-                                <div className="space-y-1"><label htmlFor="lwf-er-contrib" className="text-[10px] font-bold text-slate-500 uppercase">ER Contribution (₹)</label><input id="lwf-er-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployerContribution} onChange={e => setFormData({ ...formData, lwfEmployerContribution: +e.target.value })} title="Employer LWF Contribution" /></div>
+                                <div className="space-y-1"><label htmlFor="lwf-cycle" className="text-[10px] font-bold text-slate-500 uppercase">Cycle</label><select id="lwf-cycle" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white" value={formData.lwfDeductionCycle} onChange={e => setFormData({ ...formData, lwfDeductionCycle: e.target.value as any })} title="LWF Deduction Cycle" aria-label="LWF Deduction Cycle"><option value="Monthly">Monthly</option><option value="HalfYearly">Half-Yearly</option><option value="Yearly">Yearly</option></select></div>
+                                <div className="space-y-1"><label htmlFor="lwf-ee-contrib" className="text-[10px] font-bold text-slate-500 uppercase">EE Contribution (₹)</label><input id="lwf-ee-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployeeContribution} onChange={e => setFormData({ ...formData, lwfEmployeeContribution: +e.target.value })} title="Employee LWF Contribution" aria-label="Employee LWF Contribution" /></div>
+                                <div className="space-y-1"><label htmlFor="lwf-er-contrib" className="text-[10px] font-bold text-slate-500 uppercase">ER Contribution (₹)</label><input id="lwf-er-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployerContribution} onChange={e => setFormData({ ...formData, lwfEmployerContribution: +e.target.value })} title="Employer LWF Contribution" aria-label="Employer LWF Contribution" /></div>
                                 <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Total (₹)</label><div className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-emerald-400 font-mono font-bold">{(formData.lwfEmployeeContribution + formData.lwfEmployerContribution).toLocaleString()}</div></div>
                             </div>
                         )}
@@ -997,13 +1019,13 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 </ul>
                             </div>
                             <div className="flex gap-4">
-                                <button onClick={() => setFormData({ ...formData, incomeTaxCalculationType: 'Manual' })} className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Manual' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
-                                    {formData.incomeTaxCalculationType === 'Manual' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Manual (As per Import)
-                                </button>
-                                <button onClick={() => setFormData({ ...formData, incomeTaxCalculationType: 'Auto' })} className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Auto' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
-                                    {formData.incomeTaxCalculationType === 'Auto' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Auto (Taxable Salary)
-                                </button>
-                            </div>
+                                 <button onClick={() => setFormData({ ...formData, incomeTaxCalculationType: 'Manual' })} title="Set Income Tax Calculation to Manual" aria-label="Set Income Tax Calculation to Manual" className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Manual' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
+                                     {formData.incomeTaxCalculationType === 'Manual' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Manual (As per Import)
+                                 </button>
+                                 <button onClick={() => setFormData({ ...formData, incomeTaxCalculationType: 'Auto' })} title="Set Income Tax Calculation to Auto" aria-label="Set Income Tax Calculation to Auto" className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Auto' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
+                                     {formData.incomeTaxCalculationType === 'Auto' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Auto (Taxable Salary)
+                                 </button>
+                             </div>
                         </div>
                     </div>
                 </div>
@@ -1017,9 +1039,9 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         <div className="flex flex-col md:flex-row items-center gap-8">
                             <div className="relative group shrink-0">
                                 <div className="relative flex items-center justify-center w-32 h-32 rounded-full bg-[#0a0f1d] shadow-2xl overflow-hidden border-4 border-white"><img src={currentLogo} className="w-full h-full object-cover" alt="Establishment Logo" /></div>
-                                <button onClick={() => logoInputRef.current?.click()} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-full flex items-center justify-center transition-opacity" title="Upload Logo"><Camera className="text-white" size={24} /></button>
+                                <button onClick={() => logoInputRef.current?.click()} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-full flex items-center justify-center transition-opacity" title="Change Company Logo" aria-label="Change Company Logo"><Camera className="text-white" size={24} /></button>
                             </div>
-                            <div className="space-y-4"><div><h4 className="font-bold text-white text-lg">Company Logo</h4><p className="text-xs text-slate-400 mt-1">This logo will appear on all Pay Slips, Reports, and the Login screen.</p></div><button onClick={() => logoInputRef.current?.click()} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-900/20 flex items-center gap-2"><Upload size={14} /> Upload New Logo</button><input ref={logoInputRef} type="file" className="hidden" accept="image/*" onChange={handleLogoChange} /></div>
+                            <div className="space-y-4"><div><h4 className="font-bold text-white text-lg">Company Logo</h4><p className="text-xs text-slate-400 mt-1">This logo will appear on all Pay Slips, Reports, and the Login screen.</p></div><button onClick={() => logoInputRef.current?.click()} title="Upload New Logo" aria-label="Upload New Logo" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-900/20 flex items-center gap-2"><Upload size={14} /> Upload New Logo</button><input ref={logoInputRef} type="file" className="hidden" accept="image/*" onChange={handleLogoChange} title="Upload Company Logo" aria-label="Upload Company Logo" /></div>
                         </div>
                     </div>
                     {/* ... Company Profile Form ... */}
@@ -1031,45 +1053,45 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1">Legal Identity & Identification</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="space-y-1"><label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label><input id="profile-est-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500 uppercase" placeholder="Your Name - as mentioned in App request mail" value={profileData.establishmentName} onChange={e => setProfileData({ ...profileData, establishmentName: e.target.value.toUpperCase() })} title="Establishment Name" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-trade-name" className="text-[10px] font-bold text-slate-400 uppercase">Trade Name (If Any)</label><input id="profile-trade-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Trade Name" value={profileData.tradeName} onChange={e => setProfileData({ ...profileData, tradeName: e.target.value })} title="Trade Name" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-cin" className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)*</label><input id="profile-cin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.cin} onChange={e => setProfileData({ ...profileData, cin: e.target.value })} placeholder="U00000XX0000XXX000000" title="Corporate Identification Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-lin" className="text-[10px] font-bold text-sky-400 uppercase">LIN No (Labour ID)*</label><input id="profile-lin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.lin} onChange={e => setProfileData({ ...profileData, lin: e.target.value })} placeholder="L0000000000" title="Labour Identification Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label><input id="profile-est-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500 uppercase" placeholder="Your Name - as mentioned in App request mail" value={profileData.establishmentName} onChange={e => setProfileData({ ...profileData, establishmentName: e.target.value.toUpperCase() })} title="Establishment Name" aria-label="Establishment Name" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-trade-name" className="text-[10px] font-bold text-slate-400 uppercase">Trade Name (If Any)</label><input id="profile-trade-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Trade Name" value={profileData.tradeName} onChange={e => setProfileData({ ...profileData, tradeName: e.target.value })} title="Trade Name" aria-label="Trade Name" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-cin" className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)*</label><input id="profile-cin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.cin} onChange={e => setProfileData({ ...profileData, cin: e.target.value })} placeholder="U00000XX0000XXX000000" title="Corporate Identification Number" aria-label="Corporate Identification Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-lin" className="text-[10px] font-bold text-sky-400 uppercase">LIN No (Labour ID)*</label><input id="profile-lin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.lin} onChange={e => setProfileData({ ...profileData, lin: e.target.value })} placeholder="L0000000000" title="Labour Identification Number" aria-label="Labour Identification Number" /></div>
                                 </div>
                             </div>
                             {/* ... Registration Codes ... */}
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Registration Codes</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label htmlFor="profile-pf-code" className="text-[10px] font-bold text-slate-400 uppercase">PF Code</label><input id="profile-pf-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PF Code" value={profileData.pfCode} onChange={e => setProfileData({ ...profileData, pfCode: e.target.value })} title="PF Code Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-esi-code" className="text-[10px] font-bold text-slate-400 uppercase">ESI Code</label><input id="profile-esi-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="ESI Code" value={profileData.esiCode} onChange={e => setProfileData({ ...profileData, esiCode: e.target.value })} title="ESI Code Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-gst-no" className="text-[10px] font-bold text-slate-400 uppercase">GST No</label><input id="profile-gst-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="GST Number" value={profileData.gstNo} onChange={e => setProfileData({ ...profileData, gstNo: e.target.value })} title="GST Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-pan-no" className="text-[10px] font-bold text-slate-400 uppercase">PAN No</label><input id="profile-pan-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PAN Number" value={profileData.pan} onChange={e => setProfileData({ ...profileData, pan: e.target.value })} title="PAN Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pf-code" className="text-[10px] font-bold text-slate-400 uppercase">PF Code</label><input id="profile-pf-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PF Code" value={profileData.pfCode} onChange={e => setProfileData({ ...profileData, pfCode: e.target.value })} title="PF Code Number" aria-label="PF Code Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-esi-code" className="text-[10px] font-bold text-slate-400 uppercase">ESI Code</label><input id="profile-esi-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="ESI Code" value={profileData.esiCode} onChange={e => setProfileData({ ...profileData, esiCode: e.target.value })} title="ESI Code Number" aria-label="ESI Code Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-gst-no" className="text-[10px] font-bold text-slate-400 uppercase">GST No</label><input id="profile-gst-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="GST Number" value={profileData.gstNo} onChange={e => setProfileData({ ...profileData, gstNo: e.target.value })} title="GST Number" aria-label="GST Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pan-no" className="text-[10px] font-bold text-slate-400 uppercase">PAN No</label><input id="profile-pan-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PAN Number" value={profileData.pan} onChange={e => setProfileData({ ...profileData, pan: e.target.value })} title="PAN Number" aria-label="PAN Number" /></div>
                                 </div>
                             </div>
                             {/* ... Address ... */}
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Address Details (Registered Office)</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label htmlFor="profile-door-no" className="text-[10px] font-bold text-slate-400 uppercase">Door No / Flat No</label><input id="profile-door-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Door No" value={profileData.doorNo} onChange={e => setProfileData({ ...profileData, doorNo: e.target.value })} title="Door/Flat Number" /></div>
-                                    <div className="space-y-1 md:col-span-2"><label htmlFor="profile-building" className="text-[10px] font-bold text-slate-400 uppercase">Building Name / Landmark</label><input id="profile-building" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Building Name" value={profileData.buildingName} onChange={e => setProfileData({ ...profileData, buildingName: e.target.value })} title="Building Name or Landmark" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-street" className="text-[10px] font-bold text-slate-400 uppercase">Street</label><input id="profile-street" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Street" value={profileData.street} onChange={e => setProfileData({ ...profileData, street: e.target.value })} title="Street Name" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-locality" className="text-[10px] font-bold text-slate-400 uppercase">Locality</label><input id="profile-locality" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Locality" value={profileData.locality} onChange={e => setProfileData({ ...profileData, locality: e.target.value })} title="Locality" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-area" className="text-[10px] font-bold text-slate-400 uppercase">Area</label><input id="profile-area" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Area" value={profileData.area} onChange={e => setProfileData({ ...profileData, area: e.target.value })} title="Area Name" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-city" className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label><input id="profile-city" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="City" value={profileData.city} onChange={e => setProfileData({ ...profileData, city: e.target.value })} title="City or Town" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-state" className="text-[10px] font-bold text-slate-400 uppercase">State / Union Territory</label><select id="profile-state" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.state} onChange={e => setProfileData({ ...profileData, state: e.target.value })} title="Select State">{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-                                    <div className="space-y-1"><label htmlFor="profile-pincode" className="text-[10px] font-bold text-slate-400 uppercase">Pin Code</label><input id="profile-pincode" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="600001" value={profileData.pincode} onChange={e => setProfileData({ ...profileData, pincode: e.target.value })} title="Pincode" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-door-no" className="text-[10px] font-bold text-slate-400 uppercase">Door No / Flat No</label><input id="profile-door-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Door No" value={profileData.doorNo} onChange={e => setProfileData({ ...profileData, doorNo: e.target.value })} title="Door/Flat Number" aria-label="Door/Flat Number" /></div>
+                                    <div className="space-y-1 md:col-span-2"><label htmlFor="profile-building" className="text-[10px] font-bold text-slate-400 uppercase">Building Name / Landmark</label><input id="profile-building" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Building Name" value={profileData.buildingName} onChange={e => setProfileData({ ...profileData, buildingName: e.target.value })} title="Building Name or Landmark" aria-label="Building Name or Landmark" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-street" className="text-[10px] font-bold text-slate-400 uppercase">Street</label><input id="profile-street" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Street" value={profileData.street} onChange={e => setProfileData({ ...profileData, street: e.target.value })} title="Street Name" aria-label="Street Name" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-locality" className="text-[10px] font-bold text-slate-400 uppercase">Locality</label><input id="profile-locality" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Locality" value={profileData.locality} onChange={e => setProfileData({ ...profileData, locality: e.target.value })} title="Locality" aria-label="Locality" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-area" className="text-[10px] font-bold text-slate-400 uppercase">Area</label><input id="profile-area" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Area" value={profileData.area} onChange={e => setProfileData({ ...profileData, area: e.target.value })} title="Area Name" aria-label="Area Name" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-city" className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label><input id="profile-city" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="City" value={profileData.city} onChange={e => setProfileData({ ...profileData, city: e.target.value })} title="City or Town" aria-label="City or Town" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-state" className="text-[10px] font-bold text-slate-400 uppercase">State / Union Territory</label><select id="profile-state" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.state} onChange={e => setProfileData({ ...profileData, state: e.target.value })} title="Select State" aria-label="Select State">{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pincode" className="text-[10px] font-bold text-slate-400 uppercase">Pin Code</label><input id="profile-pincode" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="600001" value={profileData.pincode} onChange={e => setProfileData({ ...profileData, pincode: e.target.value })} title="Pincode" aria-label="Pincode" /></div>
                                 </div>
                             </div>
                             {/* ... Contact ... */}
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Contact & Online Presence</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label htmlFor="profile-mobile" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Mobile No</label><input id="profile-mobile" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="Mobile Number" value={profileData.mobile} onChange={e => setProfileData({ ...profileData, mobile: e.target.value })} title="Mobile Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-telephone" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Land Line (Telephone)</label><input id="profile-telephone" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="Landline" value={profileData.telephone} onChange={e => setProfileData({ ...profileData, telephone: e.target.value })} title="Telephone Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-email" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Mail size={10} /> Official Email</label><input id="profile-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="mail@example.com" value={profileData.email} onChange={e => setProfileData({ ...profileData, email: e.target.value })} title="Official Email Address" /></div>
-                                    <div className="space-y-1 md:col-span-2"><label htmlFor="profile-website" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Globe size={10} /> Corporate Website</label><input id="profile-website" type="url" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="https://www.example.com" value={profileData.website} onChange={e => setProfileData({ ...profileData, website: e.target.value })} title="Corporate Website URL" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-business-nature" className="text-[10px] font-bold text-slate-400 uppercase">Nature of Business</label><select id="profile-business-nature" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.natureOfBusiness} onChange={e => setProfileData({ ...profileData, natureOfBusiness: e.target.value })} title="Select Nature of Business">{NATURE_OF_BUSINESS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select></div>
+                                    <div className="space-y-1"><label htmlFor="profile-mobile" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Mobile No</label><input id="profile-mobile" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="Mobile Number" value={profileData.mobile} onChange={e => setProfileData({ ...profileData, mobile: e.target.value })} title="Mobile Number" aria-label="Mobile Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-telephone" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Land Line (Telephone)</label><input id="profile-telephone" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="Landline" value={profileData.telephone} onChange={e => setProfileData({ ...profileData, telephone: e.target.value })} title="Telephone Number" aria-label="Telephone Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-email" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Mail size={10} /> Official Email</label><input id="profile-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="mail@example.com" value={profileData.email} onChange={e => setProfileData({ ...profileData, email: e.target.value })} title="Official Email Address" aria-label="Official Email Address" /></div>
+                                    <div className="space-y-1 md:col-span-2"><label htmlFor="profile-website" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Globe size={10} /> Corporate Website</label><input id="profile-website" type="url" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="https://www.example.com" value={profileData.website} onChange={e => setProfileData({ ...profileData, website: e.target.value })} title="Corporate Website URL" aria-label="Corporate Website URL" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-business-nature" className="text-[10px] font-bold text-slate-400 uppercase">Nature of Business</label><select id="profile-business-nature" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.natureOfBusiness} onChange={e => setProfileData({ ...profileData, natureOfBusiness: e.target.value })} title="Select Nature of Business" aria-label="Select Nature of Business">{NATURE_OF_BUSINESS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select></div>
                                 </div>
                             </div>
                         </div>
@@ -1108,6 +1130,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             disabled={isSyncing}
                             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20"
                             title="Sync News with Cloud"
+                            aria-label="Sync News with Cloud"
                         >
                             {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
                             {isSyncing ? 'SYNCING...' : 'SYNC WITH CLOUD'}
@@ -1124,6 +1147,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 value={profileData.flashNews || ''}
                                 onChange={e => setProfileData({ ...profileData, flashNews: e.target.value })}
                                 title="Flash News Message"
+                                aria-label="Flash News Message"
                             />
                         </div>
 
@@ -1140,6 +1164,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         value={profileData.externalAppUrl || ''}
                                         onChange={e => setProfileData({ ...profileData, externalAppUrl: e.target.value })}
                                         title="External AI Application URL"
+                                        aria-label="External AI Application URL"
                                     />
                                 </div>
                             </div>
@@ -1152,6 +1177,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     value={profileData.postLoginMessage || ''}
                                     onChange={e => setProfileData({ ...profileData, postLoginMessage: e.target.value })}
                                     title="Post-Login Information Message"
+                                    aria-label="Post-Login Information Message"
                                 />
                             </div>
                         </div>
@@ -1199,6 +1225,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <button
                                         onClick={onSkipSetupRedirect}
                                         className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-3 mt-auto"
+                                        title="Start Fresh (Nuke All Data)"
+                                        aria-label="Start Fresh (Nuke All Data)"
                                     >
                                         START FRESH <ArrowRight size={18} />
                                     </button>
@@ -1214,6 +1242,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <button
                                         onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }}
                                         className="w-full py-4 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-xl font-bold transition-all flex items-center justify-center gap-3 mt-auto"
+                                        title="Restore from Backup"
+                                        aria-label="Restore from Backup"
                                     >
                                         <Upload size={18} /> RESTORE BACKUP
                                     </button>
@@ -1229,7 +1259,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     </div>
                                     <h4 className="font-bold text-white mb-2">Backup Data</h4>
                                     <p className="text-xs text-slate-400 mb-6 leading-relaxed">Create a secure, encrypted backup file (.enc) of your entire system data.</p>
-                                    <button onClick={() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); }} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2">
+                                    <button onClick={() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); }} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2" title="Create Backup" aria-label="Create Backup">
                                         <Download size={16} /> Create Backup
                                     </button>
                                 </div>
@@ -1240,7 +1270,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 </div>
                                 <h4 className="font-bold text-white mb-2">Restore Data</h4>
                                 <p className="text-xs text-slate-400 mb-6 leading-relaxed">Restore system from an encrypted file. Overwrites current session.</p>
-                                <button onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }} className="w-full py-3 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-lg font-bold transition-all flex items-center justify-center gap-2">
+                                <button onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }} className="w-full py-3 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-lg font-bold transition-all flex items-center justify-center gap-2" title="Restore Backup" aria-label="Restore Backup">
                                     <Upload size={16} /> Restore Backup
                                 </button>
                             </div>
@@ -1251,7 +1281,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     </div>
                                     <h4 className="font-bold text-white mb-2">Payroll Data Reset</h4>
                                     <p className="text-xs text-slate-400 mb-6 leading-relaxed">Remove only employee and payroll records. <span className="text-amber-400 font-bold">Keeps Statutory Rules and Company Profile intact.</span></p>
-                                    <button onClick={() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); }} className="w-full py-3 bg-amber-600/20 hover:bg-amber-600 text-amber-400 hover:text-white border border-amber-600/50 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2">
+                                    <button onClick={() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); }} className="w-full py-3 bg-amber-600/20 hover:bg-amber-600 text-amber-400 hover:text-white border border-amber-600/50 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2" title="Reset Employee Database" aria-label="Reset Employee Database">
                                         <RefreshCw size={16} /> Reset Employee Database
                                     </button>
                                 </div>
@@ -1269,7 +1299,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <p className="text-xs text-red-300/60">Permanently delete all data.</p>
                                 </div>
                             </div>
-                            <button onClick={() => { setShowResetModal(true); setResetPassword(''); setResetError(''); }} className="px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/50 rounded-lg text-xs font-bold transition-all">Factory Reset</button>
+                            <button onClick={() => { setShowResetModal(true); setResetPassword(''); setResetError(''); }} className="px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/50 rounded-lg text-xs font-bold transition-all" title="Factory Reset" aria-label="Factory Reset">Factory Reset</button>
                         </div>
                     </div>
                 </div>
@@ -1289,7 +1319,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             {showResetModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Modal"><X size={20} /></button>}
+                        {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Factory Reset Modal" aria-label="Close Factory Reset Modal"><X size={20} /></button>}
                         <div className="flex flex-col items-center gap-2">
                             <div className="p-4 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2">
                                 <AlertTriangle size={32} />
@@ -1299,7 +1329,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                         <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
                             <div className="flex items-center gap-2 text-sm text-slate-400 mb-2"><KeyRound size={16} /><span>Confirm Identity</span></div>
-                            <input type="password" placeholder="Enter Login Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all disabled:opacity-50`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executeFactoryReset()} />
+                            <input type="password" placeholder="Enter Login Password" title="Identity Verification Password" aria-label="Identity Verification Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all disabled:opacity-50`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executeFactoryReset()} />
                             {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
                         </div>
                         <button onClick={executeFactoryReset} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-900/20 transition-all flex items-center justify-center gap-2">
@@ -1312,7 +1342,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             {showPayrollResetModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowPayrollResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Modal"><X size={20} /></button>
+                        <button onClick={() => setShowPayrollResetModal(false)} title="Close Payroll Reset Modal" aria-label="Close Payroll Reset Modal" className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full border border-amber-900/50 mb-2">
                                 <Trash2 size={32} />
@@ -1322,7 +1352,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                         <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
                             <div className="flex items-center gap-2 text-sm text-slate-400 mb-2"><KeyRound size={16} /><span>Confirm Identity</span></div>
-                            <input type="password" placeholder="Enter Login Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all disabled:opacity-50`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
+                            <input type="password" placeholder="Enter Login Password" title="Identity Verification Password" aria-label="Identity Verification Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all disabled:opacity-50`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
                             {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
                         </div>
                         <button onClick={executePayrollReset} disabled={isProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-900/20 transition-all flex items-center justify-center gap-2">
@@ -1336,7 +1366,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
                         {!isProcessing && (
-                            <button onClick={() => { setShowBackupModal(false); setSelectedBackupFile(null); setEncryptionKey(''); }} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Modal"><X size={20} /></button>
+                            <button onClick={() => { setShowBackupModal(false); setSelectedBackupFile(null); setEncryptionKey(''); }} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Backup Modal" aria-label="Close Backup Modal"><X size={20} /></button>
                         )}
                         <div className="flex flex-col items-center gap-2">
                             <div className={`p-4 rounded-full border mb-2 transition-all duration-500 ${processProgress === 100 ? 'bg-emerald-900/30 text-emerald-400 border-emerald-500/50' : isProcessing ? 'bg-indigo-900/30 text-indigo-400 border-indigo-500/50' : 'bg-blue-900/20 text-blue-400 border-blue-900/50'}`}>
@@ -1353,8 +1383,14 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         <span className={`text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${processProgress === 100 ? 'text-emerald-400 text-sm animate-pulse' : 'text-slate-400'}`}>{processStatus}</span>
                                         <span className={`text-xs font-bold font-mono ${processProgress === 100 ? 'text-emerald-400' : 'text-slate-500'}`}>{processProgress}%</span>
                                     </div>
-                                    <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden border border-slate-700">
-                                        <div className={`h-full transition-all duration-300 ease-out ${backupMode === 'EXPORT' ? 'bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.6)]'}`} style={{ width: `${processProgress}%` }}></div>
+                                    <div className="relative h-2 w-full bg-slate-900/50 rounded-full overflow-hidden border border-slate-800">
+                                        <div 
+                                            ref={progressRef}
+                                            className={`h-full transition-all duration-300 ease-out progress-shadow-blue ${backupMode === 'EXPORT' ? 'bg-blue-600' : 'bg-emerald-600'}`} 
+                                        ></div>
+                                        <span className="sr-only" role="status">
+                                            {`Progress: ${Math.round(processProgress)}% - ${processStatus}`}
+                                        </span>
                                     </div>
                                 </div>
                             </div>
@@ -1370,6 +1406,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             <button
                                                 onClick={() => backupFileRef.current?.click()}
                                                 className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-[10px] font-black uppercase tracking-widest rounded-lg border border-slate-700 transition-all text-slate-300"
+                                                title="Change Backup File"
+                                                aria-label="Change Backup File"
                                             >
                                                 Change
                                             </button>
@@ -1389,7 +1427,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         </p>
                                     </div>
                                 )}
-                                <button onClick={backupMode === 'EXPORT' ? () => requireAuth(handleEncryptedExport) : () => { const file = selectedBackupFile; if (!file || (!encryptionKey && !isSqliteFile)) { showAlert?.('warning', 'Input Required', 'Please select a file and enter password.'); return; } requireAuth(initiateRestore); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                                <button onClick={backupMode === 'EXPORT' ? () => requireAuth(handleEncryptedExport) : () => { const file = selectedBackupFile; if (!file || (!encryptionKey && !isSqliteFile)) { showAlert?.('warning', 'Input Required', 'Please select a file and enter password.'); return; } requireAuth(initiateRestore); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2" title={backupMode === 'EXPORT' ? 'Download Encrypted Backup' : 'Restore Data from Backup'} aria-label={backupMode === 'EXPORT' ? 'Download Encrypted Backup' : 'Restore Data from Backup'}>
                                     {backupMode === 'EXPORT' ? 'DOWNLOAD BACKUP' : 'RESTORE DATA'}
                                 </button>
                             </div>
@@ -1433,6 +1471,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         }}
                                         disabled={isSyncing}
                                         className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-[10px] font-black uppercase tracking-widest rounded-lg border border-slate-700 transition-all text-sky-400 disabled:opacity-50"
+                                        title="Sync License Info with Cloud"
+                                        aria-label="Sync License Info with Cloud"
                                     >
                                         <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
                                         {isSyncing ? 'Syncing...' : 'Sync Cloud'}
@@ -1489,26 +1529,26 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <div className="space-y-4">
                                     <div className="space-y-1">
                                         <label htmlFor="license-full-name" className="text-[10px] font-bold text-slate-500 uppercase pl-1">Full Name / Authorized Person</label>
-                                        <input id="license-full-name" ref={fullNameRef} type="text" placeholder="Your Name - as mentioned in App request mail" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserName} onChange={e => setNewUserName(e.target.value)} title="Full Name for License" />
+                                        <input id="license-full-name" ref={fullNameRef} type="text" placeholder="Your Name - as mentioned in App request mail" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserName} onChange={e => setNewUserName(e.target.value)} title="Full Name for License" aria-label="Full Name for License" />
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-1">
                                             <label htmlFor="license-user-id" className="text-[10px] font-bold text-slate-500 uppercase pl-1">User ID</label>
-                                            <input id="license-user-id" type="text" placeholder="User ID" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-mono focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserID} onChange={e => setNewUserID(e.target.value)} title="License User ID" />
+                                            <input id="license-user-id" type="text" placeholder="User ID" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-mono focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserID} onChange={e => setNewUserID(e.target.value)} title="License User ID" aria-label="License User ID" />
                                         </div>
                                         <div className="space-y-1">
                                             <label htmlFor="license-key-input" className="text-[10px] font-bold text-slate-500 uppercase pl-1">License Key (16-Digit)</label>
-                                            <input id="license-key-input" type="text" placeholder="XXXX-XXXX-XXXX-XXXX" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white placeholder:text-slate-500 text-sm font-mono focus:ring-2 focus:ring-pink-500/50 outline-none transition-all uppercase" value={newLicenseKey} onChange={e => setNewLicenseKey(e.target.value.toUpperCase())} title="16-Digit License Key" />
+                                            <input id="license-key-input" type="text" placeholder="XXXX-XXXX-XXXX-XXXX" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white placeholder:text-slate-500 text-sm font-mono focus:ring-2 focus:ring-pink-500/50 outline-none transition-all uppercase" value={newLicenseKey} onChange={e => setNewLicenseKey(e.target.value.toUpperCase())} title="16-Digit License Key" aria-label="16-Digit License Key" />
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-1">
                                             <label htmlFor="license-email" className="text-[10px] font-bold text-slate-500 uppercase pl-1">Email ID</label>
-                                            <input id="license-email" type="email" title="Registered Email" placeholder="Email Address" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegEmail} onChange={e => setNewRegEmail(e.target.value)} />
+                                            <input id="license-email" type="email" title="Registered Email" aria-label="Registered Email" placeholder="Email Address" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegEmail} onChange={e => setNewRegEmail(e.target.value)} />
                                         </div>
                                         <div className="space-y-1">
                                             <label htmlFor="license-mobile" className="text-[10px] font-bold text-slate-500 uppercase pl-1">Mobile No</label>
-                                            <input id="license-mobile" type="tel" title="Activation Mobile Number" placeholder="10-digit mobile" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegMobile} onChange={e => setNewRegMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} />
+                                            <input id="license-mobile" type="tel" title="Activation Mobile Number" aria-label="Activation Mobile Number" placeholder="10-digit mobile" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegMobile} onChange={e => setNewRegMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} />
                                         </div>
                                     </div>
 
@@ -1537,6 +1577,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         }}
                                         disabled={isActivating}
                                         title="Activate License"
+                                        aria-label="Activate License"
                                         className="w-full py-4 bg-pink-600 hover:bg-pink-700 disabled:opacity-50 text-white font-black uppercase tracking-widest rounded-xl shadow-xl shadow-pink-500/20 transition-all flex items-center justify-center gap-3"
                                     >
                                         {isActivating ? <Loader2 size={24} className="animate-spin" /> : <>Re-Activate System <ArrowRight size={20} /></>}
@@ -1544,7 +1585,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 </div>
                             </div>
 
-                            <div className="bg-indigo-900/10 border border-indigo-500/20 rounded-2xl p-6 space-y-4">
+                            <div className="p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-2xl p-6 space-y-4">
                                 <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
                                     <ShieldCheck size={16} /> Software Security & Trust Guide
                                 </h3>
@@ -1622,8 +1663,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-1">
-                                                    <button onClick={() => handleUmEdit(u)} className="p-1.5 hover:bg-slate-700 text-sky-400 rounded-md transition-colors" title="Edit User"><Edit2 size={14} /></button>
-                                                    <button onClick={() => { if (u.username === currentUser?.username) { showAlert?.('error', 'Action Restricted', 'Cannot delete your own account.'); } else { requireAuth(() => handleUmDelete(u.username)); } }} className="p-1.5 hover:bg-red-900/20 text-red-400 rounded-md transition-colors" title="Delete User"><Trash2 size={14} /></button>
+                                                    <button onClick={() => handleUmEdit(u)} className="p-1.5 hover:bg-slate-700 text-sky-400 rounded-md transition-colors" title="Edit User" aria-label="Edit User"><Edit2 size={14} /></button>
+                                                    <button onClick={() => { if (u.username === currentUser?.username) { showAlert?.('error', 'Action Restricted', 'Cannot delete your own account.'); } else { requireAuth(() => handleUmDelete(u.username)); } }} className="p-1.5 hover:bg-red-900/20 text-red-400 rounded-md transition-colors" title="Delete User" aria-label="Delete User"><Trash2 size={14} /></button>
                                                 </div>
                                             </div>
                                         ))}
@@ -1641,31 +1682,31 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <div className="space-y-3">
                                     <div className="space-y-1">
                                         <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Full Name</label>
-                                        <input ref={umNameRef} type="text" value={umForm.name} onChange={e => setUmForm({ ...umForm, name: e.target.value })} placeholder="Enter user's full name" className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none" />
+                                        <input ref={umNameRef} type="text" value={umForm.name} onChange={e => setUmForm({ ...umForm, name: e.target.value })} placeholder="Enter user's full name" className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none" title="User Full Name" aria-label="User Full Name" />
                                     </div>
                                     <div className="space-y-1">
                                         <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Username / ID</label>
-                                        <input type="text" value={umForm.username} onChange={e => setUmForm({ ...umForm, username: e.target.value.toLowerCase().replace(/\s/g, '') })} placeholder="Pick a unique login ID" disabled={!!umEditId} className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none disabled:opacity-50" />
+                                        <input type="text" value={umForm.username} onChange={e => setUmForm({ ...umForm, username: e.target.value.toLowerCase().replace(/\s/g, '') })} placeholder="Pick a unique login ID" disabled={!!umEditId} className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none disabled:opacity-50" title="Username" aria-label="Username" />
                                     </div>
                                     <div className="space-y-1">
                                         <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Login Password</label>
                                         <div className="relative">
-                                            <input type={umShowPwd ? 'text' : 'password'} value={umForm.password} onChange={e => setUmForm({ ...umForm, password: e.target.value })} placeholder="Enter secure password" className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none pr-10" />
-                                            <button onClick={() => setUmShowPwd(!umShowPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-sky-400 transition-colors">{umShowPwd ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+                                            <input type={umShowPwd ? 'text' : 'password'} value={umForm.password} onChange={e => setUmForm({ ...umForm, password: e.target.value })} placeholder="Enter secure password" className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none pr-10" title="Login Password" aria-label="Login Password" />
+                                            <button onClick={() => setUmShowPwd(!umShowPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-sky-400 transition-colors" title={umShowPwd ? 'Hide Password' : 'Show Password'} aria-label={umShowPwd ? 'Hide Password' : 'Show Password'}>{umShowPwd ? <EyeOff size={14} /> : <Eye size={14} />}</button>
                                         </div>
                                     </div>
                                     <div className="space-y-1">
                                         <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">System Role</label>
                                         <div className="flex gap-2 p-1 bg-slate-800 rounded-xl border border-slate-700">
                                             {(['Administrator', 'User'] as const).map(role => (
-                                                <button key={role} onClick={() => setUmForm({ ...umForm, role })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${umForm.role === role ? 'bg-sky-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>{role}</button>
+                                                <button key={role} onClick={() => setUmForm({ ...umForm, role })} title={`Set User Role to ${role}`} aria-label={`Set User Role to ${role}`} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${umForm.role === role ? 'bg-sky-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>{role}</button>
                                             ))}
                                         </div>
                                     </div>
                                     {umError && <div className="p-2 bg-red-900/20 border border-red-500/20 rounded-lg text-[10px] text-red-400 flex items-center gap-2"><AlertCircle size={12} /> {umError}</div>}
                                     <div className="flex gap-2 pt-2">
-                                        {umEditId && <button onClick={() => { setUmEditId(null); setUmForm({ name: '', username: '', password: '', role: 'User' }); }} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all">Cancel</button>}
-                                        <button onClick={handleUmSave} className="flex-[2] py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-black uppercase text-[10px] tracking-widest rounded-xl shadow-lg shadow-sky-500/20 transition-all flex items-center justify-center gap-2">{umEditId ? 'Update User' : 'Save User'}</button>
+                                        {umEditId && <button onClick={() => { setUmEditId(null); setUmForm({ name: '', username: '', password: '', role: 'User' }); }} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all" title="Cancel Editing" aria-label="Cancel Editing">Cancel</button>}
+                                        <button onClick={handleUmSave} title={umEditId ? 'Update User Information' : 'Save New User'} aria-label={umEditId ? 'Update User Information' : 'Save New User'} className="flex-[2] py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-black uppercase text-[10px] tracking-widest rounded-xl shadow-lg shadow-sky-500/20 transition-all flex items-center justify-center gap-2">{umEditId ? 'Update User' : 'Save User'}</button>
                                     </div>
                                 </div>
                             </div>
@@ -1677,7 +1718,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             {showOverwriteConfirm && (
                 <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowOverwriteConfirm(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Modal"><X size={20} /></button>
+                        <button onClick={() => setShowOverwriteConfirm(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Overwrite Confirmation Modal" aria-label="Close Overwrite Confirmation Modal"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2">
                                 <AlertTriangle size={32} />
@@ -1688,8 +1729,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             </p>
                         </div>
                         <div className="flex gap-3 mt-4">
-                            <button onClick={() => setShowOverwriteConfirm(false)} className="flex-1 py-3 border border-slate-600 rounded-xl text-slate-300 font-bold hover:bg-slate-800 transition-all">Cancel</button>
-                            <button onClick={() => { setShowOverwriteConfirm(false); executeImport(); }} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-lg transition-all">Proceed & Overwrite</button>
+                            <button onClick={() => setShowOverwriteConfirm(false)} title="Cancel Overwrite" aria-label="Cancel Overwrite" className="flex-1 py-3 border border-slate-600 rounded-xl text-slate-300 font-bold hover:bg-slate-800 transition-all">Cancel</button>
+                            <button onClick={() => { setShowOverwriteConfirm(false); executeImport(); }} title="Confirm and Overwrite Data" aria-label="Confirm and Overwrite Data" className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-lg transition-all">Proceed & Overwrite</button>
                         </div>
                     </div>
                 </div>
@@ -1698,7 +1739,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             {showAuthModal && (
                 <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-indigo-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Authentication Modal"><X size={20} /></button>
+                        <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Authentication Modal" aria-label="Close Authentication Modal"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className="p-4 bg-indigo-900/20 text-indigo-500 rounded-full border border-indigo-900/50 mb-2">
                                 <KeyRound size={32} />
@@ -1710,7 +1751,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <input id="auth-pwd" type="password" placeholder="Login Password" autoFocus className={`w-full bg-[#0f172a] border ${authError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all`} value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }} onKeyDown={(e) => e.key === 'Enter' && handleAuthSubmit()} title="Login Password" />
                             {authError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{authError}</p>}
                         </div>
-                        <button onClick={handleAuthSubmit} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                        <button onClick={handleAuthSubmit} title="Verify Password and Proceed" aria-label="Verify Password and Proceed" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
                             <CheckCircle2 size={18} /> VERIFY & PROCEED
                         </button>
                     </div>

@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, net, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
-import { https } from 'follow-redirects';
+
 import { spawn, execSync } from 'child_process';
 import * as os from 'os';
 
@@ -40,7 +40,7 @@ const getAppPaths = (base: string) => {
 };
 
 // ── DATABASE INITIALIZATION ──
-let db: any = null;
+let db: Database.Database | null = null;
 
 function initializeDatabase(basePath: string) {
     const paths = getAppPaths(basePath);
@@ -371,6 +371,11 @@ ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
                 redirect: 'follow'
             } as any);
 
+            const timeout = setTimeout(() => {
+                request.abort();
+                reject({ message: '🔌 API Request Timed Out (30s)' });
+            }, 30000);
+
             if (options?.headers) {
                 for (const [key, value] of Object.entries(options.headers)) {
                     request.setHeader(key, value as string);
@@ -383,6 +388,7 @@ ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
                     responseData += chunk.toString('utf8');
                 });
                 response.on('end', () => {
+                    clearTimeout(timeout);
                     let responseBody: any;
                     try {
                         responseBody = JSON.parse(responseData);
@@ -400,6 +406,7 @@ ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
             });
 
             request.on('error', (error) => {
+                clearTimeout(timeout);
                 console.error('🔌 Error in api-fetch:', error);
                 reject({ message: error.message });
             });

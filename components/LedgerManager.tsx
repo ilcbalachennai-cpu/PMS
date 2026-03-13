@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useMemo } from 'react';
-import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2, UserX, Trash2 } from 'lucide-react';
+import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2, UserX, Trash2, Search, FileText, ChevronRight, ChevronLeft, Filter, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Employee, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile, Attendance } from '../types';
+import { Employee, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile } from '../types';
 import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
 
 interface LedgerManagerProps {
@@ -376,6 +376,8 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                     {!isReadOnly && !isLocked && (
                         <>
                             <button
+                                title={justSaved ? `Enable ${viewMode === 'leave' ? 'Leave' : 'Advance'} Editing` : 'Save Ledger Changes'}
+                                aria-label={justSaved ? `Enable ${viewMode === 'leave' ? 'Leave' : 'Advance'} Editing` : 'Save Ledger Changes'}
                                 onClick={justSaved ? () => setJustSaved(false) : handleSave}
                                 disabled={isSaving}
                                 className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg ${justSaved
@@ -386,35 +388,37 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                 {isSaving ? (
                                     <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
                                 ) : justSaved ? (
-                                    <Edit2 size={16} />
+                                    <span title="Edit Mode" aria-label="Edit Mode"><Edit2 size={16} /></span>
                                 ) : (
-                                    <Save size={16} />
+                                    <span title="Save Mode" aria-label="Save Mode"><Save size={16} /></span>
                                 )}
                                 {justSaved ? `Modify ${viewMode === 'leave' ? 'Leave' : 'Advance'}` : 'Save Changes'}
                             </button>
                             {viewMode === 'advance' && (
                                 <button
-                                    onClick={handleClearData}
-                                    disabled={isSaving || justSaved}
-                                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600/20 hover:bg-red-600/40 text-red-500 border border-red-500/30 font-bold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title="Clear All Advance Data"
-                                >
-                                    <Trash2 size={16} /> Clear Data
-                                </button>
+                                onClick={handleClearData}
+                                disabled={isSaving || justSaved}
+                                title="Clear All Advance Data"
+                                aria-label="Clear All Advance Data"
+                                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600/20 hover:bg-red-600/40 text-red-500 border border-red-500/30 font-bold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <X size={16} /> Clear Data
+                            </button>
                             )}
-                            <button onClick={downloadTemplate} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2.5 rounded-lg font-bold text-sm border border-slate-600">
+                            <button title="Download Import Template" aria-label="Download Import Template" onClick={downloadTemplate} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2.5 rounded-lg font-bold text-sm border border-slate-600">
                                 <Download size={16} /> Template
                             </button>
                             <button
+                                title="Import Excel Data"
+                                aria-label="Import Excel Data"
                                 onClick={() => fileInputRef.current?.click()}
                                 disabled={isUploading || justSaved}
                                 className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed"
-                                title="Import Excel Data"
                             >
                                 {isUploading ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : <Upload size={16} />}
                                 Import
                             </button>
-                            <input type="file" ref={fileInputRef} onChange={handleExcelImport} className="hidden" accept=".xlsx, .xls" />
+                            <input type="file" title="Excel File Input" aria-label="Excel File Input" ref={fileInputRef} onChange={handleExcelImport} className="hidden" accept=".xlsx, .xls" />
                         </>
                     )}
                 </div>
@@ -456,7 +460,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                     <tr key={emp.id} className="hover:bg-slate-800/50">
                                         <td className="px-6 py-4"><div className="text-sm font-bold text-white">{emp.name}</div><div className="text-[10px] text-slate-500">{emp.id}</div></td>
                                         <td className="px-4 py-4 text-center text-slate-300 font-mono text-sm">{l.el.opening}</td>
-                                        <td className="px-4 py-4 text-center"><input disabled={baseDisabled} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-white text-sm disabled:opacity-50" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
+                                        <td className="px-4 py-4 text-center"><input disabled={baseDisabled} title={`EL Eligible for ${emp.name}`} aria-label={`EL Eligible for ${emp.name}`} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-white text-sm disabled:opacity-50" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
                                         <td className="px-4 py-4 text-center font-bold text-blue-400">{l.el.balance}</td>
                                         <td className="px-4 py-4 text-center text-emerald-400">{l.sl.balance}</td>
                                         <td className="px-4 py-4 text-center text-amber-400">{l.cl.balance}</td>
@@ -492,25 +496,24 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                         <td className="px-4 py-4 text-center text-slate-400 font-mono">{a.opening || 0}</td>
                                         {/* New Advance */}
                                         <td className="px-4 py-4 text-center">
-                                            <input disabled={inputDisabled} type="number" min={0}
+                                            <input disabled={inputDisabled} title={`New Advance for ${emp.name}`} aria-label={`New Advance for ${emp.name}`} type="number" min={0}
                                                 className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-emerald-400 font-bold text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent"
                                                 value={a.totalAdvance || 0}
                                                 onChange={e => handleAdvanceUpdate(emp.id, 'totalAdvance', +e.target.value)} />
                                         </td>
                                         {/* Manual Payment — overrides EMI when > 0 */}
-                                        <td className="px-4 py-4 text-center">
-                                            <input disabled={inputDisabled} type="number" min={0}
+                                        <td className="px-4 py-4 text-center">                                            <input disabled={inputDisabled} title={`Manual Payment for ${emp.name}`} aria-label={`Manual Payment for ${emp.name}`} type="number" min={0}
                                                 placeholder="0"
                                                 className="w-20 bg-[#0f172a] border border-amber-700/40 rounded p-1 text-center text-amber-400 text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent"
                                                 value={(a.manualPayment || 0) > 0 ? a.manualPayment : ''}
                                                 onChange={e => handleAdvanceUpdate(emp.id, 'manualPayment', e.target.value === '' ? 0 : +e.target.value)} />
                                         </td>
                                         {/* EMI Count — disabled when manual is set */}
-                                        <td className="px-4 py-4 text-center">
-                                            <input
+                                        <td className="px-4 py-4 text-center">                                            <input
                                                 disabled={inputDisabled || (a.manualPayment || 0) > 0}
+                                                title={(a.manualPayment || 0) > 0 ? 'Disabled — Manual payment is set' : `EMI Count for ${emp.name}`}
+                                                aria-label={(a.manualPayment || 0) > 0 ? 'Disabled — Manual payment is set' : `EMI Count for ${emp.name}`}
                                                 type="number" min={0} step={1}
-                                                title={(a.manualPayment || 0) > 0 ? 'Disabled — Manual payment is set' : 'Number of EMI installments'}
                                                 className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-slate-300 text-sm disabled:opacity-40 disabled:bg-transparent disabled:border-transparent disabled:cursor-not-allowed"
                                                 value={a.emiCount || 0}
                                                 onChange={e => handleAdvanceUpdate(emp.id, 'emiCount', +e.target.value)} />
@@ -534,7 +537,9 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
             {modalState.isOpen && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button onClick={() => setModalState({ ...modalState, isOpen: false })} title="Close Modal" aria-label="Close Modal" className="absolute top-4 right-4 text-slate-400 hover:text-white">
+              <X size={20} />
+            </button>
                         <div className="flex flex-col items-center gap-2">
                             <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>
                                 {modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}
@@ -545,12 +550,33 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                         <div className="flex gap-3 mt-4">
                             {modalState.type === 'confirm' ? (
                                 <>
-                                    <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors">Cancel</button>
-                                    <button onClick={modalState.onConfirm} className="flex-1 py-2.5 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 transition-colors shadow-lg">Confirm</button>
-                                </>
-                            ) : (
-                                <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
-                            )}
+                  <button
+                    onClick={() => setModalState({ ...modalState, isOpen: false })}
+                    title="Cancel Action"
+                    aria-label="Cancel Action"
+                    className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={modalState.onConfirm}
+                    title="Confirm Action"
+                    aria-label="Confirm Action"
+                    className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg"
+                  >
+                    Confirm
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setModalState({ ...modalState, isOpen: false })}
+                  title="Close Notification"
+                  aria-label="Close Notification"
+                  className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors"
+                >
+                  Close
+                </button>
+              )}
                         </div>
                     </div>
                 </div>

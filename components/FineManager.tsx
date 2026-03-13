@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef } from 'react';
-import { Upload, Save, Lock, AlertTriangle, CheckCircle2, X, AlertCircle, Search, FileSpreadsheet, Download, Gavel } from 'lucide-react';
+import { Upload, Save, Lock, AlertTriangle, CheckCircle2, X, Search, Download, Gavel } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, FineRecord, PayrollResult, CompanyProfile } from '../types';
 import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
@@ -212,16 +212,16 @@ const FineManager: React.FC<FineManagerProps> = ({
                 <div className="flex items-center gap-3">
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                        <input type="text" placeholder="Search..." className="pl-9 pr-4 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-xs text-white outline-none focus:ring-1 focus:ring-blue-500 w-40" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                        <input type="text" title="Search Employee Records" aria-label="Search Employee Records" placeholder="Search..." className="pl-9 pr-4 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-xs text-white outline-none focus:ring-1 focus:ring-blue-500 w-40" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                     </div>
                     {!isLocked && (
                         <>
-                            <button onClick={justSaved ? () => setJustSaved(false) : handleSave} disabled={isSaving} className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold text-xs transition-all shadow-lg ${justSaved ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+                             <button title={justSaved ? 'Enable Editing' : 'Save Records'} aria-label={justSaved ? 'Enable Editing' : 'Save Records'} onClick={justSaved ? () => setJustSaved(false) : handleSave} disabled={isSaving} className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold text-xs transition-all shadow-lg ${justSaved ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
                                 {isSaving ? <div className="animate-spin rounded-full h-3 w-3 border-2 border-white/30 border-t-white" /> : <Save size={14} />} {justSaved ? 'Modify' : 'Save'}
                             </button>
-                            <button onClick={downloadTemplate} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-lg font-bold text-xs border border-slate-600"><Download size={14} /> Template</button>
-                            <button onClick={() => fileInputRef.current?.click()} disabled={isUploading || justSaved} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700"><Upload size={14} /> Import</button>
-                            <input type="file" ref={fileInputRef} onChange={handleExcelImport} className="hidden" accept=".xlsx, .xls" />
+                            <button title="Download Import Template" aria-label="Download Import Template" onClick={downloadTemplate} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-lg font-bold text-xs border border-slate-600"><Download size={14} /> Template</button>
+                            <button title="Import from Excel" aria-label="Import from Excel" onClick={() => fileInputRef.current?.click()} disabled={isUploading || justSaved} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700"><Upload size={14} /> Import</button>
+                            <input type="file" title="Excel File Input" aria-label="Excel File Input" ref={fileInputRef} onChange={handleExcelImport} className="hidden" accept=".xlsx, .xls" />
                         </>
                     )}
                 </div>
@@ -251,6 +251,8 @@ const FineManager: React.FC<FineManagerProps> = ({
                                     <td className="px-4 py-4 text-right">
                                         <input
                                             type="number"
+                                            title={`Income Tax for ${emp.name}`}
+                                            aria-label={`Income Tax for ${emp.name}`}
                                             disabled={inputDisabled}
                                             className={`w-32 bg-[#0f172a] border rounded-lg p-2 text-right text-sm font-mono outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent ${rec.tax !== undefined && rec.tax > 0 ? 'text-sky-400 font-bold border-sky-900/50' : 'text-slate-400 border-slate-700'}`}
                                             value={rec.tax !== undefined ? rec.tax : ''}
@@ -261,6 +263,8 @@ const FineManager: React.FC<FineManagerProps> = ({
                                     <td className="px-4 py-4 text-right">
                                         <input
                                             type="number"
+                                            title={`Fine Amount for ${emp.name}`}
+                                            aria-label={`Fine Amount for ${emp.name}`}
                                             disabled={inputDisabled}
                                             className={`w-32 bg-[#0f172a] border rounded-lg p-2 text-right text-sm font-mono outline-none focus:ring-1 focus:ring-red-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent ${rec.amount > 0 ? 'text-red-400 font-bold border-red-900/50' : 'text-slate-400 border-slate-700'}`}
                                             value={rec.amount}
@@ -271,6 +275,8 @@ const FineManager: React.FC<FineManagerProps> = ({
                                     <td className="px-6 py-4">
                                         <input
                                             type="text"
+                                            title={`Reason or Remarks for ${emp.name}`}
+                                            aria-label={`Reason or Remarks for ${emp.name}`}
                                             disabled={inputDisabled}
                                             className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent"
                                             value={rec.reason}
@@ -288,7 +294,7 @@ const FineManager: React.FC<FineManagerProps> = ({
             {modalState.isOpen && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button title="Close Modal" aria-label="Close Modal" onClick={() => setModalState({ ...modalState, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50'}`}>
                                 {modalState.type === 'error' ? <AlertTriangle size={24} /> : <CheckCircle2 size={24} />}

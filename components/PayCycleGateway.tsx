@@ -41,6 +41,8 @@ const PayCycleGateway: React.FC<PayCycleGatewayProps> = ({ month, year, setMonth
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Month</label>
                     <div className="relative">
                         <select
+                            title="Select Processing Month"
+                            aria-label="Select Processing Month"
                             value={month}
                             onChange={(e) => setMonth(e.target.value)}
                             className="w-full appearance-none bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer hover:bg-slate-800 text-sm"
@@ -59,6 +61,8 @@ const PayCycleGateway: React.FC<PayCycleGatewayProps> = ({ month, year, setMonth
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Year</label>
                     <div className="relative">
                         <select
+                            title="Select Processing Year"
+                            aria-label="Select Processing Year"
                             value={year}
                             onChange={(e) => setYear(Number(e.target.value))}
                             className="w-full appearance-none bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold outline-none focus:ring-2 focus:ring-emerald-500 transition-all cursor-pointer hover:bg-slate-800 text-sm"
@@ -83,6 +87,8 @@ const PayCycleGateway: React.FC<PayCycleGatewayProps> = ({ month, year, setMonth
 
             <button 
                 onClick={onProceed}
+                title="Start Payroll Processing"
+                aria-label="Start Payroll Processing"
                 className="w-full bg-white text-slate-900 hover:bg-slate-100 font-black py-3.5 rounded-xl shadow-xl hover:shadow-2xl transition-all flex items-center justify-center gap-2 group mt-2 text-sm md:text-base"
             >
                 <CheckCircle2 size={18} className="text-emerald-600" />

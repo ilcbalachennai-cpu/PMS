@@ -143,10 +143,10 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3 bg-[#0f172a] p-2 rounded-xl border border-slate-700">
-                    <select value={month} onChange={e => setMonth(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-blue-400">
+                    <select value={month} onChange={e => setMonth(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-blue-400" title="Select Month" aria-label="Select Month">
                         {months.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
-                    <select value={year} onChange={e => setYear(+e.target.value)} className="bg-transparent px-4 py-1 text-sm text-white font-bold outline-none focus:text-blue-400">
+                    <select value={year} onChange={e => setYear(+e.target.value)} className="bg-transparent px-4 py-1 text-sm text-white font-bold outline-none focus:text-blue-400" title="Select Year" aria-label="Select Year">
                         {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
                     </select>
                 </div>
@@ -192,7 +192,7 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
                         <div className="lg:col-span-2 bg-[#1e293b] rounded-2xl border border-slate-800 shadow-lg overflow-hidden">
                             <div className="bg-[#0f172a] p-4 border-b border-slate-800 flex justify-between items-center">
                                 <h3 className="font-bold text-white text-sm">Challan Summary</h3>
-                                <button onClick={handleDownloadChallan} className="text-[10px] bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded border border-slate-700 transition-colors flex items-center gap-1">
+                                <button onClick={handleDownloadChallan} className="text-[10px] bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded border border-slate-700 transition-colors flex items-center gap-1" title="Download Challan Summary PDF" aria-label="Download Challan Summary PDF">
                                     <FileText size={12} /> Download PDF
                                 </button>
                             </div>
@@ -212,7 +212,7 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
                         </div>
                         <div className="bg-[#1e293b] rounded-2xl border border-slate-800 shadow-lg p-6 flex flex-col justify-center gap-4">
                             <h3 className="font-bold text-white text-sm border-b border-slate-800 pb-2 mb-2">ECR Actions</h3>
-                            <button onClick={handleDownloadECR} className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg transition-all flex items-center justify-center gap-3 group">
+                            <button onClick={handleDownloadECR} className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg transition-all flex items-center justify-center gap-3 group" title="Generate and Download ECR Text File" aria-label="Generate and Download ECR Text File">
                                 <Download className="group-hover:scale-110 transition-transform" /> Generate ECR Text File
                             </button>
                             <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-900/50 text-xs text-blue-300 leading-relaxed"><p className="flex gap-2"><AlertCircle size={14} className="shrink-0 mt-0.5" /> <span>Ensure <b>UAN</b> is updated for all employees in Master before generation.</span></p></div>

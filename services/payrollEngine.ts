@@ -56,7 +56,6 @@ export const calculatePayroll = (
     let effectivePayableDays = (attendance.presentDays || 0) + paidLeaveDays;
 
     // --- DOL (Date of Leaving) Logic Checks ---
-    let isLeftService = false;
     let exitRemark = '';
 
     if (employee.dol) {
@@ -74,7 +73,7 @@ export const calculatePayroll = (
             exitRemark = 'Left Service (Previous Period)';
         }
         else if (dolDate >= periodStart && dolDate <= periodEnd) {
-            isLeftService = true;
+
             exitRemark = `Left: ${employee.dol}`;
         }
     }

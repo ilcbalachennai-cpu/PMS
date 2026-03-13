@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef } from 'react';
-import { Upload, Table as TableIcon, CheckCircle2, AlertCircle, FileSpreadsheet, Save, Lock, AlertTriangle, Users, Edit2, X, CheckCircle, HelpCircle, Download } from 'lucide-react';
+import { Upload, CheckCircle2, AlertCircle, Save, Lock, AlertTriangle, Users, Edit2, X, CheckCircle, HelpCircle, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, PayrollResult, LeaveLedger, CompanyProfile } from '../types';
 import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
@@ -394,6 +394,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
           {!hideContextSelector && (
             <>
               <select
+                title="Select Month"
+                aria-label="Select Month"
                 value={month}
                 onChange={e => setMonth(e.target.value)}
                 className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
@@ -403,6 +405,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                 ))}
               </select>
               <select
+                title="Select Year"
+                aria-label="Select Year"
                 value={year}
                 onChange={e => setYear(+e.target.value)}
                 className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
@@ -444,6 +448,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
             onClick={downloadTemplate}
             className="flex items-center gap-2 bg-slate-700 text-slate-200 px-4 py-2.5 rounded-lg font-bold transition-all border border-slate-600 hover:bg-slate-600 text-sm"
             title="Download Excel Template"
+            aria-label="Download Excel Template"
           >
             <Download size={16} /> Template
           </button>
@@ -453,12 +458,15 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
             disabled={isUploading || isLocked}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-bold transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed"
             title="Import Excel Data"
+            aria-label="Import Excel Data"
           >
             {isUploading ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : <Upload size={18} />}
             Import
           </button>
           <input
             type="file"
+            title="Import Excel File"
+            aria-label="Import Excel File"
             ref={fileInputRef}
             onChange={handleExcelUpload}
             className="hidden"
@@ -517,13 +525,15 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     <div className="text-[10px] text-slate-400 uppercase tracking-tight font-mono">{emp.id}</div>
                   </td>
                   <td className="px-4 py-4 text-center">
-                    <input disabled={inputDisabled} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1.5 text-center text-sm text-white font-mono disabled:opacity-50" value={att.presentDays} onChange={e => handleUpdate(emp.id, 'presentDays', +e.target.value || 0)} />
+                    <input title={`Present Days for ${emp.name}`} aria-label={`Present Days for ${emp.name}`} disabled={inputDisabled} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1.5 text-center text-sm text-white font-mono disabled:opacity-50" value={att.presentDays} onChange={e => handleUpdate(emp.id, 'presentDays', +e.target.value || 0)} />
                   </td>
                   <td className="px-4 py-4 text-center">
                     <div className="relative">
                       <input
                         disabled={inputDisabled}
                         type="number"
+                        title={`EL Availed for ${emp.name}`}
+                        aria-label={`EL Availed for ${emp.name}`}
                         className={`w-16 bg-[#0f172a] border rounded p-1.5 text-center text-sm font-mono disabled:opacity-50 ${isELExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700 text-white'}`}
                         value={att.earnedLeave}
                         onChange={e => handleUpdate(emp.id, 'earnedLeave', +e.target.value || 0)}
@@ -536,6 +546,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                       <input
                         disabled={inputDisabled}
                         type="number"
+                        title={`EL Encashed for ${emp.name}`}
+                        aria-label={`EL Encashed for ${emp.name}`}
                         className={`w-16 bg-orange-900/20 border rounded p-1.5 text-center text-sm font-mono font-bold disabled:opacity-50 ${isELExceeded ? 'border-red-500 text-red-500 bg-red-900/10' : 'border-orange-900/50 text-orange-400'}`}
                         value={att.encashedDays || 0}
                         onChange={e => handleUpdate(emp.id, 'encashedDays', +e.target.value || 0)}
@@ -548,6 +560,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                       <input
                         disabled={inputDisabled}
                         type="number"
+                        title={`Sick Leave for ${emp.name}`}
+                        aria-label={`Sick Leave for ${emp.name}`}
                         className={`w-16 bg-[#0f172a] border rounded p-1.5 text-center text-sm font-mono disabled:opacity-50 ${isSLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700 text-white'}`}
                         value={att.sickLeave}
                         onChange={e => handleUpdate(emp.id, 'sickLeave', +e.target.value || 0)}
@@ -560,6 +574,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                       <input
                         disabled={inputDisabled}
                         type="number"
+                        title={`Casual Leave for ${emp.name}`}
+                        aria-label={`Casual Leave for ${emp.name}`}
                         className={`w-16 bg-[#0f172a] border rounded p-1.5 text-center text-sm font-mono disabled:opacity-50 ${isCLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700 text-white'}`}
                         value={att.casualLeave || 0}
                         onChange={e => handleUpdate(emp.id, 'casualLeave', +e.target.value || 0)}
@@ -568,7 +584,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     </div>
                   </td>
                   <td className="px-4 py-4 text-center">
-                    <input disabled={inputDisabled} type="number" className="w-16 bg-red-900/10 border border-red-900/40 rounded p-1.5 text-center text-sm text-red-200 font-bold font-mono disabled:opacity-50" value={att.lopDays} onChange={e => handleUpdate(emp.id, 'lopDays', +e.target.value || 0)} />
+                    <input title={`LOP Days for ${emp.name}`} aria-label={`LOP Days for ${emp.name}`} disabled={inputDisabled} type="number" className="w-16 bg-red-900/10 border border-red-900/40 rounded p-1.5 text-center text-sm text-red-200 font-bold font-mono disabled:opacity-50" value={att.lopDays} onChange={e => handleUpdate(emp.id, 'lopDays', +e.target.value || 0)} />
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1">
@@ -600,7 +616,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
       {modalState.isOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-            <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+            <button onClick={() => setModalState({ ...modalState, isOpen: false })} title="Close Modal" aria-label="Close Modal" className="absolute top-4 right-4 text-slate-400 hover:text-white">
               <X size={20} />
             </button>
             <div className="flex flex-col items-center gap-2">
@@ -621,12 +637,16 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                 <>
                   <button
                     onClick={() => setModalState({ ...modalState, isOpen: false })}
+                    title="Cancel Action"
+                    aria-label="Cancel Action"
                     className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={modalState.onConfirm}
+                    title="Confirm Action"
+                    aria-label="Confirm Action"
                     className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg"
                   >
                     Confirm
@@ -635,6 +655,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
               ) : (
                 <button
                   onClick={() => setModalState({ ...modalState, isOpen: false })}
+                  title="Close Notification"
+                  aria-label="Close Notification"
                   className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors"
                 >
                   Close

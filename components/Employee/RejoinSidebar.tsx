@@ -27,13 +27,15 @@ const RejoinSidebar: React.FC<RejoinSidebarProps> = ({
                     <div className="p-2 bg-amber-900/30 rounded text-amber-400"><RotateCcw size={20} /></div>
                     <h3 className="font-bold text-white text-sm">Rejoin Ex-Employee</h3>
                 </div>
-                <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                <button title="Close Sidebar" aria-label="Close Sidebar" onClick={onClose} className="text-slate-400 hover:text-white"><X size={20} /></button>
             </div>
             <div className="p-4 bg-[#0f172a] border-b border-slate-800">
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
                     <input
                         type="text"
+                        title="Search Ex-Employees"
+                        aria-label="Search Ex-Employees"
                         placeholder="Search Ex-Employees..."
                         className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white outline-none focus:ring-1 focus:ring-amber-500"
                         value={searchTerm}
@@ -56,6 +58,8 @@ const RejoinSidebar: React.FC<RejoinSidebarProps> = ({
                             </div>
                             <p className="text-[10px] text-slate-500 line-clamp-1 mb-3">{emp.leavingReason || 'No reason specified'}</p>
                             <button
+                                title={`Initiate Rejoin for ${emp.name}`}
+                                aria-label={`Initiate Rejoin for ${emp.name}`}
                                 onClick={() => onInitiateRejoin(emp)}
                                 className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2"
                             >

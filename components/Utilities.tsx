@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Building, MapPin, Briefcase, Network, Search, X } from 'lucide-react';
-import { LeavePolicy } from '../types';
+import { Plus, Trash2, Building, MapPin, Briefcase, Network, Search } from 'lucide-react';
+
 
 interface MasterManagerProps {
   title: string;

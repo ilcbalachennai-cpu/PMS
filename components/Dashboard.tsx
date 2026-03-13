@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { IndianRupee, Users, Building, ShieldCheck, TrendingUp, Database, Calendar, Calculator, ArrowRight, ExternalLink, Sparkles, Lock } from 'lucide-react';
+import { IndianRupee, Users, Building, TrendingUp, Database, Calendar, Calculator, ArrowRight, ExternalLink, Sparkles } from 'lucide-react';
 import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, View, CompanyProfile, PayrollResult } from '../types';
 
 interface DashboardProps {
@@ -29,7 +29,7 @@ const getLastProcessedPeriod = (history: PayrollResult[]) => {
   return { month: sorted[0].month, year: sorted[0].year };
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers, payrollHistory, month, year, setMonth, setYear, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attendances, payrollHistory, month, year, onNavigate }) => {
 
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
@@ -44,6 +44,8 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
     <div className={`grid grid-cols-1 ${centered ? 'md:grid-cols-2 max-w-3xl' : 'md:grid-cols-3'} gap-4 w-full`}>
       <button
         onClick={() => onNavigate(View.PFCalculator)}
+        title="Open PF ECR Calculator"
+        aria-label="Open PF ECR Calculator"
         className="col-span-1 bg-gradient-to-r from-blue-900/30 to-[#1e293b] p-4 rounded-xl border border-blue-800/30 flex items-center justify-between group hover:border-blue-500/50 transition-all shadow-lg cursor-pointer text-left"
       >
         <div className="flex items-center gap-4">
@@ -64,6 +66,8 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
         href={companyProfile.externalAppUrl || '#'}
         target="_blank"
         rel="noopener noreferrer"
+        title="Launch AI Studio App (External)"
+        aria-label="Launch AI Studio App (External)"
         className="col-span-1 bg-gradient-to-r from-purple-900/30 to-[#1e293b] p-4 rounded-xl border border-purple-800/30 flex items-center justify-between group hover:border-purple-500/50 transition-all shadow-lg cursor-pointer text-left"
       >
         <div className="flex items-center gap-4">
@@ -96,7 +100,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
           <h2 className="text-3xl font-black text-white tracking-tight">System Ready</h2>
           <div className="p-6 bg-[#1e293b]/50 border border-slate-800 rounded-xl shadow-xl backdrop-blur-sm">
             <div className="text-slate-300 text-lg font-medium leading-relaxed">
-              Data is empty. Go to Data Management under <button onClick={() => onNavigate(View.Settings, 'DATA')} className="text-blue-400 font-bold hover:text-blue-300 border-b border-blue-500/50 hover:border-blue-400 transition-colors inline-block cursor-pointer">Configuration</button> section to restore Data else <button onClick={() => onNavigate(View.Employees)} className="text-emerald-400 font-bold hover:text-emerald-300 border-b border-emerald-500/50 hover:border-emerald-400 transition-colors inline-block cursor-pointer">start afresh</button>.
+              Data is empty. Go to Data Management under <button title="Navigate to Data Management" aria-label="Navigate to Data Management" onClick={() => onNavigate(View.Settings, 'DATA')} className="text-blue-400 font-bold hover:text-blue-300 border-b border-blue-500/50 hover:border-blue-400 transition-colors inline-block cursor-pointer">Configuration</button> section to restore Data else <button title="Navigate to Employees to start afresh" aria-label="Navigate to Employees to start afresh" onClick={() => onNavigate(View.Employees)} className="text-emerald-400 font-bold hover:text-emerald-300 border-b border-emerald-500/50 hover:border-emerald-400 transition-colors inline-block cursor-pointer">start afresh</button>.
             </div>
           </div>
         </div>
@@ -170,6 +174,8 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2 bg-[#1e293b] p-1 rounded-lg border border-slate-700">
             <select
+              title="Select Month"
+              aria-label="Select Month"
               value={localMonth}
               onChange={e => setLocalMonth(e.target.value)}
               className="bg-[#0f172a] border border-slate-700 rounded-md px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-bold"
@@ -177,6 +183,8 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
               {months.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
             <select
+              title="Select Year"
+              aria-label="Select Year"
               value={localYear}
               onChange={e => setLocalYear(+e.target.value)}
               className="bg-[#0f172a] border border-slate-700 rounded-md px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-bold"
@@ -258,7 +266,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
                   dataKey="value"
                   stroke="none"
                 >
-                  {pieData.map((entry, index) => (
+                  {pieData.map((_entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -273,7 +281,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, config, companyProfile
             {pieData.map((d, i) => (
               <div key={i} className="flex items-center justify-between text-[10px] px-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i] }}></div>
+                  <div className={`w-2 h-2 rounded-full bg-stat-${i}`}></div>
                   <span className="text-slate-400 font-medium">{d.name}</span>
                 </div>
                 <span className="font-bold text-white">₹{d.value.toLocaleString()}</span>

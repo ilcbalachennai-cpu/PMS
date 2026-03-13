@@ -4,7 +4,7 @@ import {
     FileText, Save, Home, MapPinned, Landmark,
     Briefcase, ShieldCheck, ShieldAlert, UserMinus, Lock
 } from 'lucide-react';
-import { Employee, User } from '../../types';
+import { Employee } from '../../types';
 import { INDIAN_STATES } from '../../constants';
 
 interface EmployeeFormProps {
@@ -75,7 +75,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                             <p className="text-xs text-slate-500">Master Record Configuration</p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition-all"><X size={24} /></button>
+                    <button onClick={onClose} title="Close Form" aria-label="Close Form" className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition-all"><X size={24} /></button>
                 </div>
 
                 <form onSubmit={onSubmit} className="p-8 space-y-12">
@@ -94,15 +94,17 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     )}
                                     <button
                                         type="button"
+                                        title="Click to Upload Photo"
+                                        aria-label="Click to Upload Photo"
                                         onClick={() => photoInputRef.current?.click()}
                                         className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
                                     >
                                         <Upload size={20} className="text-white" />
                                     </button>
-                                    <input ref={photoInputRef} type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} />
+                                    <input title="Upload Employee Photo" aria-label="Upload Employee Photo" ref={photoInputRef} type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} />
                                 </div>
                                 {newEmpForm.photoUrl && (
-                                    <button type="button" onClick={() => setNewEmpForm({ ...newEmpForm, photoUrl: '' })} className="text-[10px] text-red-400 font-bold hover:underline">Remove Photo</button>
+                                    <button type="button" onClick={() => setNewEmpForm({ ...newEmpForm, photoUrl: '' })} title="Remove Employee Photo" aria-label="Remove Employee Photo" className="text-[10px] text-red-400 font-bold hover:underline">Remove Photo</button>
                                 )}
 
                                 <div className="w-full space-y-3 mt-4 border-t border-slate-800 pt-4">
@@ -126,8 +128,8 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                         <>
                                                             <button type="button" onClick={() => {
                                                                 onPreviewDoc(hasDoc, `${newEmpForm.name || 'Employee'} - ${docType.label}`);
-                                                            }} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors" title="Preview Document"><FileText size={12} /></button>
-                                                            <button type="button" onClick={() => {
+                                                            }} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors" title={`Preview ${docType.label}`} aria-label={`Preview ${docType.label}`}><FileText size={12} /></button>
+                                                            <button type="button" title={`Remove ${docType.label}`} aria-label={`Remove ${docType.label}`} onClick={() => {
                                                                 setNewEmpForm(prev => ({
                                                                     ...prev,
                                                                     employeeDocuments: {
@@ -139,10 +141,10 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                         </>
                                                     )}
                                                     {!hasDoc && (
-                                                        <button type="button" onClick={() => docType.ref.current?.click()} className="p-1.5 bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 rounded-lg transition-colors"><Upload size={14} /></button>
+                                                        <button type="button" title={`Upload ${docType.label}`} aria-label={`Upload ${docType.label}`} onClick={() => docType.ref.current?.click()} className="p-1.5 bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 rounded-lg transition-colors"><Upload size={14} /></button>
                                                     )}
                                                 </div>
-                                                <input ref={docType.ref} type="file" className="hidden" accept=".pdf,image/jpeg,image/png" onChange={(e) => handleDocumentUpload(e, docType.key as keyof Required<Employee>['employeeDocuments'])} />
+                                                <input ref={docType.ref} title={`Upload ${docType.label}`} aria-label={`Upload ${docType.label}`} type="file" className="hidden" accept=".pdf,image/jpeg,image/png" onChange={(e) => handleDocumentUpload(e, docType.key as keyof Required<Employee>['employeeDocuments'])} />
                                             </div>
                                         );
                                     })}
@@ -151,28 +153,58 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
 
                             <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div className="space-y-1.5">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Employee ID*</label>
+                                    <label htmlFor="employeeIdInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Employee ID*</label>
                                     <div className="relative">
                                         <input
+                                            id="employeeIdInput"
                                             readOnly
+                                            title="Automatically Generated Employee ID"
+                                            aria-label="Automatically Generated Employee ID"
                                             className="w-full bg-slate-800/50 border border-slate-700 rounded-xl p-3 text-sm text-slate-400 font-bold font-mono outline-none cursor-not-allowed focus:ring-0"
                                             value={newEmpForm.id}
                                         />
                                         <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-600 font-bold uppercase">Auto-Gen</div>
                                     </div>
                                 </div>
-                                <div className="space-y-1.5 md:col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Full Legal Name*</label><input required className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.name} onChange={e => setNewEmpForm({ ...newEmpForm, name: e.target.value })} /></div>
+                                <div className="space-y-1.5 md:col-span-2">
+                                    <label htmlFor="employeeNameInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Full Legal Name*</label>
+                                    <input id="employeeNameInput" required title="Full Legal Name" aria-label="Full Legal Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.name} onChange={e => setNewEmpForm({ ...newEmpForm, name: e.target.value })} />
+                                </div>
 
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-sky-400 uppercase tracking-widest ml-1">Mobile No*</label><input required className="w-full bg-slate-900 border border-sky-900/50 rounded-xl p-3 text-sm text-white font-mono focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.mobile} onChange={e => setNewEmpForm({ ...newEmpForm, mobile: e.target.value })} /></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Gender</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.gender} onChange={e => setNewEmpForm({ ...newEmpForm, gender: e.target.value as any })}><option>Male</option><option>Female</option><option>Transgender</option><option>Others</option></select></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Date of Birth</label><input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.dob} onChange={e => setNewEmpForm({ ...newEmpForm, dob: e.target.value })} /></div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="mobileInput" className="text-[10px] font-bold text-sky-400 uppercase tracking-widest ml-1">Mobile No*</label>
+                                    <input id="mobileInput" required title="Mobile Number" aria-label="Mobile Number" className="w-full bg-slate-900 border border-sky-900/50 rounded-xl p-3 text-sm text-white font-mono focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.mobile} onChange={e => setNewEmpForm({ ...newEmpForm, mobile: e.target.value })} />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="genderInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Gender</label>
+                                    <select id="genderInput" title="Gender" aria-label="Gender" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.gender} onChange={e => setNewEmpForm({ ...newEmpForm, gender: e.target.value as any })}><option>Male</option><option>Female</option><option>Transgender</option><option>Others</option></select>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="dobInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Date of Birth</label>
+                                    <input id="dobInput" type="date" title="Date of Birth" aria-label="Date of Birth" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.dob} onChange={e => setNewEmpForm({ ...newEmpForm, dob: e.target.value })} />
+                                </div>
 
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Date of Joining</label><input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.doj} onChange={e => setNewEmpForm({ ...newEmpForm, doj: e.target.value })} /></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Designation</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.designation} onChange={e => setNewEmpForm({ ...newEmpForm, designation: e.target.value })}>{designations.map(d => <option key={d}>{d}</option>)}</select></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Department/Division</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.division} onChange={e => setNewEmpForm({ ...newEmpForm, division: e.target.value })}>{divisions.map(d => <option key={d}>{d}</option>)}</select></div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="dojInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Date of Joining</label>
+                                    <input id="dojInput" type="date" title="Date of Joining" aria-label="Date of Joining" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.doj} onChange={e => setNewEmpForm({ ...newEmpForm, doj: e.target.value })} />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="designationInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Designation</label>
+                                    <select id="designationInput" title="Designation" aria-label="Designation" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.designation} onChange={e => setNewEmpForm({ ...newEmpForm, designation: e.target.value })}>{designations.map(d => <option key={d}>{d}</option>)}</select>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="divisionInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Department/Division</label>
+                                    <select id="divisionInput" title="Department/Division" aria-label="Department/Division" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.division} onChange={e => setNewEmpForm({ ...newEmpForm, division: e.target.value })}>{divisions.map(d => <option key={d}>{d}</option>)}</select>
+                                </div>
 
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Work Branch</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.branch} onChange={e => setNewEmpForm({ ...newEmpForm, branch: e.target.value })}>{branches.map(b => <option key={b}>{b}</option>)}</select></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Site</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.site} onChange={e => setNewEmpForm({ ...newEmpForm, site: e.target.value })}>{sites.map(s => <option key={s}>{s}</option>)}</select></div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="branchInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Work Branch</label>
+                                    <select id="branchInput" title="Work Branch" aria-label="Work Branch" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.branch} onChange={e => setNewEmpForm({ ...newEmpForm, branch: e.target.value })}>{branches.map(b => <option key={b}>{b}</option>)}</select>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="siteInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Site</label>
+                                    <select id="siteInput" title="Site Name" aria-label="Site Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.site} onChange={e => setNewEmpForm({ ...newEmpForm, site: e.target.value })}>{sites.map(s => <option key={s}>{s}</option>)}</select>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -181,12 +213,15 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                         <div>
                             <FormSectionHeader icon={Home} title="2. Family Relations" />
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-900/30 p-4 rounded-xl border border-slate-800">
-                                <div className="col-span-2 space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Father / Spouse Name</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.fatherSpouseName} onChange={e => setNewEmpForm({ ...newEmpForm, fatherSpouseName: e.target.value })} /></div>
-                                <div className="col-span-2 space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Relationship</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.relationship} onChange={e => setNewEmpForm({ ...newEmpForm, relationship: e.target.value })}><option>Father</option><option>Spouse</option><option>Mother</option><option>Guardian</option></select></div>
+                                 <div className="col-span-2 space-y-1.5"><label htmlFor="fatherSpouseNameInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Father / Spouse Name</label><input id="fatherSpouseNameInput" title="Father or Spouse Name" aria-label="Father or Spouse Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.fatherSpouseName} onChange={e => setNewEmpForm({ ...newEmpForm, fatherSpouseName: e.target.value })} /></div>
+                                <div className="col-span-2 space-y-1.5"><label htmlFor="relationshipInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Relationship</label><select id="relationshipInput" title="Relationship" aria-label="Relationship" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.relationship} onChange={e => setNewEmpForm({ ...newEmpForm, relationship: e.target.value })}><option>Father</option><option>Spouse</option><option>Mother</option><option>Guardian</option></select></div>
 
                                 <div className="space-y-1.5">
-                                    <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Married</label>
-                                    <select
+                                    <label htmlFor="maritalStatusInput" className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Married</label>
+                                     <select
+                                        id="maritalStatusInput"
+                                        title="Marital Status"
+                                        aria-label="Marital Status"
                                         className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none"
                                         value={newEmpForm.maritalStatus || 'No'}
                                         onChange={e => setNewEmpForm({ ...newEmpForm, maritalStatus: e.target.value as 'Yes' | 'No' })}
@@ -196,8 +231,11 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     </select>
                                 </div>
                                 <div className="space-y-1.5">
-                                    <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Name</label>
-                                    <input
+                                    <label htmlFor="spouseNameInput" className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Name</label>
+                                     <input
+                                        id="spouseNameInput"
+                                        title="Spouse Legal Name"
+                                        aria-label="Spouse Legal Name"
                                         className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none transition-colors ${newEmpForm.maritalStatus === 'Yes' ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
                                         disabled={newEmpForm.maritalStatus !== 'Yes'}
                                         value={newEmpForm.spouseName || ''}
@@ -205,8 +243,11 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     />
                                 </div>
                                 <div className="space-y-1.5">
-                                    <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Gender</label>
-                                    <select
+                                    <label htmlFor="spouseGenderInput" className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Gender</label>
+                                     <select
+                                        id="spouseGenderInput"
+                                        title="Spouse Gender"
+                                        aria-label="Spouse Gender"
                                         className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none transition-colors ${newEmpForm.maritalStatus === 'Yes' ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
                                         disabled={newEmpForm.maritalStatus !== 'Yes'}
                                         value={newEmpForm.spouseGender || ''}
@@ -219,8 +260,11 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     </select>
                                 </div>
                                 <div className="space-y-1.5">
-                                    <label className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Aadhaar No</label>
-                                    <input
+                                    <label htmlFor="spouseAadhaarInput" className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Aadhaar No</label>
+                                     <input
+                                        id="spouseAadhaarInput"
+                                        title="Spouse Aadhaar Number"
+                                        aria-label="Spouse Aadhaar Number"
                                         className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none font-mono transition-colors ${newEmpForm.maritalStatus === 'Yes' ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
                                         disabled={newEmpForm.maritalStatus !== 'Yes'}
                                         value={newEmpForm.spouseAadhaar || ''}
@@ -233,13 +277,13 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                         <div>
                             <FormSectionHeader icon={MapPinned} title="3. Residential Address" />
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Door No / House No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.doorNo} onChange={e => setNewEmpForm({ ...newEmpForm, doorNo: e.target.value })} /></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase">Building / Flat Name</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.buildingName} onChange={e => setNewEmpForm({ ...newEmpForm, buildingName: e.target.value })} /></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Street</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.street} onChange={e => setNewEmpForm({ ...newEmpForm, street: e.target.value })} /></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Area</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.area} onChange={e => setNewEmpForm({ ...newEmpForm, area: e.target.value })} /></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">City / Town</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.city} onChange={e => setNewEmpForm({ ...newEmpForm, city: e.target.value })} /></div>
-                                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">State</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={newEmpForm.state} onChange={e => setNewEmpForm({ ...newEmpForm, state: e.target.value })}>{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-                                <div className="space-y-1.5 col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Pincode</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.pincode} onChange={e => setNewEmpForm({ ...newEmpForm, pincode: e.target.value })} /></div>
+                                <div className="space-y-1.5"><label htmlFor="doorNoInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Door No / House No</label><input id="doorNoInput" title="Door No" aria-label="Door No" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.doorNo} onChange={e => setNewEmpForm({ ...newEmpForm, doorNo: e.target.value })} /></div>
+                                <div className="space-y-1.5"><label htmlFor="buildingNameInput" className="text-[10px] font-bold text-slate-500 uppercase">Building / Flat Name</label><input id="buildingNameInput" title="Building Name" aria-label="Building Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.buildingName} onChange={e => setNewEmpForm({ ...newEmpForm, buildingName: e.target.value })} /></div>
+                                <div className="space-y-1.5"><label htmlFor="streetInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Street</label><input id="streetInput" title="Street Name" aria-label="Street Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.street} onChange={e => setNewEmpForm({ ...newEmpForm, street: e.target.value })} /></div>
+                                <div className="space-y-1.5"><label htmlFor="areaInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Area</label><input id="areaInput" title="Area Locality" aria-label="Area Locality" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.area} onChange={e => setNewEmpForm({ ...newEmpForm, area: e.target.value })} /></div>
+                                <div className="space-y-1.5"><label htmlFor="cityInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">City / Town</label><input id="cityInput" title="City or Town" aria-label="City or Town" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.city} onChange={e => setNewEmpForm({ ...newEmpForm, city: e.target.value })} /></div>
+                                <div className="space-y-1.5"><label htmlFor="stateSelect" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">State</label><select id="stateSelect" title="State" aria-label="State" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={newEmpForm.state} onChange={e => setNewEmpForm({ ...newEmpForm, state: e.target.value })}>{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                                <div className="space-y-1.5 col-span-2"><label htmlFor="pincodeInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Pincode</label><input id="pincodeInput" title="Pincode" aria-label="Pincode" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none" value={newEmpForm.pincode} onChange={e => setNewEmpForm({ ...newEmpForm, pincode: e.target.value })} /></div>
                             </div>
                         </div>
                     </div>
@@ -247,42 +291,41 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                     <div>
                         <FormSectionHeader icon={Landmark} title="4. Banking & Disbursement" color="text-indigo-400" />
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-indigo-900/10 p-6 rounded-2xl border border-indigo-500/20">
-                            <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Bank Account No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-indigo-500" value={newEmpForm.bankAccount} onChange={e => setNewEmpForm({ ...newEmpForm, bankAccount: e.target.value })} /></div>
-                            <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">IFSC Code</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-indigo-500" value={newEmpForm.ifsc} onChange={e => setNewEmpForm({ ...newEmpForm, ifsc: e.target.value.toUpperCase() })} /></div>
-                            <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Bank Name</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:border-indigo-500" value={newEmpForm.bankName} onChange={e => setNewEmpForm({ ...newEmpForm, bankName: e.target.value })} /></div>
-                            <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Bank Branch</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:border-indigo-500" value={newEmpForm.bankBranch} onChange={e => setNewEmpForm({ ...newEmpForm, bankBranch: e.target.value })} /></div>
+                             <div className="space-y-1.5 md:col-span-1"><label htmlFor="bankAccountInput" className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Bank Account No</label><input id="bankAccountInput" title="Bank Account Number" aria-label="Bank Account Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-indigo-500" value={newEmpForm.bankAccount} onChange={e => setNewEmpForm({ ...newEmpForm, bankAccount: e.target.value })} /></div>
+                            <div className="space-y-1.5 md:col-span-1"><label htmlFor="ifscInput" className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">IFSC Code</label><input id="ifscInput" title="IFSC Code" aria-label="IFSC Code" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-indigo-500" value={newEmpForm.ifsc} onChange={e => setNewEmpForm({ ...newEmpForm, ifsc: e.target.value.toUpperCase() })} /></div>
+                            <div className="space-y-1.5 md:col-span-1"><label htmlFor="bankNameInput" className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Bank Name</label><input id="bankNameInput" title="Bank Name" aria-label="Bank Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:border-indigo-500" value={newEmpForm.bankName} onChange={e => setNewEmpForm({ ...newEmpForm, bankName: e.target.value })} /></div>
+                            <div className="space-y-1.5 md:col-span-1"><label htmlFor="bankBranchInput" className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">Bank Branch</label><input id="bankBranchInput" title="Bank Branch" aria-label="Bank Branch" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:border-indigo-500" value={newEmpForm.bankBranch} onChange={e => setNewEmpForm({ ...newEmpForm, bankBranch: e.target.value })} /></div>
                         </div>
                     </div>
 
                     <div>
                         <FormSectionHeader icon={Briefcase} title="5. Salary Structure & Allowances" color="text-emerald-400" />
                         <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Basic Pay</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.basicPay} onChange={e => setNewEmpForm({ ...newEmpForm, basicPay: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">DA</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.da} onChange={e => setNewEmpForm({ ...newEmpForm, da: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Retaining Allow</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.retainingAllowance} onChange={e => setNewEmpForm({ ...newEmpForm, retainingAllowance: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">HRA</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.hra} onChange={e => setNewEmpForm({ ...newEmpForm, hra: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Conveyance</label><input type="number" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.conveyance} onChange={e => setNewEmpForm({ ...newEmpForm, conveyance: +e.target.value })} /></div>
+                              <div className="space-y-1.5"><label htmlFor="basicPayInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Basic Pay</label><input id="basicPayInput" type="number" title="Basic Pay Amount" aria-label="Basic Pay Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.basicPay} onChange={e => setNewEmpForm({ ...newEmpForm, basicPay: +e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="daInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">DA</label><input id="daInput" type="number" title="DA Amount" aria-label="DA Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.da} onChange={e => setNewEmpForm({ ...newEmpForm, da: +e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="retainingAllwInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Retaining Allow</label><input id="retainingAllwInput" type="number" title="Retaining Allowance" aria-label="Retaining Allowance" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.retainingAllowance} onChange={e => setNewEmpForm({ ...newEmpForm, retainingAllowance: +e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="hraInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">HRA</label><input id="hraInput" type="number" title="HRA Amount" aria-label="HRA Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.hra} onChange={e => setNewEmpForm({ ...newEmpForm, hra: +e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="conveyanceInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Conveyance</label><input id="conveyanceInput" type="number" title="Conveyance Amount" aria-label="Conveyance Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.conveyance} onChange={e => setNewEmpForm({ ...newEmpForm, conveyance: +e.target.value })} /></div>
 
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Washing Allow</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.washing} onChange={e => setNewEmpForm({ ...newEmpForm, washing: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Attire Allow</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.attire} onChange={e => setNewEmpForm({ ...newEmpForm, attire: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Special Allow 1</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance1} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance1: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Special Allow 2</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance2} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance2: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Special Allow 3</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance3} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance3: +e.target.value })} /></div>
+                              <div className="space-y-1.5"><label htmlFor="washingInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Washing Allow</label><input id="washingInput" type="number" title="Washing Allowance" aria-label="Washing Allowance" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.washing} onChange={e => setNewEmpForm({ ...newEmpForm, washing: +e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="attireInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Attire Allow</label><input id="attireInput" type="number" title="Attire Allowance" aria-label="Attire Allowance" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.attire} onChange={e => setNewEmpForm({ ...newEmpForm, attire: +e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="special1Input" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Special Allow 1</label><input id="special1Input" type="number" title="Special Allowance 1" aria-label="Special Allowance 1" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance1} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance1: +e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="special2Input" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Special Allow 2</label><input id="special2Input" type="number" title="Special Allowance 2" aria-label="Special Allowance 2" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance2} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance2: +e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="special3Input" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Special Allow 3</label><input id="special3Input" type="number" title="Special Allowance 3" aria-label="Special Allowance 3" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance3} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance3: +e.target.value })} /></div>
                         </div>
                         <div className="mt-4 p-4 bg-emerald-900/10 border border-emerald-500/20 rounded-xl flex justify-between items-center">
                             <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Total Gross Salary</span>
                             <span className="text-2xl font-black text-white font-mono">₹{calculateGrossWage(newEmpForm).toLocaleString()}</span>
                         </div>
                     </div>
-
                     <div>
                         <FormSectionHeader icon={ShieldCheck} title="6. Statutory Identity Numbers" color="text-amber-400" />
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PAN No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500 uppercase" value={newEmpForm.pan} onChange={e => setNewEmpForm({ ...newEmpForm, pan: e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Aadhaar No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.aadhaarNumber} onChange={e => setNewEmpForm({ ...newEmpForm, aadhaarNumber: e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">UAN No</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.uanc} onChange={e => setNewEmpForm({ ...newEmpForm, uanc: e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PF Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.pfNumber} onChange={e => setNewEmpForm({ ...newEmpForm, pfNumber: e.target.value })} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ESI Number</label><input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({ ...newEmpForm, esiNumber: e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="panInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PAN No</label><input id="panInput" title="PAN Number" aria-label="PAN Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500 uppercase" value={newEmpForm.pan} onChange={e => setNewEmpForm({ ...newEmpForm, pan: e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="aadhaarInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Aadhaar No</label><input id="aadhaarInput" title="Aadhaar Number" aria-label="Aadhaar Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.aadhaarNumber} onChange={e => setNewEmpForm({ ...newEmpForm, aadhaarNumber: e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="uanInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">UAN No</label><input id="uanInput" title="UAN Number" aria-label="UAN Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.uanc} onChange={e => setNewEmpForm({ ...newEmpForm, uanc: e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="pfNumberInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PF Number</label><input id="pfNumberInput" title="PF Number" aria-label="PF Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.pfNumber} onChange={e => setNewEmpForm({ ...newEmpForm, pfNumber: e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="esiNumberInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ESI Number</label><input id="esiNumberInput" title="ESI Number" aria-label="ESI Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({ ...newEmpForm, esiNumber: e.target.value })} /></div>
                         </div>
                     </div>
 
@@ -293,9 +336,8 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 <div>
                                     <h4 className="text-sm font-bold text-white">A. PF Exempted (Para 69)</h4>
                                     <p className="text-[10px] text-slate-400">Employee excluded from EPF coverage. (Also disables Higher Pension)</p>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" className="sr-only peer" checked={newEmpForm.isPFExempt} onChange={e => {
+                                </div>                                 <label htmlFor="pfExemptInput" className="relative inline-flex items-center cursor-pointer">
+                                    <input id="pfExemptInput" title="PF Exempted" aria-label="PF Exempted" type="checkbox" className="sr-only peer" checked={newEmpForm.isPFExempt} onChange={e => {
                                         const isExempt = e.target.checked;
                                         setNewEmpForm(prev => ({
                                             ...prev,
@@ -303,6 +345,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                             pfHigherPension: isExempt ? { ...prev.pfHigherPension!, enabled: false } : prev.pfHigherPension
                                         }));
                                     }} />
+
                                     <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
                                 </label>
                             </div>
@@ -312,8 +355,8 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     <h4 className="text-sm font-bold text-white">B. ESI Exempted</h4>
                                     <p className="text-[10px] text-slate-400">Above Wage Ceiling or not covered.</p>
                                 </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" className="sr-only peer" checked={newEmpForm.isESIExempt} onChange={e => setNewEmpForm({ ...newEmpForm, isESIExempt: e.target.checked })} />
+                                 <label htmlFor="esiExemptInput" className="relative inline-flex items-center cursor-pointer">
+                                    <input id="esiExemptInput" title="ESI Exempted" aria-label="ESI Exempted" type="checkbox" className="sr-only peer" checked={newEmpForm.isESIExempt} onChange={e => setNewEmpForm({ ...newEmpForm, isESIExempt: e.target.checked })} />
                                     <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
                                 </label>
                             </div>
@@ -324,8 +367,8 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                         <h4 className="text-sm font-bold text-amber-400">Enable Higher Pension Option (EPS 95)</h4>
                                         <p className="text-[10px] text-slate-400">Apply for Higher Pension on Actual Wages (Joint Option).</p>
                                     </div>
-                                    <label className="relative inline-flex items-center cursor-pointer">
-                                        <input type="checkbox" className="sr-only peer" checked={newEmpForm.pfHigherPension?.enabled} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, enabled: e.target.checked } }))} />
+                                     <label htmlFor="higherPensionToggle" className="relative inline-flex items-center cursor-pointer">
+                                        <input id="higherPensionToggle" title="Enable Higher Pension" aria-label="Enable Higher Pension" type="checkbox" className="sr-only peer" checked={newEmpForm.pfHigherPension?.enabled} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, enabled: e.target.checked } }))} />
                                         <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
                                     </label>
                                 </div>
@@ -333,32 +376,32 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 {newEmpForm.pfHigherPension?.enabled && (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-800/50 p-4 rounded-xl border border-slate-700 animate-in slide-in-from-top-2">
                                         <div className="space-y-1.5">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase">1. Contributed on Higher Wages pre-2014?</label>
-                                            <select className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.contributedBefore2014} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, contributedBefore2014: e.target.value as any } }))}>
+                                            <label htmlFor="higherWagesPre2014" className="text-[9px] font-bold text-slate-400 uppercase">1. Contributed on Higher Wages pre-2014?</label>                                             <select id="higherWagesPre2014" title="Contributed on Higher Wages pre-2014" aria-label="Contributed on Higher Wages pre-2014" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.contributedBefore2014} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, contributedBefore2014: e.target.value as any } }))}>
                                                 <option>No</option><option>Yes</option>
                                             </select>
+
                                         </div>
                                         <div className="space-y-1.5">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase">2. EPF Membership Date (DOJ Impact)</label>
-                                            <input type="date" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.epfMembershipDate} onChange={e => setNewEmpForm({ ...newEmpForm, epfMembershipDate: e.target.value })} />
+                                            <label htmlFor="epfMembershipDateInput" className="text-[9px] font-bold text-slate-400 uppercase">2. EPF Membership Date (DOJ Impact)</label>
+                                             <input id="epfMembershipDateInput" type="date" title="EPF Membership Date" aria-label="EPF Membership Date" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.epfMembershipDate} onChange={e => setNewEmpForm({ ...newEmpForm, epfMembershipDate: e.target.value })} />
                                         </div>
                                         <div className="space-y-1.5">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase">3. Employee Contribution Type</label>
-                                            <select className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.employeeContribution} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, employeeContribution: e.target.value as any } }))}>
+                                            <label htmlFor="employeeContribType" className="text-[9px] font-bold text-slate-400 uppercase">3. Employee Contribution Type</label>                                             <select id="employeeContribType" title="Employee Contribution Type" aria-label="Employee Contribution Type" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.employeeContribution} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, employeeContribution: e.target.value as any } }))}>
                                                 <option>Regular</option><option>Higher</option>
+
                                             </select>
                                         </div>
                                         <div className="space-y-1.5">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase">4. Employer Contribution Type</label>
-                                            <select className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.employerContribution} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, employerContribution: e.target.value as any } }))}>
+                                            <label htmlFor="employerContribType" className="text-[9px] font-bold text-slate-400 uppercase">4. Employer Contribution Type</label>
+                                            <select id="employerContribType" title="Employer Contribution Type" aria-label="Employer Contribution Type" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.employerContribution} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, employerContribution: e.target.value as any } }))}>
                                                 <option>Regular</option><option>Higher</option>
                                             </select>
                                         </div>
                                         <div className="space-y-1.5 col-span-2">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase">5. Joint Option Exercised?</label>
-                                            <select className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.isHigherPensionOpted} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, isHigherPensionOpted: e.target.value as any } }))}>
+                                            <label htmlFor="jointOptionExercised" className="text-[9px] font-bold text-slate-400 uppercase">5. Joint Option Exercised?</label>                                             <select id="jointOptionExercised" title="Joint Option Exercised" aria-label="Joint Option Exercised" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white" value={newEmpForm.pfHigherPension.isHigherPensionOpted} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, isHigherPensionOpted: e.target.value as any } }))}>
                                                 <option>No</option><option>Yes</option>
                                             </select>
+
                                         </div>
                                     </div>
                                 )}
@@ -374,20 +417,22 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     <h3 className="text-xs font-black uppercase tracking-widest text-red-400">8. Separation & Final Settlement</h3>
                                 </div>
                                 {!isSeparationUnlocked && (
-                                    <button type="button" onClick={onUnlockSeparation} className="flex items-center gap-2 text-[10px] font-bold bg-red-900/20 text-red-400 px-3 py-1.5 rounded-lg border border-red-900/30 hover:bg-red-900/40 transition-colors">
+                                    <button type="button" onClick={onUnlockSeparation} title="Unlock Restricted Separation Fields" aria-label="Unlock Restricted Separation Fields" className="flex items-center gap-2 text-[10px] font-bold bg-red-900/20 text-red-400 px-3 py-1.5 rounded-lg border border-red-900/30 hover:bg-red-900/40 transition-colors">
                                         <Lock size={12} /> Unlock Restricted Fields
                                     </button>
                                 )}
                             </div>
                             <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 p-6 rounded-2xl border transition-all ${isSeparationUnlocked ? 'bg-red-900/10 border-red-500/30' : 'bg-slate-900/30 border-slate-800 opacity-60 pointer-events-none'}`}>
                                 <div className="space-y-1.5">
-                                    <label className="text-[10px] font-bold text-red-300 uppercase tracking-widest">Date of Leaving (DOL)</label>
-                                    <input type="date" className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:border-red-500" value={newEmpForm.dol} onChange={e => setNewEmpForm({ ...newEmpForm, dol: e.target.value })} />
+                                    <label htmlFor="dolInput" className="text-[10px] font-bold text-red-300 uppercase tracking-widest">Date of Leaving (DOL)</label>
+                                     <input id="dolInput" type="date" title="Date of Leaving" aria-label="Date of Leaving" className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:border-red-500" value={newEmpForm.dol} onChange={e => setNewEmpForm({ ...newEmpForm, dol: e.target.value })} />
                                 </div>
                                 <div className="space-y-1.5">
-                                    <label className="text-[10px] font-bold text-red-300 uppercase tracking-widest">Reason for Leaving</label>
-                                    <select
+                                    <label htmlFor="leavingReasonInput" className="text-[10px] font-bold text-red-300 uppercase tracking-widest">Reason for Leaving</label>
+                                     <select
                                         id="leavingReasonInput"
+                                        title="Reason for Leaving"
+                                        aria-label="Reason for Leaving"
                                         className="w-full bg-slate-900 border border-red-900/50 rounded-xl p-3 text-sm text-white outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500"
                                         value={newEmpForm.leavingReason}
                                         onChange={e => {
@@ -415,8 +460,8 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                     )}
 
                     <div className="flex justify-end gap-4 pt-6 border-t border-slate-800">
-                        <button type="button" onClick={onClose} className="px-6 py-3 rounded-xl font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-all text-sm">Cancel</button>
-                        <button type="submit" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all text-sm flex items-center gap-2">
+                        <button type="button" onClick={onClose} title="Cancel and Close Form" aria-label="Cancel and Close Form" className="px-6 py-3 rounded-xl font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-all text-sm">Cancel</button>
+                        <button type="submit" title="Save Employee Record" aria-label="Save Employee Record" className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all text-sm flex items-center gap-2">
                             <Save size={18} /> Save Record
                         </button>
                     </div>

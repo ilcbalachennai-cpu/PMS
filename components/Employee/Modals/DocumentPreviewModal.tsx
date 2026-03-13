@@ -21,7 +21,7 @@ const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
                         <FileText size={20} className="text-blue-400" /> Document Preview: <span className="text-slate-400 font-normal truncate max-w-[300px]">{previewDoc.name}</span>
                     </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition-colors"><X size={20} /></button>
+                    <button onClick={onClose} title="Close Preview" aria-label="Close Preview" className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition-colors"><X size={20} /></button>
                 </div>
                 <div className="flex-1 bg-slate-900/50 p-4 overflow-hidden flex items-center justify-center min-h-[60vh]">
                     {previewDoc.url.startsWith('data:image') ? (

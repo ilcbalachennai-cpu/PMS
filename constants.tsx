@@ -220,8 +220,6 @@ export const LWF_STATE_PRESETS = {
   'Haryana': { cycle: 'Monthly', emp: 25, emplr: 50 },
 };
 
-export const MOCK_USERS: User[] = [
-  { username: 'dev', password: 'Basupra@74', name: 'Master Developer', role: 'Developer', email: 'dev@bharatpay.com' }
-];
+export const MOCK_USERS: User[] = [];
 
 export const SAMPLE_EMPLOYEES: Employee[] = [];

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { TrendingUp, Calendar, Save, Calculator, AlertTriangle, CheckCircle2, Download, Lock, X } from 'lucide-react';
+import { TrendingUp, Calendar, Save, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
 import { Employee, CompanyProfile, ArrearBatch, ArrearRecord, PayrollResult } from '../types';
-import { generateArrearReport } from '../services/reportService';
+
 import { ModalType } from './Shared/CustomModal';
 
 interface ArrearManagerProps {
@@ -21,7 +21,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     setEmployees,
     currentMonth,
     currentYear,
-    companyProfile,
+    companyProfile: _companyProfile,
     arrearHistory,
     setArrearHistory,
     savedRecords,
@@ -111,6 +111,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     }, [employees, searchQuery, effectiveMonth, effectiveYear, savedRecords]);
 
     const calculateMonthsPassed = () => {
+
         const processIdx = months.indexOf(currentMonth);
         const effectiveIdx = months.indexOf(effectiveMonth);
 
@@ -231,14 +232,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
         });
 
         if (arrearRecords.length > 0 && setArrearHistory) {
-            const newBatch: ArrearBatch = {
-                month: currentMonth,
-                year: currentYear,
-                effectiveMonth,
-                effectiveYear,
-                records: arrearRecords,
-                status: 'Draft'
-            };
+
             showAlert('success', 'Draft Saved', `Draft Arrear Wages successfully saved. Proceed to Pay Reports to generate the Arrear Salary PDF.`);
         } else {
             showAlert('info', 'No Data', `No increments calculated to save as draft.`);
@@ -317,8 +311,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                     <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Effective From</label>
                         <div className="flex gap-2">
-                            <select disabled={isLocked} className="bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none disabled:opacity-50 disabled:cursor-not-allowed" value={effectiveMonth} onChange={e => setEffectiveMonth(e.target.value)}>{months.map(m => <option key={m} value={m}>{m}</option>)}</select>
-                            <select disabled={isLocked} className="bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none disabled:opacity-50 disabled:cursor-not-allowed" value={effectiveYear} onChange={e => setEffectiveYear(+e.target.value)}>{Array.from({ length: 5 }, (_, i) => currentYear - 2 + i).map(y => <option key={y} value={y}>{y}</option>)}</select>
+                            <select title="Effective Month" aria-label="Effective Month" disabled={isLocked} className="bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none disabled:opacity-50 disabled:cursor-not-allowed" value={effectiveMonth} onChange={e => setEffectiveMonth(e.target.value)}>{months.map(m => <option key={m} value={m}>{m}</option>)}</select>
+                            <select title="Effective Year" aria-label="Effective Year" disabled={isLocked} className="bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none disabled:opacity-50 disabled:cursor-not-allowed" value={effectiveYear} onChange={e => setEffectiveYear(+e.target.value)}>{Array.from({ length: 5 }, (_, i) => currentYear - 2 + i).map(y => <option key={y} value={y}>{y}</option>)}</select>
                         </div>
                     </div>
                     <div className="text-right">
@@ -350,8 +344,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                     <div className="space-y-3">
                         <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Increment Type</label>
                         <div className="flex gap-2">
-                            <button onClick={() => !isLocked && setIncrementType('Percentage')} disabled={isLocked} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${incrementType === 'Percentage' ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>Percentage Based (%)</button>
-                            <button onClick={() => !isLocked && setIncrementType('Adhoc')} disabled={isLocked} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${incrementType === 'Adhoc' ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>Ad-hoc / Absolute</button>
+                            <button onClick={() => !isLocked && setIncrementType('Percentage')} disabled={isLocked} title="Calculate by Percentage" aria-label="Calculate by Percentage" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${incrementType === 'Percentage' ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>Percentage Based (%)</button>
+                            <button onClick={() => !isLocked && setIncrementType('Adhoc')} disabled={isLocked} title="Calculate by Ad-hoc Amount" aria-label="Calculate by Ad-hoc Amount" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${incrementType === 'Adhoc' ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>Ad-hoc / Absolute</button>
                         </div>
                     </div>
 
@@ -359,8 +353,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                         <div className="space-y-3 animate-in fade-in slide-in-from-left-2">
                             <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Application Mode</label>
                             <div className="flex gap-2">
-                                <button onClick={() => !isLocked && setPercentageMode('Flat')} disabled={isLocked} className={`px-3 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${percentageMode === 'Flat' ? 'bg-blue-500 text-white font-bold' : 'bg-transparent text-slate-400 hover:text-white'}`}>Flat % for All</button>
-                                <button onClick={() => !isLocked && setPercentageMode('Specific')} disabled={isLocked} className={`px-3 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${percentageMode === 'Specific' ? 'bg-blue-500 text-white font-bold' : 'bg-transparent text-slate-400 hover:text-white'}`}>Specific Employee %</button>
+                                <button onClick={() => !isLocked && setPercentageMode('Flat')} disabled={isLocked} title="Apply Flat Percentage to All" aria-label="Apply Flat Percentage to All" className={`px-3 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${percentageMode === 'Flat' ? 'bg-blue-500 text-white font-bold' : 'bg-transparent text-slate-400 hover:text-white'}`}>Flat % for All</button>
+                                <button onClick={() => !isLocked && setPercentageMode('Specific')} disabled={isLocked} title="Apply Specific Percentages per Employee" aria-label="Apply Specific Percentages per Employee" className={`px-3 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${percentageMode === 'Specific' ? 'bg-blue-500 text-white font-bold' : 'bg-transparent text-slate-400 hover:text-white'}`}>Specific Employee %</button>
                             </div>
                         </div>
                     )}
@@ -371,8 +365,10 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                             <input
                                 type="text"
                                 placeholder="Search by ID or Name..."
-                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white outline-none focus:border-purple-500 transition-colors"
+                                 className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white outline-none focus:border-purple-500 transition-colors"
                                 value={searchQuery}
+                                title="Search Employee by ID or Name"
+                                aria-label="Search Employee by ID or Name"
                                 onChange={(e) => setSearchQuery(e.target.value)}
                             />
                         </div>
@@ -382,7 +378,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                         <div className="space-y-3 animate-in fade-in slide-in-from-left-2">
                             <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Increment %</label>
                             <div className="flex items-center gap-2">
-                                <input type="number" className="w-24 bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-white font-bold outline-none focus:border-blue-500" placeholder="0.00" value={flatPercentage} onChange={e => setFlatPercentage(+e.target.value)} disabled={isLocked} />
+                                <input type="number" className="w-24 bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-white font-bold outline-none focus:border-blue-500" placeholder="0.00" value={flatPercentage} title="Flat Increment Percentage for All Employees" aria-label="Flat Increment Percentage for All Employees" onChange={e => setFlatPercentage(+e.target.value)} disabled={isLocked} />
                                 <span className="text-slate-500 font-bold">%</span>
                             </div>
                         </div>
@@ -477,6 +473,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                     <td className="px-2 py-2 text-center bg-purple-900/10">
                                         <input
                                             type="number"
+                                            title={`Increment ${field} for ${emp.name}`}
+                                            aria-label={`Increment ${field} for ${emp.name}`}
                                             disabled={isLocked}
                                             className="w-16 bg-slate-900 border border-purple-500/50 rounded px-1 py-1 text-right text-white font-bold outline-none focus:ring-1 focus:ring-purple-500 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                             value={adhoc[field] || 0}
@@ -511,6 +509,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                                 <td className="px-2 py-2 text-center bg-blue-900/10">
                                                     <input
                                                         type="number"
+                                                        title={`Specific Increment percentage for ${emp.name}`}
+                                                        aria-label={`Specific Increment percentage for ${emp.name}`}
                                                         disabled={isLocked}
                                                         className="w-14 bg-slate-900 border border-blue-500/50 rounded px-1 py-1 text-center text-white font-bold outline-none focus:ring-1 focus:ring-blue-500 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                                         value={specificPercentages[emp.id] || 0}
@@ -581,12 +581,12 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
 
                 <div className="mt-6 flex justify-end gap-4">
                     {!isLocked && (
-                        <button onClick={handleSaveDraft} disabled={isProcessing} className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-xl border border-slate-600 shadow-lg transition-all flex items-center gap-2 transform hover:scale-105 active:scale-95 disabled:opacity-50">
+                        <button onClick={handleSaveDraft} disabled={isProcessing} title="Save Arrear Calculation as Draft" aria-label="Save Arrear Calculation as Draft" className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-xl border border-slate-600 shadow-lg transition-all flex items-center gap-2 transform hover:scale-105 active:scale-95 disabled:opacity-50">
                             <Save size={18} /> SAVE DRAFT
                         </button>
                     )}
                     {activeDraft && !isLocked && (
-                        <button onClick={handleFinalizeBtn} disabled={isProcessing} className="px-8 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl shadow-lg transition-all flex items-center gap-2 transform hover:scale-105 active:scale-95 disabled:opacity-50">
+                        <button onClick={handleFinalizeBtn} disabled={isProcessing} title="Confirm and Finalize Arrear Wages" aria-label="Confirm and Finalize Arrear Wages" className="px-8 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl shadow-lg transition-all flex items-center gap-2 transform hover:scale-105 active:scale-95 disabled:opacity-50">
                             <CheckCircle2 size={18} /> CONFIRM & FINALIZE
                         </button>
                     )}
@@ -611,10 +611,10 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                         </div>
 
                         <div className="flex gap-3 mt-4">
-                            <button onClick={() => setShowConfirmation(false)} className="flex-1 py-3 rounded-xl border border-slate-600 text-slate-400 font-bold hover:bg-slate-800 hover:text-white transition-all text-sm">
+                            <button onClick={() => setShowConfirmation(false)} title="Cancel Finalization" aria-label="Cancel Finalization" className="flex-1 py-3 rounded-xl border border-slate-600 text-slate-400 font-bold hover:bg-slate-800 hover:text-white transition-all text-sm">
                                 Cancel
                             </button>
-                            <button onClick={executeFinalize} className="flex-1 flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg transition-all text-sm">
+                            <button onClick={executeFinalize} title="Execute Permanent Finalization" aria-label="Execute Permanent Finalization" className="flex-1 flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg transition-all text-sm">
                                 <CheckCircle2 size={18} /> Finalize App
                             </button>
                         </div>
@@ -636,6 +636,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Effective Month</label>
                                     <select
+                                        title="Select Effective Month"
+                                        aria-label="Select Effective Month"
                                         className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors"
                                         value={effectiveMonth}
                                         onChange={e => setEffectiveMonth(e.target.value)}
@@ -646,6 +648,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Effective Year</label>
                                     <select
+                                        title="Select Effective Year"
+                                        aria-label="Select Effective Year"
                                         className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors"
                                         value={effectiveYear}
                                         onChange={e => setEffectiveYear(+e.target.value)}
@@ -656,6 +660,8 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                             </div>
                             <button
                                 onClick={() => setShowProcessMonthModal(false)}
+                                title="Confirm Effective Month Selection"
+                                aria-label="Confirm Effective Month Selection"
                                 className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-lg transition-transform transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
                             >
                                 <CheckCircle2 size={18} /> CONFIRM EFFECTIVE MONTH

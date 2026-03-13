@@ -39,7 +39,7 @@ const ExportModal: React.FC<ExportModalProps> = ({
                         </h3>
                         <p className="text-xs text-slate-400 mt-1">Configure your master record export parameters.</p>
                     </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                    <button onClick={onClose} title="Close Export Modal" aria-label="Close Export Modal" className="text-slate-400 hover:text-white"><X size={20} /></button>
                 </div>
 
                 <div className="p-6 space-y-8">

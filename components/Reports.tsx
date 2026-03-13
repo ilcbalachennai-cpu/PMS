@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, KeyRound, UserX, Save, RefreshCw, TrendingUp } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, KeyRound, UserX, Save, TrendingUp } from 'lucide-react';
+
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, ArrearBatch } from '../types';
 import {
     generateExcelReport,
@@ -11,11 +11,10 @@ import {
     generateLeaveLedgerReport,
     generateAdvanceShortfallReport,
     generateArrearReport,
-    formatDateInd,
     getStandardFileName,
     getBackupFileName
 } from '../services/reportService';
-import CustomModal, { ModalType } from './Shared/CustomModal';
+
 
 interface ReportsProps {
     employees: Employee[];
@@ -36,14 +35,14 @@ interface ReportsProps {
     currentUser?: User;
     onRollover: (history?: PayrollResult[]) => void;
     arrearHistory?: ArrearBatch[];
-    showAlert: (type: ModalType, title: string, message: string, onConfirm?: () => void) => void;
+    showAlert: (type: 'confirm' | 'success' | 'error' | 'warning' | 'info' | 'loading' | 'danger', title: string, message: string, onConfirm?: () => void) => void;
 }
 
 const Reports: React.FC<ReportsProps> = ({
     employees,
     setEmployees,
     companyProfile,
-    attendances,
+    attendances: _attendances,
     savedRecords,
     setSavedRecords,
     month,
@@ -55,7 +54,7 @@ const Reports: React.FC<ReportsProps> = ({
     currentUser,
     onRollover,
     arrearHistory,
-    showAlert
+    showAlert: _showAlert
 }) => {
     const [reportType, setReportType] = useState<string>('Pay Sheet');
     const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
@@ -392,7 +391,7 @@ const Reports: React.FC<ReportsProps> = ({
         };
 
         if (employeesWithAdvance.length > 0) {
-            const names = employeesWithAdvance.map(([id]) => employees.find(e => e.id === id)?.name || id).join(', ');
+            
             setModalState({
                 isOpen: true,
                 type: 'confirm',
@@ -704,10 +703,10 @@ const Reports: React.FC<ReportsProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3 bg-[#0f172a] p-2 rounded-xl border border-slate-700">
-                    <select value={month} onChange={e => setMonth(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400">
+                    <select value={month} onChange={e => setMonth(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400" title="Select Month" aria-label="Select Month">
                         {months.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
-                    <select value={year} onChange={e => setYear(+e.target.value)} className="bg-transparent px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400">
+                    <select value={year} onChange={e => setYear(+e.target.value)} className="bg-transparent px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400" title="Select Year" aria-label="Select Year">
                         {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
                     </select>
                 </div>
@@ -733,6 +732,8 @@ const Reports: React.FC<ReportsProps> = ({
                 <button
                     onClick={isLocked ? handleUnlock : handleFreeze}
                     disabled={!isLocked && (!hasData || hasUnsavedChanges)}
+                    title={isLocked ? 'Unlock Period' : 'Confirm & Freeze Data'}
+                    aria-label={isLocked ? 'Unlock Period' : 'Confirm & Freeze Data'}
                     className={`px-6 py-2.5 rounded-lg font-bold text-sm shadow-lg transition-all ${isLocked
                         ? 'bg-slate-800 hover:bg-slate-700 text-white border border-slate-600'
                         : (hasData && !hasUnsavedChanges)
@@ -768,6 +769,8 @@ const Reports: React.FC<ReportsProps> = ({
                             <button
                                 key={item.id}
                                 onClick={() => handleReportTypeChange(item.id)}
+                                title={`Select ${item.label}`}
+                                aria-label={`Select ${item.label}`}
                                 className={`flex flex-col items-center justify-center gap-3 p-4 rounded-xl border transition-all ${reportType === item.id
                                     ? 'bg-blue-600 border-blue-500 text-white shadow-lg scale-105'
                                     : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600 hover:bg-slate-800'
@@ -789,8 +792,8 @@ const Reports: React.FC<ReportsProps> = ({
                                 <div className="space-y-2">
                                     <label className="text-xs font-bold text-slate-500">Output Format</label>
                                     <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
-                                        <button onClick={() => setFormat('PDF')} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${format === 'PDF' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>PDF</button>
-                                        <button onClick={() => setFormat('Excel')} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${format === 'Excel' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>Excel</button>
+                                        <button onClick={() => setFormat('PDF')} title="Set format to PDF" aria-label="Set format to PDF" className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${format === 'PDF' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>PDF</button>
+                                        <button onClick={() => setFormat('Excel')} title="Set format to Excel" aria-label="Set format to Excel" className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${format === 'Excel' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>Excel</button>
                                     </div>
                                 </div>
                             ) : (
@@ -815,6 +818,8 @@ const Reports: React.FC<ReportsProps> = ({
                                     <select
                                         value={arrearSelectedPeriod}
                                         onChange={e => setArrearSelectedPeriod(e.target.value)}
+                                        title="Select Arrear Batch"
+                                        aria-label="Select Arrear Batch"
                                         className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-bold outline-none focus:border-indigo-500 transition-colors"
                                     >
                                         {arrearHistory.map(b => (
@@ -831,6 +836,8 @@ const Reports: React.FC<ReportsProps> = ({
                     <button
                         onClick={generateReport}
                         disabled={isGenerating}
+                        title={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
+                        aria-label={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
                         className={`w-full py-4 font-black rounded-xl shadow-lg flex items-center justify-center gap-3 transition-all mt-6 ${(reportType !== 'Arrear Report' && !isLocked)
                             ? 'bg-slate-800 hover:bg-slate-700 text-amber-500 border border-slate-700'
                             : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20'
@@ -855,7 +862,7 @@ const Reports: React.FC<ReportsProps> = ({
             {showAuthModal && (
                 <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button title="Close Verification Modal" aria-label="Close Verification Modal" onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className="p-3 bg-indigo-900/20 text-indigo-500 rounded-full border border-indigo-900/50 mb-2">
                                 <KeyRound size={24} />
@@ -868,6 +875,8 @@ const Reports: React.FC<ReportsProps> = ({
                             <input
                                 type="password"
                                 placeholder="Enter Password"
+                                title="Admin Password"
+                                aria-label="Admin Password"
                                 autoFocus
                                 className={`w-full bg-[#0f172a] border ${authError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm`}
                                 value={authPassword}
@@ -876,7 +885,7 @@ const Reports: React.FC<ReportsProps> = ({
                             />
                             {authError && <p className="text-[10px] text-red-400 font-bold text-center animate-pulse">{authError}</p>}
                         </div>
-                        <button onClick={handleAuthVerify} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all text-sm">
+                        <button onClick={handleAuthVerify} title="Verify Password and Unlock" aria-label="Verify Password and Unlock" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all text-sm">
                             VERIFY & UNLOCK
                         </button>
                     </div>
@@ -903,6 +912,8 @@ const Reports: React.FC<ReportsProps> = ({
                             </div>
                             <button
                                 onClick={() => { setZeroWageEmployees([]); setExitData({}); }}
+                                title="Close Modal"
+                                aria-label="Close Modal"
                                 className="p-2 bg-black/10 hover:bg-black/20 text-white/80 hover:text-white rounded-full transition-colors"
                             >
                                 <X size={20} />
@@ -955,6 +966,8 @@ const Reports: React.FC<ReportsProps> = ({
                                                                 : 'bg-[#0f172a] border-slate-600 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50'
                                                                 }`}
                                                             value={data.reason === 'ON LOP' ? '' : data.dol}
+                                                            title={data.reason === 'ON LOP' ? "Date of Leaving not required for ON LOP" : `Enter Date of Leaving for ${emp?.name}`}
+                                                            aria-label={data.reason === 'ON LOP' ? "Date of Leaving not required for ON LOP" : `Enter Date of Leaving for ${emp?.name}`}
                                                             max={maxDate}
                                                             disabled={data.reason === 'ON LOP'}
                                                             placeholder={data.reason === 'ON LOP' ? 'Not required' : ''}
@@ -982,7 +995,8 @@ const Reports: React.FC<ReportsProps> = ({
                                                             className="bg-[#0f172a] border border-slate-600 rounded-lg px-3 py-2 text-white text-xs w-full focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 outline-none transition-all"
                                                             value={data.reason}
                                                             onChange={(e) => handleExitChange(r.employeeId, 'reason', e.target.value)}
-                                                            title="Select separation reason"
+                                                            title={`Select separation reason for ${emp?.name}`}
+                                                            aria-label={`Select separation reason for ${emp?.name}`}
                                                         >
                                                             <option value="">Select Reason...</option>
                                                             <option value="ON LOP">ON LOP</option>
@@ -1008,12 +1022,16 @@ const Reports: React.FC<ReportsProps> = ({
                             <div className="flex gap-3">
                                 <button
                                     onClick={() => { setZeroWageEmployees([]); setExitData({}); }}
+                                    title="Cancel Operation"
+                                    aria-label="Cancel Operation"
                                     className="px-6 py-2.5 rounded-xl border border-slate-600 text-slate-300 font-bold text-xs hover:bg-slate-800 transition-all uppercase tracking-wider"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     onClick={processExitAndFreeze}
+                                    title="Proceed and Freeze Payroll"
+                                    aria-label="Proceed and Freeze Payroll"
                                     className="px-8 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-xs shadow-lg shadow-amber-900/30 transition-all uppercase tracking-wider flex items-center gap-2 transform hover:scale-105 active:scale-95"
                                 >
                                     <Save size={16} /> Proceed to Freeze
@@ -1028,7 +1046,7 @@ const Reports: React.FC<ReportsProps> = ({
             {modalState.isOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={handleModalClose} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button onClick={handleModalClose} title="Close Modal" aria-label="Close Modal" className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>
                                 {modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle2 size={24} /> : <Lock size={24} />}
@@ -1039,11 +1057,11 @@ const Reports: React.FC<ReportsProps> = ({
                         <div className="flex gap-3 mt-4">
                             {modalState.type === 'confirm' ? (
                                 <>
-                                    <button onClick={handleModalClose} className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors">Cancel</button>
-                                    <button onClick={modalState.onConfirm} className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg">Confirm</button>
+                                    <button onClick={handleModalClose} title="Cancel Action" aria-label="Cancel Action" className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors">Cancel</button>
+                                    <button onClick={modalState.onConfirm} title="Confirm Action" aria-label="Confirm Action" className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg">Confirm</button>
                                 </>
                             ) : (
-                                <button onClick={handleModalClose} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
+                                <button onClick={handleModalClose} title="Close Modal" aria-label="Close Modal" className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
                             )}
                         </div>
                     </div>

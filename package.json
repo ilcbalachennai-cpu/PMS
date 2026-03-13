@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "lint": "tsc --noEmit",
     "preview": "vite preview",
     "dev:electron": "concurrently \"npm run dev\" \"npm run electron:serve\"",
     "electron:serve": "wait-on tcp:3000 && npx tsc -p electron/tsconfig.json && node -e \"const fs=require('fs'); if(!fs.existsSync('dist-electron')) fs.mkdirSync('dist-electron'); fs.writeFileSync('dist-electron/package.json', '{\\\"type\\\": \\\"commonjs\\\"}')\" && cross-env NODE_ENV=development electron .",

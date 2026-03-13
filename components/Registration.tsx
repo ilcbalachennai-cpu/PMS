@@ -8,24 +8,19 @@ import {
     ArrowRight,
     ArrowLeft,
     ShieldAlert,
-    Landmark,
-    MapPin,
     Mail,
     Phone,
-    Globe,
     Lock,
     IndianRupee,
-    Briefcase,
     AlertCircle,
     Database,
     Upload,
     Loader2,
     UserCircle,
-    Power,
-    ArrowLeftCircle
+    Power
 } from 'lucide-react';
 import { CompanyProfile, StatutoryConfig, User } from '../types';
-import { INITIAL_COMPANY_PROFILE, INITIAL_STATUTORY_CONFIG, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, BRAND_CONFIG } from '../constants';
+import { INITIAL_COMPANY_PROFILE, INITIAL_STATUTORY_CONFIG, BRAND_CONFIG } from '../constants';
 import { activateFullLicense, registerTrial, isValidKeyFormat } from '../services/licenseService';
 import CryptoJS from 'crypto-js';
 
@@ -46,8 +41,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     const [licenseKey, setLicenseKey] = useState('');
     const [regEmail, setRegEmail] = useState('');
     const [regMobile, setRegMobile] = useState('');
-    const [profile, setProfile] = useState<CompanyProfile>(INITIAL_COMPANY_PROFILE);
-    const [config, setConfig] = useState<StatutoryConfig>(INITIAL_STATUTORY_CONFIG);
+    const [_profile, setProfile] = useState<CompanyProfile>(INITIAL_COMPANY_PROFILE);
+    const [_config] = useState<StatutoryConfig>(INITIAL_STATUTORY_CONFIG);
     const [adminPassword, setAdminPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
@@ -337,24 +332,6 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
         reader.readAsText(file);
     };
 
-    const handleFinish = () => {
-        if (!profile.establishmentName) {
-            setError('Establishment Name is required.');
-            return;
-        }
-
-        onComplete({
-            companyProfile: profile,
-            statutoryConfig: config,
-            adminUser: {
-                username: userID || 'admin',
-                password: adminPassword,
-                name: userName || 'System Administrator',
-                role: 'Administrator',
-                email: profile.email || 'admin@bharatpay.com'
-            }
-        });
-    };
 
     const handleFreshSetup = () => {
         setIsProcessing(true);
@@ -498,6 +475,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                     ref={nameInputRef}
                                                     type="text"
                                                     autoFocus
+                                                    title="Full Name / Authorized Person"
+                                                    aria-label="Full Name / Authorized Person"
                                                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all uppercase placeholder:normal-case placeholder:text-slate-500"
                                                     placeholder="Your Name - as mentioned in App request mail"
                                                     value={userName}
@@ -511,6 +490,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                                 <input
                                                     type="text"
+                                                    title="User ID"
+                                                    aria-label="User ID"
                                                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                     placeholder="Enter your User ID"
                                                     value={userID}
@@ -522,6 +503,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">License Key (Leave empty for Trial)</label>
                                             <input
                                                 type="text"
+                                                title="License Key"
+                                                aria-label="License Key"
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white font-mono text-center tracking-[0.2em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                 placeholder="XXXX-XXXX-XXXX-XXXX"
                                                 value={licenseKey}
@@ -537,6 +520,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                                 <input
                                                     type="email"
+                                                    title="Registered Email ID"
+                                                    aria-label="Registered Email ID"
                                                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                     placeholder="mail@example.com"
                                                     value={regEmail}
@@ -550,6 +535,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                                 <input
                                                     type="tel"
+                                                    title="Mobile Number"
+                                                    aria-label="Mobile Number"
                                                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                     placeholder="9876543210"
                                                     value={regMobile}
@@ -610,6 +597,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 ref={passwordRef}
                                                 type="password"
                                                 autoFocus
+                                                title="Set Password"
+                                                aria-label="Set Password"
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono placeholder:text-slate-500 placeholder:font-sans"
                                                 placeholder="Enter secure password"
                                                 value={adminPassword}
@@ -636,6 +625,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                             <input
                                                 type="password"
+                                                title="Confirm Password"
+                                                aria-label="Confirm Password"
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono placeholder:text-slate-500 placeholder:font-sans"
                                                 placeholder="Retype password"
                                                 value={confirmPassword}
@@ -726,6 +717,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                     type="password"
                                                     value={encryptionKey}
                                                     onChange={e => setEncryptionKey(e.target.value)}
+                                                    title="Decryption Password"
+                                                    aria-label="Decryption Password"
                                                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono"
                                                     placeholder="Enter decryption password"
                                                 />

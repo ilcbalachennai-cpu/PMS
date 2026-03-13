@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, Shield, ShieldCheck, User, Maximize, Minimize, Power } from 'lucide-react';
+import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, ShieldCheck, Maximize, Minimize, Power } from 'lucide-react';
 import { User as UserType } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
-import { validateLicenseStartup, trackCloudLogin, APP_VERSION } from '../services/licenseService';
+import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper } from '../services/licenseService';
 
 interface LoginProps {
   onLogin: (user: UserType) => void;
@@ -10,13 +10,13 @@ interface LoginProps {
   setLogo: (url: string) => void;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [bridgeReady, setBridgeReady] = useState(!!(window as any).electronAPI);
+  const [_bridgeReady, setBridgeReady] = useState(!!(window as any).electronAPI);
   const usernameRef = useRef<HTMLInputElement>(null);
 
   // Monitor bridge status
@@ -76,7 +76,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
     try {
       // Get registered users from localStorage
       const savedUsersRaw = localStorage.getItem('app_users');
-      let allUsers = MOCK_USERS;
+      let allUsers = [...MOCK_USERS];
+
+      // 1. Add cloud-synced Developer account if it exists
+      const cloudDev = getAppDeveloper();
+      if (cloudDev) {
+        allUsers.push(cloudDev);
+      }
 
       if (savedUsersRaw) {
         try {
@@ -84,7 +90,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
           // Combine, allowing saved users to override mock users with same username (like 'admin')
           allUsers = [
             ...savedUsers,
-            ...MOCK_USERS.filter(mu => !savedUsers.some(su => su.username === mu.username))
+            ...allUsers.filter(au => !savedUsers.some(su => su.username === au.username))
           ];
         } catch (e) {
           console.error("Failed to parse app_users", e);
@@ -312,6 +318,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
+                    title="Username"
+                    aria-label="Username"
                     className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm"
                     placeholder="Enter username"
                   />
@@ -326,6 +334,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    title="Password"
+                    aria-label="Password"
                     className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm"
                     placeholder="••••••••"
                   />
@@ -395,6 +405,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
                       key="admin" 
                       onClick={() => admin && autofill(admin.username)} 
                       disabled={!admin}
+                      title={admin ? `Login as ${admin.name}` : 'Admin user not active'}
+                      aria-label={admin ? `Login as ${admin.name}` : 'Admin user not active'}
                       className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
                         admin 
                           ? 'bg-blue-900/10 hover:bg-blue-900/20 border border-blue-900/30' 
@@ -411,6 +423,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
                       key="user" 
                       onClick={() => payrollUser && autofill(payrollUser.username)} 
                       disabled={!payrollUser}
+                      title={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
+                      aria-label={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
                       className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
                         payrollUser 
                           ? 'bg-emerald-900/10 hover:bg-emerald-900/20 border border-emerald-900/30' 

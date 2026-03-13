@@ -1,7 +1,4 @@
 @import "tailwindcss";
-@source "./index.html";
-@source "./App.tsx";
-@source "./components";
 
 @keyframes marquee {
   0% {
@@ -32,4 +29,36 @@
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #475569;
+}
+
+.progress-shadow-blue {
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.6);
+}
+
+.progress-shadow-emerald {
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
+}
+
+.progress-bar-width {
+  width: var(--progress-width, 0%);
+}
+
+.bg-stat-0 {
+  background-color: #3b82f6;
+}
+
+.bg-stat-1 {
+  background-color: #818cf8;
+}
+
+.bg-stat-2 {
+  background-color: #10b981;
+}
+
+.bg-stat-3 {
+  background-color: #f59e0b;
+}
+
+.bg-stat-4 {
+  background-color: #ef4444;
 }
