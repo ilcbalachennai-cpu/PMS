@@ -1,7 +1,7 @@
 import puppeteer from 'puppeteer';
 import fs from 'fs';
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><circle cx="200" cy="200" r="200" fill="#800000"/><ellipse cx="200" cy="200" rx="195" ry="120" fill="#FFD700"/><text x="200" y="185" font-family="serif" font-weight="bold" font-size="80" fill="#800000" text-anchor="middle">ILCbala</text><text x="200" y="240" font-family="sans-serif" font-weight="bold" font-style="italic" font-size="22" fill="#800000" text-anchor="middle">Decoding Indian Labour Laws</text></svg>`;
+
 
 (async () => {
     try {
@@ -11,13 +11,17 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><circ
 
         const browser = await puppeteer.launch();
         const page = await browser.newPage();
-        await page.setViewport({ width: 256, height: 256 });
+        await page.setViewport({ width: 512, height: 512 });
+
+        // Read the actual BPP logo from public folder
+        const logoData = fs.readFileSync('public/logo.png', { encoding: 'base64' });
+        const logoUrl = `data:image/png;base64,${logoData}`;
 
         await page.setContent(`
-            <html>
+            <html style="background: transparent;">
             <body style="margin: 0; padding: 0; background-color: transparent;">
-                <div style="width: 256px; height: 256px;">
-                    ${svg.replace('viewBox="0 0 400 400"', 'viewBox="0 0 400 400" width="256" height="256"')}
+                <div style="width: 512px; height: 512px; border-radius: 50%; overflow: hidden; background: #000040; display: flex; align-items: center; justify-content: center; border: 20px solid #FF9933; box-sizing: border-box;">
+                    <img src="${logoUrl}" style="width: 100%; height: 100%; object-fit: contain; transform: scale(2.8);" />
                 </div>
             </body>
             </html>

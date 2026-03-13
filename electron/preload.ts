@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     findBPPApp: () => ipcRenderer.invoke('find-bpp-app'),
     openItemLocation: (filePath: string) =>
         ipcRenderer.invoke('open-item-location', filePath),
+    onUpdateDownloadComplete: (callback: () => void) => {
+        ipcRenderer.on('update-download-complete', callback);
+    },
     getIsElectron: () => true
 });
 

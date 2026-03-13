@@ -7,7 +7,8 @@ export const BRAND_CONFIG = {
   appNameSuffix: 'Pro',
   companyName: 'ILCbala',
   tagline: 'Decoding Indian Labour Laws',
-  logoUrl: './logo3.png'
+  logoUrl: './logo.png',
+  developerLogoUrl: './logo3.png'
 };
 
 export const INITIAL_COMPANY_PROFILE: CompanyProfile = {

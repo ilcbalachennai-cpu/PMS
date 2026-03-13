@@ -357,19 +357,28 @@ ipcMain.handle('get-machine-id', async () => {
     }
 });
 
-// 7. API Fetch to bypass CORS
 ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
     try {
         const response = await net.fetch(url, options);
-        const data = await response.text();
+
+        // Read response body exactly once
+        let responseBody: any;
+        const text = await response.text();
         try {
-            return JSON.parse(data);
+            responseBody = JSON.parse(text); // Try parsing as JSON
         } catch {
-            return data;
+            responseBody = text; // Otherwise return as plain text
         }
-    } catch (e: any) {
-        console.error('API Fetch Failed:', e);
-        throw e;
+
+        if (!response.ok) {
+            console.error(`🔌 fetch failed [${response.status}]:`, responseBody);
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        return responseBody;
+    } catch (error: any) {
+        console.error('🔌 Error in api-fetch:', error);
+        throw { message: error.message }; // Pass clean error object
     }
 });
 
@@ -428,18 +437,42 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string) => {
             const dest = getInstallerPath();
             const file = fs.createWriteStream(dest);
 
-            https.get(downloadUrl, (response: any) => {
-                response.pipe(file);
-                file.on('finish', () => {
-                    file.close();
+            const request = net.request({
+                url: downloadUrl,
+                redirect: 'follow'
+            });
+            
+            request.on('response', (response) => {
+                response.on('data', (chunk) => {
+                    file.write(chunk);
+                });
+                
+                response.on('end', () => {
+                    file.end();
                     console.log('✅ Update downloaded to:', dest);
+                    BrowserWindow.getAllWindows().forEach(win => {
+                        win.webContents.send('update-download-complete');
+                    });
                     resolve({ success: true, path: dest });
                 });
-            }).on('error', (err: any) => {
+                
+                response.on('error', (err: any) => {
+                    file.end();
+                    fs.unlink(dest, () => { });
+                    console.error('❌ Update download stream failed:', err);
+                    resolve({ success: false, error: err.message });
+                });
+            });
+
+            request.on('error', (err: any) => {
+                file.end();
                 fs.unlink(dest, () => { });
-                console.error('❌ Update download failed:', err);
+                console.error('❌ Update request failed:', err);
                 resolve({ success: false, error: err.message });
             });
+            
+            request.end();
+
         } catch (e: any) {
             resolve({ success: false, error: e.message });
         }
@@ -478,7 +511,10 @@ ipcMain.handle('backup-and-install', async () => {
         console.log('🚀 Launching update installer...');
 
         // Use spawn to launch detached so we can quit Electron immediately
-        const child = spawn(installerPath, [], {
+        // By passing /currentuser we tell NSIS not to ask the "Who should this apply to?" question.
+        // We also force the directory so it doesn't accidentally install a duplicate copy in %LOCALAPPDATA%.
+        const installDir = path.dirname(process.execPath);
+        const child = spawn(installerPath, ['/currentuser', `/D=${installDir}`], {
             detached: true,
             stdio: 'ignore'
         });

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, Shield, ShieldCheck, User, Maximize, Minimize, Power } from 'lucide-react';
 import { User as UserType } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
-import { validateLicenseStartup } from '../services/licenseService';
+import { validateLicenseStartup, trackCloudLogin, APP_VERSION } from '../services/licenseService';
 
 interface LoginProps {
   onLogin: (user: UserType) => void;
@@ -103,12 +103,47 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
 
       const user = allUsers.find(
         (u) =>
-          String(u.username).trim() === cleanUsername &&
+          String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
           String(u.password).trim() === cleanPassword
       );
 
       if (user) {
         console.log("✅ Login successful for:", cleanUsername);
+
+        // --- V01.0.11: CLOUD LOGIN TRACKING ---
+        try {
+          const machineId = localStorage.getItem('app_machine_id');
+          if (machineId) {
+            // To track accurately we need the registered Email from the license
+            const rawLicense = localStorage.getItem('app_license_secure');
+            if (rawLicense) {
+              // Quick unscramble to get email without importing the whole unscramble logic
+              // We can just rely on getStoredLicense if we import it, let's just do that in a cleaner way:
+              // Since getStoredLicense is not exported/imported directly here, let's just use the known structure 
+              // or better yet, we can export getStoredLicense from licenseService.
+
+              // Actually, let's just use what we have. We know the email is the 'registeredTo' field.
+              const btoaDecoded = atob(rawLicense);
+              const SECRET_PEPPER = "BPP_PRO_2026_SECURE_VAL";
+
+              // Decode payload
+              const unsalted = btoaDecoded.split('').map((c, i) =>
+                String.fromCharCode(c.charCodeAt(0) ^ (SECRET_PEPPER.charCodeAt(i % SECRET_PEPPER.length)))
+              ).join('');
+
+              const parts = unsalted.split('|');
+              const jsonPayload = parts.slice(0, -1).join('|');
+              const licenseObj = JSON.parse(jsonPayload);
+
+              if (licenseObj && licenseObj.registeredTo) {
+                trackCloudLogin(licenseObj.registeredTo, machineId);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Could not fire cloud tracking:", e);
+        }
+
         onLogin(user);
       } else {
         // --- CLOUD FALLBACK ---
@@ -123,12 +158,36 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
             const updatedUsers: UserType[] = JSON.parse(updatedUsersRaw);
             const syncedUser = updatedUsers.find(
               (u) =>
-                String(u.username).trim() === cleanUsername &&
+                String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
                 String(u.password).trim() === cleanPassword
             );
 
             if (syncedUser) {
               console.log("✅ Login successful via Cloud Sync for:", cleanUsername);
+
+              // --- V01.0.11: CLOUD LOGIN TRACKING ---
+              try {
+                const machineId = localStorage.getItem('app_machine_id');
+                if (machineId) {
+                  const rawLicense = localStorage.getItem('app_license_secure');
+                  if (rawLicense) {
+                    const btoaDecoded = atob(rawLicense);
+                    const SECRET_PEPPER = "BPP_PRO_2026_SECURE_VAL";
+                    const unsalted = btoaDecoded.split('').map((c, i) =>
+                      String.fromCharCode(c.charCodeAt(0) ^ (SECRET_PEPPER.charCodeAt(i % SECRET_PEPPER.length)))
+                    ).join('');
+                    const parts = unsalted.split('|');
+                    const jsonPayload = parts.slice(0, -1).join('|');
+                    const licenseObj = JSON.parse(jsonPayload);
+                    if (licenseObj && licenseObj.registeredTo) {
+                      trackCloudLogin(licenseObj.registeredTo, machineId);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn("Could not fire cloud tracking on fallback:", e);
+              }
+
               onLogin(syncedUser);
               return;
             }
@@ -216,7 +275,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
               <div className="flex items-center gap-3 px-5 py-2.5 bg-slate-900/50 border border-slate-800 rounded-2xl">
                 <span className="text-sm font-black text-[#FF9933] tracking-wide">{BRAND_CONFIG.companyName}</span>
               </div>
-              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">Decoding Indian Labour Laws</p>
+              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">{BRAND_CONFIG.tagline}</p>
+              <div className="mt-2 px-3 py-1 bg-slate-800/50 border border-slate-700/50 rounded-full">
+                <span className="text-[9px] font-black tracking-widest text-slate-400 uppercase">Version <span className="text-white">{APP_VERSION}</span></span>
+              </div>
             </div>
           </div>
         </div>

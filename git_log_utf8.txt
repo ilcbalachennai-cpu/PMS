@@ -1,0 +1,30 @@
+﻿0f0affb feat: Implement core employee management features, various financial managers, reporting, and initial Electron desktop application setup.
+66050c2 feat: Initialize Electron application structure with user registration, licensing, and core UI components.
+616ebd9 Firstime User
+961e703 final changes
+923d396 feat: add EmployeeList component with document upload functionality and extend Employee type to include document fields.
+15976cc feat: Implement a comprehensive payroll calculation engine including statutory compliance and leave management.
+d761ee3 feat: Implement arrear management, payroll processing, and reporting features, add a Puppeteer e2e test script, and refine arrear history handling.
+aaa3441 feat: Introduce arrear management with retaining allowance tracking, new reporting components, and a flexible payroll rollover update.
+73cdc80 feat: Implement statutory report generation for PF, ESI, TDS, and state-specific forms, utilizing a new service, component, and templates.
+b1d6382 Statutory Reports Updated
+95573b8 feat: Implement a payroll processing module with attendance, ledger, and fine management, master data import, and reporting capabilities.
+90c92df apps
+4f449a7 feat: Implement comprehensive payroll reporting with payroll freeze/unfreeze functionality and ledger management.
+f3fc467 feat(employees): Improve employee ID generation and alerts
+4a3606b feat: Add Arrear Management features
+c053f66 feat: Add state-specific statutory report generation
+5272701 feat(StatutoryReports): Add Form 16 generation support
+9d65672 feat: Add 'ON LOP' to exit reasons
+55d11a2 feat: Refactor PDF report generation
+8f17fea feat: Add code wage calculation to report service
+3d92212 feat(payroll): Refine EPF wage calculation and reporting
+2b98b4b feat(report): Improve date formatting and add number to words utility
+ef538a8 feat: Enhance leave ledger report and add error modal
+484a04c feat(payroll): Align leave snapshot with attendance and refine PF ceiling
+fa6d49d feat: Introduce income tax calculation type setting
+ef2f0aa feat: Add income tax and improve ESI wage calculation
+644c321 fix(reports): Improve date formatting and number to words
+acc6aa0 feat: Add PDF table customization and fix EPF report totals
+22fd4be feat: Add family and bank details to employee profiles
+e6148a7 feat: Implement month rollover functionality

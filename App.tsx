@@ -231,6 +231,28 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   }, [latestAppVersion]);
 
+  useEffect(() => {
+    // @ts-ignore
+    if (window.electronAPI?.onUpdateDownloadComplete) {
+      // @ts-ignore
+      window.electronAPI.onUpdateDownloadComplete(() => {
+        console.log("📥 Background download finished entirely.");
+        localStorage.setItem('app_update_ready', 'true');
+        setUpdateDownloaded(true);
+        setIsUpdateDownloading(false);
+        setAlertConfig({
+          isOpen: true,
+          type: 'confirm',
+          title: 'Update Download Complete',
+          message: `The background update has successfully downloaded! Would you like to restart and install it now?`,
+          confirmLabel: 'Install Now',
+          cancelLabel: 'Later',
+          onConfirm: handleUpdateNow
+        });
+      });
+    }
+  }, []);
+
   const [isAppDirectoryConfigured, setIsAppDirectoryConfigured] = useState<boolean | null>(null);
 
   // --- LICENSE ENFORCEMENT ---
@@ -716,6 +738,10 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     if (!companyProfile?.establishmentName || companyProfile.establishmentName === 'Your Establishment Name' || companyProfile.establishmentName === 'Your Name' || companyProfile.establishmentName === 'Your Name - as mentioned in App request mail') {
       setActiveView(View.Settings);
       setSettingsTab('COMPANY');
+    } else {
+      setTimeout(() => {
+        showAlert('success', 'System Secured', `Welcome back, ${user.name || user.username}. Connected to local database successfully.`);
+      }, 500);
     }
   };
 
@@ -779,9 +805,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       'Select an action to proceed:',
       () => {
         // Re-login session
-        setCurrentUser(null);
         sessionStorage.removeItem('app_session_user');
-        setActiveView(View.Dashboard);
         window.location.reload();
       },
       () => {
@@ -792,7 +816,6 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         } else {
           console.error("LOGOUT: electronAPI is MISSING! Attempting browser window close.");
           // Fallback for browser: just clear session or close window if possible
-          setCurrentUser(null);
           sessionStorage.removeItem('app_session_user');
           window.close();
           // If window.close() fails (as it often does in modern browsers unless opened by script),
@@ -1202,14 +1225,19 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 </div>
               </div>
               <div className="flex items-center gap-4 shrink-0">
-                <button onClick={toggleFullScreen} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-full border border-slate-700 transition-all hover:scale-105 shadow-lg">{isFullScreen ? <Minimize size={18} /> : <Maximize size={18} />}</button>
-                <div className="relative group overflow-hidden rounded-full p-[1px]">
-                  <span className="absolute inset-[-1000%] animate-[spin_3s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#059669_0%,#3b82f6_50%,#059669_100%)]" />
-                  <div className="inline-flex h-full w-full items-center justify-center rounded-full bg-[#0f172a] px-3 py-1.5 backdrop-blur-3xl">
-                    <div className="flex items-center gap-1.5">
-                      <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
-                      <span className="text-[10px] font-black tracking-[0.05em] text-emerald-400 animate-pulse">{getFinancialYearLabel()}</span>
+                <button onClick={toggleFullScreen} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-full border border-slate-700 transition-all hover:scale-105 shadow-lg hidden md:block">{isFullScreen ? <Minimize size={18} /> : <Maximize size={18} />}</button>
+                <div className="flex flex-col items-end gap-1.5">
+                  <div className="relative group overflow-hidden rounded-full p-[1px]">
+                    <span className="absolute inset-[-1000%] animate-[spin_3s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#059669_0%,#3b82f6_50%,#059669_100%)]" />
+                    <div className="inline-flex h-full w-full items-center justify-center rounded-full bg-[#0f172a] px-3 py-1.5 backdrop-blur-3xl">
+                      <div className="flex items-center gap-1.5">
+                        <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
+                        <span className="text-[10px] font-black tracking-[0.05em] text-emerald-400 animate-pulse">{getFinancialYearLabel()}</span>
+                      </div>
                     </div>
+                  </div>
+                  <div className="hidden md:flex items-center px-2 py-[2px] bg-slate-800/80 border border-slate-700 rounded shadow-inner justify-center min-w-[120px]">
+                    <span className="text-[9px] font-black tracking-widest text-slate-400 uppercase">Version <span className="text-white">{APP_VERSION}</span></span>
                   </div>
                 </div>
               </div>

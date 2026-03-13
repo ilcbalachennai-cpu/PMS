@@ -124,16 +124,18 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         if (!umForm.name.trim() || !umForm.username.trim() || !umForm.password.trim()) {
             setUmError('All fields are required.'); return;
         }
-        const existing = appUsers.find(u => u.username === umForm.username && u.username !== umEditId);
+
+        const cleanUsername = umForm.username.trim().toLowerCase();
+        const existing = appUsers.find(u => u.username.toLowerCase() === cleanUsername && u.username.toLowerCase() !== umEditId?.toLowerCase());
         if (existing) { setUmError('Username already exists.'); return; }
 
         if (umEditId) {
             // Edit mode — update the matched user
-            const updated = appUsers.map(u => u.username === umEditId ? { ...u, name: umForm.name, password: umForm.password, role: umForm.role } : u);
+            const updated = appUsers.map(u => u.username.toLowerCase() === umEditId.toLowerCase() ? { ...u, name: umForm.name.trim(), username: cleanUsername, password: umForm.password, role: umForm.role } : u);
             saveAppUsers(updated);
         } else {
             // Add new user
-            const newUser: User = { name: umForm.name, username: umForm.username, password: umForm.password, role: umForm.role, email: '' };
+            const newUser: User = { name: umForm.name.trim(), username: cleanUsername, password: umForm.password, role: umForm.role, email: '' };
             saveAppUsers([...appUsers, newUser]);
         }
         setUmForm({ name: '', username: '', password: '', role: 'User' });
@@ -1539,6 +1541,32 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     >
                                         {isActivating ? <Loader2 size={24} className="animate-spin" /> : <>Re-Activate System <ArrowRight size={20} /></>}
                                     </button>
+                                </div>
+                            </div>
+
+                            <div className="bg-indigo-900/10 border border-indigo-500/20 rounded-2xl p-6 space-y-4">
+                                <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                                    <ShieldCheck size={16} /> Software Security & Trust Guide
+                                </h3>
+                                <div className="space-y-4">
+                                    <div className="space-y-1">
+                                        <p className="text-[11px] font-bold text-slate-300 uppercase tracking-wider underline decoration-indigo-500/50">Why do I see "Windows protected your PC"?</p>
+                                        <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
+                                            This is a standard Microsoft SmartScreen warning for unsigned software. To proceed, click <b>"More Info"</b> and then <b>"Run Anyway"</b>.
+                                        </p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-[11px] font-bold text-slate-300 uppercase tracking-wider underline decoration-indigo-500/50">Why can't Google Drive scan for viruses?</p>
+                                        <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
+                                            Google Drive cannot scan files larger than 100MB. BharatPay Pro includes the high-fidelity Electron engine, making it ~120MB+. You can safely click <b>"Download anyway"</b>.
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                                        <div className="p-1 px-2 bg-emerald-500/20 text-emerald-400 text-[8px] font-black rounded uppercase">Tip</div>
+                                        <p className="text-[9px] text-emerald-300/80 font-bold uppercase tracking-widest">
+                                            Professional Tip: Purchasing an "EV Code Signing Certificate" will remove these warnings permanently.
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
                         </div>

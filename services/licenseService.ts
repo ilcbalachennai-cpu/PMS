@@ -441,7 +441,6 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
           }
         }
 
-        localStorage.setItem('app_license_last_check', today);
         console.log("✅ Daily License/Trial Sync Complete.");
       }
     } catch (e) {
@@ -452,7 +451,31 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
   return { valid: true };
 };
 
-export const APP_VERSION = "1.0.8";
+/**
+ * Sends a background ping to the cloud to increment the user's total login count
+ * and log their last access time.
+ */
+export const trackCloudLogin = async (email: string, machineId: string) => {
+  if (!navigator.onLine) {
+    console.log("📴 Offline: Skipping cloud login tracking.");
+    return;
+  }
+
+  try {
+    fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'TRACK_LOGIN',
+        email: email,
+        machineId: machineId
+      })
+    }).catch(e => console.error("Cloud Tracking Warning:", e));
+  } catch (e) {
+    console.warn("Cloud Tracking Error:", e);
+  }
+};
+
+export const APP_VERSION = "1.0.12";
 /**
  * Fetches the latest developer messages from Google Sheets
  */
