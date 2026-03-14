@@ -24,9 +24,12 @@ interface SettingsProps {
     isSetupMode?: boolean;
     onSkipSetupRedirect?: () => void;
     showAlert?: (type: any, title: string, message: string, onConfirm?: () => void) => void;
+    onDirtyChange?: (isDirty: boolean) => void;
+    saveTrigger?: number;
+    onSaveComplete?: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, showAlert }) => {
+const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, showAlert, onDirtyChange, saveTrigger = 0, onSaveComplete }) => {
     const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(isSetupMode ? 'COMPANY' : initialTab);
 
     // SCHEMA MIGRATION: Merge current config with defaults to prevent crashes on new features
@@ -62,6 +65,24 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             return false;
         }
     }, []);
+    
+    const isDirty = useMemo(() => {
+        const isConfigDirty = JSON.stringify(formData) !== JSON.stringify(config);
+        const isProfileDirty = JSON.stringify(profileData) !== JSON.stringify(companyProfile);
+        const isLeaveDirty = JSON.stringify(localLeavePolicy) !== JSON.stringify(leavePolicy);
+        return isConfigDirty || isProfileDirty || isLeaveDirty;
+    }, [formData, config, profileData, companyProfile, localLeavePolicy, leavePolicy]);
+
+    useEffect(() => {
+        onDirtyChange?.(isDirty);
+    }, [isDirty, onDirtyChange]);
+
+    useEffect(() => {
+        if (saveTrigger > 0) {
+            handleSave();
+            onSaveComplete?.();
+        }
+    }, [saveTrigger]);
 
     useEffect(() => {
         setActiveTab(isSetupMode ? 'COMPANY' : initialTab);
@@ -652,6 +673,17 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         });
     };
 
+    const handleOTWagesToggle = (key: keyof StatutoryConfig['otWagesComponents']) => {
+        const currentComponents = formData.otWagesComponents || INITIAL_STATUTORY_CONFIG.otWagesComponents;
+        setFormData({
+            ...formData,
+            otWagesComponents: {
+                ...currentComponents,
+                [key]: !currentComponents[key]
+            }
+        });
+    };
+
     const handleLeavePolicyChange = (type: 'el' | 'sl' | 'cl', field: 'maxPerYear' | 'maxCarryForward' | 'label', value: string | number) => {
         setLocalLeavePolicy({
             ...localLeavePolicy,
@@ -954,6 +986,45 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             </div>
                             <div className="flex justify-end"><span className="text-[10px] text-slate-500 italic">* Default logic uses Basic + DA. Adjust according to company policy.</span></div>
                         </div>
+                    </div>
+
+                    {/* OverTime Policy Section */}
+                    <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+                        <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <Calculator className="text-sky-400" size={20} />
+                                <h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">OverTime (OT) Policy</h3>
+                            </div>
+                            <label htmlFor="enable-ot" className="flex items-center gap-2 cursor-pointer p-1.5 bg-sky-900/20 rounded-lg border border-sky-500/20 hover:bg-sky-900/30 transition-all">
+                                <input id="enable-ot" type="checkbox" className="w-4 h-4 rounded border-slate-700 text-sky-500 bg-slate-900 accent-sky-500" checked={formData.enableOverTime || false} onChange={e => setFormData({ ...formData, enableOverTime: e.target.checked })} title="Enable OverTime Policy" />
+                                <span className="text-[10px] font-black text-sky-400 uppercase tracking-widest">Enable OT Policy</span>
+                            </label>
+                        </div>
+                        {formData.enableOverTime && (
+                            <div className="p-6 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-4">
+                                        <span className="text-[10px] font-bold text-slate-500 uppercase">Calculation Factor:</span>
+                                        <div className="flex gap-2">
+                                            {['Single', 'Double'].map(type => (
+                                                <button key={type} onClick={() => setFormData({ ...formData, otRateType: type as any })} className={`px-4 py-1.5 rounded-full text-[10px] font-bold border transition-all ${formData.otRateType === type ? 'bg-sky-600 border-sky-500 text-white shadow-lg shadow-sky-900/20' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'}`} title={`Set OT Calculation to ${type} Rate`}>{type} Rate ({type === 'Single' ? '1x' : '2x'})</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Table size={12} className="text-sky-400" /> Selected Wage Components for OT Calculation</label>
+                                        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
+                                            {[{ key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' }, { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Special 1' }, { key: 'special2', label: 'Special 2' }, { key: 'special3', label: 'Special 3' }].map(comp => {
+                                                const components = formData.otWagesComponents || INITIAL_STATUTORY_CONFIG.otWagesComponents;
+                                                const isActive = components[comp.key as keyof typeof components];
+                                                return <button key={comp.key} onClick={() => handleOTWagesToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-sky-600 border-sky-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`} title={`Toggle ${comp.label} for OverTime`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>;
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex justify-end italic text-[9px] text-slate-500">* OT Rate Calculation: (Selected Components / Month Days) * (1 or 2 as per factor).</div>
+                            </div>
+                        )}
                     </div>
 
                     {/* PT Matrix */}

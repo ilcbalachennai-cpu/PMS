@@ -62,7 +62,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   
   // --- Initialize Hooks ---
   const { alertConfig, setAlertConfig, showAlert, closeAlert } = useAlerts();
-  const { globalMonth, setGlobalMonth, globalYear, setGlobalYear } = usePayrollPeriod();
+  const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, activePeriod } = usePayrollPeriod();
   const { licenseStatus, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
   const { 
     latestAppVersion, setLatestAppVersion, 
@@ -86,6 +86,35 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     showRegistrationManual, setShowRegistrationManual, setSkipSetupRedirect,
     isSetupComplete, setIsSetupComplete
   } = useUIState(employees.length, activeView, setActiveView);
+
+  const [isSettingsDirty, setIsSettingsDirty] = useState(false);
+  const [settingsSaveTrigger, setSettingsSaveTrigger] = useState(0);
+  const [pendingView, setPendingView] = useState<View | null>(null);
+
+  const handleNavigate = (view: View) => {
+    if (activeView === View.Settings && isSettingsDirty) {
+      setPendingView(view);
+      showAlert('confirm', 'Unsaved Changes', 'You have unsaved changes in Configuration. Save changes before leaving?', () => {
+        // OK (Save)
+        setSettingsSaveTrigger(prev => prev + 1);
+      }, () => {
+        // Cancel (Ignore changes)
+        setIsSettingsDirty(false);
+        setActiveView(view);
+      }, 'OK (Save)', 'Ignore changes', 'Go Back');
+      return;
+    }
+    setActiveView(view);
+  };
+
+  const handleSettingsSaveComplete = () => {
+    if (pendingView) {
+      const target = pendingView;
+      setPendingView(null);
+      setIsSettingsDirty(false);
+      setActiveView(target);
+    }
+  };
 
   // Persistence & Sync Hook
   useSync({
@@ -350,15 +379,15 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 {isSidebarOpen && <span className="text-lg font-black"><span className="text-[#FF9933]">Bharat</span><span className="text-white">Pay</span><span className="text-[#34d399]">Pro</span></span>}
              </div>
              <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
-                <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked && activeView !== View.Dashboard} />
-                <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.PFCalculator} icon={Calculator} label="PF ECR Calculator" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.AI_Assistant} icon={Bot} label="Compliance AI" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                {isSettingsAccessible && <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />}
+                <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} setActiveView={handleNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked && activeView !== View.Dashboard} />
+                <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} setActiveView={handleNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} setActiveView={handleNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} setActiveView={handleNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} setActiveView={handleNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.PFCalculator} icon={Calculator} label="PF ECR Calculator" activeView={activeView} setActiveView={handleNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" activeView={activeView} setActiveView={handleNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.AI_Assistant} icon={Bot} label="Compliance AI" activeView={activeView} setActiveView={handleNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                {isSettingsAccessible && <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} setActiveView={handleNavigate} isSidebarOpen={isSidebarOpen} />}
              </nav>
              <div className="p-4 border-t border-slate-800 bg-[#0b1120]">
                 <button onClick={handleLogoutAction} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-red-400 hover:bg-red-900/20`}><LogOut size={18} /> {isSidebarOpen && <span className="font-bold text-sm">Sign Out</span>}</button>
@@ -410,14 +439,14 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             </header>
 
             <div className="p-8 max-w-7xl mx-auto">
-              {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={setActiveView} />}
+              {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={handleNavigate} />}
               {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} />}
-              {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} showAlert={showAlert} />}
-              {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} />}
+              {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} showAlert={showAlert} activePeriod={activePeriod} />}
+              {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} activePeriod={activePeriod} />}
               {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} />}
               {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
               {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} />}
-              {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={onRefresh} initialTab={settingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); setActiveView(View.Dashboard); }} onNuclearReset={handleNuclearReset} showAlert={showAlert} />}
+              {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={onRefresh} initialTab={settingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); setActiveView(View.Dashboard); }} onNuclearReset={handleNuclearReset} showAlert={showAlert} onDirtyChange={setIsSettingsDirty} saveTrigger={settingsSaveTrigger} onSaveComplete={handleSettingsSaveComplete} />}
               {activeView === View.AI_Assistant && <AIAssistant />}
             </div>
           </main>

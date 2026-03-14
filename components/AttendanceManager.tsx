@@ -19,6 +19,7 @@ interface AttendanceManagerProps {
   setLeaveLedgers?: (ledgers: LeaveLedger[]) => void; // Added setter for syncing
   hideContextSelector?: boolean;
   companyProfile: CompanyProfile;
+  activePeriod: { month: string; year: number; value: number; };
 }
 
 const AttendanceManager: React.FC<AttendanceManagerProps> = ({
@@ -33,7 +34,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   leaveLedgers,
   setLeaveLedgers,
   hideContextSelector = false,
-  companyProfile
+  companyProfile,
+  activePeriod
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -56,10 +58,17 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const daysInMonth = new Date(year, months.indexOf(month) + 1, 0).getDate();
 
-  // Check if current month is locked
+  // Check if current month is locked (Strict Sequential Lock)
   const isLocked = useMemo(() => {
-    return savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
-  }, [savedRecords, month, year]);
+    const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const currentVal = (year * 12) + monthsArr.indexOf(month);
+    
+    // Locked if it's a historical period OR specifically finalized
+    const isHistorical = currentVal < activePeriod.value;
+    const isSpecificallyFinalized = savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
+    
+    return isHistorical || isSpecificallyFinalized;
+  }, [savedRecords, month, year, activePeriod]);
 
   // Filter Active Employees for Attendance
   const activeEmployees = useMemo(() => {

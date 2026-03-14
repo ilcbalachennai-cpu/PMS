@@ -170,7 +170,8 @@ export const usePayrollData = (showAlert: any) => {
       if (currentIdx === 11) { nextMonth = monthsArr[0]; nextYear = globalYear + 1; }
       else { nextMonth = monthsArr[currentIdx + 1]; }
 
-      setAttendances(prev => prev.map(a => a.month === globalMonth && a.year === globalYear ? { ...a, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0, encashedDays: 0 } : a));
+      // Note: Attendance records are maintained for historical reporting and are not cleared during rollover.
+      // New attendance records for the next month are typically created upon first access or import.
       setAdvanceLedgers(prev => {
         const currentHistory = updatedHistory || payrollHistory;
         const finalizedResults = currentHistory.filter(r => r.month === globalMonth && r.year === globalYear && r.status === 'Finalized');
@@ -178,9 +179,19 @@ export const usePayrollData = (showAlert: any) => {
           const payrollResult = finalizedResults.find(r => r.employeeId === a.employeeId);
           const actualRecovered = payrollResult ? (payrollResult.deductions?.advanceRecovery ?? 0) : 0;
           const carryOpening = Math.max(0, (a.opening || 0) + (a.totalAdvance || 0) - actualRecovered);
-          const nextEmiCount = carryOpening > 0 ? (a.emiCount || 0) : 0;
-          let nextRecovery = nextEmiCount > 0 ? Math.min(Math.round(carryOpening / nextEmiCount), carryOpening) : 0;
-          return { ...a, opening: carryOpening, totalAdvance: 0, manualPayment: 0, emiCount: nextEmiCount, recovery: nextRecovery, balance: Math.max(0, carryOpening - nextRecovery) };
+          
+          // Carry forward balance to opening, reset all other monthly inputs to 0
+          return { 
+            ...a, 
+            opening: carryOpening, 
+            totalAdvance: 0, 
+            manualPayment: 0, 
+            emiCount: 0, 
+            recovery: 0, 
+            balance: carryOpening,
+            monthlyInstallment: 0,
+            paidAmount: 0
+          };
         });
       });
       setFines(prev => prev.filter(f => !(f.month === globalMonth && f.year === globalYear)));

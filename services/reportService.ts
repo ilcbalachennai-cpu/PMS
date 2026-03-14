@@ -62,6 +62,11 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
             const res = await window.electronAPI.saveReport(fileName, data, type);
             if (res.success) {
                 console.log(`Report saved to ${res.path}`);
+                // @ts-ignore
+                if (window.electronAPI.openItemLocation && res.path) {
+                    // @ts-ignore
+                    window.electronAPI.openItemLocation(res.path);
+                }
                 return { success: true, path: res.path };
             }
         } catch (e) {

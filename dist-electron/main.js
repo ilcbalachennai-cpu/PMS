@@ -74,51 +74,63 @@ const getAppPaths = (base) => {
 };
 // ── DATABASE INITIALIZATION ──
 let db = null;
+let lastDbError = null;
 function initializeDatabase(basePath) {
-    const paths = getAppPaths(basePath);
-    // Ensure directories exist
-    [paths.data, paths.reports, paths.backups].forEach((dir) => {
-        if (!fs.existsSync(dir))
-            fs.mkdirSync(dir, { recursive: true });
-    });
-    const DB_PATH = path.join(paths.data, 'active_db.sqlite');
-    const snapshotDir = path.join(paths.backups, 'PRE_UPDATE_SNAPSHOT');
-    const snapshotDb = path.join(snapshotDir, 'active_db_snapshot.sqlite');
-    // ── AUTO-RESTORE LOGIC ──
-    // If main DB is missing but snapshot exists, restore it.
-    if (!fs.existsSync(DB_PATH) && fs.existsSync(snapshotDb)) {
-        try {
-            console.log('🔄 Main DB missing. Restoring from pre-update snapshot...');
-            fs.copyFileSync(snapshotDb, DB_PATH);
-            const configSnapshot = path.join(snapshotDir, 'app-config_snapshot.json');
-            if (fs.existsSync(configSnapshot)) {
-                fs.copyFileSync(configSnapshot, CONFIG_PATH);
+    try {
+        const paths = getAppPaths(basePath);
+        // Ensure directories exist
+        [paths.data, paths.reports, paths.backups].forEach((dir) => {
+            if (!fs.existsSync(dir))
+                fs.mkdirSync(dir, { recursive: true });
+        });
+        const DB_PATH = path.join(paths.data, 'active_db.sqlite');
+        const snapshotDir = path.join(paths.backups, 'PRE_UPDATE_SNAPSHOT');
+        const snapshotDb = path.join(snapshotDir, 'active_db_snapshot.sqlite');
+        // ── AUTO-RESTORE LOGIC ──
+        if (!fs.existsSync(DB_PATH) && fs.existsSync(snapshotDb)) {
+            try {
+                console.log('🔄 Main DB missing. Restoring from pre-update snapshot...');
+                fs.copyFileSync(snapshotDb, DB_PATH);
+                const configSnapshot = path.join(snapshotDir, 'app-config_snapshot.json');
+                if (fs.existsSync(configSnapshot)) {
+                    fs.copyFileSync(configSnapshot, CONFIG_PATH);
+                }
+                console.log('✅ Restoration complete.');
             }
-            console.log('✅ Restoration complete.');
+            catch (e) {
+                console.error('❌ Auto-restore failed:', e);
+            }
+        }
+        try {
+            db = new better_sqlite3_1.default(DB_PATH, { timeout: 10000 }); // Increase timeout for slow disks/removable drives
+            db.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+            console.log('✅ Database initialized successfully at:', DB_PATH);
+            lastDbError = null;
+            return true;
         }
         catch (e) {
-            console.error('❌ Auto-restore failed:', e);
+            lastDbError = e.message;
+            console.error(`❌ DB connection failed at ${DB_PATH}:`, e);
+            // If corrupted and snapshot exists, try a hail-mary restore
+            if (fs.existsSync(snapshotDb)) {
+                try {
+                    if (db)
+                        db.close();
+                    fs.copyFileSync(snapshotDb, DB_PATH);
+                    db = new better_sqlite3_1.default(DB_PATH);
+                    console.log('🛠️ Corrupted DB replaced with snapshot.');
+                    return true;
+                }
+                catch (restoreErr) {
+                    console.error('❌ Hail-mary restore failed.', restoreErr);
+                }
+            }
+            return false;
         }
     }
-    try {
-        db = new better_sqlite3_1.default(DB_PATH);
-        db.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
-    }
-    catch (e) {
-        console.error('❌ DB connection failed. Database might be corrupted.', e);
-        // If corrupted and snapshot exists, try a hail-mary restore
-        if (fs.existsSync(snapshotDb)) {
-            try {
-                if (db)
-                    db.close();
-                fs.copyFileSync(snapshotDb, DB_PATH);
-                db = new better_sqlite3_1.default(DB_PATH);
-                console.log('🛠️ Corrupted DB replaced with snapshot.');
-            }
-            catch (restoreErr) {
-                console.error('❌ Hail-mary restore failed.', restoreErr);
-            }
-        }
+    catch (outerErr) {
+        console.error('❌ Critical failure in initializeDatabase:', outerErr);
+        return false;
     }
 }
 if (appBasePath) {
@@ -155,6 +167,28 @@ function createWindow() {
         mainWindow = null;
     });
 }
+// ── SINGLE INSTANCE LOCK ──────────────────────────────────────────────────
+// Prevent multiple instances of BPP_APP from running simultaneously.
+const gotTheLock = electron_1.app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    // A second instance tried to launch — show a warning and quit.
+    electron_1.dialog.showErrorBox('⚠  BharatPay Pro — Already Running', 'BharatPay Pro is already open on this machine.\n\n' +
+        'Only one session is allowed at a time.\n\n' +
+        'Please switch to the existing window.\n' +
+        'If the app is unresponsive, close it from the Windows Taskbar and try again.');
+    electron_1.app.quit();
+}
+else {
+    // If a second instance attempts while we are the primary, focus our window.
+    electron_1.app.on('second-instance', () => {
+        if (mainWindow) {
+            if (mainWindow.isMinimized())
+                mainWindow.restore();
+            mainWindow.focus();
+        }
+    });
+}
+// ─────────────────────────────────────────────────────────────────────────
 electron_1.app.whenReady().then(() => {
     createWindow();
     cleanupOldInstallers();
@@ -239,35 +273,53 @@ electron_1.ipcMain.handle('open-item-location', async (_, filePath) => {
 // 3. Simple Key-Value Store
 electron_1.ipcMain.handle('db-set', async (_, { key, value }) => {
     try {
+        if (!db) {
+            console.log(`[IPC] db-set: DB null for key "${key}". Attempting lazy re-init...`);
+            if (appBasePath)
+                initializeDatabase(appBasePath);
+        }
         if (!db)
-            throw new Error("Database not initialized");
+            throw new Error(`Database not initialized. ${lastDbError || 'Please ensure app storage is configured and accessible.'}`);
         const stmt = db.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
         stmt.run(key, JSON.stringify(value));
         return { success: true };
     }
     catch (e) {
+        console.error(`[IPC] db-set failed for key "${key}":`, e);
         return { success: false, error: e.message };
     }
 });
 electron_1.ipcMain.handle('db-get', async (_, key) => {
     try {
+        if (!db) {
+            console.log(`[IPC] db-get: DB null for key "${key}". Attempting lazy re-init...`);
+            if (appBasePath)
+                initializeDatabase(appBasePath);
+        }
         if (!db)
-            return { success: true, data: null };
+            return { success: true, data: null }; // Silent fallback if init failed
         const row = db.prepare('SELECT value FROM store WHERE key = ?').get(key);
         return { success: true, data: row ? JSON.parse(row.value) : null };
     }
     catch (e) {
+        console.error(`[IPC] db-get failed for key "${key}":`, e);
         return { success: false, error: e.message };
     }
 });
 electron_1.ipcMain.handle('db-delete', async (_, key) => {
     try {
+        if (!db) {
+            console.log(`[IPC] db-delete: DB null for key "${key}". Attempting lazy re-init...`);
+            if (appBasePath)
+                initializeDatabase(appBasePath);
+        }
         if (!db)
             return { success: true };
         db.prepare('DELETE FROM store WHERE key = ?').run(key);
         return { success: true };
     }
     catch (e) {
+        console.error(`[IPC] db-delete failed for key "${key}":`, e);
         return { success: false, error: e.message };
     }
 });
@@ -290,8 +342,16 @@ electron_1.ipcMain.handle('run-backup', async (_, encryptedData) => {
 // 5. Automatic Data Backup (triggered by payroll confirmation/rollover)
 electron_1.ipcMain.handle('create-data-backup', async (_, fileName) => {
     try {
-        if (!appBasePath || !db)
-            throw new Error("App storage or database not initialized");
+        if (!appBasePath) {
+            throw new Error("Application storage location is not configured. Please set a storage directory in Settings.");
+        }
+        if (!db) {
+            console.log('[IPC] create-data-backup: DB null. Attempting lazy recovery...');
+            initializeDatabase(appBasePath);
+            if (!db) {
+                throw new Error(`The database file could not be opened. (Error: ${lastDbError || 'Unknown'}). This usually happens if the file is locked by another process (like Antivirus) or is corrupted. Please restart the app.`);
+            }
+        }
         const paths = getAppPaths(appBasePath);
         // Ensure backups directory exists
         if (!fs.existsSync(paths.backups)) {

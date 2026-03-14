@@ -107,7 +107,7 @@ export const calculatePayroll = (
             payableDays: 0,
             earnings: {
                 basic: 0, da: 0, retainingAllowance: 0, hra: 0, conveyance: 0, washing: 0, attire: 0,
-                special1: 0, special2: 0, special3: 0, bonus: 0, leaveEncashment: 0, total: 0
+                special1: 0, special2: 0, special3: 0, bonus: 0, leaveEncashment: 0, otAmount: 0, total: 0
             },
             deductions: { epf: 0, vpf: 0, esi: 0, pt: 0, it: 0, lwf: 0, advanceRecovery: 0, fine: 0, total: 0 },
             employerContributions: { epf: 0, eps: 0, esi: 0, lwf: 0 },
@@ -154,7 +154,28 @@ export const calculatePayroll = (
 
     const leaveEncashment = Math.round((leaveWageBase / daysInMonth) * encashedDays);
 
-    const grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
+    // --- OverTime Calculation ---
+    let otAmount = 0;
+    if (config.enableOverTime) {
+        let otWageBase = 0;
+        const otComponents = config.otWagesComponents || { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false };
+
+        if (otComponents.basic) otWageBase += employee.basicPay;
+        if (otComponents.da) otWageBase += (employee.da || 0);
+        if (otComponents.retaining) otWageBase += (employee.retainingAllowance || 0);
+        if (otComponents.hra) otWageBase += (employee.hra || 0);
+        if (otComponents.conveyance) otWageBase += (employee.conveyance || 0);
+        if (otComponents.washing) otWageBase += (employee.washing || 0);
+        if (otComponents.attire) otWageBase += (employee.attire || 0);
+        if (otComponents.special1) otWageBase += (employee.specialAllowance1 || 0);
+        if (otComponents.special2) otWageBase += (employee.specialAllowance2 || 0);
+        if (otComponents.special3) otWageBase += (employee.specialAllowance3 || 0);
+
+        const otRatePerDay = (otWageBase / daysInMonth) * (config.otRateType === 'Double' ? 2 : 1);
+        otAmount = Math.round((otRatePerDay * (attendance.otDays || 0)) + ((otRatePerDay / 8) * (attendance.otHours || 0)));
+    }
+
+    const grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment + otAmount;
 
     const standardMonthlyGross = employee.basicPay + (employee.da || 0) + (employee.retainingAllowance || 0) + (employee.hra || 0) + (employee.conveyance || 0) + (employee.washing || 0) + (employee.attire || 0) + (employee.specialAllowance1 || 0) + (employee.specialAllowance2 || 0) + (employee.specialAllowance3 || 0);
 
@@ -504,7 +525,7 @@ export const calculatePayroll = (
         payableDays: effectivePayableDays,
         earnings: {
             basic, da, retainingAllowance: retaining, hra, conveyance, washing, attire,
-            special1, special2, special3, bonus, leaveEncashment, total: grossEarnings
+            special1, special2, special3, bonus, leaveEncashment, otAmount, total: grossEarnings
         },
         deductions: {
             epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf: lwfEmployee,

@@ -35,6 +35,7 @@ interface ReportsProps {
     currentUser?: User;
     onRollover: (history?: PayrollResult[]) => void;
     arrearHistory?: ArrearBatch[];
+    activePeriod: { month: string; year: number; value: number; lastLockedValue: number; };
     showAlert: (type: 'confirm' | 'success' | 'error' | 'warning' | 'info' | 'loading' | 'danger', title: string, message: string, onConfirm?: () => void) => void;
 }
 
@@ -54,6 +55,7 @@ const Reports: React.FC<ReportsProps> = ({
     currentUser,
     onRollover,
     arrearHistory,
+    activePeriod,
     showAlert: _showAlert
 }) => {
     const [reportType, setReportType] = useState<string>('Pay Sheet');
@@ -95,16 +97,39 @@ const Reports: React.FC<ReportsProps> = ({
     const [authError, setAuthError] = useState('');
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const currentYear = new Date().getFullYear();
-    const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+    
+    const yearOptions = useMemo(() => {
+        const startYear = 2025; // System baseline
+        const endYear = activePeriod.year;
+        const years = [];
+        for (let y = startYear; y <= endYear; y++) {
+            years.push(y);
+        }
+        return years;
+    }, [activePeriod.year]);
+
+    const selectableMonths = useMemo(() => {
+        if (year < activePeriod.year) return months;
+        // If current year, only allow months up to activePeriod.month
+        const activeMonthIdx = months.indexOf(activePeriod.month);
+        return months.slice(0, activeMonthIdx + 1);
+    }, [year, activePeriod]);
 
     const currentResults = useMemo(() => {
         return savedRecords.filter(r => r.month === month && r.year === year);
     }, [savedRecords, month, year]);
 
+    // Check if current month is locked (Strict Sequential Lock)
     const isLocked = useMemo(() => {
-        return currentResults.length > 0 && currentResults[0].status === 'Finalized';
-    }, [currentResults]);
+        const mIdx = months.indexOf(month);
+        const currentVal = (year * 12) + mIdx;
+        
+        // Locked if historical period OR specifically finalized
+        const isHistorical = currentVal < activePeriod.value;
+        const isSpecificallyFinalized = currentResults.length > 0 && currentResults[0].status === 'Finalized';
+        
+        return isHistorical || isSpecificallyFinalized;
+    }, [currentResults, month, year, activePeriod]);
 
     const hasData = useMemo(() => {
         return currentResults.length > 0;
@@ -704,7 +729,7 @@ const Reports: React.FC<ReportsProps> = ({
 
                 <div className="flex items-center gap-3 bg-[#0f172a] p-2 rounded-xl border border-slate-700">
                     <select value={month} onChange={e => setMonth(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400" title="Select Month" aria-label="Select Month">
-                        {months.map(m => (<option key={m} value={m}>{m}</option>))}
+                        {selectableMonths.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
                     <select value={year} onChange={e => setYear(+e.target.value)} className="bg-transparent px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400" title="Select Year" aria-label="Select Year">
                         {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}

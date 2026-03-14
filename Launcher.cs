@@ -29,6 +29,38 @@ namespace BharatPayLauncher
                 MessageBoxIcon.Information
             );
 
+            // ── Single Instance Guard ──────────────────────────────────────────
+            var runningInstances = Process.GetProcessesByName("BPP_APP");
+            if (runningInstances.Length > 0)
+            {
+                var choice = MessageBox.Show(
+                    "BharatPay Pro (BPP_APP) is already running on this machine.\n\n" +
+                    "Only one instance is allowed at a time.\n\n" +
+                    "Click  OK  to close the running instance and launch a fresh one.\n" +
+                    "Click  Cancel  to abort and keep the current session.",
+                    "⚠  BharatPay Pro — Already Running",
+                    MessageBoxButtons.OKCancel,
+                    MessageBoxIcon.Warning
+                );
+
+                if (choice == DialogResult.OK)
+                {
+                    // Close all running instances
+                    foreach (var p in runningInstances)
+                    {
+                        try { p.Kill(); p.WaitForExit(3000); } catch { }
+                    }
+                    Console.WriteLine("ℹ️  Previous BPP_APP instance terminated.");
+                }
+                else
+                {
+                    // User chose Cancel — abort
+                    Console.WriteLine("🚫 Launch aborted by user.");
+                    return;
+                }
+            }
+            // ──────────────────────────────────────────────────────────────────
+
             Console.WriteLine("=====================================");
             Console.WriteLine("   BharatPay Pro Intelligent Launcher");
             Console.WriteLine("=====================================");

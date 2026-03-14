@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Employee, CompanyProfile } from '../types';
-import { generateExcelReport, generatePDFTableReport, getStandardFileName } from './reportService';
+import { generateExcelReport, generatePDFTableReport, getStandardFileName, generateExcelWorkbook } from './reportService';
 
 /**
  * Generates an Excel Template for Employee Import
@@ -18,8 +18,7 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
             const now = new Date();
             const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
             const fileName = getStandardFileName('Employee_Export', company || {} as any, months[now.getMonth()], now.getFullYear());
-            // Wait, I need CompanyProfile here. I should update the function signature.
-            XLSX.writeFile(wb, `${fileName}.xlsx`);
+            await generateExcelWorkbook(wb, fileName);
             return;
         }
 
@@ -63,7 +62,7 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
         const ws = XLSX.utils.aoa_to_sheet([templateHeaders, sampleRow]);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "EmployeeMasterTemplate");
-        XLSX.writeFile(wb, "BharatPay_Employee_Master_Template.xlsx");
+        await generateExcelWorkbook(wb, "BharatPay_Employee_Master_Template");
     } catch (err: any) {
         console.error("Template/Export Error:", err);
         alert("Failed to process Excel file. Please check file permissions.");
@@ -337,4 +336,47 @@ export const generateImportFailureReport = (importSummary: any, format: 'PDF' | 
             cp
         );
     }
+};
+
+/**
+ * Generates an Excel Template for OverTime Import
+ */
+export const generateOTTemplate = async (items: any[], month: string, year: number, company?: CompanyProfile) => {
+    try {
+        const templateHeaders = ["EMP_ID", "Name", "Days", "Hours"];
+        const rows = items.map(emp => [emp.id, emp.name, "", ""]);
+        
+        const ws = XLSX.utils.aoa_to_sheet([templateHeaders, ...rows]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "OT_Template");
+        
+        const fileName = getStandardFileName('OT_Import_Template', company || {} as any, month, year);
+        await generateExcelWorkbook(wb, fileName);
+    } catch (err: any) {
+        console.error("OT Template Error:", err);
+        throw err;
+    }
+};
+
+/**
+ * Parses OverTime XLSX data
+ */
+export const parseOTXLSX = async (file: File): Promise<any[]> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+                resolve(data as any[]);
+            } catch (err: any) {
+                reject(err);
+            }
+        };
+        reader.onerror = (err) => reject(err);
+        reader.readAsBinaryString(file);
+    });
 };

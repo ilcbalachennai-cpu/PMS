@@ -21,6 +21,7 @@ interface LedgerManagerProps {
     viewMode?: 'leave' | 'advance';
     isReadOnly?: boolean;
     companyProfile: CompanyProfile;
+    activePeriod: { month: string; year: number; value: number; };
 }
 
 const LedgerManager: React.FC<LedgerManagerProps> = ({
@@ -35,7 +36,8 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
     hideContextSelector = false,
     viewMode = 'leave',
     isReadOnly = false,
-    companyProfile
+    companyProfile,
+    activePeriod
 }) => {
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -51,10 +53,17 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
         onConfirm?: () => void;
     }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
-    // Check lock status
+    // Check lock status (Strict Sequential Lock)
     const isLocked = useMemo(() => {
-        return savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
-    }, [savedRecords, month, year]);
+        const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const currentVal = (year * 12) + monthsArr.indexOf(month);
+        
+        // Locked if it's a historical period OR specifically finalized
+        const isHistorical = currentVal < activePeriod.value;
+        const isSpecificallyFinalized = savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
+        
+        return isHistorical || isSpecificallyFinalized;
+    }, [savedRecords, month, year, activePeriod]);
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 

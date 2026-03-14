@@ -14,6 +14,7 @@ interface FineManagerProps {
     savedRecords: PayrollResult[];
     hideContextSelector?: boolean;
     companyProfile: CompanyProfile;
+    activePeriod: { month: string; year: number; value: number; };
 }
 
 const FineManager: React.FC<FineManagerProps> = ({
@@ -24,7 +25,8 @@ const FineManager: React.FC<FineManagerProps> = ({
     year,
     savedRecords,
     hideContextSelector = false,
-    companyProfile
+    companyProfile,
+    activePeriod
 }) => {
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -40,9 +42,17 @@ const FineManager: React.FC<FineManagerProps> = ({
         onConfirm?: () => void;
     }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
+    // Check if current month is locked (Strict Sequential Lock)
     const isLocked = useMemo(() => {
-        return savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
-    }, [savedRecords, month, year]);
+        const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const currentVal = (year * 12) + monthsArr.indexOf(month);
+        
+        // Locked if historical period OR specifically finalized
+        const isHistorical = currentVal < activePeriod.value;
+        const isSpecificallyFinalized = savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
+        
+        return isHistorical || isSpecificallyFinalized;
+    }, [savedRecords, month, year, activePeriod]);
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 

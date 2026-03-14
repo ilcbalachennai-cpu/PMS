@@ -51,6 +51,8 @@ export interface Attendance {
   casualLeave: number;
   lopDays: number;
   encashedDays?: number; // New field for Leave Encashment input in Attendance
+  otDays?: number; // New field for OverTime Days
+  otHours?: number; // New field for OverTime Hours
 }
 
 export type PFComplianceType = 'Statutory' | 'Voluntary';
@@ -105,6 +107,22 @@ export interface StatutoryConfig {
     special1: false,
     special2: false,
     special3: false
+  };
+
+  // NEW: OverTime Policy
+  enableOverTime: boolean;
+  otRateType: 'Single' | 'Double';
+  otWagesComponents: {
+    basic: boolean;
+    da: boolean;
+    retaining: boolean;
+    hra: boolean;
+    conveyance: boolean;
+    washing: boolean;
+    attire: boolean;
+    special1: boolean;
+    special2: boolean;
+    special3: boolean;
   };
 }
 
@@ -255,6 +273,7 @@ export interface PayrollResult {
     special3: number;
     bonus: number;
     leaveEncashment: number;
+    otAmount: number; // New field for OverTime Amount
     total: number;
   };
   deductions: {

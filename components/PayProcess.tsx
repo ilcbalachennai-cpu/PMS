@@ -1,6 +1,5 @@
-
 import React, { useState, useRef, useMemo } from 'react';
-import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp } from 'lucide-react';
+import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, Upload, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp, Clock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch } from '../types';
 import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
@@ -11,6 +10,7 @@ import PayrollProcessor from './PayrollProcessor';
 import PayCycleGateway from './PayCycleGateway';
 import FineManager from './FineManager';
 import ArrearManager from './ArrearManager';
+import OverTimeManager from './OverTimeManager';
 
 interface PayProcessProps {
     employees: Employee[];
@@ -35,20 +35,30 @@ interface PayProcessProps {
     setFines: (fines: FineRecord[]) => void;
     arrearHistory?: ArrearBatch[];
     setArrearHistory?: React.Dispatch<React.SetStateAction<ArrearBatch[]>>;
+    activePeriod: { month: string; year: number; value: number; };
     showAlert: (type: ModalType, title: string, message: string, onConfirm?: () => void) => void;
 }
 
 const PayProcess: React.FC<PayProcessProps> = (props) => {
-    const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'fines' | 'arrears' | 'payroll'>('attendance');
+    const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'fines' | 'overtime' | 'arrears' | 'payroll'>('attendance');
     const [isGatewayOpen, setIsGatewayOpen] = useState(true);
     const [isImporting, setIsImporting] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const masterFileInputRef = useRef<HTMLInputElement>(null);
 
     // Compute lock status
+    // Compute lock status (Explicitly Finalized OR Historical Period)
     const isLocked = useMemo(() => {
-        return props.savedRecords.some(r => r.month === props.month && r.year === props.year && r.status === 'Finalized');
-    }, [props.savedRecords, props.month, props.year]);
+        const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const getVal = (m: string, y: number) => (y * 12) + monthsArr.indexOf(m);
+        const currentVal = getVal(props.month, props.year);
+        
+        // Locked if specifically finalized OR if it's a previous period compared to the current open activePeriod
+        const isHistorical = currentVal < props.activePeriod.value;
+        const isSpecificallyFinalized = props.savedRecords.some(r => r.month === props.month && r.year === props.year && r.status === 'Finalized');
+        
+        return isSpecificallyFinalized || isHistorical;
+    }, [props.savedRecords, props.month, props.year, props.activePeriod]);
 
     const TabButton = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
         <button
@@ -66,43 +76,63 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
     );
 
     const downloadMasterTemplate = async () => {
-        const headers = [
-            "Employee ID", "Name",
-            "Present Days", "EL (Availed)", "EL Encash", "SL (Sick)", "CL (Casual)", "LOP",
-            "New Advance", "Monthly EMI", "Adv Manual Pay",
-            "Income Tax", "Fine Amount", "Fine Reason"
-        ];
-
-        const activeEmps = props.employees.filter(e => !e.dol);
-
-        const data = activeEmps.map(emp => {
-            const att = props.attendances.find(a => a.employeeId === emp.id && a.month === props.month && a.year === props.year);
-            const adv = props.advanceLedgers.find(a => a.employeeId === emp.id);
-            const fine = props.fines.find(f => f.employeeId === emp.id && f.month === props.month && f.year === props.year);
-
-            return [
-                emp.id,
-                emp.name,
-                att?.presentDays || 0,
-                att?.earnedLeave || 0,
-                att?.encashedDays || 0,
-                att?.sickLeave || 0,
-                att?.casualLeave || 0,
-                att?.lopDays || 0,
-                adv?.totalAdvance || 0,
-                adv?.monthlyInstallment || 0,
-                adv?.paidAmount || 0,
-                fine?.tax || 0,
-                fine?.amount || 0,
-                fine?.reason || ''
+        try {
+            const headers = [
+                "Employee ID", "Name",
+                "Present Days", "EL (Availed)", "EL Encash", "SL (Sick)", "CL (Casual)", "LOP",
+                "OT Days", "OT Hours",
+                "New Advance", "Monthly EMI", "Adv Manual Pay",
+                "Income Tax", "Fine Amount", "Fine Reason"
             ];
-        });
 
-        const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Master_Input");
-        const fileName = getStandardFileName('Master_Payroll_Template', props.companyProfile, props.month, props.year);
-        await generateExcelWorkbook(wb, fileName);
+            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const monthIdx = months.indexOf(props.month);
+            const periodStart = new Date(props.year, monthIdx, 1);
+            periodStart.setHours(0, 0, 0, 0);
+
+            const activeEmps = props.employees.filter(emp => {
+                if (!emp.dol) return true;
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(emp.dol)) return true;
+                const [y, m, d] = emp.dol.split('-').map(Number);
+                const dolDate = new Date(y, m - 1, d);
+                dolDate.setHours(0, 0, 0, 0);
+                return dolDate >= periodStart;
+            });
+
+            const data = activeEmps.map(emp => {
+                const att = props.attendances.find(a => a.employeeId === emp.id && a.month === props.month && a.year === props.year);
+                const adv = props.advanceLedgers.find(a => a.employeeId === emp.id);
+                const fine = props.fines.find(f => f.employeeId === emp.id && f.month === props.month && f.year === props.year);
+
+                return [
+                    emp.id,
+                    emp.name,
+                    att?.presentDays ?? 0,
+                    att?.earnedLeave ?? 0,
+                    att?.encashedDays ?? 0,
+                    att?.sickLeave ?? 0,
+                    att?.casualLeave ?? 0,
+                    att?.lopDays ?? 0,
+                    att?.otDays ?? 0,
+                    att?.otHours ?? 0,
+                    adv?.totalAdvance ?? 0,
+                    adv?.emiCount ?? 0,
+                    adv?.manualPayment ?? 0,
+                    fine?.tax ?? 0,
+                    fine?.amount ?? 0,
+                    fine?.reason ?? ''
+                ];
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Master_Input");
+            const fileName = getStandardFileName('Master_Payroll_Template', props.companyProfile, props.month, props.year);
+            await generateExcelWorkbook(wb, fileName);
+        } catch (error: any) {
+            console.error(error);
+            window.alert("Failed to download Master Template: " + error.message);
+        }
     };
 
     const handleMasterImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,17 +146,18 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         reader.onload = (evt) => {
             try {
                 const bstr = evt.target?.result;
-                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wb = XLSX.read(bstr, { type: 'array' });
                 const ws = wb.Sheets[wb.SheetNames[0]];
                 const data = XLSX.utils.sheet_to_json(ws);
 
-                if (data.length === 0) throw new Error("File is empty");
+                if (data.length === 0) throw new Error("File is empty or not in correct format");
 
                 const newAttendances = [...props.attendances];
                 const newAdvanceLedgers = [...props.advanceLedgers];
                 const newFines = props.fines.filter(f => !(f.month === props.month && f.year === props.year));
 
-                const daysInMonth = new Date(props.year, ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].indexOf(props.month) + 1, 0).getDate();
+                const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                const daysInMonth = new Date(props.year, months.indexOf(props.month) + 1, 0).getDate();
 
                 data.forEach((row: any) => {
                     const empId = String(row['Employee ID'] || row['ID'] || '').trim();
@@ -137,27 +168,31 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         employeeId: empId,
                         month: props.month,
                         year: props.year,
-                        presentDays: Math.min(Number(row['Present Days'] || 0), daysInMonth),
-                        earnedLeave: Number(row['EL (Availed)'] || 0),
-                        encashedDays: Number(row['EL Encash'] || 0),
-                        sickLeave: Number(row['SL (Sick)'] || 0),
-                        casualLeave: Number(row['CL (Casual)'] || 0),
-                        lopDays: Number(row['LOP'] || 0)
+                        presentDays: Math.min(Number(row['Present Days'] ?? 0), daysInMonth),
+                        earnedLeave: Number(row['EL (Availed)'] ?? 0),
+                        encashedDays: Number(row['EL Encash'] ?? 0),
+                        sickLeave: Number(row['SL (Sick)'] ?? 0),
+                        casualLeave: Number(row['CL (Casual)'] ?? 0),
+                        lopDays: Number(row['LOP'] ?? 0),
+                        otDays: Number(row['OT Days'] ?? 0),
+                        otHours: Number(row['OT Hours'] ?? 0)
                     };
 
                     if (attIdx >= 0) newAttendances[attIdx] = attRecord;
                     else newAttendances.push(attRecord);
 
                     const advIdx = newAdvanceLedgers.findIndex(a => a.employeeId === empId);
-                    const totalAdvance = Number(row['New Advance'] || 0);
-                    const monthlyEMI = Number(row['Monthly EMI'] || 0);
-                    const paidManual = Number(row['Adv Manual Pay'] || 0);
+                    const totalAdvance = Number(row['New Advance'] ?? 0);
+                    const monthlyEMI = Number(row['Monthly EMI'] ?? 0);
+                    const paidManual = Number(row['Adv Manual Pay'] ?? 0);
 
                     if (advIdx >= 0) {
                         const ledger = newAdvanceLedgers[advIdx];
                         ledger.totalAdvance = totalAdvance;
                         ledger.emiCount = monthlyEMI;
                         ledger.manualPayment = paidManual;
+                        ledger.monthlyInstallment = monthlyEMI; // Sync for compatibility
+                        ledger.paidAmount = paidManual; // Sync for compatibility
                         const totalBal = (ledger.opening || 0) + totalAdvance;
                         let recovery = 0;
                         if (paidManual > 0) {
@@ -181,18 +216,20 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                             totalAdvance,
                             emiCount: monthlyEMI,
                             manualPayment: paidManual,
+                            monthlyInstallment: monthlyEMI,
+                            paidAmount: paidManual,
                             recovery,
                             balance: Math.max(0, totalBal - recovery)
                         });
                     }
 
-                    const fineAmt = Number(row['Fine Amount'] || 0);
-                    const fineReason = String(row['Fine Reason'] || '').trim();
+                    const fineAmt = Number(row['Fine Amount'] ?? 0);
+                    const fineReason = String(row['Fine Reason'] ?? '').trim();
                     const taxKeys = ['Income Tax', 'Tax', 'TDS'];
                     let taxVal = 0;
                     for (const k of taxKeys) {
                         if (row[k] !== undefined) {
-                            taxVal = Number(row[k]);
+                            taxVal = Number(row[k] ?? 0);
                             break;
                         }
                     }
@@ -216,15 +253,15 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 setActiveTab('payroll');
                 setShowSuccessModal(true);
 
-            } catch (error) {
+            } catch (error: any) {
                 console.error(error);
-                alert("Error processing Master Import. Please check the file format.");
+                alert("Error processing Master Import: " + error.message);
             } finally {
                 setIsImporting(false);
                 if (masterFileInputRef.current) masterFileInputRef.current.value = "";
             }
         };
-        reader.readAsBinaryString(file);
+        reader.readAsArrayBuffer(file);
     };
 
     // GATEWAY VIEW
@@ -232,9 +269,10 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         return (
             <PayCycleGateway
                 month={props.month}
-                setMonth={props.setMonth}
                 year={props.year}
+                setMonth={props.setMonth}
                 setYear={props.setYear}
+                activePeriod={props.activePeriod}
                 onProceed={() => setIsGatewayOpen(false)}
             />
         );
@@ -245,7 +283,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         <div className="space-y-4 animate-in fade-in duration-500 relative">
 
             {/* 1. Compact Header with Bulk Actions */}
-            <div className="bg-[#1e293b] p-4 rounded-xl border border-slate-800 shadow-xl">
+            <div className="sticky top-[64px] z-30 bg-[#1e293b]/95 backdrop-blur-md p-4 rounded-xl border border-slate-800 shadow-2xl mb-4">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                         <div className="p-2.5 bg-blue-900/30 text-blue-400 rounded-xl border border-blue-500/20 shrink-0">
@@ -310,8 +348,9 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     <TabButton id="attendance" label="1. Attendance" icon={CalendarDays} />
                     <TabButton id="ledgers" label="2. Advances" icon={Wallet} />
                     <TabButton id="fines" label="3. Tax & Fines" icon={Gavel} />
-                    <TabButton id="arrears" label="4. Arrear Salary" icon={TrendingUp} />
-                    <TabButton id="payroll" label="5. Run Payroll" icon={Calculator} />
+                    <TabButton id="overtime" label="4. Overtime" icon={Clock} />
+                    <TabButton id="arrears" label="5. Arrear Salary" icon={TrendingUp} />
+                    <TabButton id="payroll" label="6. Run Payroll" icon={Calculator} />
                 </div>
             </div>
 
@@ -331,6 +370,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         setLeaveLedgers={props.setLeaveLedgers}
                         hideContextSelector={true}
                         companyProfile={props.companyProfile}
+                        activePeriod={props.activePeriod}
                     />
                 </div>
 
@@ -350,6 +390,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         hideContextSelector={true}
                         viewMode="advance"
                         companyProfile={props.companyProfile}
+                        activePeriod={props.activePeriod}
                     />
                 </div>
 
@@ -363,6 +404,21 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         savedRecords={props.savedRecords}
                         hideContextSelector={true}
                         companyProfile={props.companyProfile}
+                        activePeriod={props.activePeriod}
+                    />
+                </div>
+
+                <div className={activeTab === 'overtime' ? 'block' : 'hidden'}>
+                    <OverTimeManager 
+                        employees={props.employees}
+                        attendances={props.attendances}
+                        setAttendances={props.setAttendances}
+                        month={props.month}
+                        year={props.year}
+                        config={props.config}
+                        companyProfile={props.companyProfile}
+                        isLocked={isLocked}
+                        showAlert={props.showAlert}
                     />
                 </div>
 
@@ -374,6 +430,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                             currentMonth={props.month}
                             currentYear={props.year}
                             companyProfile={props.companyProfile}
+                            activePeriod={props.activePeriod}
                             arrearHistory={props.arrearHistory}
                             setArrearHistory={props.setArrearHistory}
                             savedRecords={props.savedRecords}

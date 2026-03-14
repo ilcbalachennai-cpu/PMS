@@ -13,6 +13,7 @@ interface ArrearManagerProps {
     arrearHistory?: ArrearBatch[];
     setArrearHistory?: React.Dispatch<React.SetStateAction<ArrearBatch[]>>;
     savedRecords: PayrollResult[];
+    activePeriod: { month: string; year: number; value: number; };
     showAlert: (type: ModalType, title: string, message: string, onConfirm?: () => void) => void;
 }
 
@@ -25,6 +26,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     arrearHistory,
     setArrearHistory,
     savedRecords,
+    activePeriod,
     showAlert
 }) => {
     const [incrementType, setIncrementType] = useState<'Percentage' | 'Adhoc'>('Percentage');
@@ -45,8 +47,15 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     const existingBatch = activeDraft || finalizedBatch;
 
     const isLocked = useMemo(() => {
-        return !!finalizedBatch || savedRecords.some(r => r.month === currentMonth && r.year === currentYear && r.status === 'Finalized');
-    }, [savedRecords, currentMonth, currentYear, finalizedBatch]);
+        const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const currentVal = (currentYear * 12) + monthsArr.indexOf(currentMonth);
+        
+        // Locked if historical period OR specifically finalized
+        const isHistorical = currentVal < activePeriod.value;
+        const isSpecificallyFinalized = !!finalizedBatch || savedRecords.some(r => r.month === currentMonth && r.year === currentYear && r.status === 'Finalized');
+        
+        return isHistorical || isSpecificallyFinalized;
+    }, [savedRecords, currentMonth, currentYear, finalizedBatch, activePeriod]);
 
     // New State for Explicit Arrear Processing Month Selection
     const [showProcessMonthModal, setShowProcessMonthModal] = useState<boolean>(!existingBatch);
