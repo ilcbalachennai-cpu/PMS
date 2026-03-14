@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using System.Windows.Forms;
 using Microsoft.Win32;
 
 namespace BharatPayLauncher
@@ -16,6 +17,18 @@ namespace BharatPayLauncher
 
         static void Main(string[] args)
         {
+            // Show SmartScreen advisory flash message upfront
+            Application.EnableVisualStyles();
+            MessageBox.Show(
+                "WHY DO I SEE \"WINDOWS PROTECTED YOUR PC\"?\n\n" +
+                "This is a standard Microsoft SmartScreen warning for unsigned software.\n" +
+                "To proceed, click  \"More Info\"  and then  \"Run Anyway\".\n\n" +
+                "This message is only shown once per session.",
+                "⚠  BharatPay Pro — Software Security Notice",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
+
             Console.WriteLine("=====================================");
             Console.WriteLine("   BharatPay Pro Intelligent Launcher");
             Console.WriteLine("=====================================");

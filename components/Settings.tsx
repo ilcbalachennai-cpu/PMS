@@ -1596,18 +1596,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             This is a standard Microsoft SmartScreen warning for unsigned software. To proceed, click <b>"More Info"</b> and then <b>"Run Anyway"</b>.
                                         </p>
                                     </div>
-                                    <div className="space-y-1">
-                                        <p className="text-[11px] font-bold text-slate-300 uppercase tracking-wider underline decoration-indigo-500/50">Why can't Google Drive scan for viruses?</p>
-                                        <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
-                                            Google Drive cannot scan files larger than 100MB. BharatPay Pro includes the high-fidelity Electron engine, making it ~120MB+. You can safely click <b>"Download anyway"</b>.
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-                                        <div className="p-1 px-2 bg-emerald-500/20 text-emerald-400 text-[8px] font-black rounded uppercase">Tip</div>
-                                        <p className="text-[9px] text-emerald-300/80 font-bold uppercase tracking-widest">
-                                            Professional Tip: Purchasing an "EV Code Signing Certificate" will remove these warnings permanently.
-                                        </p>
-                                    </div>
                                 </div>
                             </div>
                         </div>
