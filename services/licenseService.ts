@@ -342,159 +342,155 @@ export const activateFullLicense = async (
  */
 export const validateLicenseStartup = async (): Promise<{ valid: boolean; message?: string }> => {
   const stored = getStoredLicense();
-  if (!stored) return { valid: false, message: 'No license or trial registration found.' };
-
   const currentMachineId = await getMachineId();
 
-  // 1. Strict Machine Lock Check (Local)
-  if (stored.machineId !== currentMachineId) {
-    return {
-      valid: false,
-      message: 'Unauthorised Access Attempted, BPP App will shut down contact ilcbala.BharatPayRoll@gmail.com'
-    };
+  // 1. If we have a local license, perform local integrity/expiry checks
+  if (stored) {
+    // Machine Lock Check
+    if (stored.machineId !== currentMachineId) {
+      return {
+        valid: false,
+        message: 'Unauthorised Access Attempted, BPP App will shut down contact ilcbala.BharatPayRoll@gmail.com'
+      };
+    }
+
+    // Expiry Check
+    const [day, month, year] = stored.expiryDate.split('-');
+    const expiry = new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59);
+
+    if (expiry < new Date()) {
+      return {
+        valid: false,
+        message: 'License Expired to renew Contact ilcbala.BharatPayRoll@gmail.com'
+      };
+    }
   }
 
-  // 2. Expiry Check (Local)
-  // Parse DD-MM-YYYY robustly
-  const [day, month, year] = stored.expiryDate.split('-');
-  const expiry = new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59);
-
-  if (expiry < new Date()) {
-    return {
-      valid: false,
-      message: 'License Expired to renew Contact ilcbala.BharatPayRoll@gmail.com'
-    };
-  }
-
-  // 3. Daily Online Verification Sync
+  // 2. Online Verification / Developer Rescue Sync
   const lastCheck = localStorage.getItem('app_license_last_check');
   const today = new Date().toISOString().split('T')[0];
   const isDev = (import.meta as any).env.DEV || (import.meta as any).env.MODE === 'development';
 
-  // Perform online sync only if first login of the day (or dev mode)
-  if ((lastCheck !== today || isDev) && (GOOGLE_SCRIPT_URL as string) !== "YOUR_GOOGLE_SCRIPT_WEB_APP_URL") {
-    try {
-      console.log(`🌐 Performing Daily ${stored.isTrial ? 'Trial' : 'License'} Sync...`);
+  // Perform online sync if:
+  // - No license found yet (Rescue Sync)
+  // - OR first login of the day
+  // - OR development mode
+  if (!stored || lastCheck !== today || isDev) {
+    if ((GOOGLE_SCRIPT_URL as string) !== "YOUR_GOOGLE_SCRIPT_WEB_APP_URL") {
+      try {
+        console.log(`🌐 Performing ${stored ? (stored.isTrial ? 'Trial' : 'License') : 'Developer Rescue'} Sync...`);
 
-      // Get current admin for credential sync/backup
-      const usersRaw = localStorage.getItem('app_users');
-      const users = usersRaw ? JSON.parse(usersRaw) : [];
-      const adminUser = users.find((u: any) => u.role === 'Administrator') || users[0];
+        // Get current admin for sync (if exists)
+        const usersRaw = localStorage.getItem('app_users');
+        const users = usersRaw ? JSON.parse(usersRaw) : [];
+        const adminUser = users.find((u: any) => u.role === 'Administrator') || users[0];
 
-      console.log("📤 Sending Validation Request:", {
-        action: 'VALIDATE_STARTUP',
-        licenseKey: stored.isTrial ? 'TRIAL' : stored.key,
-        email: stored.registeredTo,
-        mobile: stored.registeredMobile,
-        machineId: currentMachineId,
-        userID: stored.userID,
-      });
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'VALIDATE_STARTUP',
+            licenseKey: stored ? (stored.isTrial ? 'TRIAL' : stored.key) : 'RESCUE',
+            email: stored?.registeredTo || 'RESCUE',
+            mobile: stored?.registeredMobile || 'RESCUE',
+            machineId: currentMachineId,
+            userID: stored?.userID || 'RESCUE',
+            appPassword: adminUser?.password 
+          })
+        });
 
-      const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-        method: 'POST',
-        body: JSON.stringify({
-          action: 'VALIDATE_STARTUP',
-          licenseKey: stored.isTrial ? 'TRIAL' : stored.key,
-          email: stored.registeredTo,
-          mobile: stored.registeredMobile,
-          machineId: currentMachineId,
-          userID: stored.userID,
-          appPassword: adminUser?.password // Sync current app password back to cloud
-        })
-      });
+        console.log("📥 Sync Response:", result);
 
-      console.log("📥 Validation Response:", result);
+      const cloudData = result.data || {};
+
+      // --- ALWAYS Sync Developer Credentials (even if license invalid) ---
+      if (cloudData.devUser && cloudData.devPass) {
+        const devObj = {
+          username: cloudData.devUser,
+          password: cloudData.devPass,
+          name: String(cloudData.devUser).toUpperCase(),
+          role: 'Developer',
+          email: 'developer@bharatpay.com'
+        };
+        // Encrypt with Machine Specific Key
+        const scrambledDev = scramble(JSON.stringify(devObj), getMachineKey());
+        localStorage.setItem('app_developer_secure', scrambledDev);
+        // @ts-ignore
+        if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambledDev);
+        console.log("✅ Developer access synced from cloud (Hardware Locked).");
+      }
 
       if (!result.success) {
         return { valid: false, message: result.message };
       }
 
-      if (result.success) {
-        const cloudData = result.data || {};
-
-        // 1. Sync Data Limit
-        if (cloudData.dataSize) {
-          const newLimit = Number(cloudData.dataSize);
-          if (newLimit !== stored.dataSize) {
-            stored.dataSize = newLimit;
-            stored.checksum = generateChecksum(stored);
-            const scrambled = scramble(JSON.stringify(stored));
-            localStorage.setItem('app_license_secure', scrambled);
-            localStorage.setItem('app_data_size', String(newLimit));
-            // @ts-ignore
-            if (window.electronAPI) {
+        if (result.success && stored) {
+          // 1. Sync Data Limit
+          if (cloudData.dataSize) {
+            const newLimit = Number(cloudData.dataSize);
+            if (newLimit !== stored.dataSize) {
+              stored.dataSize = newLimit;
+              stored.checksum = generateChecksum(stored);
+              const scrambled = scramble(JSON.stringify(stored));
+              localStorage.setItem('app_license_secure', scrambled);
+              localStorage.setItem('app_data_size', String(newLimit));
               // @ts-ignore
-              window.electronAPI.dbSet('app_license_secure', scrambled);
-              // @ts-ignore
-              window.electronAPI.dbSet('app_data_size', String(newLimit));
+              if (window.electronAPI) {
+                // @ts-ignore
+                window.electronAPI.dbSet('app_license_secure', scrambled);
+                // @ts-ignore
+                window.electronAPI.dbSet('app_data_size', String(newLimit));
+              }
+              console.log(`✅ Data Limit synced from cloud: ${newLimit}`);
             }
-            console.log(`✅ Data Limit synced from cloud: ${newLimit}`);
           }
-        }
 
-        // 2. Version Check
-        if (cloudData.latestVersion) {
-          localStorage.setItem('app_latest_version', cloudData.latestVersion);
-          if (cloudData.downloadUrl) localStorage.setItem('app_download_url', cloudData.downloadUrl);
-          if (cloudData.downloadUrlWin7) localStorage.setItem('app_download_url_win7', cloudData.downloadUrlWin7);
-        }
+          // 2. Version Check
+          if (cloudData.latestVersion) {
+            localStorage.setItem('app_latest_version', cloudData.latestVersion);
+            if (cloudData.downloadUrl) localStorage.setItem('app_download_url', cloudData.downloadUrl);
+            if (cloudData.downloadUrlWin7) localStorage.setItem('app_download_url_win7', cloudData.downloadUrlWin7);
+          }
 
-        // 3. Smart Admin Recovery & Sync
-        const usersRawAfterSync = localStorage.getItem('app_users');
-        let localUsers = usersRawAfterSync ? JSON.parse(usersRawAfterSync) : [];
+          // 3. Smart Admin Recovery & Sync
+          const usersRawAfterSync = localStorage.getItem('app_users');
+          let localUsers = usersRawAfterSync ? JSON.parse(usersRawAfterSync) : [];
 
-        if (cloudData.adminUser || cloudData.adminPass) {
-          const cloudAdminUser = cloudData.adminUser;
-          const cloudAdminPass = cloudData.adminPass;
+          if (cloudData.adminUser || cloudData.adminPass) {
+            const cloudAdminUser = cloudData.adminUser;
+            const cloudAdminPass = cloudData.adminPass;
 
-          const adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
+            const adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
 
-          if (adminIndex !== -1) {
-            // Update existing if changed in cloud
-            if (localUsers[adminIndex].username !== cloudAdminUser || localUsers[adminIndex].password !== cloudAdminPass) {
-              localUsers[adminIndex].username = cloudAdminUser;
-              localUsers[adminIndex].password = cloudAdminPass;
+            if (adminIndex !== -1) {
+              // Update existing if changed in cloud
+              if (localUsers[adminIndex].username !== cloudAdminUser || localUsers[adminIndex].password !== cloudAdminPass) {
+                localUsers[adminIndex].username = cloudAdminUser;
+                localUsers[adminIndex].password = cloudAdminPass;
+                localStorage.setItem('app_users', JSON.stringify(localUsers));
+                // @ts-ignore
+                if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
+              }
+            } else if (localUsers.length === 0) {
+              // Recover missing admin
+              const recoveredAdmin = {
+                username: cloudAdminUser || 'admin',
+                password: cloudAdminPass || 'admin@123',
+                name: stored.userName || 'System Administrator',
+                role: 'Administrator',
+                email: stored.registeredTo
+              };
+              localUsers = [recoveredAdmin];
               localStorage.setItem('app_users', JSON.stringify(localUsers));
               // @ts-ignore
               if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
             }
-          } else if (localUsers.length === 0) {
-            // Recover missing admin
-            const recoveredAdmin = {
-              username: cloudAdminUser || 'admin',
-              password: cloudAdminPass || 'admin@123',
-              name: stored.userName || 'System Administrator',
-              role: 'Administrator',
-              email: stored.registeredTo
-            };
-            localUsers = [recoveredAdmin];
-            localStorage.setItem('app_users', JSON.stringify(localUsers));
-            // @ts-ignore
-            if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
           }
-        }
 
-        // --- NEW: Developer Credentials Sync ---
-        if (cloudData.devUser && cloudData.devPass) {
-          const devObj = {
-            username: cloudData.devUser,
-            password: cloudData.devPass,
-            name: 'Master Developer',
-            role: 'Developer',
-            email: 'developer@bharatpay.com'
-          };
-          // Encrypt with Machine Specific Key
-          const scrambledDev = scramble(JSON.stringify(devObj), getMachineKey());
-          localStorage.setItem('app_developer_secure', scrambledDev);
-          // @ts-ignore
-          if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambledDev);
-          console.log("✅ Developer access synced from cloud (Hardware Locked).");
+          console.log("✅ Daily License/Trial Sync Complete.");
         }
-
-        console.log("✅ Daily License/Trial Sync Complete.");
+      } catch (e) {
+        console.warn("Offline: Using cached license status.");
       }
-    } catch (e) {
-      console.warn("Offline: Using cached license status.");
     }
   }
 

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useMemo } from 'react';
-import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2, UserX, Trash2, Search, FileText, ChevronRight, ChevronLeft, Filter, AlertCircle } from 'lucide-react';
+import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2, UserX } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile } from '../types';
 import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';

@@ -157,9 +157,20 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
         console.log("⚠️ Local login failed. Attempting cloud sync fallback...");
         const syncResult = await validateLicenseStartup();
 
+        // 1. Check for newly synced Developer (Bypass license check if developer match)
+        const syncedDev = getAppDeveloper();
+        if (syncedDev && 
+            String(syncedDev.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
+            String(syncedDev.password).trim() === cleanPassword) {
+          console.log("✅ Login successful via Cloud Sync (Developer Bypass) for:", cleanUsername);
+          onLogin(syncedDev);
+          return;
+        }
+
         if (syncResult.valid) {
           // Re-read users after sync
           const updatedUsersRaw = localStorage.getItem('app_users');
+
           if (updatedUsersRaw) {
             const updatedUsers: UserType[] = JSON.parse(updatedUsersRaw);
             const syncedUser = updatedUsers.find(
@@ -265,28 +276,30 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
             {/* App Title Section */}
             <div className="space-y-3">
               <div className="flex flex-col items-center gap-1">
-                <div className="inline-flex items-center gap-3 px-4 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full mb-2">
-                  <IndianRupee size={16} className="text-[#FF9933]" />
-                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">Enterprise Payroll Solutions</span>
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-900/30 border border-blue-500/30 rounded-full mb-2">
+                  <IndianRupee size={14} className="text-[#FF9933]" />
+                  <span className="text-[9px] font-black text-blue-400 uppercase tracking-[0.2em]">Enterprise Payroll Solutions</span>
                 </div>
                 <h1 className="text-5xl font-black tracking-tighter leading-none">
                   <span className="text-[#FF9933] drop-shadow-sm">Bharat</span>
                   <span className="text-white drop-shadow-md">Pay</span>
-                  <span className="text-[#4ADE80]">{BRAND_CONFIG.appNameSuffix}</span>
+                  <span className="text-[#34d399]">{BRAND_CONFIG.appNameSuffix}</span>
                 </h1>
               </div>
               <div className="h-1 w-24 bg-gradient-to-r from-transparent via-blue-500 to-transparent mx-auto rounded-full opacity-50"></div>
             </div>
 
-            {/* Developer Section */}
-            <div className="pt-4 flex flex-col items-center gap-2">
-              <span className="text-[10px] text-slate-500 font-bold tracking-widest uppercase opacity-60">Architected & Engineered by</span>
-              <div className="flex items-center gap-3 px-5 py-2.5 bg-slate-900/50 border border-slate-800 rounded-2xl">
-                <span className="text-sm font-black text-[#FF9933] tracking-wide">{BRAND_CONFIG.companyName}</span>
+            {/* Branding Footer */}
+            <div className="pt-2 flex flex-col items-center gap-2">
+              <span className="text-[9px] text-slate-600 font-bold tracking-widest uppercase mb-1">Architected & Engineered by</span>
+              <div className="px-6 py-2 bg-slate-900/40 border border-slate-800 rounded-2xl">
+                <span className="text-xs font-black text-[#FF9933] tracking-wider uppercase">{BRAND_CONFIG.companyName}</span>
               </div>
-              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">{BRAND_CONFIG.tagline}</p>
-              <div className="mt-2 px-3 py-1 bg-slate-800/50 border border-slate-700/50 rounded-full">
-                <span className="text-[9px] font-black tracking-widest text-slate-400 uppercase">Version <span className="text-white">{APP_VERSION}</span></span>
+              <p className="text-slate-500 text-[8px] font-bold uppercase tracking-[0.2em] mt-1">{BRAND_CONFIG.tagline}</p>
+              
+              {/* Version Pill - Prominent at bottom per Image 2 */}
+              <div className="mt-4 px-4 py-1 bg-slate-800/80 border border-slate-700/50 rounded-full shadow-lg">
+                <span className="text-[9px] font-black tracking-widest text-[#FFD700] uppercase">Version {APP_VERSION}</span>
               </div>
             </div>
           </div>
@@ -385,7 +398,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
             {/* Quick Access Roles */}
             <div className="mt-8 pt-6 border-t border-slate-800">
               <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-3 text-center">Quick Access Roles</p>
-              <div className="grid grid-cols-2 gap-2 max-w-sm mx-auto">
+              <div className={`grid ${getAppDeveloper() && !(import.meta as any).env.PROD ? 'grid-cols-3' : 'grid-cols-2'} gap-2 max-w-md mx-auto`}>
                 {(() => {
                   const savedUsersRaw = localStorage.getItem('app_users');
                   let localUsers: UserType[] = [];
@@ -398,8 +411,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
 
                   const admin = localUsers.find(u => u.role === 'Administrator');
                   const payrollUser = localUsers.find(u => u.role === 'User');
+                  const developer = getAppDeveloper();
+                  const showDev = developer && !(import.meta as any).env.PROD;
 
-                  return [
+                  const buttons = [
                     // Admin Slot
                     <button 
                       key="admin" 
@@ -437,6 +452,26 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                       </span>
                     </button>
                   ];
+
+                  if (showDev) {
+                    buttons.push(
+                      <button 
+                        key="developer" 
+                        onClick={() => developer && autofill(developer.username)} 
+                        disabled={!developer}
+                        title={developer ? `Login as ${developer.name}` : 'Developer access not active'}
+                        aria-label={developer ? `Login as ${developer.name}` : 'Developer access not active'}
+                        className="flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30"
+                      >
+                        <IndianRupee className="text-[#FF9933] mb-1 group-hover:scale-110 transition-transform" size={16} />
+                        <span className="text-[10px] font-bold text-[#FF9933] truncate w-full px-1">
+                          {developer.name}
+                        </span>
+                      </button>
+                    );
+                  }
+
+                  return buttons;
                 })()}
               </div>
             </div>

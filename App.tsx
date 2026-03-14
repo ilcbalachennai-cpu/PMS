@@ -313,7 +313,18 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       )}
 
       {!licenseStatus.checked ? (
-        <div className="fixed inset-0 bg-[#020617] flex items-center justify-center z-[1000]"><Loader2 className="animate-spin text-blue-500" size={48} /></div>
+        <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[1000] space-y-8 animate-in fade-in duration-700">
+          <div className="relative">
+             <div className="absolute -inset-4 bg-blue-500/20 blur-2xl rounded-full animate-pulse"></div>
+             <div className="relative w-36 h-36 rounded-full border-[6px] border-white overflow-hidden shadow-2xl bg-[#020617] flex items-center justify-center">
+                <img src="./logo3.png" alt="Startup Logo" className="w-full h-full object-cover" />
+             </div>
+          </div>
+          <div className="flex items-center gap-3 animate-slow-pulse">
+             <div className="w-2 h-2 bg-blue-500 rounded-full shadow-[0_0_8px_#3b82f6]"></div>
+             <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Security Verification Underway Please Wait.....</p>
+          </div>
+        </div>
       ) : (!getStoredLicense() && (showRegistrationManual || (!isSetupComplete && employees.length === 0))) ? (
         <Registration onComplete={handleRegistrationComplete} onRestore={() => window.location.reload()} showAlert={showAlert} />
       ) : !currentUser ? (
@@ -323,7 +334,10 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           {showLoginMessage && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
                 <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-blue-500/50 p-8 space-y-6">
-                    <h3 className="text-lg font-black text-blue-400 uppercase tracking-widest">Administrative Message</h3>
+                     <h3 className="text-lg font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
+                        <ShieldCheck size={20} />
+                        Administrative Message
+                     </h3>
                     <p className="text-slate-200 whitespace-pre-wrap">{companyProfile.postLoginMessage}</p>
                     <button onClick={() => setShowLoginMessage(false)} className="w-full py-3 bg-blue-600 text-white font-black rounded-xl">Acknowledge & Continue</button>
                 </div>
@@ -333,7 +347,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} transition-all duration-300 bg-[#0f172a] border-r border-slate-800 flex flex-col`}>
              <div className="p-6 flex items-center gap-3 border-b border-slate-800">
                 <IndianRupee size={18} className="text-[#FF9933]" />
-                {isSidebarOpen && <span className="text-lg font-black"><span className="text-[#FF9933]">Bharat</span>PayPro</span>}
+                {isSidebarOpen && <span className="text-lg font-black"><span className="text-[#FF9933]">Bharat</span><span className="text-white">Pay</span><span className="text-[#34d399]">Pro</span></span>}
              </div>
              <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
                 <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked && activeView !== View.Dashboard} />
@@ -351,32 +365,48 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
              </div>
           </aside>
 
-          <main ref={mainContentRef} className="flex-1 overflow-y-auto bg-slate-950">
+          <main ref={mainContentRef} className="flex-1 overflow-y-auto bg-slate-950 custom-scrollbar">
             <header className="bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 h-16 flex items-center justify-between px-8 sticky top-0 z-10">
-               <div className="flex items-center gap-3">
-                  <img src={logoUrl} alt="Logo" className="w-8 h-8 rounded-full border border-slate-600" />
-                  <span className="text-sm font-black whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px]">{companyProfile.establishmentName || BRAND_CONFIG.companyName}</span>
-               </div>
-               <div className="flex-1 px-10">
-                  <div className="flex items-center gap-2 px-3 py-1 bg-slate-900 rounded border border-slate-800 overflow-hidden">
-                     <Megaphone size={14} className="text-amber-400" />
-                     <div className="animate-marquee whitespace-nowrap text-[10px] font-bold text-amber-100 uppercase tracking-widest">{companyProfile.flashNews || 'Welcome to BharatPay Pro!'}</div>
-                  </div>
-               </div>
-               <div className="flex items-center gap-4">
-                  <div className="text-right">
-                     <div className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">{getFinancialYearLabel()}</div>
-                     <div className="text-[8px] text-slate-500 uppercase tracking-widest font-bold">Ver {APP_VERSION}</div>
-                  </div>
-                   <button 
-                      onClick={toggleFullScreenMode} 
-                      title={document.fullscreenElement ? "Exit Full Screen" : "Enter Full Screen"}
-                      aria-label={document.fullscreenElement ? "Exit Full Screen" : "Enter Full Screen"}
-                      className="p-2 bg-slate-800 rounded-full border border-slate-700"
-                   > 
-                      {document.fullscreenElement ? <Minimize size={16} /> : <Maximize size={16} />} 
-                   </button>
-               </div>
+                <div className="flex items-center gap-4 shrink-0 mr-4">
+                   <img src={logoUrl} alt="Logo" className="w-10 h-10 rounded-full border border-slate-700 shadow-xl object-cover" />
+                   <div className="flex flex-col">
+                      <span className="text-sm font-black text-white tracking-tight">{companyProfile.establishmentName || BRAND_CONFIG.companyName}</span>
+                      <span className="text-[8px] text-slate-500 font-bold uppercase tracking-widest">{BRAND_CONFIG.tagline}</span>
+                   </div>
+                </div>
+                <div className="flex-1 px-4 min-w-[300px] max-w-xl mx-auto">
+                   <div className="flex items-center gap-0 bg-[#020617] rounded-xl border border-slate-800 overflow-hidden h-10 shadow-2xl">
+                      <div className="bg-slate-900 border-r border-slate-800 h-full px-4 flex items-center justify-center shrink-0">
+                        <Megaphone size={16} className="text-amber-500" />
+                      </div>
+                      <div className="flex-1 overflow-hidden relative">
+                        <div className="animate-marquee inline-block whitespace-nowrap text-[11px] font-bold text-amber-100 uppercase tracking-[0.2em] py-2 px-4 italic">
+                          {companyProfile.flashNews || 'Welcome to BharatPay Pro! Use Configuration to update this message.'}
+                        </div>
+                      </div>
+                   </div>
+                </div>
+                <div className="flex items-center gap-5 shrink-0 ml-4">
+                    <button 
+                       onClick={toggleFullScreenMode} 
+                       title={document.fullscreenElement ? "Exit Full Screen" : "Enter Full Screen"}
+                       className="p-2.5 bg-slate-800/40 hover:bg-slate-800 rounded-full border border-slate-700/50 shadow-lg text-slate-400 hover:text-white transition-all"
+                    > 
+                       {document.fullscreenElement ? <Minimize size={18} /> : <Maximize size={18} />} 
+                    </button>
+
+                    <div className="flex flex-col items-end gap-0">
+                     <div className="px-4 py-1.5 bg-[#020617] border border-emerald-800/60 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-slow-pulse">
+                        <span className="text-[10px] font-black text-[#10b981] uppercase tracking-widest flex items-center gap-2">
+                           <div className="w-1.5 h-1.5 bg-[#10b981] rounded-full shadow-[0_0_8px_#10b981]"></div>
+                           {getFinancialYearLabel()}
+                        </span>
+                     </div>
+                       <div className="px-3 py-1 bg-slate-900 border border-slate-800/80 rounded-md shadow-sm -mt-1.5 relative z-0">
+                          <span className="text-[9px] text-[#FFD700] uppercase tracking-[0.2em] font-black">VERSION {APP_VERSION}</span>
+                       </div>
+                    </div>
+                </div>
             </header>
 
             <div className="p-8 max-w-7xl mx-auto">

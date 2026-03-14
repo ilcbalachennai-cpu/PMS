@@ -4,14 +4,30 @@
   0% {
     transform: translateX(100%);
   }
-
   100% {
     transform: translateX(-100%);
   }
 }
 
+@keyframes slow-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.animate-slow-pulse {
+  animation: slow-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
 .animate-marquee {
   animation: marquee 25s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
