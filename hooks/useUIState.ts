@@ -2,7 +2,8 @@
 import { useState, useEffect } from 'react';
 import { View } from '../types';
 
-export const useUIState = (employeesCount: number, activeView: View, setActiveView: (v: View) => void) => {
+export const useUIState = (employeesCount: number) => {
+  const [activeView, setActiveView] = useState<View>(View.Dashboard);
   const [settingsTab, setSettingsTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>('STATUTORY');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -29,6 +30,7 @@ export const useUIState = (employeesCount: number, activeView: View, setActiveVi
   }, []);
 
   return {
+    activeView, setActiveView,
     settingsTab, setSettingsTab,
     isSidebarOpen, setIsSidebarOpen,
     isFullScreen, setIsFullScreen,

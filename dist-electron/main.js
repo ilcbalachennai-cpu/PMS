@@ -40,6 +40,7 @@ const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
+const nodemailer_1 = __importDefault(require("nodemailer"));
 const child_process_1 = require("child_process");
 const os = __importStar(require("os"));
 let mainWindow = null;
@@ -68,8 +69,8 @@ const getAppPaths = (base) => {
     return {
         root,
         data: path.join(root, 'Data'),
-        reports: path.join(root, 'Report files'),
-        backups: path.join(root, 'Data backup')
+        reports: path.join(root, 'Reports'),
+        backups: path.join(root, 'Backups')
     };
 };
 // ── DATABASE INITIALIZATION ──
@@ -619,6 +620,38 @@ electron_1.ipcMain.handle('backup-and-install', async () => {
         // Attempt to re-init DB if failed
         if (appBasePath && !db)
             initializeDatabase(appBasePath);
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('send-payslip-email', async (_event, data) => {
+    const { smtp, to, subject, body, attachment } = data;
+    try {
+        const transporter = nodemailer_1.default.createTransport({
+            host: smtp.host,
+            port: smtp.port,
+            secure: smtp.secure,
+            auth: {
+                user: smtp.user,
+                pass: smtp.pass
+            }
+        });
+        const mailOptions = {
+            from: `"${smtp.fromName}" <${smtp.user}>`,
+            to: to,
+            subject: subject,
+            text: body,
+            attachments: [
+                {
+                    filename: attachment.filename,
+                    content: Buffer.from(attachment.content)
+                }
+            ]
+        };
+        await transporter.sendMail(mailOptions);
+        return { success: true };
+    }
+    catch (e) {
+        console.error('❌ Email sending failed:', e);
         return { success: false, error: e.message };
     }
 });

@@ -95,18 +95,45 @@ export interface StatutoryConfig {
     special3: boolean;
   };
 
+  // NEW: Statutory Calculation Policy
+  useLabourCodeWages?: boolean; 
+  pfOriginalWagesComponents?: {
+    basic: boolean;
+    da: boolean;
+    retaining: boolean;
+    hra: boolean;
+    conveyance: boolean;
+    washing: boolean;
+    attire: boolean;
+    special1: boolean;
+    special2: boolean;
+    special3: boolean;
+  };
+  esiOriginalWagesComponents?: {
+    basic: boolean;
+    da: boolean;
+    retaining: boolean;
+    hra: boolean;
+    conveyance: boolean;
+    washing: boolean;
+    attire: boolean;
+    special1: boolean;
+    special2: boolean;
+    special3: boolean;
+  };
+
   // NEW: Leave Wages Calculation Policy (Default Basic + DA)
   leaveWagesComponents: {
-    basic: true,
-    da: true,
-    retaining: false,
-    hra: false,
-    conveyance: false,
-    washing: false,
-    attire: false,
-    special1: false,
-    special2: false,
-    special3: false
+    basic: boolean; // Changed to boolean
+    da: boolean;    // Changed to boolean
+    retaining: boolean;
+    hra: boolean;
+    conveyance: boolean;
+    washing: boolean;
+    attire: boolean;
+    special1: boolean;
+    special2: boolean;
+    special3: boolean;
   };
 
   // NEW: OverTime Policy
@@ -155,6 +182,15 @@ export interface CompanyProfile {
   flashNews?: string; // New field for Flash News
   postLoginMessage?: string; // New field for Post Login Popup Message
   externalAppUrl?: string; // New field for External App Link
+  smtpConfig?: {
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    pass: string;
+    fromName: string;
+    fromEmail: string;
+  };
 }
 
 export interface Employee {
@@ -192,6 +228,7 @@ export interface Employee {
   pincode: string;
 
   mobile: string;
+  email: string;
   bankAccount: string;
   bankName?: string; // New field
   bankBranch?: string; // New field
@@ -382,7 +419,8 @@ export enum View {
   PFCalculator = 'pf_calculator', // New Module
   Utilities = 'utilities',
   Settings = 'settings',
-  AI_Assistant = 'ai_assistant'
+  AI_Assistant = 'ai_assistant',
+  MIS = 'mis'
 }
 
 export interface LicenseData {
@@ -401,9 +439,55 @@ export interface LicenseData {
   checksum?: string; // For integrity check
 }
 
+export type AlertType = 'success' | 'error' | 'warning' | 'info' | 'loading' | 'confirm' | 'danger';
+
 export interface AppVersion {
   version: string;
   releaseDate: string;
   features: string[];
   statutoryUpdates?: string[];
 }
+
+// New Types for Dynamic Report Builder
+export interface DynamicReportColumn {
+  id: string;
+  header: string;
+  sourceType: 'Employee' | 'PayrollResult' | 'StartPeriodResult' | 'EndPeriodResult' | 'Auto' | 'Formula' | 'CustomText' | 'OtherAllowance' | 'OtherDeductions' | 'Compare' | 'Percentage';
+  sourceKey: string; // e.g. 'id', 'earnings.basic', 'netPay'
+}
+
+export interface DynamicReportTemplate {
+  id: string;
+  name: string;      // Form Name (e.g. FORM B)
+  type: string;      // Report Type (e.g. PAY REGISTER)
+  ruleName: string;  // Rule Description
+  state: string;     // State (e.g. Tamil Nadu)
+  orientation?: 'p' | 'l';
+  columns: DynamicReportColumn[];
+  showTotals?: boolean;
+  fromMonth?: string;
+  fromYear?: number;
+  toMonth?: string;
+  toYear?: number;
+  createdAt: string;
+}
+
+// New Types for Dynamic MIS Report (Row-based)
+export interface DynamicMISReportRow {
+  id: string;
+  rowNumber: number;
+  label: string;
+  sourceType: 'Employee' | 'PayrollStart' | 'PayrollEnd' | 'ECRStart' | 'ECREnd' | 'Compare' | 'Percentage' | 'Text' | 'C2CStart' | 'C2CEnd';
+  sourceKey: string;     // e.g. 'earnings.basic', 'eeEPF'
+  sourceKeys?: string[]; // Multiple keys for summation (used by C2C types)
+  calcRefs: number[];    // Row numbers used for calculation: e.g. [5, 4] for (Row 5 - Row 4)
+  operator?: '+' | '-' | '*' | '/'; // Operator for 'Compare' source type
+}
+
+export interface DynamicMISReportTemplate {
+  id: string;
+  name: string;
+  rows: DynamicMISReportRow[];
+  createdAt: string;
+}
+

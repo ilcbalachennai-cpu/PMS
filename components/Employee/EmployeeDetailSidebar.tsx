@@ -78,7 +78,10 @@ const EmployeeDetailSidebar: React.FC<EmployeeDetailSidebarProps> = ({
                     </div>
                     <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500 font-bold uppercase text-[9px]">Contact</span>
-                        <span className="font-bold">{selectedEmp.mobile || 'N/A'}</span>
+                        <div className="text-right">
+                            <p className="font-bold">{selectedEmp.mobile || 'N/A'}</p>
+                            <p className="text-[10px] text-blue-400 truncate max-w-[120px]">{selectedEmp.email || ''}</p>
+                        </div>
                     </div>
                 </div>
 

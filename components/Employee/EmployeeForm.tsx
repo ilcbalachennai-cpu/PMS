@@ -205,6 +205,10 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     <label htmlFor="siteInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Site</label>
                                     <select id="siteInput" title="Site Name" aria-label="Site Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.site} onChange={e => setNewEmpForm({ ...newEmpForm, site: e.target.value })}>{sites.map(s => <option key={s}>{s}</option>)}</select>
                                 </div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="emailInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">MailID</label>
+                                    <input id="emailInput" type="email" title="Email Address" aria-label="Email Address" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500" value={newEmpForm.email} onChange={e => setNewEmpForm({ ...newEmpForm, email: e.target.value.toLowerCase() })} />
+                                </div>
                             </div>
                         </div>
                     </div>

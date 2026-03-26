@@ -20,6 +20,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     findBPPApp: () => electron_1.ipcRenderer.invoke('find-bpp-app'),
     openItemLocation: (filePath) => electron_1.ipcRenderer.invoke('open-item-location', filePath),
     getOSVersion: () => electron_1.ipcRenderer.invoke('get-os-version'),
+    sendPayslipEmail: (data) => electron_1.ipcRenderer.invoke('send-payslip-email', data),
     onUpdateDownloadComplete: (callback) => {
         electron_1.ipcRenderer.on('update-download-complete', callback);
     },

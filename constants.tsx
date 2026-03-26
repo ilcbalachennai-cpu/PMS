@@ -1,4 +1,3 @@
-
 import { StatutoryConfig, Employee, User, LeavePolicy, CompanyProfile } from './types';
 
 // Branding Configuration
@@ -100,7 +99,33 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
     special3: false
   },
 
-  // NEW: Leave Wages Calculation Policy (Default Basic + DA)
+  // NEW: Statutory Calculation Policy
+  useLabourCodeWages: true, // Default to Clause 88 logic
+  pfOriginalWagesComponents: {
+    basic: true,
+    da: true,
+    retaining: true,
+    hra: false,
+    conveyance: false,
+    washing: false,
+    attire: false,
+    special1: false,
+    special2: false,
+    special3: false
+  },
+  esiOriginalWagesComponents: {
+    basic: true,
+    da: true,
+    retaining: true,
+    hra: false,
+    conveyance: false,
+    washing: false,
+    attire: false,
+    special1: false,
+    special2: false,
+    special3: false
+  },
+
   // NEW: Leave Wages Calculation Policy (Default Basic + DA)
   leaveWagesComponents: {
     basic: true,

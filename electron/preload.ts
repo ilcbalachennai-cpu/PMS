@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openItemLocation: (filePath: string) =>
         ipcRenderer.invoke('open-item-location', filePath),
     getOSVersion: () => ipcRenderer.invoke('get-os-version'),
+    sendPayslipEmail: (data: any) => ipcRenderer.invoke('send-payslip-email', data),
     onUpdateDownloadComplete: (callback: () => void) => {
         ipcRenderer.on('update-download-complete', callback);
     },

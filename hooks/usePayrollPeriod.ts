@@ -16,7 +16,7 @@ export const usePayrollPeriod = () => {
       const historyData = localStorage.getItem('app_payroll_history');
       const history = historyData ? JSON.parse(historyData) : [];
 
-      let lastLockedVal = getMonthValue('March', 2025); // Baseline system start
+      let lastLockedVal = 0; 
       
       const finalized = Array.isArray(history) ? history.filter((h: any) => h.status === 'Finalized') : [];
       
@@ -25,18 +25,25 @@ export const usePayrollPeriod = () => {
           const val = getMonthValue(h.month, h.year);
           if (val > lastLockedVal) lastLockedVal = val;
         });
+      } else {
+          // If no history is found, fall back to March 2025 as the conceptual "last locked" 
+          // but we might want to return 0 to indicate "nothing actually locked yet"
+          lastLockedVal = 0;
       }
 
-      // The period that is currently open for processing is LFM + 1
-      const nextVal = lastLockedVal + 1;
+      // If no reports are frozen, the next active period is the baseline start (April 2025)
+      // Otherwise it's LFM + 1
+      const effectiveLastVal = lastLockedVal > 0 ? lastLockedVal : getMonthValue('March', 2025);
+      const nextVal = effectiveLastVal + 1;
+
       return { 
         month: monthsArr[nextVal % 12], 
         year: Math.floor(nextVal / 12),
         value: nextVal,
-        lastLockedValue: lastLockedVal
+        lastLockedValue: lastLockedVal // Will be 0 if nothing is actually frozen
       };
     } catch (e) {
-      return { month: 'April', year: 2025, value: getMonthValue('April', 2025), lastLockedValue: getMonthValue('March', 2025) };
+      return { month: 'April', year: 2025, value: getMonthValue('April', 2025), lastLockedValue: 0 };
     }
   };
 

@@ -14,15 +14,22 @@ export const useAuth = () => {
     } catch (e) { return null; }
   });
 
-  const handleLogin = useCallback((user: User) => {
+  const [logoutMessage, setLogoutMessage] = useState<string | null>(null);
+
+  const handleAuthLogin = useCallback((user: User) => {
     setCurrentUser(user);
     sessionStorage.setItem('app_session_user', JSON.stringify(user));
   }, []);
 
-  const logout = useCallback(() => {
+  const handleLogout = useCallback(() => {
     sessionStorage.removeItem('app_session_user');
     setCurrentUser(null);
+    setLogoutMessage('You have been signed out successfully.');
   }, []);
 
-  return { currentUser, setCurrentUser, handleLogin, logout };
+  return { 
+    currentUser, setCurrentUser, 
+    handleAuthLogin, handleLogout, 
+    logoutMessage, setLogoutMessage 
+  };
 };

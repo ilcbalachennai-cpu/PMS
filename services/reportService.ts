@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
+import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch, DynamicReportTemplate, DynamicReportColumn, DynamicMISReportTemplate, DynamicMISReportRow } from '../types';
 
 // ==========================================
 // UTILITIES
@@ -132,6 +132,17 @@ export const generatePDFTableReport = async (title: string, headers: string[], d
     doc.text(title, 14, 22);
     if (summary) doc.text(summary, 14, 28);
 
+    // Auto-detect numeric columns for right alignment if not explicitly provided
+    const finalColumnStyles = columnStyles || {};
+    if (!columnStyles && data[0]) {
+        data[0].forEach((val, idx) => {
+            const isNumeric = typeof val === 'number' || (typeof val === 'string' && !isNaN(parseFloat(val.replace(/,/g, ''))) && /^[0-9,.\-%]+$/.test(val));
+            if (isNumeric && idx > 0) { // Don't right align first column typically (ID or SL No)
+                finalColumnStyles[idx] = { halign: 'right' };
+            }
+        });
+    }
+
     autoTable(doc, {
         head: [headers],
         body: data,
@@ -139,7 +150,7 @@ export const generatePDFTableReport = async (title: string, headers: string[], d
         theme: 'grid',
         styles: { fontSize: 8 },
         headStyles: { fillColor: [41, 128, 185] },
-        columnStyles: columnStyles
+        columnStyles: finalColumnStyles
     });
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
@@ -564,7 +575,7 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
         const lines = rows.map(r =>
             `${r.uan}#~#${r.name}#~#${r.grossWages}#~#${r.epfWages}#~#${r.epsWages}#~#${r.edliWages}#~#${r.eeEPF}#~#${r.erEPS}#~#${r.erEPF}#~#${r.ncpDays}#~#${r.refund}`
         );
-        const content = lines.join('\n');
+        const content = lines.join('\r\n');
         const u8 = new TextEncoder().encode(content);
         const savedLocally = await electronSaveReport(fileName, u8, 'txt');
 
@@ -2363,7 +2374,7 @@ export const generateArrearECRText = async (
         return null;
     }
 
-    const content = lines.join('\n');
+    const content = lines.join('\r\n');
     const u8 = new TextEncoder().encode(content);
     const res = await electronSaveReport(fileName, u8, 'txt');
     if (!res.success) {
@@ -2563,3 +2574,542 @@ export const generateArrearECRExcel = async (
     XLSX.utils.book_append_sheet(wb, ws, 'Arrear ECR details');
     return await generateExcelWorkbook(wb, fileName);
 };
+export const generateDynamicReport = async (
+    template: DynamicReportTemplate,
+    results: PayrollResult[],
+    employees: Employee[],
+    month: string,
+    year: number,
+    companyProfile: CompanyProfile,
+    dateRange?: { fromMonth: string, fromYear: number, toMonth: string, toYear: number }
+): Promise<string | null> => {
+    const headers = template.columns.map((c: DynamicReportColumn) => c.header);
+    const isRangeReport = dateRange && (dateRange.fromMonth !== month || dateRange.fromYear !== year || dateRange.toMonth !== month || dateRange.toYear !== year);
+
+    // 1. Group results by employee for multi-period comparison
+    const empResultsMap: Record<string, { from?: PayrollResult, to: PayrollResult }> = {};
+    results.forEach(r => {
+        if (!empResultsMap[r.employeeId]) {
+            // In a range report, the 'results' array passed in might contain multiple results per employee
+            // We'll treat the one matching the targeting month/year as 'to' and others as potential 'from'
+            // However, the current component only passes results for the CURRENT month.
+            // We need to assume the 'results' array contains ALL relevant results for the range if isRangeReport is true.
+            empResultsMap[r.employeeId] = { to: r }; 
+        } else {
+            // If we have multiple, the 'To' is the later one
+            const currentTo = empResultsMap[r.employeeId].to;
+            const currentMonthIdx = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].indexOf(r.month);
+            const toMonthIdx = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].indexOf(currentTo.month);
+            
+            if (r.year > currentTo.year || (r.year === currentTo.year && currentMonthIdx > toMonthIdx)) {
+                empResultsMap[r.employeeId] = { from: currentTo, to: r };
+            } else {
+                empResultsMap[r.employeeId] = { from: r, to: currentTo };
+            }
+        }
+    });
+
+    const data = Object.values(empResultsMap).map(({ from, to: r }, idx) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        
+        // Helper to get C2C
+        const getC2C = (res: PayrollResult) => {
+            const gross = res.earnings.total || 0;
+            const erContrib = (res.employerContributions?.epf || 0) + 
+                              (res.employerContributions?.eps || 0) + 
+                              (res.employerContributions?.esi || 0) + 
+                              (res.employerContributions?.lwf || 0);
+            return gross + erContrib;
+        };
+
+        return template.columns.map(col => {
+            if (col.sourceType === 'Auto') {
+                if (col.sourceKey === 'sl_no') return idx + 1;
+                if (col.sourceKey === 'month_days') return r.daysInMonth;
+                return '-';
+            }
+            if (col.sourceType === 'CustomText') return col.sourceKey;
+            
+            let val: any = null;
+            if (col.sourceType === 'Employee' && emp) {
+                if (col.sourceKey === 'grossWages') {
+                    val = (emp.basicPay || 0) + (emp.da || 0) + (emp.retainingAllowance || 0) + 
+                          (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + 
+                          (emp.attire || 0) + (emp.specialAllowance1 || 0) + 
+                          (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0);
+                } else if (col.sourceKey === 'dailyRate') {
+                    const gross = (emp.basicPay || 0) + (emp.da || 0) + (emp.retainingAllowance || 0) + 
+                                  (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + 
+                                  (emp.attire || 0) + (emp.specialAllowance1 || 0) + 
+                                  (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0);
+                    val = r.daysInMonth > 0 ? (gross / r.daysInMonth) : 0;
+                } else {
+                    val = (emp as any)[col.sourceKey];
+                }
+            } else if (col.sourceType === 'StartPeriodResult' || col.sourceType === 'EndPeriodResult') {
+                const targetResult = col.sourceType === 'StartPeriodResult' ? from : r;
+                if (!targetResult) {
+                    val = '-';
+                } else if (col.sourceKey === 'total_c2c') {
+                    val = Math.round(getC2C(targetResult));
+                } else {
+                    const keys = col.sourceKey.split('.');
+                    let temp: any = targetResult;
+                    for (const k of keys) {
+                        if (temp && temp[k] !== undefined) {
+                            temp = temp[k];
+                        } else {
+                            temp = 0;
+                            break;
+                        }
+                    }
+                    val = typeof temp === 'number' ? Math.round(temp) : temp;
+                }
+            } else if (col.sourceType === 'PayrollResult' || col.sourceType === 'OtherAllowance' || col.sourceType === 'OtherDeductions') {
+                if (col.sourceKey === 'total_c2c') {
+                    val = Math.round(getC2C(r));
+                } else {
+                    const keysToSum = (col.sourceType === 'OtherAllowance' || col.sourceType === 'OtherDeductions') ? col.sourceKey.split(',') : [col.sourceKey];
+                    let total = 0;
+                    let isNumeric = false;
+
+                    for (const fullKey of keysToSum) {
+                        const keys = fullKey.split('.');
+                        let temp: any = r;
+                        for (const k of keys) {
+                            if (temp && temp[k] !== undefined) {
+                                temp = temp[k];
+                            } else {
+                                temp = 0;
+                                break;
+                            }
+                        }
+                        if (typeof temp === 'number') {
+                            total += temp;
+                            isNumeric = true;
+                        } else {
+                            val = temp;
+                        }
+                    }
+                    if (isNumeric) val = Math.round(total);
+                }
+            } else if (col.sourceType === 'Compare' || col.sourceType === 'Percentage') {
+                const toGross = r.earnings.total || 0;
+                const fromGross = from?.earnings.total || 0;
+                const toC2C = getC2C(r);
+                const fromC2C = from ? getC2C(from) : 0;
+
+                if (col.sourceKey === 'increment_amount' || col.sourceKey === 'gross_delta') {
+                    val = from ? Math.round(toGross - fromGross) : '-';
+                } else if (col.sourceKey === 'increment_pct' || col.sourceKey === 'gross_inc_pct') {
+                    val = (from && fromGross > 0) ? (((toGross - fromGross) / toGross) * 100).toFixed(2) + '%' : '-';
+                } else if (col.sourceKey === 'statutory_impact') {
+                    if (from) {
+                        const toStat = (r.employerContributions?.epf || 0) + (r.employerContributions?.eps || 0) + (r.employerContributions?.esi || 0);
+                        const fromStat = (from.employerContributions?.epf || 0) + (from.employerContributions?.eps || 0) + (from.employerContributions?.esi || 0);
+                        val = Math.round(toStat - fromStat);
+                    } else { val = '-'; }
+                } else if (col.sourceKey === 'pf_delta') {
+                    if (from) {
+                        const toPF = (r.employerContributions?.epf || 0) + (r.employerContributions?.eps || 0);
+                        const fromPF = (from.employerContributions?.epf || 0) + (from.employerContributions?.eps || 0);
+                        val = Math.round(toPF - fromPF);
+                    } else { val = '-'; }
+                } else if (col.sourceKey === 'pf_inc_pct') {
+                    if (from) {
+                        const toPF = (r.employerContributions?.epf || 0) + (r.employerContributions?.eps || 0);
+                        const fromPF = (from.employerContributions?.epf || 0) + (from.employerContributions?.eps || 0);
+                        val = (toPF > 0) ? (((toPF - fromPF) / toPF) * 100).toFixed(2) + '%' : '-';
+                    } else { val = '-'; }
+                } else if (col.sourceKey === 'esi_delta') {
+                    val = from ? Math.round((r.employerContributions?.esi || 0) - (from.employerContributions?.esi || 0)) : '-';
+                } else if (col.sourceKey === 'esi_inc_pct') {
+                    if (from) {
+                        const toESI = r.employerContributions?.esi || 0;
+                        const fromESI = from.employerContributions?.esi || 0;
+                        val = (toESI > 0) ? (((toESI - fromESI) / toESI) * 100).toFixed(2) + '%' : '-';
+                    } else { val = '-'; }
+                } else if (col.sourceKey === 'c2c_var' || col.sourceKey === 'c2c_delta') {
+                    val = from ? Math.round(toC2C - fromC2C) : '-';
+                } else if (col.sourceKey === 'c2c_pct' || col.sourceKey === 'c2c_inc_pct') {
+                    val = (from && fromC2C > 0) ? (((toC2C - fromC2C) / toC2C) * 100).toFixed(2) + '%' : '-';
+                } else if (col.sourceKey === 'bonus_percentage') {
+                    val = r.earnings.total > 0 ? ((r.earnings.bonus || 0) / r.earnings.total * 100).toFixed(2) + '%' : '0%';
+                } else {
+                    val = '-';
+                }
+            }
+            
+            return val !== null && val !== undefined ? val : '-';
+        });
+    });
+
+    const displayMonth = isRangeReport ? `${dateRange.fromMonth} ${dateRange.fromYear} - ${dateRange.toMonth} ${dateRange.toYear}` : `${month} ${year}`;
+    const fileName = getStandardFileName(template.name.replace(/\s+/g, '_'), companyProfile, isRangeReport ? `Range` : month, isRangeReport ? `${dateRange.fromYear}_to_${dateRange.toYear}` : year);
+
+    const orientation = template.orientation || 'l';
+    const doc = new jsPDF(orientation, 'mm', 'a4');
+    const pageW = orientation === 'l' ? 297 : 210;
+    let y = 15;
+
+    // Line 1: Form Name (Centered, Large, Bold)
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text(template.name.toUpperCase(), pageW / 2, y, { align: 'center' });
+    y += 7;
+
+    // Line 2: Report Title (Centered, Medium, Bold)
+    doc.setFontSize(11);
+    doc.text(template.type.toUpperCase(), pageW / 2, y, { align: 'center' });
+    y += 5;
+
+    // Line 3: Rule Reference (Centered, Small)
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(template.ruleName, pageW / 2, y, { align: 'center' });
+    y += 5;
+
+    // Line 4: Act Name (Centered, Medium, Bold)
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    const actName = template.state.toUpperCase().includes('ACT') 
+        ? template.state.toUpperCase() 
+        : `THE ${template.state.toUpperCase()} SHOPS AND ESTABLISHMENT ACT, 1947 AND RULES, 1948`;
+    doc.text(actName, pageW / 2, y, { align: 'center' });
+    y += 8;
+
+    // Establishment & Period Info Box
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.3);
+    doc.rect(14, y, pageW - 28, 10); // Border Box
+    doc.line(pageW - 100, y, pageW - 100, y + 10); // Vertical Separator
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text("Name of the Establishment:", 16, y + 6.5);
+    doc.setFont('helvetica', 'normal');
+    doc.text(companyProfile.establishmentName || '', 60, y + 6.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text("Wage Period:", pageW - 98, y + 6.5);
+    doc.setFont('helvetica', 'normal');
+    doc.text(displayMonth, pageW - 75, y + 6.5);
+
+    y += 16;
+
+    // Dynamic column alignment (right-align numbers/amounts)
+    const columnStyles: any = {};
+    template.columns.forEach((col: DynamicReportColumn, i: number) => {
+        const key = (col.sourceKey || '').toLowerCase();
+        const header = (col.header || '').toLowerCase();
+        
+        // Comprehensive numeric field detection
+        const isNumeric = key.includes('amount') || key.includes('basic') || key.includes('pay') || 
+                        key.includes('total') || key.includes('earnings') || key.includes('deductions') || 
+                        key.includes('net') || key.includes('epf') || key.includes('esi') || 
+                        key.includes('pt') || key.includes('it') || key.includes('special') ||
+                        key.includes('salary') || key.includes('wages') || key.includes('rate') ||
+                        key.includes('fine') || key.includes('bonus') || key.includes('leaveencashment') ||
+                        header.includes('salary') || header.includes('wage') || header.includes('total') ||
+                        header.includes('fine') || header.includes('recovery');
+
+        if (isNumeric) {
+            columnStyles[i] = { 
+                halign: 'right',
+                cellWidth: 'wrap' // Prioritize full display for numbers
+            };
+        } else {
+            columnStyles[i] = { 
+                cellWidth: 'auto' 
+            };
+        }
+    });
+
+    // Generate Totals if enabled
+    let foot: any[][] = [];
+    if (template.showTotals) {
+        const totalRow: any[] = new Array(template.columns.length).fill('');
+        let hasTotals = false;
+        
+        template.columns.forEach((col, i) => {
+            const key = col.sourceKey.toLowerCase();
+            const isNumeric = key.includes('amount') || key.includes('basic') || key.includes('pay') || 
+                            key.includes('total') || key.includes('earnings') || key.includes('deductions') || 
+                            key.includes('net') || key.includes('epf') || key.includes('esi') || 
+                            key.includes('pt') || key.includes('it') || key.includes('special') ||
+                            key.includes('salary') || key.includes('wages') || key.includes('rate');
+
+            if (isNumeric) {
+                const isRate = key === 'dailyrate';
+                const sum = data.reduce((acc, row) => {
+                    const cellVal = row[i];
+                    const val = typeof cellVal === 'number' ? cellVal : parseFloat(String(cellVal).replace(/[^0-9.-]+/g, ""));
+                    return isNaN(val) ? acc : acc + val;
+                }, 0);
+                totalRow[i] = isRate ? sum : Math.round(sum);
+                hasTotals = true;
+            }
+        });
+
+        if (hasTotals) {
+            // Find first empty column to put "TOTAL" label
+            const labelIdx = totalRow.findIndex(val => val === '');
+            if (labelIdx >= 0) totalRow[labelIdx] = 'TOTAL';
+            foot = [totalRow];
+        }
+    }
+
+    autoTable(doc, {
+        head: [headers],
+        body: data,
+        foot: foot.length > 0 ? foot : undefined,
+        startY: y,
+        theme: 'grid',
+        styles: { 
+            fontSize: 7.5, // Slightly smaller to accommodate more columns
+            cellPadding: 1.5, 
+            lineColor: [40, 40, 40],
+            overflow: 'visible', // Ensure values appear in full
+            cellWidth: 'auto'
+        },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.3, overflow: 'linebreak' },
+        footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'right', lineWidth: 0.3 },
+        columnStyles: columnStyles,
+        margin: { top: 10 },
+        didParseCell: (data) => {
+            if ((data.section === 'body' || data.section === 'foot') && typeof data.cell.raw === 'number') {
+                const col = template.columns[data.column.index];
+                const isRate = col.sourceKey === 'dailyRate';
+                const fractions = isRate ? 2 : 0;
+                data.cell.text = [data.cell.raw.toLocaleString('en-IN', { 
+                    minimumFractionDigits: fractions, 
+                    maximumFractionDigits: fractions 
+                })];
+            }
+        }
+    });
+
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const res = await electronSaveReport(fileName, u8, 'pdf');
+
+    if (!res.success) {
+        doc.save(`${fileName}.pdf`);
+        return null;
+    }
+    return res.path || null;
+};
+
+export const generatePayslipForEmail = async (
+    result: PayrollResult,
+    employee: Employee,
+    month: string,
+    year: number,
+    companyProfile: CompanyProfile
+): Promise<Uint8Array | null> => {
+    const orientation = 'p';
+    const doc = new jsPDF(orientation, 'mm', 'a4');
+    const pageW = 210;
+    let y = 15;
+
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text((companyProfile.establishmentName || 'Company Name').toUpperCase(), pageW / 2, y, { align: 'center' });
+    y += 7;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    const fullAddress = `${companyProfile.street || ''}, ${companyProfile.area || ''}, ${companyProfile.city || ''}`;
+    doc.text(fullAddress, pageW / 2, y, { align: 'center' });
+    y += 10;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text(`PAYSLIP FOR THE MONTH OF ${month.toUpperCase()} ${year}`, pageW / 2, y, { align: 'center' });
+    y += 10;
+
+    const infoData = [
+        ['Employee ID:', employee.id, 'Name:', employee.name],
+        ['Designation:', employee.designation || '-', 'UAN:', employee.uanc || '-'],
+        ['Bank Acc:', employee.bankAccount || '-', 'IFSC:', employee.ifsc || '-']
+    ];
+
+    autoTable(doc, {
+        body: infoData,
+        startY: y,
+        theme: 'plain',
+        styles: { fontSize: 9, cellPadding: 1 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 30 }, 2: { fontStyle: 'bold', cellWidth: 30 } }
+    });
+    y = (doc as any).lastAutoTable.finalY + 5;
+
+    const earnRows: any[][] = [];
+    const dedRows: any[][] = [];
+    
+    earnRows.push(['Basic Pay', Math.round(result.earnings.basic)]);
+    if (result.earnings.da) earnRows.push(['D.A.', Math.round(result.earnings.da)]);
+    if (result.earnings.hra) earnRows.push(['H.R.A.', Math.round(result.earnings.hra)]);
+    if (result.earnings.conveyance) earnRows.push(['Conveyance', Math.round(result.earnings.conveyance)]);
+    if (result.earnings.otAmount) earnRows.push(['Overtime', Math.round(result.earnings.otAmount)]);
+    
+    dedRows.push(['P.F. (Emp)', Math.round(result.deductions.epf)]);
+    dedRows.push(['E.S.I. (Emp)', Math.round(result.deductions.esi)]);
+    if (result.deductions.pt) dedRows.push(['Prof. Tax', Math.round(result.deductions.pt)]);
+    if (result.deductions.it) dedRows.push(['Income Tax', Math.round(result.deductions.it)]);
+    if (result.deductions.advanceRecovery) dedRows.push(['Adv. Recovery', Math.round(result.deductions.advanceRecovery)]);
+
+    const maxLength = Math.max(earnRows.length, dedRows.length);
+    const body: any[][] = [];
+    for (let i = 0; i < maxLength; i++) {
+        const row = [
+            earnRows[i]?.[0] || '', earnRows[i]?.[1] || '',
+            dedRows[i]?.[0] || '', dedRows[i]?.[1] || ''
+        ];
+        body.push(row);
+    }
+
+    autoTable(doc, {
+        head: [['EARNINGS', 'AMOUNT', 'DEDUCTIONS', 'AMOUNT']],
+        body: body,
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0] }
+    });
+    y = (doc as any).lastAutoTable.finalY + 5;
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`NET PAY: Rs. ${result.netPay.toLocaleString('en-IN')}`, 14, y);
+    y += 10;
+    
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`This is a computer-generated payslip and does not require a signature.`, 14, y);
+
+    return new Uint8Array(doc.output('arraybuffer'));
+};
+
+export const generateDynamicMISReport = async (
+    template: DynamicMISReportTemplate,
+    employees: Employee[],
+    payrollHistory: PayrollResult[],
+    fromPeriod: { month: string, year: number },
+    toPeriod: { month: string, year: number },
+    companyProfile: CompanyProfile
+): Promise<string | null> => {
+    // 1. Filter results for start and end periods
+    const startResults = payrollHistory.filter((r: PayrollResult) => r.month === fromPeriod.month && r.year === fromPeriod.year);
+    const endResults = payrollHistory.filter((r: PayrollResult) => r.month === toPeriod.month && r.year === toPeriod.year);
+
+    // 2. Prepare periods for comparison (Year * 12 + MonthIndex)
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const startVal = fromPeriod.year * 12 + months.indexOf(fromPeriod.month);
+    const endVal = toPeriod.year * 12 + months.indexOf(toPeriod.month);
+
+    // 3. Filter active employees for the period
+    const activeEmployees = employees.filter(emp => {
+        const dojDate = new Date(emp.doj);
+        const dojVal = dojDate.getFullYear() * 12 + dojDate.getMonth();
+        
+        if (dojVal > endVal) return false; // Joined after the period ended
+        
+        if (emp.dol) {
+            const dolDate = new Date(emp.dol);
+            const dolVal = dolDate.getFullYear() * 12 + dolDate.getMonth();
+            if (dolVal < startVal) return false; // Left before the period started
+        }
+        
+        return true;
+    });
+
+    // 4. Prepare headers (Row labels directly from template)
+    const headers = template.rows.map(r => r.label);
+    
+    // 5. Process each active employee
+    const data = activeEmployees.map(emp => {
+        const startRes = startResults.find(r => r.employeeId === emp.id);
+        const endRes = endResults.find(r => r.employeeId === emp.id);
+        
+        const rowData: any[] = [];
+        const computedValues: Record<number, number> = {}; // rowNumber -> value
+
+        const getFieldValue = (res: PayrollResult | undefined, sKey: string): number => {
+            if (!res) return 0;
+            const pfWages = (res.earnings.basic || 0) + (res.earnings.da || 0);
+
+            // Handle virtual ECR keys
+            if (sKey === 'epfWages') return pfWages;
+            if (sKey === 'epsWages') return Math.min(15000, pfWages);
+            if (sKey === 'eeEPF') return res.deductions.epf || 0;
+            if (sKey === 'erEPF') return res.employerContributions?.epf || 0;
+            if (sKey === 'erEPS') return res.employerContributions?.eps || 0;
+            if (sKey === 'employerContributions.totalPF') return (res.employerContributions?.epf || 0) + (res.employerContributions?.eps || 0);
+            if (sKey === 'ncpDays') return res.daysInMonth - res.payableDays;
+
+            // Handle standard nested keys
+            const keys = sKey.split('.');
+            let temp: any = res;
+            for (const k of keys) {
+                temp = temp ? temp[k] : 0;
+            }
+            return typeof temp === 'number' ? temp : 0;
+        };
+
+        template.rows.forEach((row: DynamicMISReportRow) => {
+            let val: any = 0;
+            
+            if (row.sourceType === 'Employee') {
+                val = (emp as any)[row.sourceKey] || 0;
+            } else if (row.sourceType === 'PayrollStart' || row.sourceType === 'PayrollEnd' || row.sourceType === 'ECRStart' || row.sourceType === 'ECREnd') {
+                const targetRes = (row.sourceType.endsWith('Start')) ? startRes : endRes;
+                val = getFieldValue(targetRes, row.sourceKey);
+            } else if (row.sourceType === 'C2CStart' || row.sourceType === 'C2CEnd') {
+                const targetRes = (row.sourceType === 'C2CStart') ? startRes : endRes;
+                if (targetRes && row.sourceKeys && row.sourceKeys.length > 0) {
+                    val = row.sourceKeys.reduce((acc, sKey) => acc + getFieldValue(targetRes, sKey), 0);
+                }
+            } else if (row.sourceType === 'Compare') {
+                const valA = computedValues[row.calcRefs[0]] || 0;
+                const valB = computedValues[row.calcRefs[1]] || 0;
+                
+                const op = row.operator || '-';
+                if (op === '+') val = valA + valB;
+                else if (op === '*') val = valA * valB;
+                else if (op === '/') val = valB !== 0 ? valA / valB : 0;
+                else val = valA - valB;
+            } else if (row.sourceType === 'Percentage') {
+                const valA = computedValues[row.calcRefs[0]] || 0;
+                const valB = computedValues[row.calcRefs[1]] || 0;
+                val = valB !== 0 ? ((valA / valB) * 100).toFixed(2) + '%' : '0%';
+            } else if (row.sourceType === 'Text') {
+                val = row.sourceKey;
+            }
+
+            // Store numeric values for future calculations in the same row set
+            if (typeof val === 'number') {
+                computedValues[row.rowNumber] = val;
+                rowData.push(Math.round(val));
+            } else {
+                rowData.push(val);
+            }
+        });
+
+        return rowData;
+    });
+
+    const fileName = getStandardFileName(template.name.replace(/\s+/g, '_'), companyProfile, 'MIS', toPeriod.year);
+    const title = `MIS Report: ${template.name}`;
+    const summary = `Comparison: ${fromPeriod.month} ${fromPeriod.year} vs ${toPeriod.month} ${toPeriod.year}`;
+
+    // 6. Right-indent numeric columns
+    const columnStyles: any = {};
+    template.rows.forEach((row, index) => {
+        // Right align anything that isn't Employee Name or Static Text
+        if (row.sourceType !== 'Text' && row.sourceKey !== 'name' && row.sourceKey !== 'id') {
+            columnStyles[index] = { halign: 'right' };
+        }
+    });
+
+    return await generatePDFTableReport(title, headers, data, fileName, 'l', summary, companyProfile, columnStyles);
+};
+
+

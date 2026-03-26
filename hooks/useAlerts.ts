@@ -1,53 +1,44 @@
 
 import { useState, useCallback } from 'react';
-import { ModalType } from '../components/Shared/CustomModal';
 
-export interface AlertConfig {
-  isOpen: boolean;
-  type: ModalType;
+export type AlertType = 'success' | 'error' | 'info' | 'warning' | 'loading' | 'confirm' | 'danger';
+
+export interface Alert {
+  id: string;
+  type: AlertType;
   title: string;
   message: string | React.ReactNode;
   onConfirm?: () => void;
-  onSecondaryConfirm?: () => void;
-  confirmLabel?: string;
-  secondaryConfirmLabel?: string;
-  cancelLabel?: string;
+  onCancel?: () => void;
 }
 
 export const useAlerts = () => {
-  const [alertConfig, setAlertConfig] = useState<AlertConfig>({
-    isOpen: false,
-    type: 'info',
-    title: '',
-    message: '',
-  });
+  const [alerts, setAlerts] = useState<Alert[]>([]);
 
   const showAlert = useCallback((
-    type: ModalType,
+    type: AlertType,
     title: string,
     message: string | React.ReactNode,
     onConfirm?: () => void,
-    onSecondaryConfirm?: () => void,
-    confirmLabel?: string,
-    secondaryConfirmLabel?: string,
-    cancelLabel?: string
+    onCancel?: () => void
   ) => {
-    setAlertConfig({
-      isOpen: true,
-      type,
-      title,
-      message,
-      onConfirm,
-      onSecondaryConfirm,
-      confirmLabel,
-      secondaryConfirmLabel,
-      cancelLabel
-    });
+    const id = Math.random().toString(36).substring(2, 9);
+    const newAlert: Alert = { id, type, title, message, onConfirm, onCancel };
+    setAlerts(prev => [...prev, newAlert]);
+    
+    // Auto-dismiss for non-interactive success/info alerts after 5 seconds
+    if (!onConfirm && !onCancel && (type === 'success' || type === 'info')) {
+      setTimeout(() => {
+        dismissAlert(id);
+      }, 5000);
+    }
+    
+    return id;
   }, []);
 
-  const closeAlert = useCallback(() => {
-    setAlertConfig(prev => ({ ...prev, isOpen: false }));
+  const dismissAlert = useCallback((id: string) => {
+    setAlerts(prev => prev.filter(a => a.id !== id));
   }, []);
 
-  return { alertConfig, setAlertConfig, showAlert, closeAlert };
+  return { alerts, showAlert, dismissAlert };
 };

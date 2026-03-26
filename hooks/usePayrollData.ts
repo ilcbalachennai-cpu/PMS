@@ -1,5 +1,5 @@
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { 
   Employee, StatutoryConfig, CompanyProfile, PayrollResult, 
   Attendance, LeaveLedger, AdvanceLedger, FineRecord, 
@@ -138,6 +138,21 @@ export const usePayrollData = (showAlert: any) => {
     } catch (e) { return '../public/logo.png'; }
   });
 
+  const masters = useMemo(() => ({
+    designations,
+    divisions,
+    branches,
+    sites
+  }), [designations, divisions, branches, sites]);
+
+  const addEmployee = useCallback((data: Employee) => {
+    setEmployees(prev => [...prev, data]);
+  }, []);
+
+  const bulkAddEmployees = useCallback((data: Employee[]) => {
+    setEmployees(prev => [...prev, ...data]);
+  }, []);
+
   // --- PERSISTENCE HELPERS ---
   const safeSave = useCallback((key: string, data: any) => {
     if (isResetting) return;
@@ -253,6 +268,9 @@ export const usePayrollData = (showAlert: any) => {
     divisions, setDivisions,
     branches, setBranches,
     sites, setSites,
+    masters,
+    addEmployee,
+    bulkAddEmployees,
     logoUrl, setLogoUrl,
     safeSave, handleRollover, handleNuclearReset,
     isResetting

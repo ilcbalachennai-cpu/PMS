@@ -468,21 +468,9 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
                 localUsers[adminIndex].password = cloudAdminPass;
                 localStorage.setItem('app_users', JSON.stringify(localUsers));
                 // @ts-ignore
+                // @ts-ignore
                 if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
               }
-            } else if (localUsers.length === 0) {
-              // Recover missing admin
-              const recoveredAdmin = {
-                username: cloudAdminUser || 'admin',
-                password: cloudAdminPass || 'admin@123',
-                name: stored.userName || 'System Administrator',
-                role: 'Administrator',
-                email: stored.registeredTo
-              };
-              localUsers = [recoveredAdmin];
-              localStorage.setItem('app_users', JSON.stringify(localUsers));
-              // @ts-ignore
-              if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
             }
           }
 
@@ -495,6 +483,14 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
   }
 
   return { valid: true };
+};
+
+/**
+ * NEW: Manual Sync Trigger for Trial/License Status
+ */
+export const syncLicenseStatus = async (): Promise<boolean> => {
+  const result = await validateLicenseStartup();
+  return result.valid;
 };
 
 /**
@@ -521,7 +517,11 @@ export const trackCloudLogin = async (email: string, machineId: string) => {
   }
 };
 
-export const APP_VERSION = "1.0.12";
+export const APP_VERSION = "2.0.04";
+export const checkNewMessages = async (): Promise<{ scrollNews: string, statutory: string } | null> => {
+  return await fetchLatestMessages();
+};
+
 /**
  * Fetches the latest developer messages from Google Sheets
  */

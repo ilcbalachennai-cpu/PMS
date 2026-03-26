@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, net, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
+import nodemailer from 'nodemailer';
 
 import { spawn, execSync } from 'child_process';
 import * as os from 'os';
@@ -34,8 +35,8 @@ const getAppPaths = (base: string) => {
     return {
         root,
         data: path.join(root, 'Data'),
-        reports: path.join(root, 'Report files'),
-        backups: path.join(root, 'Data backup')
+        reports: path.join(root, 'Reports'),
+        backups: path.join(root, 'Backups')
     };
 };
 
@@ -629,6 +630,41 @@ ipcMain.handle('backup-and-install', async () => {
         console.error('❌ Pre-update backup or install failed:', e);
         // Attempt to re-init DB if failed
         if (appBasePath && !db) initializeDatabase(appBasePath);
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('send-payslip-email', async (_event, data: any) => {
+    const { smtp, to, subject, body, attachment } = data;
+    
+    try {
+        const transporter = nodemailer.createTransport({
+            host: smtp.host,
+            port: smtp.port,
+            secure: smtp.secure,
+            auth: {
+                user: smtp.user,
+                pass: smtp.pass
+            }
+        });
+
+        const mailOptions = {
+            from: `"${smtp.fromName}" <${smtp.user}>`,
+            to: to,
+            subject: subject,
+            text: body,
+            attachments: [
+                {
+                    filename: attachment.filename,
+                    content: Buffer.from(attachment.content)
+                }
+            ]
+        };
+
+        await transporter.sendMail(mailOptions);
+        return { success: true };
+    } catch (e: any) {
+        console.error('❌ Email sending failed:', e);
         return { success: false, error: e.message };
     }
 });

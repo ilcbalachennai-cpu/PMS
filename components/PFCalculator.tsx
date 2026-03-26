@@ -1,5 +1,4 @@
-
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Calculator, Download, FileText, AlertCircle, FileSpreadsheet, Building2, IndianRupee, Users, Lock } from 'lucide-react';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile } from '../types';
 import { generatePFECR, generatePFForm12A } from '../services/reportService';
@@ -9,10 +8,7 @@ interface PFCalculatorProps {
     payrollHistory: PayrollResult[];
     config: StatutoryConfig;
     companyProfile: CompanyProfile;
-    month: string;
-    setMonth: (m: string) => void;
-    year: number;
-    setYear: (y: number) => void;
+    activePeriod: { month: string; year: number; value: number; lastLockedValue: number; };
 }
 
 const PFCalculator: React.FC<PFCalculatorProps> = ({
@@ -20,12 +16,32 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
     payrollHistory,
     config,
     companyProfile,
-    month,
-    setMonth,
-    year,
-    setYear
+    activePeriod
 }) => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    const [month, setMonth] = useState<string>(() => {
+        if (activePeriod.lastLockedValue > 0) {
+            return months[activePeriod.lastLockedValue % 12];
+        }
+        return activePeriod.month;
+    });
+    const [year, setYear] = useState<number>(() => {
+        if (activePeriod.lastLockedValue > 0) {
+            return Math.floor(activePeriod.lastLockedValue / 12);
+        }
+        return activePeriod.year;
+    });
+
+    const hasData = useMemo(() => {
+        return payrollHistory.some(r => r.month === month && r.year === year);
+    }, [payrollHistory, month, year]);
+
+    const isLocked = useMemo(() => {
+        const mIdx = months.indexOf(month);
+        const currentVal = (year * 12) + mIdx;
+        return currentVal < activePeriod.value;
+    }, [month, year, activePeriod]);
     const currentYear = new Date().getFullYear();
     const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
 
@@ -137,13 +153,25 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
                         <Calculator size={28} className="text-white" />
                     </div>
                     <div>
-                        <h2 className="text-2xl font-black text-white">PF ECR Calculator</h2>
-                        <p className="text-slate-400 text-sm">Comprehensive Challan & ECR Analysis</p>
+                        <h3 className={`font-bold text-lg ${isLocked ? (hasData ? 'text-emerald-400' : 'text-slate-400') : 'text-amber-400'}`}>
+                            {isLocked ? (hasData ? 'PF ECR Data Finalized' : 'No Data for PF ECR') : 'PF ECR in Draft'}
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                            {isLocked
+                                ? (hasData ? `Showing frozen EPF records for ${month} ${year}.` : `No payroll records found for ${month} ${year} to calculate PF.`)
+                                : 'Calculate and review EPF contributions before finalizing.'}
+                        </p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3 bg-[#0f172a] p-2 rounded-xl border border-slate-700">
-                    <select value={month} onChange={e => setMonth(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-blue-400" title="Select Month" aria-label="Select Month">
+                    <select
+                        value={month}
+                        onChange={e => setMonth(e.target.value)}
+                        className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400"
+                        title="Select Month"
+                        aria-label="Select Month"
+                    >
                         {months.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
                     <select value={year} onChange={e => setYear(+e.target.value)} className="bg-transparent px-4 py-1 text-sm text-white font-bold outline-none focus:text-blue-400" title="Select Year" aria-label="Select Year">

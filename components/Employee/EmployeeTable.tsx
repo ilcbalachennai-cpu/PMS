@@ -29,6 +29,7 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                     <tr>
                         <th className="px-3 py-4 bg-[#0f172a] w-2/6">Identity</th>
                         <th className="px-2 py-4 bg-[#0f172a] w-1.5/6">Organization</th>
+                        <th className="px-2 py-4 bg-[#0f172a] w-1.5/6">Contact</th>
                         <th className="px-2 py-4 bg-[#0f172a] w-[90px] text-center">Join Date</th>
                         <th className="px-2 py-4 bg-[#0f172a] w-[100px] text-center">Wages</th>
                         <th className="px-3 py-4 text-right bg-[#0f172a] w-[80px]">Actions</th>
@@ -60,6 +61,10 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                             <td className="px-2 py-3 overflow-hidden">
                                 <div className="text-[9px] text-sky-400 font-bold uppercase truncate">{emp.designation}</div>
                                 <div className="text-[8px] text-slate-500 uppercase truncate">{emp.branch}</div>
+                            </td>
+                            <td className="px-2 py-3 overflow-hidden">
+                                <div className="text-[9px] text-emerald-400 font-bold truncate">{emp.email || 'No Email'}</div>
+                                <div className="text-[8px] text-slate-500 font-mono truncate">{emp.mobile}</div>
                             </td>
                             <td className="px-2 py-3 text-center">
                                 <div className="text-[10px] font-mono text-slate-300 whitespace-nowrap">{formatDateInd(emp.doj)}</div>

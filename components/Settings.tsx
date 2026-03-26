@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2 } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Send } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -1163,6 +1163,44 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <div className="space-y-1"><label htmlFor="profile-email" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Mail size={10} /> Official Email</label><input id="profile-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="mail@example.com" value={profileData.email} onChange={e => setProfileData({ ...profileData, email: e.target.value })} title="Official Email Address" aria-label="Official Email Address" /></div>
                                     <div className="space-y-1 md:col-span-2"><label htmlFor="profile-website" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Globe size={10} /> Corporate Website</label><input id="profile-website" type="url" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="https://www.example.com" value={profileData.website} onChange={e => setProfileData({ ...profileData, website: e.target.value })} title="Corporate Website URL" aria-label="Corporate Website URL" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-business-nature" className="text-[10px] font-bold text-slate-400 uppercase">Nature of Business</label><select id="profile-business-nature" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.natureOfBusiness} onChange={e => setProfileData({ ...profileData, natureOfBusiness: e.target.value })} title="Select Nature of Business" aria-label="Select Nature of Business">{NATURE_OF_BUSINESS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select></div>
+                                </div>
+                            </div>
+
+                            {/* --- SMTP Configuration --- */}
+                            <div className="md:col-span-3">
+                                <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2 flex items-center gap-2"><Send size={10} /> SMTP Configuration (For Mailing Payslips)</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-left">
+                                    <div className="space-y-1 md:col-span-2">
+                                        <label htmlFor="smtp-host" className="text-[10px] font-bold text-slate-400 uppercase">SMTP Host</label>
+                                        <input id="smtp-host" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500" placeholder="smtp.gmail.com" value={profileData.smtpConfig?.host || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', secure: false, fromName: '', fromEmail: '' }), host: e.target.value } })} title="SMTP Host" aria-label="SMTP Host" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label htmlFor="smtp-port" className="text-[10px] font-bold text-slate-400 uppercase">Port</label>
+                                        <input id="smtp-port" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500" value={profileData.smtpConfig?.port || 587} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', secure: false, fromName: '', fromEmail: '' }), port: parseInt(e.target.value) || 587 } })} title="SMTP Port" aria-label="SMTP Port" />
+                                    </div>
+                                    <div className="flex items-end pb-3">
+                                        <label className="flex items-center gap-2 cursor-pointer group">
+                                            <input type="checkbox" className="hidden" checked={profileData.smtpConfig?.secure || false} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', fromName: '', fromEmail: '' }), secure: e.target.checked } })} />
+                                            <div className={`w-5 h-5 rounded border ${profileData.smtpConfig?.secure ? 'bg-amber-500 border-amber-500' : 'bg-slate-900 border-slate-700'} flex items-center justify-center transition-colors`}>{profileData.smtpConfig?.secure && <div className="w-2 h-2 bg-white rounded-full" />}</div>
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase group-hover:text-slate-300">Use SSL/TLS</span>
+                                        </label>
+                                    </div>
+                                    <div className="space-y-1 md:col-span-2">
+                                        <label htmlFor="smtp-user" className="text-[10px] font-bold text-slate-400 uppercase">SMTP User (Email)</label>
+                                        <input id="smtp-user" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500" value={profileData.smtpConfig?.user || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, pass: '', secure: false, fromName: '', fromEmail: '' }), user: e.target.value } })} title="SMTP Username" aria-label="SMTP Username" />
+                                    </div>
+                                    <div className="space-y-1 md:col-span-2">
+                                        <label htmlFor="smtp-pass" className="text-[10px] font-bold text-slate-400 uppercase">SMTP Password</label>
+                                        <input id="smtp-pass" type="password" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500 text-sm" value={profileData.smtpConfig?.pass || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', secure: false, fromName: '', fromEmail: '' }), pass: e.target.value } })} title="SMTP Password" aria-label="SMTP Password" />
+                                    </div>
+                                    <div className="space-y-1 md:col-span-2">
+                                        <label htmlFor="smtp-from-name" className="text-[10px] font-bold text-slate-400 uppercase">Sender Name</label>
+                                        <input id="smtp-from-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500" value={profileData.smtpConfig?.fromName || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', secure: false, fromEmail: '' }), fromName: e.target.value } })} title="Email Sender Name" aria-label="Email Sender Name" />
+                                    </div>
+                                    <div className="space-y-1 md:col-span-2">
+                                        <label htmlFor="smtp-from-email" className="text-[10px] font-bold text-slate-400 uppercase">Sender Email (If Different)</label>
+                                        <input id="smtp-from-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500" value={profileData.smtpConfig?.fromEmail || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', secure: false, fromName: '' }), fromEmail: e.target.value } })} title="Email Sender Email" aria-label="Email Sender Email" />
+                                    </div>
                                 </div>
                             </div>
                         </div>

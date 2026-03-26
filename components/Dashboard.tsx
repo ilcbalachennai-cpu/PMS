@@ -1,21 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 import { IndianRupee, Users, Building, TrendingUp, Database, Calendar, Calculator, ArrowRight, ExternalLink, Sparkles } from 'lucide-react';
-import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, View, CompanyProfile, PayrollResult } from '../types';
+import { Employee, View, PayrollResult } from '../types';
+import { usePayrollData } from '../hooks/usePayrollData';
+import { usePayrollPeriod } from '../hooks/usePayrollPeriod';
 
 interface DashboardProps {
+  setActiveView: (view: View) => void;
   employees: Employee[];
-  config: StatutoryConfig;
-  companyProfile: CompanyProfile;
-  attendances: Attendance[];
-  leaveLedgers: LeaveLedger[];
-  advanceLedgers: AdvanceLedger[];
-  payrollHistory: PayrollResult[];
-  month: string;
-  year: number;
-  setMonth: (m: string) => void;
-  setYear: (y: number) => void;
-  onNavigate: (view: View, tab?: string) => void;
+  results: PayrollResult[];
+  showAlert: any;
 }
 
 const MONTHS_LIST = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -23,27 +17,29 @@ const MONTHS_LIST = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 // Find the most recently processed payroll month from history
 const getLastProcessedPeriod = (history: PayrollResult[]) => {
   if (history.length === 0) return null;
-  const sorted = history.slice().sort((a, b) =>
+  const sorted = history.slice().sort((a, b) => 
     (b.year * 12 + MONTHS_LIST.indexOf(b.month)) - (a.year * 12 + MONTHS_LIST.indexOf(a.month))
   );
   return { month: sorted[0].month, year: sorted[0].year };
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attendances, payrollHistory, month, year, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ setActiveView, employees, results, showAlert }) => {
+  const { companyProfile, attendances } = usePayrollData(showAlert);
+  const { globalMonth, globalYear } = usePayrollPeriod();
 
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
   const months = MONTHS_LIST;
 
   // Local picker state — always defaults to last processed month, not the global period
-  const lastProcessed = useMemo(() => getLastProcessedPeriod(payrollHistory), [payrollHistory]);
-  const [localMonth, setLocalMonth] = useState<string>(() => lastProcessed?.month || month);
-  const [localYear, setLocalYear] = useState<number>(() => lastProcessed?.year || year);
+  const lastProcessed = useMemo(() => getLastProcessedPeriod(results), [results]);
+  const [localMonth, setLocalMonth] = useState<string>(() => lastProcessed?.month || globalMonth);
+  const [localYear, setLocalYear] = useState<number>(() => lastProcessed?.year || globalYear);
 
   const QuickLinks = ({ centered = false }: { centered?: boolean }) => (
     <div className={`grid grid-cols-1 ${centered ? 'md:grid-cols-2 max-w-3xl' : 'md:grid-cols-3'} gap-4 w-full`}>
-      <button
-        onClick={() => onNavigate(View.PFCalculator)}
+      <button 
+        onClick={() => setActiveView(View.PFCalculator)}
         title="Open PF ECR Calculator"
         aria-label="Open PF ECR Calculator"
         className="col-span-1 bg-gradient-to-r from-blue-900/30 to-[#1e293b] p-4 rounded-xl border border-blue-800/30 flex items-center justify-between group hover:border-blue-500/50 transition-all shadow-lg cursor-pointer text-left"
@@ -62,9 +58,9 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
         </div>
       </button>
 
-      <a
-        href={companyProfile.externalAppUrl || '#'}
-        target="_blank"
+      <a 
+        href={companyProfile?.externalAppUrl || '#'} 
+        target="_blank" 
         rel="noopener noreferrer"
         title="Launch AI Studio App (External)"
         aria-label="Launch AI Studio App (External)"
@@ -83,6 +79,26 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
           <ExternalLink size={16} />
         </div>
       </a>
+
+      <button 
+        onClick={() => setActiveView(View.MIS)}
+        title="Open Management Info (MIS)"
+        aria-label="Open Management Info (MIS)"
+        className="col-span-1 bg-gradient-to-r from-emerald-900/30 to-[#1e293b] p-4 rounded-xl border border-emerald-800/30 flex items-center justify-between group hover:border-emerald-500/50 transition-all shadow-lg cursor-pointer text-left"
+      >
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-emerald-600 rounded-xl text-white shadow-lg shadow-emerald-900/50 group-hover:scale-110 transition-transform">
+            <IndianRupee size={24} />
+          </div>
+          <div>
+            <h3 className="font-bold text-white text-[13px] leading-tight whitespace-nowrap">Management Info (MIS)</h3>
+            <p className="text-[10px] text-emerald-200/70">Advanced Reporting & Mailing</p>
+          </div>
+        </div>
+        <div className="p-2 bg-slate-800 rounded-full text-slate-400 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+          <ArrowRight size={16} />
+        </div>
+      </button>
     </div>
   );
 
@@ -100,7 +116,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
           <h2 className="text-3xl font-black text-white tracking-tight">System Ready</h2>
           <div className="p-6 bg-[#1e293b]/50 border border-slate-800 rounded-xl shadow-xl backdrop-blur-sm">
             <div className="text-slate-300 text-lg font-medium leading-relaxed">
-              Data is empty. Go to Data Management under <button title="Navigate to Data Management" aria-label="Navigate to Data Management" onClick={() => onNavigate(View.Settings, 'DATA')} className="text-blue-400 font-bold hover:text-blue-300 border-b border-blue-500/50 hover:border-blue-400 transition-colors inline-block cursor-pointer">Configuration</button> section to restore Data else <button title="Navigate to Employees to start afresh" aria-label="Navigate to Employees to start afresh" onClick={() => onNavigate(View.Employees)} className="text-emerald-400 font-bold hover:text-emerald-300 border-b border-emerald-500/50 hover:border-emerald-400 transition-colors inline-block cursor-pointer">start afresh</button>.
+              Data is empty. Go to Data Management under <button title="Navigate to Data Management" aria-label="Navigate to Data Management" onClick={() => setActiveView(View.Settings)} className="text-blue-400 font-bold hover:text-blue-300 border-b border-blue-500/50 hover:border-blue-400 transition-colors inline-block cursor-pointer">Configuration</button> section to restore Data else <button title="Navigate to Employees to start afresh" aria-label="Navigate to Employees to start afresh" onClick={() => setActiveView(View.Employees)} className="text-emerald-400 font-bold hover:text-emerald-300 border-b border-emerald-500/50 hover:border-emerald-400 transition-colors inline-block cursor-pointer">start afresh</button>.
             </div>
           </div>
         </div>
@@ -113,26 +129,26 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
     );
   }
 
-  // ── Derive all overview stats from payrollHistory (last saved batch) ───────
+  // ── Derive all overview stats from results (last saved batch) ───────
 
   // Find the most recent finalized batch; fall back to any saved batch for the selected local month/year
   const sourceRecords = useMemo(() => {
     // First try the locally selected month/year
-    const selected = payrollHistory.filter(r => r.month === localMonth && r.year === localYear);
+    const selected = results.filter(r => r.month === localMonth && r.year === localYear);
     if (selected.length > 0) return selected;
     // Else fall back to most recent batch
-    const sorted = payrollHistory.slice().sort((a, b) =>
+    const sorted = results.slice().sort((a, b) => 
       (b.year * 12 + MONTHS_LIST.indexOf(b.month)) - (a.year * 12 + MONTHS_LIST.indexOf(a.month))
     );
     return sorted.filter(r => r.month === sorted[0]?.month && r.year === sorted[0]?.year);
-  }, [payrollHistory, localMonth, localYear]);
+  }, [results, localMonth, localYear]);
 
-  const sourceLabel = sourceRecords.length > 0
-    ? `${sourceRecords[0].month} ${sourceRecords[0].year}`
+  const sourceLabel = sourceRecords.length > 0 
+    ? `${sourceRecords[0].month} ${sourceRecords[0].year}` 
     : null;
 
   const totalGross = sourceRecords.reduce((acc, r) => acc + (r.earnings?.total || 0), 0);
-  const totalEPF = sourceRecords.reduce((acc, r) =>
+  const totalEPF = sourceRecords.reduce((acc, r) => 
     acc + (r.deductions?.epf || 0) + (r.employerContributions?.epf || 0) + (r.employerContributions?.eps || 0), 0);
   const activeCount = sourceRecords.filter(r => (r.earnings?.total || 0) > 0).length;
   const totalLOP = sourceRecords.reduce((acc, r) => {
@@ -141,7 +157,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
   }, 0);
 
   const stats = [
-    { label: 'Total Payroll Cost', value: totalGross > 0 ? `₹${(totalGross / 100000).toFixed(2)}L` : '—', icon: IndianRupee, color: 'text-blue-400', bg: 'bg-blue-900/30' },
+    { label: 'Total Payroll Cost', value: totalGross > 0 ? `₹${(totalGross/100000).toFixed(2)}L` : '—', icon: IndianRupee, color: 'text-blue-400', bg: 'bg-blue-900/30' },
     { label: 'Active Employees', value: activeCount || employees.length, icon: Users, color: 'text-emerald-400', bg: 'bg-emerald-900/30' },
     { label: 'EPF Pool', value: totalEPF > 0 ? `₹${totalEPF.toLocaleString()}` : '—', icon: Building, color: 'text-amber-400', bg: 'bg-amber-900/30' },
     { label: 'Total LOP Days', value: totalLOP, icon: TrendingUp, color: 'text-red-400', bg: 'bg-red-900/30' },
@@ -154,9 +170,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
   }));
 
   const pieData = [
-    // EPF = total A/c 1 (EE share + ER diff share) — matches ECR Calculator
     { name: 'EPF (EE+ER)', value: sourceRecords.reduce((a, c) => a + (c.deductions?.epf || 0) + (c.deductions?.vpf || 0) + (c.employerContributions?.epf || 0), 0) },
-    // EPS = ER pension contribution — A/c 10
     { name: 'EPS (ER)', value: sourceRecords.reduce((a, c) => a + (c.employerContributions?.eps || 0), 0) },
     { name: 'ESI', value: sourceRecords.reduce((a, c) => a + (c.deductions?.esi || 0), 0) },
     { name: 'Bonus & Gratuity', value: sourceRecords.reduce((a, c) => a + (c.earnings?.bonus || 0) + (c.gratuityAccrual || 0), 0) },
@@ -173,19 +187,19 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
         </h2>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2 bg-[#1e293b] p-1 rounded-lg border border-slate-700">
-            <select
+            <select 
               title="Select Month"
               aria-label="Select Month"
-              value={localMonth}
+              value={localMonth} 
               onChange={e => setLocalMonth(e.target.value)}
               className="bg-[#0f172a] border border-slate-700 rounded-md px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-bold"
             >
               {months.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
-            <select
+            <select 
               title="Select Year"
               aria-label="Select Year"
-              value={localYear}
+              value={localYear} 
               onChange={e => setLocalYear(+e.target.value)}
               className="bg-[#0f172a] border border-slate-700 rounded-md px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-bold"
             >
@@ -240,9 +254,9 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
                 <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
                 <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
-                <Tooltip
+                <Tooltip 
                   cursor={{ fill: '#334155' }}
-                  contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
+                  contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', color: '#fff', fontSize: '12px' }} 
                 />
                 <Bar dataKey="Net" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={25} />
                 <Bar dataKey="Deductions" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={25} />
@@ -270,7 +284,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip
+                <Tooltip 
                   contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', color: '#ffffff', fontSize: '12px' }}
                   itemStyle={{ color: '#ffffff' }}
                 />
@@ -281,7 +295,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
             {pieData.map((d, i) => (
               <div key={i} className="flex items-center justify-between text-[10px] px-2">
                 <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full bg-stat-${i}`}></div>
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
                   <span className="text-slate-400 font-medium">{d.name}</span>
                 </div>
                 <span className="font-bold text-white">₹{d.value.toLocaleString()}</span>

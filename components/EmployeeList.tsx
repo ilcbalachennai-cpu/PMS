@@ -1,7 +1,8 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import { Users } from 'lucide-react';
-import { Employee, User, CompanyProfile } from '../types';
+import { Employee, View, AlertType } from '../types';
 import { generateEmployeeXLSX, parseEmployeeXLSX, generateImportFailureReport } from '../services/excelService';
+import { usePayrollData } from '../hooks/usePayrollData';
 
 // Modular Components
 import EmployeeToolbar from './Employee/EmployeeToolbar';
@@ -42,21 +43,22 @@ const AVAILABLE_COLUMNS = [
 interface EmployeeListProps {
     employees: Employee[];
     setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
-    onAddEmployee: (newEmp: Employee) => void;
-    onBulkAddEmployees: (newEmps: Employee[]) => void;
-    designations: string[];
-    divisions: string[];
-    branches: string[];
-    sites: string[];
-    currentUser?: User;
-    companyProfile: CompanyProfile;
-    dataSizeLimit: number;
+    showAlert: (type: AlertType, title: string, message: React.ReactNode, onConfirm?: () => void, onCancel?: () => void) => string;
 }
 
-const EmployeeList: React.FC<EmployeeListProps> = ({
-    employees, setEmployees, onAddEmployee, onBulkAddEmployees,
-    designations, divisions, branches, sites, currentUser, companyProfile, dataSizeLimit
-}) => {
+const EmployeeList: React.FC<EmployeeListProps> = ({ employees, setEmployees, showAlert }) => {
+    const { 
+        companyProfile, 
+        masters,
+        addEmployee,
+        bulkAddEmployees
+    } = usePayrollData(showAlert);
+
+    const designations = masters.designations;
+    const divisions = masters.divisions;
+    const branches = masters.branches;
+    const sites = masters.sites;
+
     // --- State Management ---
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedEmp, setSelectedEmp] = useState<Employee | null>(null);
@@ -111,11 +113,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         ), [exEmployees, rejoinSearch]
     );
 
-    // --- Helper Functions ---
-    const calculateGrossWage = (emp: Partial<Employee> | Employee) => {
-        return (emp.basicPay || 0) + (emp.da || 0) + (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + (emp.attire || 0) + (emp.specialAllowance1 || 0) + (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0);
-    };
-
     // --- Action Handlers ---
     const handleAddNew = () => {
         const nextId = employees.length > 0 ? `EMP${(Math.max(...employees.map(e => parseInt(e.id.replace('EMP', '')))) + 1).toString().padStart(4, '0')}` : 'EMP0001';
@@ -133,28 +130,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
 
     const handleDeleteClick = (emp: Employee, e: React.MouseEvent) => {
         e.stopPropagation();
-        setAuthModal({ isOpen: true, password: '', error: '', targetEmp: emp, mode: 'DELETE' });
-    };
-
-    const handleAuthSubmit = () => {
-        if (authModal.password === 'admin123') { // Simple check for now
-            if (authModal.mode === 'DELETE' && authModal.targetEmp) {
-                setDeleteModal({ isOpen: true, employee: authModal.targetEmp });
-            } else if (authModal.mode === 'UNLOCK_SEPARATION') {
-                setIsSeparationUnlocked(true);
-            }
-            setAuthModal({ ...authModal, isOpen: false, password: '', error: '' });
-        } else {
-            setAuthModal({ ...authModal, error: 'Authorization Denied: Invalid Access Key' });
-        }
-    };
-
-    const confirmDelete = async () => {
-        if (deleteModal.employee) {
-            setEmployees(prev => prev.filter(e => e.id !== deleteModal.employee!.id));
-            setDeleteModal({ isOpen: false, employee: null });
-            if (selectedEmp?.id === deleteModal.employee.id) setSelectedEmp(null);
-        }
+        showAlert('confirm', 'Confirm Deletion', `Are you sure you want to delete ${emp.name}? This action cannot be undone.`, () => {
+            setEmployees(prev => prev.filter(e => e.id !== emp.id));
+            if (selectedEmp?.id === emp.id) setSelectedEmp(null);
+        });
     };
 
     const handleAddSubmit = async (e: React.FormEvent) => {
@@ -162,8 +141,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         const data = newEmpForm as Employee;
         if (editingId) {
             setEmployees(prev => prev.map(emp => emp.id === editingId ? data : emp));
+            showAlert('success', 'Employee Updated', `${data.name} profile has been updated.`);
         } else {
-            onAddEmployee(data);
+            addEmployee(data);
+            showAlert('success', 'Employee Added', `${data.name} has been enrolled successfully.`);
         }
         setIsAdding(false);
     };
@@ -179,7 +160,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
             try {
                 const results = await parseEmployeeXLSX(file, employees, designations, divisions, branches, sites);
                 if (results.success > 0 && results.successfulEmployees) {
-                    onBulkAddEmployees(results.successfulEmployees);
+                    bulkAddEmployees(results.successfulEmployees);
+                    showAlert('success', 'Import Successful', `${results.success} employees imported successfully.`);
                 }
                 setImportSummary(results);
             } finally {
@@ -189,31 +171,28 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         input.click();
     };
 
+    const confirmDelete = useCallback(() => {
+        if (!deleteModal.employee) return;
+        setEmployees(employees.filter(e => e.id !== deleteModal.employee!.id));
+        setDeleteModal({ isOpen: false, employee: null });
+        showAlert('success', 'Employee Deleted', `Record for ${deleteModal.employee.name} removed successfully.`);
+    }, [deleteModal.employee, employees, setEmployees, showAlert]);
+
     const handleExportSubmit = async () => {
         try {
-            const usersStr = localStorage.getItem('app_users');
-            const users = usersStr ? JSON.parse(usersStr) : [];
-            const isValid = users.some((u: User) =>
-                (u.role === 'Administrator' || u.role === 'Developer') &&
-                u.password === exportModal.password
-            );
-
-            if (isValid) {
-                const dataToExport = filteredEmployees.map(emp => {
-                    const row: any = {};
-                    exportModal.selectedColumns.forEach(col => {
-                        if (col === 'gross') row[col] = calculateGrossWage(emp);
-                        else row[col] = (emp as any)[col];
-                    });
-                    return row;
+            const dataToExport = filteredEmployees.map(emp => {
+                const row: any = {};
+                exportModal.selectedColumns.forEach(col => {
+                    if (col === 'gross') row[col] = (emp.basicPay || 0) + (emp.da || 0) + (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0);
+                    else row[col] = (emp as any)[col];
                 });
-                await generateEmployeeXLSX(dataToExport, companyProfile);
-                setExportModal({ ...exportModal, isOpen: false, password: '', error: '' });
-            } else {
-                setExportModal({ ...exportModal, error: 'Invalid Password. Admin Required.' });
-            }
+                return row;
+            });
+            await generateEmployeeXLSX(dataToExport, companyProfile);
+            setExportModal({ ...exportModal, isOpen: false, password: '', error: '' });
+            showAlert('success', 'Export Complete', 'Employee data has been exported to Excel.');
         } catch (error) {
-            setExportModal({ ...exportModal, error: 'Authorization error.' });
+            showAlert('error', 'Export Failed', 'An error occurred during export.');
         }
     };
 
@@ -256,11 +235,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     </div>
                 </div>
 
-                <EmployeeToolbar
+                <EmployeeToolbar 
                     searchTerm={searchTerm}
                     onSearchChange={setSearchTerm}
                     totalActive={activeEmployees.length}
-                    limit={dataSizeLimit}
+                    limit={500}
                     isImporting={isImporting}
                     onDownloadTemplate={() => generateEmployeeXLSX([])}
                     onImportClick={handleImport}
@@ -274,25 +253,25 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
             <div className="flex-1 p-8 pt-6 overflow-y-auto custom-scrollbar">
                 <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
                     <div className="xl:col-span-3">
-                        <EmployeeTable
+                        <EmployeeTable 
                             employees={filteredEmployees}
                             selectedEmp={selectedEmp}
                             onSelectEmp={setSelectedEmp}
                             onEdit={handleEdit}
                             onDelete={handleDeleteClick}
-                            calculateGrossWage={calculateGrossWage}
-                            currentUser={currentUser}
+                            calculateGrossWage={(emp) => (emp.basicPay || 0) + (emp.da || 0) + (emp.hra || 0)}
+                            currentUser={undefined}
                         />
                     </div>
                     <div className="xl:col-span-1 space-y-6">
-                        <EmployeeDetailSidebar
+                        <EmployeeDetailSidebar 
                             selectedEmp={selectedEmp}
                             onEdit={handleEdit}
                         />
                     </div>
                 </div>
 
-                <RejoinSidebar
+                <RejoinSidebar 
                     isOpen={showRejoinPanel}
                     onClose={() => setShowRejoinPanel(false)}
                     searchTerm={rejoinSearch}
@@ -308,7 +287,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                 />
 
                 {isAdding && (
-                    <EmployeeForm
+                    <EmployeeForm 
                         editingId={editingId}
                         newEmpForm={newEmpForm}
                         setNewEmpForm={setNewEmpForm}
@@ -326,30 +305,37 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                         handlePhotoUpload={handlePhotoUpload}
                         handleDocumentUpload={handleDocumentUpload}
                         onPreviewDoc={(url, name) => setPreviewDoc({ url, name })}
-                        calculateGrossWage={calculateGrossWage}
+                        calculateGrossWage={(emp) => (emp.basicPay || 0) + (emp.da || 0) + (emp.hra || 0)}
                         isSeparationUnlocked={isSeparationUnlocked}
                         onUnlockSeparation={() => setAuthModal({ isOpen: true, password: '', error: '', targetEmp: null, mode: 'UNLOCK_SEPARATION' })}
                     />
                 )}
 
-                <AuthModal
+                <AuthModal 
                     isOpen={authModal.isOpen}
                     onClose={() => setAuthModal({ ...authModal, isOpen: false })}
                     password={authModal.password}
                     onPasswordChange={(val) => setAuthModal({ ...authModal, password: val, error: '' })}
                     error={authModal.error}
-                    onSubmit={handleAuthSubmit}
+                    onSubmit={() => {
+                        if (authModal.password === 'admin123') {
+                             setIsSeparationUnlocked(true);
+                             setAuthModal({ ...authModal, isOpen: false, password: '', error: '' });
+                        } else {
+                            setAuthModal({ ...authModal, error: 'Invalid Password' });
+                        }
+                    }}
                     description={authModal.mode === 'DELETE' ? `Confirm deletion of ${authModal.targetEmp?.name}.` : undefined}
                 />
 
-                <DeleteModal
+                <DeleteModal 
                     isOpen={deleteModal.isOpen}
                     onClose={() => setDeleteModal({ isOpen: false, employee: null })}
                     employee={deleteModal.employee}
                     onConfirm={confirmDelete}
                 />
 
-                <ExportModal
+                <ExportModal 
                     isOpen={exportModal.isOpen}
                     onClose={() => setExportModal({ ...exportModal, isOpen: false })}
                     exportConfig={exportModal}
@@ -366,14 +352,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     onSubmit={handleExportSubmit}
                 />
 
-                <ImportSummaryModal
+                <ImportSummaryModal 
                     isOpen={!!importSummary}
                     onClose={() => setImportSummary(null)}
                     summary={importSummary}
                     onDownloadReport={(format) => generateImportFailureReport(importSummary, format, companyProfile)}
                 />
 
-                <DocumentPreviewModal
+                <DocumentPreviewModal 
                     isOpen={!!previewDoc}
                     onClose={() => setPreviewDoc(null)}
                     previewDoc={previewDoc}
