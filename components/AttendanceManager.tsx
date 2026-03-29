@@ -3,7 +3,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { Upload, CheckCircle2, AlertCircle, Save, Lock, AlertTriangle, Users, Edit2, X, CheckCircle, HelpCircle, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, PayrollResult, LeaveLedger, CompanyProfile } from '../types';
-import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
+import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
 
 interface AttendanceManagerProps {
   employees: Employee[];
@@ -19,7 +19,6 @@ interface AttendanceManagerProps {
   setLeaveLedgers?: (ledgers: LeaveLedger[]) => void; // Added setter for syncing
   hideContextSelector?: boolean;
   companyProfile: CompanyProfile;
-  activePeriod: { month: string; year: number; value: number; };
 }
 
 const AttendanceManager: React.FC<AttendanceManagerProps> = ({
@@ -34,8 +33,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   leaveLedgers,
   setLeaveLedgers,
   hideContextSelector = false,
-  companyProfile,
-  activePeriod
+  companyProfile
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -58,17 +56,10 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const daysInMonth = new Date(year, months.indexOf(month) + 1, 0).getDate();
 
-  // Check if current month is locked (Strict Sequential Lock)
+  // Check if current month is locked
   const isLocked = useMemo(() => {
-    const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const currentVal = (year * 12) + monthsArr.indexOf(month);
-    
-    // Locked if it's a historical period OR specifically finalized
-    const isHistorical = currentVal < activePeriod.value;
-    const isSpecificallyFinalized = savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
-    
-    return isHistorical || isSpecificallyFinalized;
-  }, [savedRecords, month, year, activePeriod]);
+    return savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
+  }, [savedRecords, month, year]);
 
   // Filter Active Employees for Attendance
   const activeEmployees = useMemo(() => {
@@ -255,7 +246,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Attendance");
     const fileName = getStandardFileName('Attendance_Template', companyProfile, month, year);
-    await generateExcelWorkbook(wb, fileName);
+    await generateTemplateWorkbook(wb, fileName);
   };
 
   const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -398,7 +389,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
         </div>
       )}
 
-      <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-4 text-white">
           {!hideContextSelector && (
             <>
@@ -426,51 +417,52 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
               </select>
             </>
           )}
-          <div className="text-sm text-slate-300 pl-4 border-l border-slate-700">
-            Total days: <span className="text-sky-400 font-bold">{daysInMonth}</span>
+          <div className="text-[11px] font-bold text-slate-300 pl-4 border-l border-slate-700 uppercase tracking-wider">
+            Total days: <span className="text-sky-400">{daysInMonth}</span>
           </div>
         </div>
 
         <div className="flex gap-3">
           <button
+            title={justSaved ? 'Enable editing' : 'Save attendance records'}
+            aria-label={justSaved ? 'Enable editing' : 'Save attendance records'}
             onClick={justSaved ? () => setJustSaved(false) : handleSave}
             disabled={isSaving || isLocked}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed ${justSaved
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-bold transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed text-[12px] ${justSaved
               ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-900/20'
               : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20'
               }`}
           >
             {isSaving ? (
-              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
+              <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white/30 border-t-white" />
             ) : isLocked ? (
-              <Lock size={18} />
+              <Lock size={14} />
             ) : justSaved ? (
-              <Edit2 size={18} />
+              <Edit2 size={14} />
             ) : (
-              <Save size={18} />
+              <Save size={14} />
             )}
-
             {isLocked ? 'Locked' : justSaved ? 'Modify Attendance' : 'Save Attendance'}
           </button>
 
           <button
             onClick={downloadTemplate}
-            className="flex items-center gap-2 bg-slate-700 text-slate-200 px-4 py-2.5 rounded-lg font-bold transition-all border border-slate-600 hover:bg-slate-600 text-sm"
-            title="Download Excel Template"
-            aria-label="Download Excel Template"
+            className="flex items-center gap-1.5 bg-slate-700 text-slate-200 px-3 py-2 rounded-lg font-bold transition-all border border-slate-600 hover:bg-slate-600 text-[12px]"
+            title="Download Excel template"
+            aria-label="Download Excel template"
           >
-            <Download size={16} /> Template
+            <Download size={15} /> Download Template
           </button>
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading || isLocked}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-bold transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed"
-            title="Import Excel Data"
-            aria-label="Import Excel Data"
+            disabled={isUploading || isLocked || justSaved}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed text-[12px]"
+            title="Import from Excel"
+            aria-label="Import from Excel"
           >
-            {isUploading ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : <Upload size={18} />}
-            Import
+            {isUploading ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : <Upload size={15} />}
+            Import Data
           </button>
           <input
             type="file"
@@ -486,18 +478,16 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
 
       <div className={`bg-[#1e293b] rounded-xl border border-slate-800 overflow-hidden shadow-2xl ${isLocked ? 'opacity-80 pointer-events-none' : ''}`}>
         <table className="w-full text-left">
-          <thead className="bg-[#0f172a] text-sky-400 text-xs uppercase tracking-wider font-bold">
+          <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-normal font-bold">
             <tr>
-              <th className="px-6 py-4">Employee Identity</th>
-              <th className="px-4 py-4 text-center">Present Days</th>
-              {/* UPDATED: Renamed from EL (Earned) to EL (Availed) */}
-              <th className="px-4 py-4 text-center">EL (Availed)</th>
-              {/* UPDATED: Font color to Orange */}
-              <th className="px-4 py-4 text-center text-orange-400">EL Encash</th>
-              <th className="px-4 py-4 text-center">SL (Sick)</th>
-              <th className="px-4 py-4 text-center">CL (Casual)</th>
-              <th className="px-4 py-4 text-center text-red-400">LOP</th>
-              <th className="px-6 py-4">Status & Alerts</th>
+              <th className="px-5 py-3">Employee Identity</th>
+              <th className="px-3 py-3 text-center">Present Days</th>
+              <th className="px-3 py-3 text-center">EL (Availed)</th>
+              <th className="px-3 py-3 text-center text-orange-400">EL Encash</th>
+              <th className="px-3 py-3 text-center">SL (Sick)</th>
+              <th className="px-3 py-3 text-center">CL (Casual)</th>
+              <th className="px-3 py-3 text-center text-red-400">LOP</th>
+              <th className="px-5 py-3">Status & Alerts</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
@@ -529,27 +519,27 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
 
               return (
                 <tr key={emp.id} className="hover:bg-slate-800/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="text-sm font-bold text-white">{emp.name}</div>
-                    <div className="text-[10px] text-slate-400 uppercase tracking-tight font-mono">{emp.id}</div>
+                  <td className="px-5 py-2.5">
+                    <div className="text-xs font-bold text-white uppercase tracking-normal">{emp.name}</div>
+                    <div className="text-[9px] text-slate-500 uppercase tracking-normal font-mono">{emp.id}</div>
                   </td>
-                  <td className="px-4 py-4 text-center">
-                    <input title={`Present Days for ${emp.name}`} aria-label={`Present Days for ${emp.name}`} disabled={inputDisabled} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1.5 text-center text-sm text-white font-mono disabled:opacity-50" value={att.presentDays} onChange={e => handleUpdate(emp.id, 'presentDays', +e.target.value || 0)} />
+                  <td className="px-3 py-2.5 text-center">
+                    <input title={`Present Days for ${emp.name}`} aria-label={`Present Days for ${emp.name}`} disabled={inputDisabled} type="number" className="w-12 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-[11px] text-white font-mono disabled:opacity-50 focus:border-blue-500 outline-none" value={att.presentDays} onChange={e => handleUpdate(emp.id, 'presentDays', +e.target.value || 0)} />
                   </td>
-                  <td className="px-4 py-4 text-center">
+                  <td className="px-3 py-2.5 text-center">
                     <div className="relative">
                       <input
                         disabled={inputDisabled}
                         type="number"
                         title={`EL Availed for ${emp.name}`}
                         aria-label={`EL Availed for ${emp.name}`}
-                        className={`w-16 bg-[#0f172a] border rounded p-1.5 text-center text-sm font-mono disabled:opacity-50 ${isELExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700 text-white'}`}
+                        className={`w-12 bg-[#0f172a] border rounded px-1 py-1 text-center text-[11px] font-mono disabled:opacity-50 outline-none ${isELExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700/50 text-white'}`}
                         value={att.earnedLeave}
                         onChange={e => handleUpdate(emp.id, 'earnedLeave', +e.target.value || 0)}
                       />
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-center">
+                  <td className="px-3 py-2.5 text-center">
                     <div className="relative">
                       {/* UPDATED: Input styling to Orange */}
                       <input
@@ -557,59 +547,59 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                         type="number"
                         title={`EL Encashed for ${emp.name}`}
                         aria-label={`EL Encashed for ${emp.name}`}
-                        className={`w-16 bg-orange-900/20 border rounded p-1.5 text-center text-sm font-mono font-bold disabled:opacity-50 ${isELExceeded ? 'border-red-500 text-red-500 bg-red-900/10' : 'border-orange-900/50 text-orange-400'}`}
+                        className={`w-12 bg-orange-950/20 border rounded px-1 py-1 text-center text-[11px] font-mono font-black disabled:opacity-50 outline-none ${isELExceeded ? 'border-red-500 text-red-500 bg-red-900/10' : 'border-orange-900/30 text-orange-400'}`}
                         value={att.encashedDays || 0}
                         onChange={e => handleUpdate(emp.id, 'encashedDays', +e.target.value || 0)}
                       />
-                      {isELExceeded && <div className="absolute -top-3 left-0 w-full text-[8px] text-red-400 font-bold bg-black/80 rounded px-1">Max: {elCapacity}</div>}
+                      {isELExceeded && <div className="absolute -top-3 left-0 w-full text-[7px] text-red-400 font-black bg-black/80 rounded px-0.5">MAX: {elCapacity}</div>}
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-center">
+                  <td className="px-3 py-2.5 text-center">
                     <div className="relative">
                       <input
                         disabled={inputDisabled}
                         type="number"
                         title={`Sick Leave for ${emp.name}`}
                         aria-label={`Sick Leave for ${emp.name}`}
-                        className={`w-16 bg-[#0f172a] border rounded p-1.5 text-center text-sm font-mono disabled:opacity-50 ${isSLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700 text-white'}`}
+                        className={`w-12 bg-[#0f172a] border rounded px-1 py-1 text-center text-[11px] font-mono disabled:opacity-50 outline-none ${isSLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700/50 text-white'}`}
                         value={att.sickLeave}
                         onChange={e => handleUpdate(emp.id, 'sickLeave', +e.target.value || 0)}
                       />
-                      {isSLExceeded && <div className="absolute -top-3 left-0 w-full text-[8px] text-red-400 font-bold bg-black/80 rounded px-1">Max: {slCapacity}</div>}
+                      {isSLExceeded && <div className="absolute -top-3 left-0 w-full text-[7px] text-red-400 font-black bg-black/80 rounded px-0.5">MAX: {slCapacity}</div>}
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-center">
+                  <td className="px-3 py-2.5 text-center">
                     <div className="relative">
                       <input
                         disabled={inputDisabled}
                         type="number"
                         title={`Casual Leave for ${emp.name}`}
                         aria-label={`Casual Leave for ${emp.name}`}
-                        className={`w-16 bg-[#0f172a] border rounded p-1.5 text-center text-sm font-mono disabled:opacity-50 ${isCLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700 text-white'}`}
+                        className={`w-12 bg-[#0f172a] border rounded px-1 py-1 text-center text-[11px] font-mono disabled:opacity-50 outline-none ${isCLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700/50 text-white'}`}
                         value={att.casualLeave || 0}
                         onChange={e => handleUpdate(emp.id, 'casualLeave', +e.target.value || 0)}
                       />
-                      {isCLExceeded && <div className="absolute -top-3 left-0 w-full text-[8px] text-red-400 font-bold bg-black/80 rounded px-1">Max: {clCapacity}</div>}
+                      {isCLExceeded && <div className="absolute -top-3 left-0 w-full text-[7px] text-red-400 font-black bg-black/80 rounded px-0.5">MAX: {clCapacity}</div>}
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-center">
-                    <input title={`LOP Days for ${emp.name}`} aria-label={`LOP Days for ${emp.name}`} disabled={inputDisabled} type="number" className="w-16 bg-red-900/10 border border-red-900/40 rounded p-1.5 text-center text-sm text-red-200 font-bold font-mono disabled:opacity-50" value={att.lopDays} onChange={e => handleUpdate(emp.id, 'lopDays', +e.target.value || 0)} />
+                  <td className="px-3 py-2.5 text-center">
+                    <input title={`LOP Days for ${emp.name}`} aria-label={`LOP Days for ${emp.name}`} disabled={inputDisabled} type="number" className="w-12 bg-red-950/20 border border-red-900/30 rounded px-1 py-1 text-center text-[11px] text-red-300 font-black font-mono disabled:opacity-50 outline-none" value={att.lopDays} onChange={e => handleUpdate(emp.id, 'lopDays', +e.target.value || 0)} />
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-5 py-2.5">
                     <div className="flex flex-col gap-1">
                       {isInvalid && (
-                        <div className="flex items-center gap-1.5 text-red-400 text-xs font-bold bg-red-950/20 px-2 py-1 rounded border border-red-900/50">
-                          <AlertCircle size={14} /> Total &gt; {daysInMonth}
+                        <div className="flex items-center gap-1 text-[11px] font-bold text-red-400 bg-red-950/30 px-2 py-1 rounded border border-red-500/20 tracking-normal">
+                          <AlertCircle size={12} /> Total &gt; {daysInMonth}
                         </div>
                       )}
                       {exceededErrors.length > 0 ? (
-                        <div className="flex flex-col gap-1 text-[10px] text-amber-400 bg-amber-900/20 px-2 py-1 rounded border border-amber-900/50">
-                          <div className="flex items-center gap-1 font-bold"><AlertTriangle size={12} /> Restricted Limit</div>
-                          {exceededErrors.map((err, i) => <span key={i} className="text-amber-200/70">{err}</span>)}
+                        <div className="flex flex-col gap-0.5 text-[10px] text-amber-400 bg-amber-950/30 px-2 py-1 rounded border border-amber-500/20 tracking-normal">
+                          <div className="flex items-center gap-1 font-bold"><AlertTriangle size={12} /> Restricted</div>
+                          {exceededErrors.map((err, i) => <span key={i} className="text-amber-200/60 leading-none">{err}</span>)}
                         </div>
                       ) : !isInvalid && (
-                        <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-bold bg-emerald-950/20 px-2 py-1 rounded border border-emerald-900/50 w-fit">
-                          <CheckCircle2 size={14} /> Validated
+                        <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-950/30 px-2 py-1 rounded border border-emerald-500/20 w-fit tracking-normal">
+                          <CheckCircle2 size={12} /> Validated
                         </div>
                       )}
                     </div>

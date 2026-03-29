@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useMemo } from 'react';
-import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2, UserX } from 'lucide-react';
+import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, ClipboardList, Edit2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile } from '../types';
-import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
+import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
 
 interface LedgerManagerProps {
     employees: Employee[];
@@ -21,7 +21,6 @@ interface LedgerManagerProps {
     viewMode?: 'leave' | 'advance';
     isReadOnly?: boolean;
     companyProfile: CompanyProfile;
-    activePeriod: { month: string; year: number; value: number; };
 }
 
 const LedgerManager: React.FC<LedgerManagerProps> = ({
@@ -36,8 +35,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
     hideContextSelector = false,
     viewMode = 'leave',
     isReadOnly = false,
-    companyProfile,
-    activePeriod
+    companyProfile
 }) => {
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -53,17 +51,10 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
         onConfirm?: () => void;
     }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
-    // Check lock status (Strict Sequential Lock)
+    // Check lock status
     const isLocked = useMemo(() => {
-        const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-        const currentVal = (year * 12) + monthsArr.indexOf(month);
-        
-        // Locked if it's a historical period OR specifically finalized
-        const isHistorical = currentVal < activePeriod.value;
-        const isSpecificallyFinalized = savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
-        
-        return isHistorical || isSpecificallyFinalized;
-    }, [savedRecords, month, year, activePeriod]);
+        return savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
+    }, [savedRecords, month, year]);
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -239,7 +230,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
         }
 
         const fileName = getStandardFileName(`${viewMode}_Ledger_Template`, companyProfile, month, year);
-        await generateExcelWorkbook(wb, fileName);
+        await generateTemplateWorkbook(wb, fileName);
     };
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -368,15 +359,15 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                 </div>
             )}
 
-            <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                    <div className={`p-3 rounded-xl border ${viewMode === 'leave' ? 'bg-emerald-900/30 border-emerald-500/20 text-emerald-400' : 'bg-blue-900/30 border-blue-500/20 text-blue-400'}`}>
-                        <Icon size={24} />
+            <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-xl border ${viewMode === 'leave' ? 'bg-emerald-900/30 border-emerald-500/20 text-emerald-400' : 'bg-blue-900/30 border-blue-500/20 text-blue-400'}`}>
+                        <Icon size={20} />
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-white">{currentModeTitle}</h2>
+                        <h2 className="text-base font-black text-white uppercase tracking-tight">{currentModeTitle}</h2>
                         {!hideContextSelector && (
-                            <p className="text-xs text-slate-400">{month} {year}</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{month} {year}</p>
                         )}
                     </div>
                 </div>
@@ -385,47 +376,47 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                     {!isReadOnly && !isLocked && (
                         <>
                             <button
-                                title={justSaved ? `Enable ${viewMode === 'leave' ? 'Leave' : 'Advance'} Editing` : 'Save Ledger Changes'}
-                                aria-label={justSaved ? `Enable ${viewMode === 'leave' ? 'Leave' : 'Advance'} Editing` : 'Save Ledger Changes'}
+                                title={justSaved ? 'Enable Editing' : 'Save Ledger Records'}
+                                aria-label={justSaved ? 'Enable Editing' : 'Save Ledger Records'}
                                 onClick={justSaved ? () => setJustSaved(false) : handleSave}
                                 disabled={isSaving}
-                                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg ${justSaved
+                                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-bold text-[12px] transition-all shadow-lg ${justSaved
                                     ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-900/20'
-                                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20'
                                     }`}
                             >
                                 {isSaving ? (
-                                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
+                                    <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white/30 border-t-white" />
                                 ) : justSaved ? (
-                                    <span title="Edit Mode" aria-label="Edit Mode"><Edit2 size={16} /></span>
+                                    <Edit2 size={14} />
                                 ) : (
-                                    <span title="Save Mode" aria-label="Save Mode"><Save size={16} /></span>
+                                    <Save size={14} />
                                 )}
-                                {justSaved ? `Modify ${viewMode === 'leave' ? 'Leave' : 'Advance'}` : 'Save Changes'}
+                                {justSaved ? `Modify ${viewMode === 'leave' ? 'Leave' : 'Advance'}` : 'Save Ledger'}
                             </button>
                             {viewMode === 'advance' && (
                                 <button
-                                onClick={handleClearData}
-                                disabled={isSaving || justSaved}
-                                title="Clear All Advance Data"
-                                aria-label="Clear All Advance Data"
-                                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600/20 hover:bg-red-600/40 text-red-500 border border-red-500/30 font-bold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                <X size={16} /> Clear Data
-                            </button>
+                                    onClick={handleClearData}
+                                    disabled={isSaving || justSaved}
+                                    title="Clear All Advance Data"
+                                    aria-label="Clear All Advance Data"
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-600/20 hover:bg-red-600/40 text-red-500 border border-red-500/30 font-black text-[12px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <X size={14} /> Clear Data
+                                </button>
                             )}
-                            <button title="Download Import Template" aria-label="Download Import Template" onClick={downloadTemplate} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2.5 rounded-lg font-bold text-sm border border-slate-600">
-                                <Download size={16} /> Template
+                            <button title="Download Import Template" aria-label="Download Import Template" onClick={downloadTemplate} className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-lg font-bold text-[12px] border border-slate-600 transition-all">
+                                <Download size={14} /> Template
                             </button>
                             <button
-                                title="Import Excel Data"
-                                aria-label="Import Excel Data"
+                                title="Import from Excel"
+                                aria-label="Import from Excel"
                                 onClick={() => fileInputRef.current?.click()}
                                 disabled={isUploading || justSaved}
-                                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:cursor-not-allowed"
+                                className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-[12px] transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700"
                             >
-                                {isUploading ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : <Upload size={16} />}
-                                Import
+                                {isUploading ? <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white/30 border-t-white" /> : <Upload size={14} />}
+                                Import Data
                             </button>
                             <input type="file" title="Excel File Input" aria-label="Excel File Input" ref={fileInputRef} onChange={handleExcelImport} className="hidden" accept=".xlsx, .xls" />
                         </>
@@ -435,25 +426,25 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
 
             <div className="bg-[#1e293b] rounded-xl border border-slate-800 overflow-hidden shadow-2xl overflow-x-auto">
                 <table className="w-full text-left">
-                    <thead className="bg-[#0f172a] text-xs font-bold uppercase text-slate-400">
+                    <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-normal font-bold">
                         <tr>
-                            <th className="px-6 py-4">Employee</th>
+                            <th className="px-5 py-3">Employee Identity</th>
                             {viewMode === 'leave' ? (
                                 <>
-                                    <th className="px-4 py-4 text-center">EL Opening</th>
-                                    <th className="px-4 py-4 text-center">EL Credit</th>
-                                    <th className="px-4 py-4 text-center">EL Balance</th>
-                                    <th className="px-4 py-4 text-center">SL Balance</th>
-                                    <th className="px-4 py-4 text-center">CL Balance</th>
+                                    <th className="px-3 py-3 text-center">EL Opening</th>
+                                    <th className="px-3 py-3 text-center">EL Credit</th>
+                                    <th className="px-3 py-3 text-center">EL Balance</th>
+                                    <th className="px-3 py-3 text-center text-emerald-400">SL Balance</th>
+                                    <th className="px-3 py-3 text-center text-amber-400">CL Balance</th>
                                 </>
                             ) : (
                                 <>
-                                    <th className="px-4 py-4 text-center">Opening</th>
-                                    <th className="px-4 py-4 text-center">New Advance</th>
-                                    <th className="px-4 py-4 text-center text-amber-400">Manual</th>
-                                    <th className="px-4 py-4 text-center">EMI Count</th>
-                                    <th className="px-4 py-4 text-center text-sky-400">Recovery</th>
-                                    <th className="px-4 py-4 text-center font-bold text-white">Balance</th>
+                                    <th className="px-3 py-3 text-center">Opening</th>
+                                    <th className="px-3 py-3 text-center">New Advance</th>
+                                    <th className="px-3 py-3 text-center text-amber-400">Manual</th>
+                                    <th className="px-3 py-3 text-center">EMI Count</th>
+                                    <th className="px-3 py-3 text-center text-sky-400">Recovery</th>
+                                    <th className="px-3 py-3 text-center font-black text-white">Balance</th>
                                 </>
                             )}
                         </tr>
@@ -466,13 +457,16 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                             if (viewMode === 'leave') {
                                 const l = leaveLedgers.find(led => led.employeeId === emp.id) || { el: { opening: 0, eligible: 0, balance: 0 }, sl: { balance: 0, eligible: 0 }, cl: { balance: 0, accumulation: 0 } };
                                 return (
-                                    <tr key={emp.id} className="hover:bg-slate-800/50">
-                                        <td className="px-6 py-4"><div className="text-sm font-bold text-white">{emp.name}</div><div className="text-[10px] text-slate-500">{emp.id}</div></td>
-                                        <td className="px-4 py-4 text-center text-slate-300 font-mono text-sm">{l.el.opening}</td>
-                                        <td className="px-4 py-4 text-center"><input disabled={baseDisabled} title={`EL Eligible for ${emp.name}`} aria-label={`EL Eligible for ${emp.name}`} type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-white text-sm disabled:opacity-50" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
-                                        <td className="px-4 py-4 text-center font-bold text-blue-400">{l.el.balance}</td>
-                                        <td className="px-4 py-4 text-center text-emerald-400">{l.sl.balance}</td>
-                                        <td className="px-4 py-4 text-center text-amber-400">{l.cl.balance}</td>
+                                    <tr key={emp.id} className="hover:bg-slate-800/50 transition-colors">
+                                        <td className="px-5 py-2.5">
+                                            <div className="text-xs font-bold text-white uppercase tracking-normal">{emp.name}</div>
+                                            <div className="text-[9px] text-slate-500 uppercase tracking-normal font-mono">{emp.id}</div>
+                                        </td>
+                                        <td className="px-3 py-2.5 text-center text-slate-300 font-mono text-[11px]">{l.el.opening}</td>
+                                        <td className="px-3 py-2.5 text-center"><input disabled={baseDisabled} title={`EL Eligible for ${emp.name}`} aria-label={`EL Eligible for ${emp.name}`} type="number" className="w-12 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-white text-[11px] font-mono disabled:opacity-50 focus:border-blue-500 outline-none" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
+                                        <td className="px-3 py-2.5 text-center font-black text-blue-400 text-xs">{l.el.balance}</td>
+                                        <td className="px-3 py-2.5 text-center text-emerald-400 font-bold text-xs">{l.sl.balance}</td>
+                                        <td className="px-3 py-2.5 text-center text-amber-400 font-bold text-xs">{l.cl.balance}</td>
                                     </tr>
                                 );
                             } else {
@@ -494,45 +488,42 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                 const inputDisabled = baseDisabled || isExPending;
 
                                 return (
-                                    <tr key={emp.id} className={rowClass}>
-                                        <td className="px-6 py-4">
-                                            <div className="text-sm font-bold text-white">{emp.name}</div>
-                                            <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                                    <tr key={emp.id} className={rowClass + " transition-colors"}>
+                                        <td className="px-5 py-2.5">
+                                            <div className="text-xs font-black text-white uppercase tracking-tight">{emp.name}</div>
+                                            <div className="text-[9px] text-slate-500 flex items-center gap-1 uppercase tracking-tighter font-mono">
                                                 {emp.id}
-                                                {isExPending && <span className="bg-red-500/20 text-red-400 px-1.5 rounded-[2px] font-black uppercase text-[8px] flex items-center gap-1"><UserX size={8} /> Left</span>}
+                                                {isExPending && <span className="text-red-400 font-black px-1 rounded-[2px] bg-red-950/30 border border-red-500/20">LEFT</span>}
                                             </div>
                                         </td>
-                                        <td className="px-4 py-4 text-center text-slate-400 font-mono">{a.opening || 0}</td>
-                                        {/* New Advance */}
-                                        <td className="px-4 py-4 text-center">
+                                        <td className="px-3 py-2.5 text-center text-slate-400 font-mono text-[11px]">{a.opening || 0}</td>
+                                        <td className="px-3 py-2.5 text-center">
                                             <input disabled={inputDisabled} title={`New Advance for ${emp.name}`} aria-label={`New Advance for ${emp.name}`} type="number" min={0}
-                                                className="w-20 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-emerald-400 font-bold text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent"
+                                                className="w-14 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-emerald-400 font-black text-[11px] font-mono disabled:opacity-50 outline-none focus:border-emerald-500"
                                                 value={a.totalAdvance || 0}
                                                 onChange={e => handleAdvanceUpdate(emp.id, 'totalAdvance', +e.target.value)} />
                                         </td>
-                                        {/* Manual Payment — overrides EMI when > 0 */}
-                                        <td className="px-4 py-4 text-center">                                            <input disabled={inputDisabled} title={`Manual Payment for ${emp.name}`} aria-label={`Manual Payment for ${emp.name}`} type="number" min={0}
+                                        <td className="px-3 py-2.5 text-center">
+                                            <input disabled={inputDisabled} title={`Manual Payment for ${emp.name}`} aria-label={`Manual Payment for ${emp.name}`} type="number" min={0}
                                                 placeholder="0"
-                                                className="w-20 bg-[#0f172a] border border-amber-700/40 rounded p-1 text-center text-amber-400 text-sm disabled:opacity-50 disabled:bg-transparent disabled:border-transparent"
+                                                className="w-14 bg-amber-950/20 border border-amber-900/30 rounded px-1 py-1 text-center text-amber-400 text-[11px] font-mono font-black disabled:opacity-50 outline-none focus:border-amber-500"
                                                 value={(a.manualPayment || 0) > 0 ? a.manualPayment : ''}
                                                 onChange={e => handleAdvanceUpdate(emp.id, 'manualPayment', e.target.value === '' ? 0 : +e.target.value)} />
                                         </td>
-                                        {/* EMI Count — disabled when manual is set */}
-                                        <td className="px-4 py-4 text-center">                                            <input
+                                        <td className="px-3 py-2.5 text-center">
+                                            <input
                                                 disabled={inputDisabled || (a.manualPayment || 0) > 0}
                                                 title={(a.manualPayment || 0) > 0 ? 'Disabled — Manual payment is set' : `EMI Count for ${emp.name}`}
                                                 aria-label={(a.manualPayment || 0) > 0 ? 'Disabled — Manual payment is set' : `EMI Count for ${emp.name}`}
                                                 type="number" min={0} step={1}
-                                                className="w-16 bg-[#0f172a] border border-slate-700 rounded p-1 text-center text-slate-300 text-sm disabled:opacity-40 disabled:bg-transparent disabled:border-transparent disabled:cursor-not-allowed"
+                                                className="w-12 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-slate-300 text-[11px] font-mono disabled:opacity-30 outline-none"
                                                 value={a.emiCount || 0}
                                                 onChange={e => handleAdvanceUpdate(emp.id, 'emiCount', +e.target.value)} />
                                         </td>
-                                        {/* Recovery — computed read-only */}
-                                        <td className="px-4 py-4 text-center font-mono text-sky-400 font-bold">{a.recovery || 0}</td>
-                                        {/* Balance */}
-                                        <td className="px-4 py-4 text-center font-black text-white text-lg">
-                                            {a.balance || 0}
-                                            {isExPending && <div className="text-[8px] text-pink-400 uppercase tracking-widest mt-1">Recovery Pending</div>}
+                                        <td className="px-3 py-2.5 text-center font-mono text-sky-400 font-black text-xs">{a.recovery || 0}</td>
+                                        <td className="px-3 py-2.5 text-center">
+                                            <div className="font-black text-white text-sm">{a.balance || 0}</div>
+                                            {isExPending && <div className="text-[7px] text-pink-400 font-black uppercase tracking-widest leading-none mt-0.5">PENDING</div>}
                                         </td>
                                     </tr>
                                 );

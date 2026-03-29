@@ -176,6 +176,10 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     <input id="mobileInput" required title="Mobile Number" aria-label="Mobile Number" className="w-full bg-slate-900 border border-sky-900/50 rounded-xl p-3 text-sm text-white font-mono focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.mobile} onChange={e => setNewEmpForm({ ...newEmpForm, mobile: e.target.value })} />
                                 </div>
                                 <div className="space-y-1.5">
+                                    <label htmlFor="emailInput" className="text-[10px] font-bold text-sky-400 uppercase tracking-widest ml-1">Email ID</label>
+                                    <input id="emailInput" type="email" title="Employee Email Address" aria-label="Employee Email Address" className="w-full bg-slate-900 border border-sky-900/50 rounded-xl p-3 text-sm text-white font-mono focus:ring-2 focus:ring-blue-500 outline-none placeholder:text-slate-600" placeholder="emp@company.com" value={newEmpForm.email || ''} onChange={e => setNewEmpForm({ ...newEmpForm, email: e.target.value })} />
+                                </div>
+                                <div className="space-y-1.5">
                                     <label htmlFor="genderInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Gender</label>
                                     <select id="genderInput" title="Gender" aria-label="Gender" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.gender} onChange={e => setNewEmpForm({ ...newEmpForm, gender: e.target.value as any })}><option>Male</option><option>Female</option><option>Transgender</option><option>Others</option></select>
                                 </div>
@@ -204,10 +208,6 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 <div className="space-y-1.5">
                                     <label htmlFor="siteInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Site</label>
                                     <select id="siteInput" title="Site Name" aria-label="Site Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.site} onChange={e => setNewEmpForm({ ...newEmpForm, site: e.target.value })}>{sites.map(s => <option key={s}>{s}</option>)}</select>
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label htmlFor="emailInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">MailID</label>
-                                    <input id="emailInput" type="email" title="Email Address" aria-label="Email Address" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500" value={newEmpForm.email} onChange={e => setNewEmpForm({ ...newEmpForm, email: e.target.value.toLowerCase() })} />
                                 </div>
                             </div>
                         </div>

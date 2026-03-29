@@ -1,0 +1,22 @@
+﻿diff --git a/components/Login.tsx b/components/Login.tsx
+index 5c1f729..e3903c0 100644
+--- a/components/Login.tsx
++++ b/components/Login.tsx
+@@ -103,7 +103,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
+ 
+       const user = allUsers.find(
+         (u) =>
+-          String(u.username).trim() === cleanUsername &&
++          String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
+           String(u.password).trim() === cleanPassword
+       );
+ 
+@@ -123,7 +123,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo }) => {
+             const updatedUsers: UserType[] = JSON.parse(updatedUsersRaw);
+             const syncedUser = updatedUsers.find(
+               (u) =>
+-                String(u.username).trim() === cleanUsername &&
++                String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
+                 String(u.password).trim() === cleanPassword
+             );
+ 

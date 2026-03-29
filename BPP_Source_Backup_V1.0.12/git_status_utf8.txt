@@ -1,0 +1,24 @@
+﻿On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   App.tsx
+	modified:   build/icon.png
+	modified:   components/Login.tsx
+	modified:   components/Settings.tsx
+	modified:   constants.tsx
+	modified:   dist-electron/main.js
+	modified:   electron/main.ts
+	modified:   generate-icon.js
+	modified:   package-lock.json
+	modified:   package.json
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	git_log.txt
+	git_log_utf8.txt
+	git_status_utf8.txt
+
+no changes added to commit (use "git add" and/or "git commit -a")

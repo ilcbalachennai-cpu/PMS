@@ -1,7 +1,7 @@
 {
   "name": "bharatpay-pro",
   "private": true,
-  "version": "2.0.04",
+  "version": "1.0.12",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -12,10 +12,9 @@
     "dev:electron": "concurrently \"npm run dev\" \"npm run electron:serve\"",
     "electron:serve": "wait-on tcp:3000 && npx tsc -p electron/tsconfig.json && node -e \"const fs=require('fs'); if(!fs.existsSync('dist-electron')) fs.mkdirSync('dist-electron'); fs.writeFileSync('dist-electron/package.json', '{\\\"type\\\": \\\"commonjs\\\"}')\" && cross-env NODE_ENV=development electron .",
     "build:electron": "npm run build && node electron/build.cjs && electron-builder",
-    "build:win10": "npm install electron@31.0.0 electron-builder@24.13.3 @types/node@22.14.0 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.0.01_Win10.exe",
-    "build:win7": "npm install electron@22.3.27 electron-builder@23.6.0 @types/node@18.11.18 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.0.01_Win7.exe",
+    "build:win10": "npm install electron@31.0.0 electron-builder@24.13.3 @types/node@22.14.0 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V01.0.12_Win10.exe",
+    "build:win7": "npm install electron@22.3.27 electron-builder@23.6.0 @types/node@18.11.18 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V01.0.12_Win7.exe",
     "build:all": "npm run build:win10 && npm run build:win7 && npm install electron@31.0.0 electron-builder@24.13.3 @types/node@22.14.0",
-    "build:both": "npm run build:all",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-builder install-app-deps"
   },
@@ -34,7 +33,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "BPP_APP_V02.0.01_Win10.exe"
+      "artifactName": "BPP_APP_V01.0.12_Win10.exe"
     },
     "files": [
       "dist",
@@ -44,6 +43,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.42.0",
+    "@types/nodemailer": "^7.0.11",
     "better-sqlite3": "^11.5.0",
     "bytenode": "^1.5.7",
     "crypto-js": "4.2.0",
@@ -53,7 +53,7 @@
     "jspdf": "2.5.1",
     "jspdf-autotable": "3.8.2",
     "lucide-react": "^0.562.0",
-    "nodemailer": "^8.0.2",
+    "nodemailer": "^8.0.4",
     "puppeteer": "^24.37.5",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
@@ -67,7 +67,6 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^22.14.0",
-    "@types/nodemailer": "^7.0.11",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",

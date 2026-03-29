@@ -1,0 +1,1 @@
+﻿components/PayProcess.tsx(36,23): error TS2304: Cannot find name 'ModalType'.

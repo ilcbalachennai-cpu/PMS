@@ -1,0 +1,4 @@
+﻿
+> bharatpay-pro@1.0.12 lint
+> tsc --noEmit
+

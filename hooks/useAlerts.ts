@@ -1,44 +1,56 @@
 
 import { useState, useCallback } from 'react';
+import { ModalType } from '../components/Shared/CustomModal';
 
-export type AlertType = 'success' | 'error' | 'info' | 'warning' | 'loading' | 'confirm' | 'danger';
-
-export interface Alert {
-  id: string;
-  type: AlertType;
+export interface AlertConfig {
+  isOpen: boolean;
+  type: ModalType;
   title: string;
   message: string | React.ReactNode;
   onConfirm?: () => void;
-  onCancel?: () => void;
+  onSecondaryConfirm?: () => void;
+  confirmLabel?: string;
+  secondaryConfirmLabel?: string;
+  cancelLabel?: string;
+  autoCloseSecs?: number;
 }
 
 export const useAlerts = () => {
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [alertConfig, setAlertConfig] = useState<AlertConfig>({
+    isOpen: false,
+    type: 'info',
+    title: '',
+    message: '',
+  });
 
   const showAlert = useCallback((
-    type: AlertType,
+    type: ModalType,
     title: string,
     message: string | React.ReactNode,
     onConfirm?: () => void,
-    onCancel?: () => void
+    onSecondaryConfirm?: () => void,
+    confirmLabel?: string,
+    secondaryConfirmLabel?: string,
+    cancelLabel?: string,
+    autoCloseSecs?: number
   ) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    const newAlert: Alert = { id, type, title, message, onConfirm, onCancel };
-    setAlerts(prev => [...prev, newAlert]);
-    
-    // Auto-dismiss for non-interactive success/info alerts after 5 seconds
-    if (!onConfirm && !onCancel && (type === 'success' || type === 'info')) {
-      setTimeout(() => {
-        dismissAlert(id);
-      }, 5000);
-    }
-    
-    return id;
+    setAlertConfig({
+      isOpen: true,
+      type,
+      title,
+      message,
+      onConfirm,
+      onSecondaryConfirm,
+      confirmLabel,
+      secondaryConfirmLabel,
+      cancelLabel,
+      autoCloseSecs
+    });
   }, []);
 
-  const dismissAlert = useCallback((id: string) => {
-    setAlerts(prev => prev.filter(a => a.id !== id));
+  const closeAlert = useCallback(() => {
+    setAlertConfig(prev => ({ ...prev, isOpen: false }));
   }, []);
 
-  return { alerts, showAlert, dismissAlert };
+  return { alertConfig, setAlertConfig, showAlert, closeAlert };
 };

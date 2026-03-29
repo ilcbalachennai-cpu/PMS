@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, CheckCircle2, AlertCircle, Info, AlertTriangle, Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, CheckCircle2, AlertCircle, Info, AlertTriangle, Loader2, FolderOpen } from 'lucide-react';
 
 export type ModalType = 'success' | 'error' | 'info' | 'warning' | 'confirm' | 'danger' | 'loading';
 
@@ -14,6 +14,7 @@ interface CustomModalProps {
     confirmLabel?: string;
     secondaryConfirmLabel?: string;
     cancelLabel?: string;
+    autoCloseSecs?: number;
 }
 
 const CustomModal: React.FC<CustomModalProps> = ({
@@ -26,8 +27,41 @@ const CustomModal: React.FC<CustomModalProps> = ({
     message,
     confirmLabel = 'OK',
     secondaryConfirmLabel,
-    cancelLabel = 'Cancel'
+    cancelLabel = 'Cancel',
+    autoCloseSecs
 }) => {
+    const [progress, setProgress] = useState(100);
+
+    useEffect(() => {
+        if (!isOpen || type !== 'success' || !autoCloseSecs) {
+            setProgress(100);
+            return;
+        }
+
+        const totalMs = autoCloseSecs * 1000;
+        const intervalMs = 50;
+        const step = (intervalMs / totalMs) * 100;
+
+        setProgress(100);
+        const timer = setInterval(() => {
+            setProgress(prev => {
+                const next = prev - step;
+                if (next <= 0) {
+                    clearInterval(timer);
+                    // Fire onConfirm (open folder/preview) then close
+                    setTimeout(() => {
+                        onClose();
+                        if (onConfirm) onConfirm();
+                    }, 60);
+                    return 0;
+                }
+                return next;
+            });
+        }, intervalMs);
+
+        return () => clearInterval(timer);
+    }, [isOpen, type, autoCloseSecs]);
+
     if (!isOpen) return null;
 
     const getTypeStyles = () => {
@@ -105,6 +139,20 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     </div>
                 </div>
 
+                {type === 'success' && autoCloseSecs && (
+                    <div className="px-6 pt-2 pb-1">
+                        <div className="w-full h-1 bg-slate-700/60 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-emerald-500 rounded-full transition-none"
+                                style={{ width: `${progress}%` }}
+                            />
+                        </div>
+                        <p className="text-[10px] text-slate-500 text-center mt-1 font-medium tracking-wider">
+                            Opening report & folder in {Math.ceil(progress / 100 * autoCloseSecs)}s…
+                        </p>
+                    </div>
+                )}
+
                 {type !== 'loading' && (
                     <div className="p-4 bg-[#1e293b] border-t border-slate-700/50 flex gap-3">
                         {(type === 'confirm' || type === 'danger') && (
@@ -131,8 +179,9 @@ const CustomModal: React.FC<CustomModalProps> = ({
                                 onClose();
                                 if (onConfirm) onConfirm();
                             }}
-                            className={`flex-1 px-4 py-2.5 ${styles.button} text-white font-black uppercase tracking-widest rounded-xl shadow-lg transition-all active:scale-95 text-xs`}
+                            className={`flex-1 px-4 py-2.5 ${styles.button} text-white font-black uppercase tracking-widest rounded-xl shadow-lg transition-all active:scale-95 text-xs flex items-center justify-center gap-2`}
                         >
+                            {type === 'success' && <FolderOpen size={14} />}
                             {confirmLabel}
                         </button>
                     </div>

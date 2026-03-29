@@ -25,14 +25,13 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
     return (
         <div className="lg:col-span-2 bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl overflow-hidden h-fit max-h-[800px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-left table-fixed">
-                <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-widest font-bold sticky top-0 z-10">
+                <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-[0.2em] font-black sticky top-0 z-10 border-b border-slate-800">
                     <tr>
-                        <th className="px-3 py-4 bg-[#0f172a] w-2/6">Identity</th>
-                        <th className="px-2 py-4 bg-[#0f172a] w-1.5/6">Organization</th>
-                        <th className="px-2 py-4 bg-[#0f172a] w-1.5/6">Contact</th>
-                        <th className="px-2 py-4 bg-[#0f172a] w-[90px] text-center">Join Date</th>
-                        <th className="px-2 py-4 bg-[#0f172a] w-[100px] text-center">Wages</th>
-                        <th className="px-3 py-4 text-right bg-[#0f172a] w-[80px]">Actions</th>
+                        <th className="px-4 py-3 bg-[#0f172a] w-[25%]">Identity</th>
+                        <th className="px-4 py-3 bg-[#0f172a] w-[30%]">Designation & Location</th>
+                        <th className="px-2 py-3 bg-[#0f172a] w-[15%] text-center">Join Date</th>
+                        <th className="px-2 py-3 bg-[#0f172a] w-[15%] text-center">Gross Wages</th>
+                        <th className="px-4 py-3 text-right bg-[#0f172a] w-[15%]">Actions</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -41,38 +40,33 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                             key={emp.id}
                             className={`hover:bg-slate-800/50 ${selectedEmp?.id === emp.id ? 'bg-blue-900/40 border-l-4 border-blue-500' : 'border-l-4 border-transparent'} ${emp.dol ? 'opacity-60 grayscale' : ''}`}
                         >
-                            <td className="px-3 py-3 overflow-hidden">
+                            <td className="px-4 py-2.5 overflow-hidden">
                                 <button
                                     onClick={() => onSelectEmp(emp)}
                                     title={`View details for ${emp.name}`}
-                                    aria-label={`View details for ${emp.name}`}
-                                    className="flex items-center gap-2 w-full text-left outline-none focus:ring-2 focus:ring-blue-500/50 rounded-lg p-0.5"
+                                    className="flex items-center gap-3 w-full text-left outline-none group"
                                 >
-                                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center border border-slate-600 overflow-hidden shrink-0 relative">
-                                        {emp.photoUrl ? <img src={emp.photoUrl} className="w-full h-full object-cover" alt={emp.name} /> : <User2 size={16} className="text-slate-400" />}
-                                        {emp.dol && <div className="absolute inset-0 bg-red-900/60 flex items-center justify-center font-black text-[7px] text-white">LEFT</div>}
+                                    <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center border border-slate-700 overflow-hidden shrink-0 relative shadow-lg group-hover:border-blue-500/50 transition-colors">
+                                        {emp.photoUrl ? <img src={emp.photoUrl} className="w-full h-full object-cover" alt={emp.name} /> : <User2 size={18} className="text-slate-500" />}
+                                        {emp.dol && <div className="absolute inset-0 bg-red-900/60 flex items-center justify-center font-black text-[8px] text-white">LEFT</div>}
                                     </div>
                                     <div className="min-w-0">
-                                        <div className="font-bold text-white text-xs truncate uppercase leading-tight">{emp.name}</div>
-                                        <div className="text-[9px] text-slate-500 font-mono truncate">{emp.id}</div>
+                                        <div className="font-black text-white text-[12px] tracking-tight truncate uppercase leading-tight group-hover:text-blue-400 transition-colors">{emp.name}</div>
+                                        <div className="text-[9px] text-slate-500 font-bold font-mono tracking-wider truncate">{emp.id}</div>
                                     </div>
                                 </button>
                             </td>
-                            <td className="px-2 py-3 overflow-hidden">
-                                <div className="text-[9px] text-sky-400 font-bold uppercase truncate">{emp.designation}</div>
-                                <div className="text-[8px] text-slate-500 uppercase truncate">{emp.branch}</div>
+                            <td className="px-4 py-2.5 overflow-hidden">
+                                <div className="text-[10px] text-sky-400 font-black uppercase tracking-wider truncate">{emp.designation}</div>
+                                <div className="text-[9px] text-slate-500 font-bold uppercase truncate opacity-80">{emp.branch || emp.site || 'Main Office'}</div>
                             </td>
-                            <td className="px-2 py-3 overflow-hidden">
-                                <div className="text-[9px] text-emerald-400 font-bold truncate">{emp.email || 'No Email'}</div>
-                                <div className="text-[8px] text-slate-500 font-mono truncate">{emp.mobile}</div>
+                            <td className="px-2 py-2.5 text-center">
+                                <div className="text-[10px] font-bold font-mono text-slate-300 whitespace-nowrap">{formatDateInd(emp.doj)}</div>
                             </td>
-                            <td className="px-2 py-3 text-center">
-                                <div className="text-[10px] font-mono text-slate-300 whitespace-nowrap">{formatDateInd(emp.doj)}</div>
+                            <td className="px-2 py-2.5 text-center">
+                                <div className="font-mono text-emerald-400 font-black text-[12px] tracking-tighter shadow-emerald-400/10">₹{calculateGrossWage(emp).toLocaleString()}</div>
                             </td>
-                            <td className="px-2 py-3 text-center">
-                                <div className="font-mono text-emerald-400 font-bold text-xs">₹{calculateGrossWage(emp).toLocaleString()}</div>
-                            </td>
-                            <td className="px-3 py-3 text-right">
+                            <td className="px-4 py-2.5 text-right">
                                 <div className="flex justify-end gap-1">
                                     <button
                                         onClick={(e) => { e.stopPropagation(); onEdit(emp); }}

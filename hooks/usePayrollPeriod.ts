@@ -4,57 +4,88 @@ import { useState } from 'react';
 const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export const usePayrollPeriod = () => {
-  const getMonthValue = (m: string | null | undefined, y: number | null | undefined) => {
-    if (!m || !y) return 0;
-    const idx = monthsArr.indexOf(String(m).trim());
-    if (idx === -1) return 0;
-    return (Number(y) * 12) + idx;
-  };
-
-  const getActivePeriod = () => {
+  const getDefaultPeriod = () => {
     try {
       const historyData = localStorage.getItem('app_payroll_history');
-      const history = historyData ? JSON.parse(historyData) : [];
+      const attendanceData = localStorage.getItem('app_attendance');
 
-      let lastLockedVal = 0; 
-      
-      const finalized = Array.isArray(history) ? history.filter((h: any) => h.status === 'Finalized') : [];
-      
-      if (finalized.length > 0) {
-        finalized.forEach((h: any) => {
+      const history = historyData ? JSON.parse(historyData) : [];
+      const attendance = attendanceData ? JSON.parse(attendanceData) : [];
+
+      const getMonthValue = (m: string | null | undefined, y: number | null | undefined) => {
+        if (!m || !y) return 0;
+        const idx = monthsArr.indexOf(String(m).trim());
+        if (idx === -1) return 0;
+        return (Number(y) * 12) + idx;
+      };
+
+      let lastLockedVal = getMonthValue('March', 2025);
+      if (Array.isArray(history) && history.length > 0) {
+        history.filter((h: any) => h.status === 'Finalized').forEach((h: any) => {
           const val = getMonthValue(h.month, h.year);
           if (val > lastLockedVal) lastLockedVal = val;
         });
-      } else {
-          // If no history is found, fall back to March 2025 as the conceptual "last locked" 
-          // but we might want to return 0 to indicate "nothing actually locked yet"
-          lastLockedVal = 0;
       }
 
-      // If no reports are frozen, the next active period is the baseline start (April 2025)
-      // Otherwise it's LFM + 1
-      const effectiveLastVal = lastLockedVal > 0 ? lastLockedVal : getMonthValue('March', 2025);
-      const nextVal = effectiveLastVal + 1;
+      let latestDraftVal = -1;
+      let latestDraftPeriod = null;
 
-      return { 
-        month: monthsArr[nextVal % 12], 
-        year: Math.floor(nextVal / 12),
-        value: nextVal,
-        lastLockedValue: lastLockedVal // Will be 0 if nothing is actually frozen
-      };
+      if (Array.isArray(attendance) && attendance.length > 0) {
+        attendance.forEach((a: any) => {
+          const val = getMonthValue(a.month, a.year);
+          if (val > lastLockedVal) {
+            const hasData = (a.presentDays || 0) > 0 || (a.earnedLeave || 0) > 0 || (a.sickLeave || 0) > 0 || (a.casualLeave || 0) > 0 || (a.lopDays || 0) > 0 || (a.encashedDays || 0) > 0;
+            const isFinalized = history.some((h: any) => h.month === a.month && h.year === a.year && h.status === 'Finalized');
+            if (hasData && !isFinalized) {
+              if (val > latestDraftVal) {
+                latestDraftVal = val;
+                latestDraftPeriod = { month: a.month, year: a.year };
+              }
+            }
+          }
+        });
+      }
+
+      if (latestDraftPeriod) return latestDraftPeriod;
+      const nextVal = lastLockedVal + 1;
+      return { month: monthsArr[nextVal % 12], year: Math.floor(nextVal / 12) };
     } catch (e) {
-      return { month: 'April', year: 2025, value: getMonthValue('April', 2025), lastLockedValue: 0 };
+      console.error("Error determining default period:", e);
+      return { month: 'April', year: 2025 };
     }
   };
 
-  const activePeriod = getActivePeriod();
-  const [globalMonth, setGlobalMonth] = useState<string>(activePeriod.month);
-  const [globalYear, setGlobalYear] = useState<number>(activePeriod.year);
+  const initialPeriod = getDefaultPeriod();
+  const [globalMonth, setGlobalMonth] = useState<string>(initialPeriod.month);
+  const [globalYear, setGlobalYear] = useState<number>(initialPeriod.year);
 
-  return { 
-    globalMonth, setGlobalMonth, 
-    globalYear, setGlobalYear, 
-    activePeriod,
-    getMonthValue
+  // Helper to find the absolute latest frozen period regardless of the initial period logic
+  const getLatestFrozen = () => {
+    try {
+      const historyData = localStorage.getItem('app_payroll_history');
+      const history = historyData ? JSON.parse(historyData) : [];
+      if (Array.isArray(history) && history.length > 0) {
+        const frozen = history.filter((h: any) => h.status === 'Finalized');
+        if (frozen.length > 0) {
+            let latest = frozen[0];
+            let maxVal = (latest.year * 12) + monthsArr.indexOf(latest.month);
+            frozen.forEach((h: any) => {
+                const val = (h.year * 12) + monthsArr.indexOf(h.month);
+                if (val > maxVal) {
+                    maxVal = val;
+                    latest = h;
+                }
+            });
+            return { month: latest.month, year: latest.year };
+        }
+      }
+    } catch (e) {
+      console.error("Error getting latest frozen period:", e);
+    }
+    return null;
   };
+
+  const latestFrozenPeriod = getLatestFrozen();
+
+  return { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod };
 };

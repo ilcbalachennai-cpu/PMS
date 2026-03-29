@@ -3,10 +3,14 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
     saveReport: (fileName: string, data: Uint8Array, type: string) =>
         ipcRenderer.invoke('save-report', { fileName, data, type }),
+    saveTemplate: (fileName: string, data: Uint8Array, type: string) =>
+        ipcRenderer.invoke('save-template', { fileName, data, type }),
     dbSet: (key: string, value: any) =>
         ipcRenderer.invoke('db-set', { key, value }),
     dbGet: (key: string) =>
         ipcRenderer.invoke('db-get', key),
+    sendEmail: (smtpConfig: any, mailOptions: any) =>
+        ipcRenderer.invoke('send-email', { smtpConfig, mailOptions }),
     dbDelete: (key: string) =>
         ipcRenderer.invoke('db-delete', key),
     runBackup: (data: any) => ipcRenderer.invoke('run-backup', data),
@@ -23,12 +27,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     findBPPApp: () => ipcRenderer.invoke('find-bpp-app'),
     openItemLocation: (filePath: string) =>
         ipcRenderer.invoke('open-item-location', filePath),
+    openItemPath: (filePath: string) =>
+        ipcRenderer.invoke('open-item-path', filePath),
     getOSVersion: () => ipcRenderer.invoke('get-os-version'),
-    sendPayslipEmail: (data: any) => ipcRenderer.invoke('send-payslip-email', data),
     onUpdateDownloadComplete: (callback: () => void) => {
         ipcRenderer.on('update-download-complete', callback);
     },
-    getIsElectron: () => true
+    getIsElectron: () => true,
+    getIsDev: () => process.env.NODE_ENV === 'development'
 });
 
 console.log("EB: Electron Bridge (electronAPI) Initialized");

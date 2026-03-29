@@ -1,7 +1,6 @@
-
-import React from 'react';
+import React, { useMemo } from 'react';
 import { CalendarClock, ArrowRight, CheckCircle2, AlertCircle, Calendar, Lock } from 'lucide-react';
-
+import { PayrollResult } from '../types';
 
 interface PayCycleGatewayProps {
   month: string;
@@ -9,93 +8,127 @@ interface PayCycleGatewayProps {
   setMonth: (m: string) => void;
   setYear: (y: number) => void;
   onProceed: () => void;
-  activePeriod: { month: string; year: number; value: number; };
+  savedRecords: PayrollResult[];
 }
 
-const PayCycleGateway: React.FC<PayCycleGatewayProps> = ({ month, year, setMonth, setYear, onProceed, activePeriod }) => {
+const PayCycleGateway: React.FC<PayCycleGatewayProps> = ({ month, year, setMonth, setYear, onProceed, savedRecords }) => {
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   
-  // Enforce sequential processing: set to active period if current selection is invalid
-  React.useEffect(() => {
-    if (month !== activePeriod.month || year !== activePeriod.year) {
-      setMonth(activePeriod.month);
-      setYear(activePeriod.year);
+  // Calculate next processing period based on finalized records
+  const nextPeriod = useMemo(() => {
+    const finalized = savedRecords.filter(r => r.status === 'Finalized');
+    if (finalized.length === 0) return null;
+
+    // Find latest finalized year and month
+    let maxYear = 0;
+    finalized.forEach(r => { if (r.year > maxYear) maxYear = r.year; });
+    
+    const monthsInMaxYear = finalized.filter(r => r.year === maxYear).map(r => months.indexOf(r.month));
+    const maxMonthIdx = Math.max(...monthsInMaxYear);
+
+    let targetMonthIdx = maxMonthIdx + 1;
+    let targetYear = maxYear;
+
+    if (targetMonthIdx > 11) {
+      targetMonthIdx = 0;
+      targetYear++;
     }
-  }, [activePeriod, month, year, setMonth, setYear]);
+
+    return { month: months[targetMonthIdx], year: targetYear };
+  }, [savedRecords]);
+
+  // If nextPeriod exists, auto-force it
+  React.useEffect(() => {
+    if (nextPeriod) {
+      if (month !== nextPeriod.month) setMonth(nextPeriod.month);
+      if (year !== nextPeriod.year) setYear(nextPeriod.year);
+    }
+  }, [nextPeriod]);
+
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: 10 }, (_, i) => currentYear - 5 + i);
 
   return (
-    <div className="flex flex-col items-center justify-start min-h-[500px] h-full pt-10 pb-8 animate-in fade-in duration-500 p-4">
+    <div className="flex flex-col items-center justify-start pt-0 h-full animate-in fade-in duration-700 px-6 py-2 overflow-y-auto">
       
-      <div className="bg-[#1e293b] border border-slate-800 p-6 md:p-8 rounded-3xl shadow-2xl max-w-md w-full relative overflow-hidden">
-        {/* Decorative Background */}
-        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
-        <div className="absolute bottom-0 left-0 w-32 h-32 bg-emerald-600/10 rounded-full blur-3xl -ml-10 -mb-10 pointer-events-none"></div>
-
-        <div className="flex flex-col items-center text-center mb-6">
-            <div className="p-3 bg-blue-900/20 text-blue-400 rounded-full mb-3 ring-1 ring-blue-500/30 shadow-lg">
-                <CalendarClock size={40} />
+      <div className="bg-[#111827]/80 backdrop-blur-2xl border border-slate-800/60 p-7 rounded-[2rem] shadow-[0_40px_80px_-15px_rgba(0,0,0,0.7)] max-w-md w-full relative overflow-hidden">
+        {/* TOP ICON BOX */}
+        <div className="flex flex-col items-center text-center mb-4">
+            <div className="w-12 h-12 bg-blue-600/10 text-blue-500/90 rounded-[1.2rem] flex items-center justify-center mb-2 ring-1 ring-blue-500/20 shadow-[0_0_30px_rgba(59,130,246,0.1)]">
+                <CalendarClock size={28} />
             </div>
-            <h2 className="text-xl md:text-2xl font-black text-white">Pay Cycle Setup</h2>
-            <p className="text-slate-400 text-xs md:text-sm mt-2 max-w-xs mx-auto">
-                Select the financial period you wish to process.
+            <h2 className="text-xl font-black text-white tracking-tight uppercase">Pay Cycle Setup</h2>
+            <p className="text-slate-500/80 text-[10px] mt-1 font-bold uppercase tracking-widest leading-relaxed">
+                Select the processing period.
             </p>
         </div>
 
         <div className="space-y-5">
             <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5 opacity-80">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1 flex items-center gap-1">
-                        Month <Lock size={10} />
-                    </label>
-                    <div className="relative">
+                {/* MONTH SELECTOR */}
+                <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 pl-1">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Month</label>
+                        {nextPeriod && <Lock size={10} className="text-slate-600" />}
+                    </div>
+                    <div className="relative group">
                         <select
-                            disabled
-                            title="Month selection is locked to sequential processing"
+                            title="Select Processing Month"
+                            aria-label="Select Processing Month"
+                            disabled={!!nextPeriod}
                             value={month}
-                            className="w-full appearance-none bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-slate-400 font-bold outline-none cursor-not-allowed text-sm"
+                            onChange={(e) => setMonth(e.target.value)}
+                            className={`w-full appearance-none bg-[#020617] border border-slate-800 rounded-xl px-4 py-3 text-white font-black transition-all text-sm focus:border-blue-500/30 outline-none ${nextPeriod ? 'cursor-not-allowed opacity-60' : 'hover:border-slate-600 cursor-pointer'}`}
                         >
-                            <option value={month}>{month}</option>
+                            {months.map(m => <option key={m} value={m}>{m}</option>)}
                         </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-600">
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-600">
                             <Calendar size={14} />
                         </div>
                     </div>
                 </div>
 
-                <div className="space-y-1.5 opacity-80">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1 flex items-center gap-1">
-                        Year <Lock size={10} />
-                    </label>
-                    <div className="relative">
+                {/* YEAR SELECTOR */}
+                <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 pl-1">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Year</label>
+                        {nextPeriod && <Lock size={10} className="text-slate-600" />}
+                    </div>
+                    <div className="relative group">
                         <select
-                            disabled
-                            title="Year selection is locked to sequential processing"
+                            title="Select Processing Year"
+                            aria-label="Select Processing Year"
+                            disabled={!!nextPeriod}
                             value={year}
-                            className="w-full appearance-none bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-slate-400 font-bold outline-none cursor-not-allowed text-sm"
+                            onChange={(e) => setYear(Number(e.target.value))}
+                            className={`w-full appearance-none bg-[#020617] border border-slate-800 rounded-xl px-4 py-3 text-white font-black transition-all text-sm focus:border-emerald-500/30 outline-none ${nextPeriod ? 'cursor-not-allowed opacity-60' : 'hover:border-slate-600 cursor-pointer'}`}
                         >
-                            <option value={year}>{year}</option>
+                            {years.map(y => <option key={y} value={y}>{y}</option>)}
                         </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-600">
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-600">
                             <Calendar size={14} />
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div className="bg-blue-900/20 p-3 rounded-xl border border-blue-500/30 flex gap-3 items-center">
-                <AlertCircle className="text-blue-400 shrink-0" size={18} />
-                <div className="text-[10px] md:text-xs text-blue-300">
-                    <span className="font-bold">Sequential Data Lock:</span> The system is currently focused on <span className="text-white font-bold">{month} {year}</span>. Previous months are frozen, and future months open only upon rollover.
+            {/* SEQUENTIAL DATA LOCK INFO BOX */}
+            <div className="bg-[#1e293b]/20 p-3 rounded-2xl border border-blue-500/10 flex gap-3 items-center shadow-inner">
+                <div className="w-8 h-8 rounded-full bg-blue-500/5 flex items-center justify-center shrink-0 border border-blue-500/10">
+                    <AlertCircle className="text-blue-400/60" size={16} />
+                </div>
+                <div className="text-[10px] leading-relaxed text-slate-400">
+                    <span className="text-blue-100/90 font-black text-[11px] uppercase tracking-tighter">Data Lock:</span> {month} {year} is the target period. Sequential processing is enforced for data integrity.
                 </div>
             </div>
 
+            {/* ACTION BUTTON */}
             <button 
                 onClick={onProceed}
-                title="Start Payroll Processing"
-                aria-label="Start Payroll Processing"
-                className="w-full bg-white text-slate-900 hover:bg-slate-100 font-black py-3.5 rounded-xl shadow-xl hover:shadow-2xl transition-all flex items-center justify-center gap-2 group mt-2 text-sm md:text-base"
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl shadow-lg hover:shadow-blue-500/25 transition-all flex items-center justify-center gap-2 group mt-2 h-12 transform active:scale-[0.98]"
             >
-                <CheckCircle2 size={18} className="text-emerald-600" />
-                START PROCESS
+                <CheckCircle2 size={18} className="text-white/90" />
+                <span className="text-sm tracking-tight italic">Start Process</span>
                 <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
             </button>
         </div>

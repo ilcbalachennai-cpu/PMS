@@ -1,0 +1,5 @@
+﻿components/StatutoryReports.tsx(172,17): error TS2322: Type 'string | null | undefined' is not assignable to type 'string | null'.
+  Type 'undefined' is not assignable to type 'string | null'.
+services/reportService.ts(1181,4): error TS2366: Function lacks ending return statement and return type does not include 'undefined'.
+services/reportService.ts(2356,9): error TS2322: Type 'undefined' is not assignable to type 'string | null'.
+services/reportService.ts(2520,9): error TS2322: Type 'undefined' is not assignable to type 'string | null'.

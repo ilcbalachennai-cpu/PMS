@@ -104,8 +104,14 @@ export const useAppUpdate = (showAlert: any) => {
     if (latestAppVersion && isVersionHigher(latestAppVersion, APP_VERSION)) {
       if (updateDownloaded) {
         // We don't trigger showAlert directly here if we want App.tsx to handle the confirm logic
-        // But for modularity, let's just expose the state and let App.tsx decide.
       } else {
+        // --- DEVELOPMENT OVERRIDE ---
+        // @ts-ignore
+        const isDev = window.electronAPI?.getIsDev?.();
+        if (isDev) {
+          console.log(`[DevMode] Update Available: ${latestAppVersion} (Current: ${APP_VERSION}). Notice suppressed.`);
+          return;
+        }
         setShowUpdateNotice(true);
       }
     }

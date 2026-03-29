@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BharatPay Pro – Already Running</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #020617;
+      color: #fff;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
+      -webkit-app-region: drag;
+    }
+
+    .card {
+      -webkit-app-region: no-drag;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 32px 36px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
+      text-align: center;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95) translateY(8px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .brand {
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      margin-bottom: 20px;
+    }
+    .brand .orange { color: #FF9933; }
+    .brand .white  { color: #ffffff; }
+    .brand .green  { color: #34d399; }
+
+    .icon-ring {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.1);
+      border: 2px solid rgba(239, 68, 68, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3); }
+      50%       { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+    }
+
+    .icon-ring svg {
+      width: 36px;
+      height: 36px;
+      color: #ef4444;
+    }
+
+    h2 {
+      font-size: 16px;
+      font-weight: 800;
+      color: #f1f5f9;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    p {
+      font-size: 12px;
+      color: #94a3b8;
+      line-height: 1.7;
+      margin-bottom: 6px;
+    }
+
+    .hint {
+      font-size: 10px;
+      color: #475569;
+      font-style: italic;
+      margin-top: 4px;
+    }
+
+    .divider {
+      height: 1px;
+      background: linear-gradient(to right, transparent, #334155, transparent);
+      margin: 20px 0;
+    }
+
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 11px 0;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      border: none;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      transition: all 0.15s ease;
+    }
+
+    .btn-close {
+      background: linear-gradient(135deg, #FF9933, #f97316);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(249, 115, 22, 0.3);
+    }
+    .btn-close:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(249, 115, 22, 0.45);
+    }
+    .btn-close:active { transform: translateY(0); }
+
+    .flag-bar {
+      display: flex;
+      height: 3px;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+    .flag-bar div { flex: 1; }
+    .flag-bar .f1 { background: #FF9933; }
+    .flag-bar .f2 { background: #ffffff; }
+    .flag-bar .f3 { background: #34d399; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="flag-bar"><div class="f1"></div><div class="f2"></div><div class="f3"></div></div>
+
+    <div class="brand">
+      <span class="orange">Bharat</span><span class="white">Pay</span><span class="green">Pro</span>
+    </div>
+
+    <div class="icon-ring">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+    </div>
+
+    <h2>Application Already Running</h2>
+    <p>BharatPay Pro is already active on this machine.</p>
+    <p>Only <strong>one session</strong> is allowed at a time.</p>
+    <p class="hint">Switch to the open window, or close it from the Taskbar and retry.</p>
+
+    <div class="divider"></div>
+
+    <button class="btn btn-close" onclick="window.close()">OK — Dismiss</button>
+  </div>
+</body>
+</html>

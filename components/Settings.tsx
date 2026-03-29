@@ -1,11 +1,12 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Send } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Scale } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
 import { fetchLatestMessages, activateFullLicense, getStoredLicense, isValidKeyFormat } from '../services/licenseService';
 import { LicenseData } from '../types';
+import SMTPConfigModal from './Shared/SMTPConfigModal';
 
 interface SettingsProps {
     config: StatutoryConfig;
@@ -24,12 +25,9 @@ interface SettingsProps {
     isSetupMode?: boolean;
     onSkipSetupRedirect?: () => void;
     showAlert?: (type: any, title: string, message: string, onConfirm?: () => void) => void;
-    onDirtyChange?: (isDirty: boolean) => void;
-    saveTrigger?: number;
-    onSaveComplete?: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, showAlert, onDirtyChange, saveTrigger = 0, onSaveComplete }) => {
+const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, showAlert }) => {
     const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(isSetupMode ? 'COMPANY' : initialTab);
 
     // SCHEMA MIGRATION: Merge current config with defaults to prevent crashes on new features
@@ -45,7 +43,23 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 ...INITIAL_STATUTORY_CONFIG.leaveWagesComponents,
                 ...config.leaveWagesComponents
             },
-            incomeTaxCalculationType: config.incomeTaxCalculationType || INITIAL_STATUTORY_CONFIG.incomeTaxCalculationType
+            otComponents: {
+                ...INITIAL_STATUTORY_CONFIG.otComponents,
+                ...config.otComponents
+            },
+            otCalculationFactor: config.otCalculationFactor || INITIAL_STATUTORY_CONFIG.otCalculationFactor,
+            incomeTaxCalculationType: config.incomeTaxCalculationType || INITIAL_STATUTORY_CONFIG.incomeTaxCalculationType,
+            pfEsiCalculationBasis: config.pfEsiCalculationBasis || INITIAL_STATUTORY_CONFIG.pfEsiCalculationBasis,
+            pfOriginalWagesComponents: {
+                ...INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents,
+                ...(config as any).pfOriginalWagesComponents,
+                ...(config as any).originalWagesComponents // Migration
+            },
+            esiOriginalWagesComponents: {
+                ...INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents,
+                ...(config as any).esiOriginalWagesComponents,
+                ...(config as any).originalWagesComponents // Migration
+            }
         };
     });
 
@@ -65,24 +79,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             return false;
         }
     }, []);
-    
-    const isDirty = useMemo(() => {
-        const isConfigDirty = JSON.stringify(formData) !== JSON.stringify(config);
-        const isProfileDirty = JSON.stringify(profileData) !== JSON.stringify(companyProfile);
-        const isLeaveDirty = JSON.stringify(localLeavePolicy) !== JSON.stringify(leavePolicy);
-        return isConfigDirty || isProfileDirty || isLeaveDirty;
-    }, [formData, config, profileData, companyProfile, localLeavePolicy, leavePolicy]);
-
-    useEffect(() => {
-        onDirtyChange?.(isDirty);
-    }, [isDirty, onDirtyChange]);
-
-    useEffect(() => {
-        if (saveTrigger > 0) {
-            handleSave();
-            onSaveComplete?.();
-        }
-    }, [saveTrigger]);
 
     useEffect(() => {
         setActiveTab(isSetupMode ? 'COMPANY' : initialTab);
@@ -103,6 +99,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [authPassword, setAuthPassword] = useState('');
     const [authError, setAuthError] = useState('');
     const [pendingAuthAction, setPendingAuthAction] = useState<(() => void) | null>(null);
+
+    const [showSMTPModal, setShowSMTPModal] = useState(false);
 
     const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
 
@@ -254,26 +252,26 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             }
 
             const dataBundle = {
-                employees: JSON.parse(localStorage.getItem('app_employees') || '[]'),
-                config: JSON.parse(localStorage.getItem('app_config') || '{}'),
-                companyProfile: JSON.parse(localStorage.getItem('app_company_profile') || '{}'),
-                attendance: JSON.parse(localStorage.getItem('app_attendance') || '[]'),
-                leaveLedgers: JSON.parse(localStorage.getItem('app_leave_ledgers') || '[]'),
-                advanceLedgers: JSON.parse(localStorage.getItem('app_advance_ledgers') || '[]'),
-                payrollHistory: JSON.parse(localStorage.getItem('app_payroll_history') || '[]'),
-                fines: JSON.parse(localStorage.getItem('app_fines') || '[]'), // Include Fines
-                leavePolicy: JSON.parse(localStorage.getItem('app_leave_policy') || '{}'), // Include Leave Policy
-                arrearHistory: JSON.parse(localStorage.getItem('app_arrear_history') || '[]'), // Include Arrear History
-                users: JSON.parse(localStorage.getItem('app_users') || '[]'), // Include Users for login restore
+                employees: (() => { try { return JSON.parse(localStorage.getItem('app_employees') || '[]'); } catch { return []; } })(),
+                config: (() => { try { return JSON.parse(localStorage.getItem('app_config') || '{}'); } catch { return {}; } })(),
+                companyProfile: (() => { try { return JSON.parse(localStorage.getItem('app_company_profile') || '{}'); } catch { return {}; } })(),
+                attendance: (() => { try { return JSON.parse(localStorage.getItem('app_attendance') || '[]'); } catch { return []; } })(),
+                leaveLedgers: (() => { try { return JSON.parse(localStorage.getItem('app_leave_ledgers') || '[]'); } catch { return []; } })(),
+                advanceLedgers: (() => { try { return JSON.parse(localStorage.getItem('app_advance_ledgers') || '[]'); } catch { return []; } })(),
+                payrollHistory: (() => { try { return JSON.parse(localStorage.getItem('app_payroll_history') || '[]'); } catch { return []; } })(),
+                fines: (() => { try { return JSON.parse(localStorage.getItem('app_fines') || '[]'); } catch { return []; } })(),
+                leavePolicy: (() => { try { return JSON.parse(localStorage.getItem('app_leave_policy') || '{}'); } catch { return {}; } })(),
+                arrearHistory: (() => { try { return JSON.parse(localStorage.getItem('app_arrear_history') || '[]'); } catch { return []; } })(),
+                users: (() => { try { return JSON.parse(localStorage.getItem('app_users') || '[]'); } catch { return []; } })(),
                 developerMetadata: {
                     lastNewsDate: localStorage.getItem('app_last_news_date') || "",
                     lastStatutoryDate: localStorage.getItem('app_last_statutory_date') || ""
                 },
                 masters: {
-                    designations: JSON.parse(localStorage.getItem('app_master_designations') || '[]'),
-                    divisions: JSON.parse(localStorage.getItem('app_master_divisions') || '[]'),
-                    branches: JSON.parse(localStorage.getItem('app_master_branches') || '[]'),
-                    sites: JSON.parse(localStorage.getItem('app_master_sites') || '[]'),
+                    designations: (() => { try { return JSON.parse(localStorage.getItem('app_master_designations') || '[]'); } catch { return []; } })(),
+                    divisions: (() => { try { return JSON.parse(localStorage.getItem('app_master_divisions') || '[]'); } catch { return []; } })(),
+                    branches: (() => { try { return JSON.parse(localStorage.getItem('app_master_branches') || '[]'); } catch { return []; } })(),
+                    sites: (() => { try { return JSON.parse(localStorage.getItem('app_master_sites') || '[]'); } catch { return []; } })(),
                 },
                 logo: processedLogo,
                 timestamp: new Date().toISOString()
@@ -673,11 +671,33 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         });
     };
 
-    const handleOTWagesToggle = (key: keyof StatutoryConfig['otWagesComponents']) => {
-        const currentComponents = formData.otWagesComponents || INITIAL_STATUTORY_CONFIG.otWagesComponents;
+    const handleOTToggle = (key: keyof StatutoryConfig['otComponents']) => {
+        const currentComponents = formData.otComponents || INITIAL_STATUTORY_CONFIG.otComponents;
         setFormData({
             ...formData,
-            otWagesComponents: {
+            otComponents: {
+                ...currentComponents,
+                [key]: !currentComponents[key]
+            }
+        });
+    };
+
+    const handlePFOriginalWagesToggle = (key: keyof StatutoryConfig['pfOriginalWagesComponents']) => {
+        const currentComponents = formData.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
+        setFormData({
+            ...formData,
+            pfOriginalWagesComponents: {
+                ...currentComponents,
+                [key]: !currentComponents[key]
+            }
+        });
+    };
+
+    const handleESIOriginalWagesToggle = (key: keyof StatutoryConfig['esiOriginalWagesComponents']) => {
+        const currentComponents = formData.esiOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents;
+        setFormData({
+            ...formData,
+            esiOriginalWagesComponents: {
                 ...currentComponents,
                 [key]: !currentComponents[key]
             }
@@ -770,28 +790,28 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                     }
                 }}
             />
-            <div className="sticky top-20 z-30 bg-[#020617] pt-2 flex gap-4 border-b border-slate-700 overflow-x-auto pb-1 scrollbar-hide">
-                <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+            <div className="sticky top-0 z-30 bg-[#020617] pt-2 flex border-b border-slate-700 overflow-x-auto pb-1 custom-scrollbar -mt-8">
+                <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                     <ShieldCheck size={16} /> Statutory Rules
                 </button>
-                <button onClick={() => setActiveTab('COMPANY')} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'COMPANY' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                <button onClick={() => setActiveTab('COMPANY')} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'COMPANY' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                     <Building2 size={16} /> Company Profile
                 </button>
-                <button onClick={() => setActiveTab('DATA')} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DATA' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                <button onClick={() => setActiveTab('DATA')} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'DATA' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                     <Database size={16} /> Data Management
                 </button>
                 {userRole === 'Developer' && (
-                    <button onClick={() => setActiveTab('DEVELOPER')} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'DEVELOPER' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <button onClick={() => setActiveTab('DEVELOPER')} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'DEVELOPER' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                         <Megaphone size={16} /> Developer Options
                     </button>
                 )}
                 {!isSetupMode && (
-                    <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'LICENSE' ? 'border-pink-500 text-pink-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'LICENSE' ? 'border-pink-500 text-pink-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                         <ShieldCheck size={16} /> License Management
                     </button>
                 )}
                 {(licenseInfo || !isSetupMode || appUsers.length > 0) && (
-                    <button onClick={() => setActiveTab('USERS')} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`whitespace-nowrap pb-3 px-4 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'USERS' ? 'border-sky-500 text-sky-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
+                    <button onClick={() => setActiveTab('USERS')} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'USERS' ? 'border-sky-500 text-sky-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
                         <Users size={16} /> User Management
                     </button>
                 )}
@@ -807,7 +827,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
             {activeTab === 'STATUTORY' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-300">
-                    {/* ... Content of Statutory ... */}
                     <div className="bg-amber-900/20 border border-amber-700/50 p-6 rounded-2xl flex gap-4 text-amber-200">
                         <AlertCircle size={28} className="shrink-0 text-amber-400" />
                         <div className="text-sm space-y-2">
@@ -815,7 +834,159 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <p className="text-slate-300">These Settings Define How PF, ESI, Leave Policy and Taxes are Calculated Establishment wise</p>
                         </div>
                     </div>
-                    {/* ... (rest of statutory) */}
+
+                    {/* Statutory Calculation Configuration - NEW GLOBAL TOGGLE */}
+                    <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
+                        <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="p-2.5 bg-blue-900/30 text-blue-400 rounded-xl border border-blue-500/20 shadow-inner">
+                                    <Scale size={20} />
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-3">
+                                        <h3 className="font-black uppercase tracking-tighter text-lg text-white">Statutory Calculation Configuration</h3>
+                                        <span className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/30 rounded text-[9px] font-black text-blue-400 uppercase tracking-widest">Global Policy</span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Choose the wage basis for PF & ESI contributions.</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-4 bg-slate-900/80 p-1.5 px-3 rounded-2xl border border-slate-800 shadow-inner">
+                                <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${formData.pfEsiCalculationBasis === 'LabourCode' ? 'text-slate-500' : 'text-amber-400'}`}>
+                                    {formData.pfEsiCalculationBasis === 'LabourCode' ? 'LABOUR CODE (CLAUSE 88)' : 'ORIGINAL WAGES BASIS'}
+                                </span>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={formData.pfEsiCalculationBasis === 'OriginalWages'}
+                                        onChange={(e) => setFormData({ ...formData, pfEsiCalculationBasis: e.target.checked ? 'OriginalWages' : 'LabourCode' })}
+                                        title="Toggle Calculation Basis"
+                                    />
+                                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 shadow-lg"></div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Card 1: Labour Code */}
+                            <button
+                                onClick={() => setFormData({ ...formData, pfEsiCalculationBasis: 'LabourCode' })}
+                                className={`group relative p-6 rounded-2xl border-2 transition-all text-left overflow-hidden ${formData.pfEsiCalculationBasis === 'LabourCode' ? 'bg-blue-600/10 border-blue-500 shadow-lg shadow-blue-900/20' : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
+                                title="Select Labour Code Wages Basis"
+                            >
+                                <div className="flex items-center gap-3 mb-3">
+                                    <div className={`p-2 rounded-lg ${formData.pfEsiCalculationBasis === 'LabourCode' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-500 grupo-hover:bg-slate-700'}`}>
+                                        <CheckCircle2 size={16} />
+                                    </div>
+                                    <h4 className="font-bold text-sm tracking-tight">Labour Code Wages</h4>
+                                </div>
+                                <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
+                                    PF/ESI Wages = Basic + DA + Excess Allowances (if Allowances &gt; 50% of Gross). Subject to Statutory Ceiling for PF.
+                                </p>
+                                {formData.pfEsiCalculationBasis === 'LabourCode' && (
+                                    <div className="absolute top-0 right-0 p-2">
+                                        <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                                    </div>
+                                )}
+                            </button>
+
+                            {/* Card 2: Original Wages */}
+                            <button
+                                onClick={() => setFormData({ ...formData, pfEsiCalculationBasis: 'OriginalWages' })}
+                                className={`group relative p-6 rounded-2xl border-2 transition-all text-left overflow-hidden ${formData.pfEsiCalculationBasis === 'OriginalWages' ? 'bg-amber-600/10 border-amber-500 shadow-lg shadow-amber-900/20' : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
+                                title="Select Original Wages Basis"
+                            >
+                                <div className="flex items-center gap-3 mb-3">
+                                    <div className={`p-2 rounded-lg ${formData.pfEsiCalculationBasis === 'OriginalWages' ? 'bg-amber-500 text-white' : 'bg-slate-800 text-slate-500 grupo-hover:bg-slate-700'}`}>
+                                        {formData.pfEsiCalculationBasis === 'OriginalWages' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border-2 border-slate-700" />}
+                                    </div>
+                                    <h4 className="font-bold text-sm tracking-tight">Original Wages</h4>
+                                </div>
+                                <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
+                                    PF/ESI Wages based on selected components below. Subject to Statutory Ceiling for PF unless (Higher Rule) is opted.
+                                </p>
+                                {formData.pfEsiCalculationBasis === 'OriginalWages' && (
+                                    <div className="absolute top-0 right-0 p-2">
+                                        <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.8)]" />
+                                    </div>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* PF ORIGINAL WAGES COMPONENTS - Only shows if OriginalWages selected */}
+                    {formData.pfEsiCalculationBasis === 'OriginalWages' && (
+                        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
+                            <div className="p-4 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Landmark size={16} className="text-blue-400" />
+                                    <h3 className="font-black uppercase tracking-tighter text-xs text-slate-300">PF Original Wages Components</h3>
+                                </div>
+                                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Select components to include for PF Base</span>
+                            </div>
+                            <div className="p-5">
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                    {[
+                                        { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                        { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                        { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
+                                        { key: 'special3', label: 'Allow 3' },
+                                    ].map(comp => {
+                                        const components = formData.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
+                                        const isActive = components[comp.key as keyof typeof components];
+                                        return (
+                                            <button 
+                                                key={comp.key} 
+                                                onClick={() => handlePFOriginalWagesToggle(comp.key as any)} 
+                                                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-blue-600 border-blue-400 text-white shadow-blue-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700'}`}
+                                                title={`Toggle ${comp.label} for PF Base`}
+                                            >
+                                                {isActive ? <CheckSquare size={14} className="shrink-0" /> : <Square size={14} className="shrink-0 opacity-40" />}
+                                                <span className="truncate">{comp.label}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ESI ORIGINAL WAGES COMPONENTS - Only shows if OriginalWages selected */}
+                    {formData.pfEsiCalculationBasis === 'OriginalWages' && (
+                        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
+                            <div className="p-4 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Heart size={16} className="text-pink-400" />
+                                    <h3 className="font-black uppercase tracking-tighter text-xs text-slate-300">ESI Original Wages Components</h3>
+                                </div>
+                                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Select components to include for ESI Base</span>
+                            </div>
+                            <div className="p-5">
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                    {[
+                                        { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                        { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                        { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
+                                        { key: 'special3', label: 'Allow 3' },
+                                    ].map(comp => {
+                                        const components = formData.esiOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents;
+                                        const isActive = components[comp.key as keyof typeof components];
+                                        return (
+                                            <button 
+                                                key={comp.key} 
+                                                onClick={() => handleESIOriginalWagesToggle(comp.key as any)} 
+                                                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-pink-600 border-pink-400 text-white shadow-pink-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-pink-900/20 hover:border-pink-500/30'}`}
+                                                title={`Toggle ${comp.label} for ESI Base`}
+                                            >
+                                                {isActive ? <CheckSquare size={14} className="shrink-0" /> : <Square size={14} className="shrink-0 opacity-40" />}
+                                                <span className="truncate">{comp.label}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
                         {/* ... existing ... */}
                         <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 space-y-6">
@@ -988,41 +1159,76 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                     </div>
 
-                    {/* OverTime Policy Section */}
+                    {/* Overtime (OT) Policy */}
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
                         <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <Calculator className="text-sky-400" size={20} />
-                                <h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">OverTime (OT) Policy</h3>
+                                <Calculator className="text-blue-400" size={20} />
+                                <h3 className="font-bold uppercase tracking-widest text-xs text-sky-400">Overtime (OT) Policy</h3>
                             </div>
-                            <label htmlFor="enable-ot" className="flex items-center gap-2 cursor-pointer p-1.5 bg-sky-900/20 rounded-lg border border-sky-500/20 hover:bg-sky-900/30 transition-all">
-                                <input id="enable-ot" type="checkbox" className="w-4 h-4 rounded border-slate-700 text-sky-500 bg-slate-900 accent-sky-500" checked={formData.enableOverTime || false} onChange={e => setFormData({ ...formData, enableOverTime: e.target.checked })} title="Enable OverTime Policy" />
-                                <span className="text-[10px] font-black text-sky-400 uppercase tracking-widest">Enable OT Policy</span>
+                            <label className="flex items-center gap-2 cursor-pointer p-1.5 px-3 bg-blue-900/20 rounded-lg border border-blue-500/20 hover:bg-blue-900/30 transition-all">
+                                <input
+                                    type="checkbox"
+                                    className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900 accent-blue-500"
+                                    checked={formData.enableOT || false}
+                                    onChange={e => setFormData({ ...formData, enableOT: e.target.checked })}
+                                    title="Enable Overtime Policy"
+                                />
+                                <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Enable OT Policy</span>
                             </label>
                         </div>
-                        {formData.enableOverTime && (
-                            <div className="p-6 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                                <div className="space-y-4">
+                        {formData.enableOT && (
+                            <div className="p-6 space-y-8 animate-in slide-in-from-top-4 duration-500">
+                                <div className="flex flex-col gap-4">
                                     <div className="flex items-center gap-4">
-                                        <span className="text-[10px] font-bold text-slate-500 uppercase">Calculation Factor:</span>
-                                        <div className="flex gap-2">
-                                            {['Single', 'Double'].map(type => (
-                                                <button key={type} onClick={() => setFormData({ ...formData, otRateType: type as any })} className={`px-4 py-1.5 rounded-full text-[10px] font-bold border transition-all ${formData.otRateType === type ? 'bg-sky-600 border-sky-500 text-white shadow-lg shadow-sky-900/20' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'}`} title={`Set OT Calculation to ${type} Rate`}>{type} Rate ({type === 'Single' ? '1x' : '2x'})</button>
+                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Calculation Factor:</span>
+                                        <div className="flex gap-2 p-1 bg-slate-900 rounded-lg border border-slate-800">
+                                            {[
+                                                { label: 'Single Rate (1x)', value: 1 },
+                                                { label: 'Double Rate (2x)', value: 2 }
+                                            ].map(opt => (
+                                                <button
+                                                    key={opt.value}
+                                                    onClick={() => setFormData({ ...formData, otCalculationFactor: opt.value as 1 | 2 })}
+                                                    className={`px-4 py-1.5 rounded-md text-[10px] font-bold transition-all ${formData.otCalculationFactor === opt.value ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30' : 'text-slate-500 hover:text-slate-300'}`}
+                                                >
+                                                    {opt.label}
+                                                </button>
                                             ))}
                                         </div>
                                     </div>
-                                    <div className="space-y-3">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Table size={12} className="text-sky-400" /> Selected Wage Components for OT Calculation</label>
-                                        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
-                                            {[{ key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' }, { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Special 1' }, { key: 'special2', label: 'Special 2' }, { key: 'special3', label: 'Special 3' }].map(comp => {
-                                                const components = formData.otWagesComponents || INITIAL_STATUTORY_CONFIG.otWagesComponents;
-                                                const isActive = components[comp.key as keyof typeof components];
-                                                return <button key={comp.key} onClick={() => handleOTWagesToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-sky-600 border-sky-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`} title={`Toggle ${comp.label} for OverTime`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>;
-                                            })}
-                                        </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                                        <Table size={14} className="text-blue-400" />
+                                        <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Selected Wage Components for OT Calculation</span>
+                                    </div>
+                                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
+                                        {[
+                                            { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                            { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                            { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Special 1' }, { key: 'special2', label: 'Special 2' },
+                                            { key: 'special3', label: 'Special 3' }
+                                        ].map(comp => {
+                                            const isActive = formData.otComponents?.[comp.key as keyof typeof formData.otComponents];
+                                            return (
+                                                <button
+                                                    key={comp.key}
+                                                    onClick={() => handleOTToggle(comp.key as any)}
+                                                    title={`Toggle ${comp.label} for Overtime`}
+                                                    className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+                                                >
+                                                    {isActive ? <CheckSquare size={14} /> : <Square size={14} />}
+                                                    <span className="truncate">{comp.label}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="flex justify-end pr-1">
+                                        <span className="text-[9px] text-slate-500 italic">* OT Rate Calculation: (Selected Components / Monthly Days) * (1x / 2x) * Capacity Factor.</span>
                                     </div>
                                 </div>
-                                <div className="flex justify-end italic text-[9px] text-slate-500">* OT Rate Calculation: (Selected Components / Month Days) * (1 or 2 as per factor).</div>
                             </div>
                         )}
                     </div>
@@ -1166,41 +1372,20 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 </div>
                             </div>
 
-                            {/* --- SMTP Configuration --- */}
+                            {/* ... SMTP Configuration ... */}
                             <div className="md:col-span-3">
-                                <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2 flex items-center gap-2"><Send size={10} /> SMTP Configuration (For Mailing Payslips)</h4>
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-left">
-                                    <div className="space-y-1 md:col-span-2">
-                                        <label htmlFor="smtp-host" className="text-[10px] font-bold text-slate-400 uppercase">SMTP Host</label>
-                                        <input id="smtp-host" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500" placeholder="smtp.gmail.com" value={profileData.smtpConfig?.host || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', secure: false, fromName: '', fromEmail: '' }), host: e.target.value } })} title="SMTP Host" aria-label="SMTP Host" />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label htmlFor="smtp-port" className="text-[10px] font-bold text-slate-400 uppercase">Port</label>
-                                        <input id="smtp-port" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500" value={profileData.smtpConfig?.port || 587} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', secure: false, fromName: '', fromEmail: '' }), port: parseInt(e.target.value) || 587 } })} title="SMTP Port" aria-label="SMTP Port" />
-                                    </div>
-                                    <div className="flex items-end pb-3">
-                                        <label className="flex items-center gap-2 cursor-pointer group">
-                                            <input type="checkbox" className="hidden" checked={profileData.smtpConfig?.secure || false} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', fromName: '', fromEmail: '' }), secure: e.target.checked } })} />
-                                            <div className={`w-5 h-5 rounded border ${profileData.smtpConfig?.secure ? 'bg-amber-500 border-amber-500' : 'bg-slate-900 border-slate-700'} flex items-center justify-center transition-colors`}>{profileData.smtpConfig?.secure && <div className="w-2 h-2 bg-white rounded-full" />}</div>
-                                            <span className="text-[10px] font-bold text-slate-400 uppercase group-hover:text-slate-300">Use SSL/TLS</span>
-                                        </label>
-                                    </div>
-                                    <div className="space-y-1 md:col-span-2">
-                                        <label htmlFor="smtp-user" className="text-[10px] font-bold text-slate-400 uppercase">SMTP User (Email)</label>
-                                        <input id="smtp-user" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500" value={profileData.smtpConfig?.user || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, pass: '', secure: false, fromName: '', fromEmail: '' }), user: e.target.value } })} title="SMTP Username" aria-label="SMTP Username" />
-                                    </div>
-                                    <div className="space-y-1 md:col-span-2">
-                                        <label htmlFor="smtp-pass" className="text-[10px] font-bold text-slate-400 uppercase">SMTP Password</label>
-                                        <input id="smtp-pass" type="password" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500 text-sm" value={profileData.smtpConfig?.pass || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', secure: false, fromName: '', fromEmail: '' }), pass: e.target.value } })} title="SMTP Password" aria-label="SMTP Password" />
-                                    </div>
-                                    <div className="space-y-1 md:col-span-2">
-                                        <label htmlFor="smtp-from-name" className="text-[10px] font-bold text-slate-400 uppercase">Sender Name</label>
-                                        <input id="smtp-from-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500" value={profileData.smtpConfig?.fromName || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', secure: false, fromEmail: '' }), fromName: e.target.value } })} title="Email Sender Name" aria-label="Email Sender Name" />
-                                    </div>
-                                    <div className="space-y-1 md:col-span-2">
-                                        <label htmlFor="smtp-from-email" className="text-[10px] font-bold text-slate-400 uppercase">Sender Email (If Different)</label>
-                                        <input id="smtp-from-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-500" value={profileData.smtpConfig?.fromEmail || ''} onChange={e => setProfileData({ ...profileData, smtpConfig: { ...(profileData.smtpConfig || { host: '', port: 587, user: '', pass: '', secure: false, fromName: '' }), fromEmail: e.target.value } })} title="Email Sender Email" aria-label="Email Sender Email" />
-                                    </div>
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-4 mt-2">
+                                    <h4 className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-2"><Mail size={12} /> SMTP CONFIGURATION (FOR MAILING PAYSLIPS)</h4>
+                                    <button onClick={() => setShowSMTPModal(true)} className="text-[9px] font-black bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 px-3 rounded-md uppercase tracking-widest transition-colors flex items-center gap-1"><AlertCircle size={10} /> HOW TO CONFIGURE?</button>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6">
+                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-host" className="text-[10px] font-bold text-slate-400 uppercase">SMTP HOST</label><input id="smtp-host" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="smtp.gmail.com" value={profileData.smtpHost || ''} onChange={e => setProfileData({ ...profileData, smtpHost: e.target.value })} /></div>
+                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-port" className="text-[10px] font-bold text-slate-400 uppercase">PORT</label><input id="smtp-port" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="465" value={profileData.smtpPort || ''} onChange={e => { const port = parseInt(e.target.value); let sec = profileData.smtpSecurity || 'None'; if (port === 465) sec = 'SSL'; else if (port === 587) sec = 'TLS'; setProfileData({ ...profileData, smtpPort: port || undefined, smtpSecurity: sec as any }); }} /></div>
+                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-security" className="text-[10px] font-bold text-slate-400 uppercase">SECURITY</label><select id="smtp-security" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono" value={profileData.smtpSecurity || 'None'} onChange={e => setProfileData({ ...profileData, smtpSecurity: e.target.value as any })}><option value="None">None</option><option value="SSL">SSL</option><option value="TLS">TLS</option></select></div>
+                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-user" className="text-[10px] font-bold text-slate-400 uppercase">SMTP USER (EMAIL)</label><input id="smtp-user" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="your.email@gmail.com" value={profileData.smtpUser || ''} onChange={e => setProfileData({ ...profileData, smtpUser: e.target.value })} /></div>
+                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-password" className="text-[10px] font-bold text-slate-400 uppercase">SMTP PASSWORD</label><input id="smtp-password" type="password" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="••••••••••••••••" value={profileData.smtpPassword || ''} onChange={e => setProfileData({ ...profileData, smtpPassword: e.target.value })} /></div>
+                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-sender-name" className="text-[10px] font-bold text-slate-400 uppercase">SENDER NAME (IN MAIL)</label><input id="smtp-sender-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 placeholder:text-slate-500" placeholder="HR Department" value={profileData.senderName || ''} onChange={e => setProfileData({ ...profileData, senderName: e.target.value })} /></div>
+                                    <div className="space-y-1 flex flex-col justify-end md:col-span-2 xl:col-span-3"><label htmlFor="smtp-sender-email" className="text-[10px] font-bold text-slate-400 uppercase">REPLY-TO EMAIL (IF DIFFERENT)</label><input id="smtp-sender-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="hr@yourcompany.com" value={profileData.senderEmail || ''} onChange={e => setProfileData({ ...profileData, senderEmail: e.target.value })} /></div>
                                 </div>
                             </div>
                         </div>
@@ -1834,7 +2019,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             )}
 
             {showAuthModal && (
-                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-indigo-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
                         <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Authentication Modal" aria-label="Close Authentication Modal"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
@@ -1853,6 +2038,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </button>
                     </div>
                 </div>
+            )}
+
+            {showSMTPModal && (
+                <SMTPConfigModal onClose={() => setShowSMTPModal(false)} />
             )}
         </div>
     );

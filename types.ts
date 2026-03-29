@@ -51,8 +51,6 @@ export interface Attendance {
   casualLeave: number;
   lopDays: number;
   encashedDays?: number; // New field for Leave Encashment input in Attendance
-  otDays?: number; // New field for OverTime Days
-  otHours?: number; // New field for OverTime Hours
 }
 
 export type PFComplianceType = 'Statutory' | 'Voluntary';
@@ -95,37 +93,10 @@ export interface StatutoryConfig {
     special3: boolean;
   };
 
-  // NEW: Statutory Calculation Policy
-  useLabourCodeWages?: boolean; 
-  pfOriginalWagesComponents?: {
-    basic: boolean;
-    da: boolean;
-    retaining: boolean;
-    hra: boolean;
-    conveyance: boolean;
-    washing: boolean;
-    attire: boolean;
-    special1: boolean;
-    special2: boolean;
-    special3: boolean;
-  };
-  esiOriginalWagesComponents?: {
-    basic: boolean;
-    da: boolean;
-    retaining: boolean;
-    hra: boolean;
-    conveyance: boolean;
-    washing: boolean;
-    attire: boolean;
-    special1: boolean;
-    special2: boolean;
-    special3: boolean;
-  };
-
   // NEW: Leave Wages Calculation Policy (Default Basic + DA)
   leaveWagesComponents: {
-    basic: boolean; // Changed to boolean
-    da: boolean;    // Changed to boolean
+    basic: boolean;
+    da: boolean;
     retaining: boolean;
     hra: boolean;
     conveyance: boolean;
@@ -136,10 +107,37 @@ export interface StatutoryConfig {
     special3: boolean;
   };
 
-  // NEW: OverTime Policy
-  enableOverTime: boolean;
-  otRateType: 'Single' | 'Double';
-  otWagesComponents: {
+  // NEW: Overtime Policy
+  enableOT: boolean;
+  otCalculationFactor: 1 | 2;
+  otComponents: {
+    basic: boolean;
+    da: boolean;
+    retaining: boolean;
+    hra: boolean;
+    conveyance: boolean;
+    washing: boolean;
+    attire: boolean;
+    special1: boolean;
+    special2: boolean;
+    special3: boolean;
+  };
+
+  // NEW: Statutory Calculation Basis
+  pfEsiCalculationBasis: 'LabourCode' | 'OriginalWages';
+  pfOriginalWagesComponents: {
+    basic: boolean;
+    da: boolean;
+    retaining: boolean;
+    hra: boolean;
+    conveyance: boolean;
+    washing: boolean;
+    attire: boolean;
+    special1: boolean;
+    special2: boolean;
+    special3: boolean;
+  };
+  esiOriginalWagesComponents: {
     basic: boolean;
     da: boolean;
     retaining: boolean;
@@ -182,15 +180,15 @@ export interface CompanyProfile {
   flashNews?: string; // New field for Flash News
   postLoginMessage?: string; // New field for Post Login Popup Message
   externalAppUrl?: string; // New field for External App Link
-  smtpConfig?: {
-    host: string;
-    port: number;
-    secure: boolean;
-    user: string;
-    pass: string;
-    fromName: string;
-    fromEmail: string;
-  };
+  
+  // SMTP Configuration
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecurity?: 'None' | 'SSL' | 'TLS';
+  smtpUser?: string;
+  smtpPassword?: string;
+  senderName?: string;
+  senderEmail?: string;
 }
 
 export interface Employee {
@@ -228,13 +226,13 @@ export interface Employee {
   pincode: string;
 
   mobile: string;
-  email: string;
   bankAccount: string;
   bankName?: string; // New field
   bankBranch?: string; // New field
   ifsc: string;
   doj: string;
   dol?: string;
+  email?: string; // New field for mailing
   leavingReason?: string; // New field for Reason of Leaving
 
   // Wage Components
@@ -310,7 +308,7 @@ export interface PayrollResult {
     special3: number;
     bonus: number;
     leaveEncashment: number;
-    otAmount: number; // New field for OverTime Amount
+    otAmount: number; // New: Overtime Payment
     total: number;
   };
   deductions: {
@@ -335,6 +333,7 @@ export interface PayrollResult {
   status?: 'Draft' | 'Finalized'; // New field for Freezing data
   isCode88?: boolean;
   isESICodeWagesUsed?: boolean;
+  isProportionatePFCapped?: boolean; // New flag for proportional PF capped wages warning
   esiRemark?: string;
   leaveSnapshot?: LeaveLedger; // Snapshot of ledger at the time of freezing
   fineReason?: string; // Store reason for fine in result for reporting
@@ -417,10 +416,10 @@ export enum View {
   PayProcess = 'pay_process', // Consolidated Pay Process View
   Reports = 'reports',
   PFCalculator = 'pf_calculator', // New Module
+  MIS = 'mis', // Management Info System
   Utilities = 'utilities',
   Settings = 'settings',
-  AI_Assistant = 'ai_assistant',
-  MIS = 'mis'
+  AI_Assistant = 'ai_assistant'
 }
 
 export interface LicenseData {
@@ -439,7 +438,15 @@ export interface LicenseData {
   checksum?: string; // For integrity check
 }
 
-export type AlertType = 'success' | 'error' | 'warning' | 'info' | 'loading' | 'confirm' | 'danger';
+export interface OTRecord {
+  employeeId: string;
+  month: string;
+  year: number;
+  otDays: number;
+  otHours: number;
+  otRate: number;
+  otAmount: number;
+}
 
 export interface AppVersion {
   version: string;
@@ -447,47 +454,3 @@ export interface AppVersion {
   features: string[];
   statutoryUpdates?: string[];
 }
-
-// New Types for Dynamic Report Builder
-export interface DynamicReportColumn {
-  id: string;
-  header: string;
-  sourceType: 'Employee' | 'PayrollResult' | 'StartPeriodResult' | 'EndPeriodResult' | 'Auto' | 'Formula' | 'CustomText' | 'OtherAllowance' | 'OtherDeductions' | 'Compare' | 'Percentage';
-  sourceKey: string; // e.g. 'id', 'earnings.basic', 'netPay'
-}
-
-export interface DynamicReportTemplate {
-  id: string;
-  name: string;      // Form Name (e.g. FORM B)
-  type: string;      // Report Type (e.g. PAY REGISTER)
-  ruleName: string;  // Rule Description
-  state: string;     // State (e.g. Tamil Nadu)
-  orientation?: 'p' | 'l';
-  columns: DynamicReportColumn[];
-  showTotals?: boolean;
-  fromMonth?: string;
-  fromYear?: number;
-  toMonth?: string;
-  toYear?: number;
-  createdAt: string;
-}
-
-// New Types for Dynamic MIS Report (Row-based)
-export interface DynamicMISReportRow {
-  id: string;
-  rowNumber: number;
-  label: string;
-  sourceType: 'Employee' | 'PayrollStart' | 'PayrollEnd' | 'ECRStart' | 'ECREnd' | 'Compare' | 'Percentage' | 'Text' | 'C2CStart' | 'C2CEnd';
-  sourceKey: string;     // e.g. 'earnings.basic', 'eeEPF'
-  sourceKeys?: string[]; // Multiple keys for summation (used by C2C types)
-  calcRefs: number[];    // Row numbers used for calculation: e.g. [5, 4] for (Row 5 - Row 4)
-  operator?: '+' | '-' | '*' | '/'; // Operator for 'Compare' source type
-}
-
-export interface DynamicMISReportTemplate {
-  id: string;
-  name: string;
-  rows: DynamicMISReportRow[];
-  createdAt: string;
-}
-

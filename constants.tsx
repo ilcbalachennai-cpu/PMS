@@ -1,3 +1,4 @@
+
 import { StatutoryConfig, Employee, User, LeavePolicy, CompanyProfile } from './types';
 
 // Branding Configuration
@@ -99,8 +100,38 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
     special3: false
   },
 
-  // NEW: Statutory Calculation Policy
-  useLabourCodeWages: true, // Default to Clause 88 logic
+  // NEW: Leave Wages Calculation Policy (Default Basic + DA)
+  leaveWagesComponents: {
+    basic: true,
+    da: true,
+    retaining: false,
+    hra: false,
+    conveyance: false,
+    washing: false,
+    attire: false,
+    special1: false,
+    special2: false,
+    special3: false
+  },
+
+  // NEW: Overtime Policy
+  enableOT: false,
+  otCalculationFactor: 1,
+  otComponents: {
+    basic: true,
+    da: true,
+    retaining: false,
+    hra: false,
+    conveyance: false,
+    washing: false,
+    attire: false,
+    special1: false,
+    special2: false,
+    special3: false
+  },
+
+  // NEW: Statutory Calculation Basis (Global Policy)
+  pfEsiCalculationBasis: 'LabourCode',
   pfOriginalWagesComponents: {
     basic: true,
     da: true,
@@ -117,36 +148,6 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
     basic: true,
     da: true,
     retaining: true,
-    hra: false,
-    conveyance: false,
-    washing: false,
-    attire: false,
-    special1: false,
-    special2: false,
-    special3: false
-  },
-
-  // NEW: Leave Wages Calculation Policy (Default Basic + DA)
-  leaveWagesComponents: {
-    basic: true,
-    da: true,
-    retaining: false,
-    hra: false,
-    conveyance: false,
-    washing: false,
-    attire: false,
-    special1: false,
-    special2: false,
-    special3: false
-  },
-
-  // NEW: OverTime Policy
-  enableOverTime: false,
-  otRateType: 'Single',
-  otWagesComponents: {
-    basic: true,
-    da: true,
-    retaining: false,
     hra: false,
     conveyance: false,
     washing: false,

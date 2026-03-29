@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { ShieldCheck, Download, ScrollText, Landmark, Lock, BookOpen, Info, X } from 'lucide-react';
-import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, AlertType } from '../types';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { ShieldCheck, Download, ScrollText, Landmark, Lock, HandCoins, Calendar, X, BookOpen, ReceiptText, Info, AlertTriangle, CheckCircle } from 'lucide-react';
+import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile, ArrearBatch } from '../types';
 import { INDIAN_STATES } from '../constants';
 import {
     generatePFECR,
@@ -19,93 +19,143 @@ import {
     generateESICodeWagesReport,
     generateGratuityReport,
     generateBonusReport,
+    generateEPFCodeImpactReport,
     generateESIForm5,
     generateArrearECRText,
     generateArrearECRExcel,
     generateForm16PartBPDF,
-    getStandardFileName
+    getStandardFileName,
+    openSavedReport
 } from '../services/reportService';
-import DynamicReportBuilder from './DynamicReportBuilder';
-import { usePayrollData } from '../hooks/usePayrollData';
-import { usePayrollPeriod } from '../hooks/usePayrollPeriod';
 
 interface StatutoryReportsProps {
-    results: PayrollResult[];
+    payrollHistory: PayrollResult[];
     employees: Employee[];
+    config: StatutoryConfig;
     companyProfile: CompanyProfile;
-    statutoryConfig: StatutoryConfig;
-    showAlert: (type: AlertType, title: string, message: React.ReactNode, onConfirm?: () => void, onCancel?: () => void) => string;
+    globalMonth: string;
+    setGlobalMonth: (m: string) => void;
+    globalYear: number;
+    setGlobalYear: (y: number) => void;
+    attendances?: Attendance[];
+    leaveLedgers?: LeaveLedger[];
+    advanceLedgers?: AdvanceLedger[];
+    arrearHistory?: ArrearBatch[];
+    latestFrozenPeriod: { month: string; year: number } | null;
+    showAlert: any;
 }
 
+// Configuration for State Specific Forms
 const STATE_FORM_MAPPINGS: Record<string, { wage: string; slip: string; advance: string }> = {
-    'Tamil Nadu': { wage: 'Form R (Wage Register)', slip: 'Form T (Wage Slip)', advance: 'Form P (Advances)' },
-    'Karnataka': { wage: 'Form T (Wage Register)', slip: 'Form V (Wage Slip)', advance: 'Form XXII (Advances)' },
-    'Maharashtra': { wage: 'Form II (Wage Register)', slip: 'Form III (Wage Slip)', advance: 'Form IV (Advances)' },
-    'Andhra Pradesh': { wage: 'Form XXIII (Wage Register)', slip: 'Form XXIV (Wage Slip)', advance: 'Form XXII (Advances)' },
-    'Telangana': { wage: 'Form XXIII (Wage Register)', slip: 'Form XXIV (Wage Slip)', advance: 'Form XXII (Advances)' },
-    'West Bengal': { wage: 'Form J (Register of Wages)', slip: 'Form H (Pay Slip)', advance: 'Form M (Advances)' },
-    'Default': { wage: 'Wage Register', slip: 'Pay Slip', advance: 'Advance Register' }
+    'Tamil Nadu': {
+        wage: 'Form R (Wage Register)',
+        slip: 'Form T (Wage Slip)',
+        advance: 'Form P (Advances)'
+    },
+    'Karnataka': {
+        wage: 'Form T (Wage Register)',
+        slip: 'Form V (Wage Slip)',
+        advance: 'Form XXII (Advances)' // Common in Karnataka S&E
+    },
+    'Maharashtra': {
+        wage: 'Form II (Wage Register)',
+        slip: 'Form III (Wage Slip)',
+        advance: 'Form IV (Advances)'
+    },
+    'Andhra Pradesh': {
+        wage: 'Form XXIII (Wage Register)',
+        slip: 'Form XXIV (Wage Slip)',
+        advance: 'Form XXII (Advances)'
+    },
+    'Telangana': {
+        wage: 'Form XXIII (Wage Register)',
+        slip: 'Form XXIV (Wage Slip)',
+        advance: 'Form XXII (Advances)'
+    },
+    'West Bengal': {
+        wage: 'Form J (Register of Wages)',
+        slip: 'Form H (Pay Slip)',
+        advance: 'Form M (Advances)'
+    },
+    'Default': {
+        wage: 'Wage Register',
+        slip: 'Pay Slip',
+        advance: 'Advance Register'
+    }
 };
 
 const StatutoryReports: React.FC<StatutoryReportsProps> = ({
-    results: payrollHistory,
+    payrollHistory,
     employees,
+    config,
     companyProfile,
-    statutoryConfig: config,
-    showAlert
+    globalMonth,
+    setGlobalMonth,
+    globalYear,
+    setGlobalYear,
+    attendances = [],
+    leaveLedgers: _leaveLedgers = [],
+    advanceLedgers = [],
+    arrearHistory = [],
+    latestFrozenPeriod,
+    showAlert: _showAlert
 }) => {
-    const { 
-        attendances,
-        advanceLedgers,
-        arrearHistory
-    } = usePayrollData(showAlert);
-    
-    const { activePeriod } = usePayrollPeriod();
-    const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    
-    const [selectedMonth, setSelectedMonth] = useState<string>(activePeriod.month);
-    const [selectedYear, setSelectedYear] = useState<number>(activePeriod.year);
-
-    const isFinalized = useMemo(() => {
-        const records = payrollHistory.filter(r => r.month === selectedMonth && r.year === selectedYear);
-        return records.length > 0 && records[0].status === 'Finalized';
-    }, [payrollHistory, selectedMonth, selectedYear]);
-
-    const isLocked = useMemo(() => isFinalized || (selectedYear < activePeriod.year) || (selectedYear === activePeriod.year && monthsArr.indexOf(selectedMonth) < monthsArr.indexOf(activePeriod.month)), [isFinalized, selectedYear, selectedMonth, activePeriod]);
+    const currentYear = new Date().getFullYear();
+    const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
     const [selectedState, setSelectedState] = useState<string>('Tamil Nadu');
-    const [reportView, setReportView] = useState<'Standard' | 'Dynamic'>('Standard');
+    const hasInitialJumped = useRef(false);
 
-    const currentForms = useMemo(() => STATE_FORM_MAPPINGS[selectedState] || STATE_FORM_MAPPINGS['Default'], [selectedState]);
+    const currentForms = useMemo(() => {
+        return STATE_FORM_MAPPINGS[selectedState] || STATE_FORM_MAPPINGS['Default'];
+    }, [selectedState]);
 
-    const finalizedPeriods = useMemo(() => {
-        const unique = new Set<string>();
-        return payrollHistory
-            .filter(r => r.status === 'Finalized')
-            .filter(r => {
-                const key = `${r.month}-${r.year}`;
-                if (unique.has(key)) return false;
-                unique.add(key);
-                return true;
-            })
-            .map(r => ({ month: r.month, year: r.year }));
-    }, [payrollHistory]);
+    const isFinalized = useMemo(() => {
+        const records = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
+        return records.length > 0 && records[0].status === 'Finalized';
+    }, [payrollHistory, globalMonth, globalYear]);
+
+    // Initial Jump to Latest Frozen Month
+    useEffect(() => {
+        if (!hasInitialJumped.current && latestFrozenPeriod) {
+            if (!isFinalized) {
+                setGlobalMonth(latestFrozenPeriod.month);
+                setGlobalYear(latestFrozenPeriod.year);
+            }
+            hasInitialJumped.current = true;
+        }
+    }, [latestFrozenPeriod, isFinalized, setGlobalMonth, setGlobalYear]);
 
     const [rangeModal, setRangeModal] = useState({
         isOpen: false,
         reportType: '',
         startMonth: 'April',
-        startYear: selectedYear,
+        startYear: globalYear,
         endMonth: 'March',
-        endYear: selectedYear + 1,
+        endYear: globalYear + 1,
         selectedEmployee: 'ALL',
         format: 'PDF' as 'PDF' | 'Excel',
         halfYearPeriod: 'Apr-Sep' as 'Apr-Sep' | 'Oct-Mar',
-        periodYear: selectedYear
+        periodYear: globalYear
+    });
+
+    const [msgModal, setMsgModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'error' | 'success'; onConfirm?: () => void }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        type: 'error'
     });
 
     const openRangeModal = (reportType: string) => {
-        const fyStartYear = ['January', 'February', 'March'].includes(selectedMonth) ? selectedYear - 1 : selectedYear;
+        const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
+        const fyStartYear = isJanToMar ? globalYear - 1 : globalYear;
+
+        let defaultHalfYear: 'Apr-Sep' | 'Oct-Mar' = 'Apr-Sep';
+        if (months.indexOf(globalMonth) >= 9 || months.indexOf(globalMonth) <= 2) {
+            defaultHalfYear = 'Oct-Mar';
+        }
+
         setRangeModal({
             isOpen: true,
             reportType,
@@ -115,15 +165,15 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             endYear: fyStartYear + 1,
             selectedEmployee: 'ALL',
             format: 'PDF',
-            halfYearPeriod: (monthsArr.indexOf(selectedMonth) >= 9 || monthsArr.indexOf(selectedMonth) <= 2) ? 'Oct-Mar' : 'Apr-Sep',
+            halfYearPeriod: defaultHalfYear,
             periodYear: fyStartYear
         });
     };
 
     const handleGenerateRange = async () => {
         setRangeModal({ ...rangeModal, isOpen: false });
+        let savedPath: string | null = null;
         try {
-            let savedPath: string | null = null;
             if (rangeModal.reportType === 'Form 3A') {
                 savedPath = await generatePFForm3A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
             } else if (rangeModal.reportType === 'Form 6A') {
@@ -136,28 +186,46 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 savedPath = await generateESIForm5(payrollHistory, employees, rangeModal.halfYearPeriod, rangeModal.periodYear, companyProfile);
             }
 
-            if (savedPath) showAlert('success', 'Report Generated', `Successfully generated ${rangeModal.reportType}!`);
+            if (savedPath) {
+                _showAlert(
+                    'success',
+                    'Report Generated Successfully',
+                    `The ${rangeModal.reportType} has been saved to your reports folder.`,
+                    () => openSavedReport(savedPath),
+                    undefined,
+                    'Open Report & Folder',
+                    undefined,
+                    undefined,
+                    2
+                );
+            } else {
+                _showAlert('error', 'Generation Failed', 'An unexpected error occurred while saving the report. Please try again.');
+            }
         } catch (e: any) {
-            showAlert('error', 'Error', e.message);
+            _showAlert('error', 'Error', e.message);
         }
     };
 
     const handleDownload = async (reportName: string, format: string) => {
-        const currentData = payrollHistory.filter(r => r.month === selectedMonth && r.year === selectedYear);
-        const fileName = getStandardFileName(reportName, companyProfile, selectedMonth, selectedYear);
+        const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
+        const fileName = getStandardFileName(reportName, companyProfile, globalMonth, globalYear);
+        let savedPath: string | null = null;
+
         try {
-            let savedPath: string | null = null;
             if (reportName === 'PF ECR Arrears') {
-                const batch = arrearHistory?.find(b => b.month === selectedMonth && b.year === selectedYear);
-                if (!batch) throw new Error(`No arrears processed for the period ${selectedMonth} ${selectedYear}`);
-                if (format === 'Excel') savedPath = await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName);
-                else savedPath = await generateArrearECRText(batch, payrollHistory, employees, config, fileName);
+                const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
+                if (!batch) throw new Error(`No arrears processed for the period ${globalMonth} ${globalYear}`);
+                if (format === 'Excel') {
+                    savedPath = await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName);
+                } else {
+                    savedPath = await generateArrearECRText(batch, payrollHistory, employees, config, fileName);
+                }
             } else if (reportName.includes('PF ECR')) {
                 savedPath = await generatePFECR(currentData, employees, config, format as any, fileName);
             } else if (reportName.includes('ESI Code Wages')) {
-                savedPath = await generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, selectedMonth, selectedYear);
+                savedPath = await generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('ESI Exit')) {
-                savedPath = await generateESIExitReport(currentData, employees, selectedMonth, selectedYear, companyProfile);
+                savedPath = await generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
             } else if (reportName.includes('ESI')) {
                 savedPath = await generateESIReturn(currentData, employees, format as any, fileName, companyProfile);
             } else if (reportName.includes('PT')) {
@@ -166,23 +234,43 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 savedPath = await generateTDSReport(currentData, employees, fileName, companyProfile);
             } else if (reportName.includes('Gratuity')) {
                 savedPath = await generateGratuityReport(employees, companyProfile);
+            } else if (reportName.includes('Social Security')) {
+                savedPath = await generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
+            } else if (reportName.includes('EPF Code Impact')) {
+                savedPath = await generateEPFCodeImpactReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('Form 12A')) {
-                savedPath = await generatePFForm12A(currentData, employees, config, companyProfile, selectedMonth, selectedYear);
+                savedPath = await generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
             } else if (reportName.includes('Form B')) {
-                savedPath = await generateFormB(currentData, employees, selectedMonth, selectedYear, companyProfile);
+                savedPath = await generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
             } else if (reportName.includes('Form C')) {
-                savedPath = await generateFormC(currentData, employees, attendances, selectedMonth, selectedYear, companyProfile);
-            } else if (reportName === 'Wage Register') {
-                savedPath = await generateStateWageRegister(currentData, employees, selectedMonth, selectedYear, companyProfile, selectedState, currentForms.wage);
+                savedPath = await generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
+            }
+            // STATE SPECIFIC LOGIC
+            else if (reportName === 'Wage Register') {
+                savedPath = await generateStateWageRegister(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.wage);
             } else if (reportName === 'Pay Slip') {
-                savedPath = await generateStatePaySlip(currentData, employees, selectedMonth, selectedYear, companyProfile, selectedState, currentForms.slip);
+                savedPath = await generateStatePaySlip(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.slip);
             } else if (reportName === 'Advance Register') {
-                savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers, selectedMonth, selectedYear, companyProfile, selectedState, currentForms.advance);
+                savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
             }
 
-            if (savedPath) showAlert('success', 'Report Generated', `Successfully generated ${reportName}!`);
+            if (savedPath) {
+                _showAlert(
+                    'success',
+                    'Report Generated Successfully',
+                    `The ${reportName} has been saved to your reports folder.`,
+                    () => openSavedReport(savedPath),
+                    undefined,
+                    'Open Report & Folder',
+                    undefined,
+                    undefined,
+                    2
+                );
+            } else {
+                _showAlert('error', 'Generation Failed', 'An unexpected error occurred while saving the report. Please try again or check if the file is open elsewhere.');
+            }
         } catch (e: any) {
-            showAlert('error', 'Generation Failed', e.message);
+            _showAlert('error', 'Report Generation Failed', e.message);
         }
     };
 
@@ -191,17 +279,17 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             <div className="bg-[#0f172a] p-4 flex items-center justify-between border-b border-slate-800">
                 <div className="flex items-center gap-3">
                     <div className={`p-2 rounded-lg bg-${color}-900/20 text-${color}-400 border border-${color}-900/30`}>
-                        <Icon size={18} />
+                        <Icon size={20} />
                     </div>
-                    <h3 className={`font-bold text-${color}-400 text-[10px] uppercase tracking-widest`}>{title}</h3>
+                    <h3 className={`font-bold text-${color}-400 text-sm uppercase tracking-widest`}>{title}</h3>
                 </div>
                 {headerAction}
             </div>
-            <div className="p-4 grid grid-cols-1 gap-1.5">
+            <div className="p-4 grid grid-cols-1 gap-2">
                 {reports.map((r, i) => (
-                    <button key={i} onClick={r.action} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900/40 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all group/btn text-left">
-                        <span className={`text-[11px] font-bold ${r.textColor || 'text-slate-300'} group-hover/btn:text-white`}>{r.label}</span>
-                        <span className="text-[9px] font-mono text-slate-500 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">{r.format || 'PDF'}</span>
+                    <button key={i} onClick={r.action} className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all group/btn text-left">
+                        <span className={`text-xs font-bold ${r.textColor || 'text-slate-300'} group-hover/btn:text-white`}>{r.label}</span>
+                        <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{r.format || 'PDF'}</span>
                     </button>
                 ))}
             </div>
@@ -209,94 +297,216 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     );
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-500">
+        <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 relative">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#1e293b] p-6 rounded-xl border border-slate-800 shadow-xl">
                 <div>
-                    <h3 className={`font-bold text-lg ${isLocked ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {isLocked ? 'Compliance View Locked' : 'Compliance View Open'}
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-1">
-                        {isLocked ? 'Data is frozen for reporting.' : 'Finalize payroll to view compliance reports.'}
-                    </p>
+                    <h2 className="text-2xl font-black text-white">Statutory Returns & Registers</h2>
+                    <p className="text-slate-400 text-sm">Lawful compliance reporting for EPF, ESI, PT, and State Acts.</p>
                 </div>
-                <div className="flex items-center gap-2 bg-[#0f172a] p-1 rounded-xl border border-slate-700">
-                    <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="bg-transparent px-3 py-1 text-xs text-white font-bold outline-none" title="Select Month">
-                        {monthsArr.map(m => <option key={m} value={m}>{m}</option>)}
+                <div className="flex items-center gap-3">
+                    <select aria-label="Select global month" value={globalMonth} onChange={e => setGlobalMonth(e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
+                        {months.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
-                    <select value={selectedYear} onChange={e => setSelectedYear(parseInt(e.target.value, 10))} className="bg-transparent px-3 py-1 text-xs text-white font-bold outline-none" title="Select Year">
-                        {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+                    <select aria-label="Select global year" value={globalYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
+                        {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
                     </select>
                 </div>
             </div>
 
-            {reportView === 'Dynamic' ? (
-                <DynamicReportBuilder 
-                    employees={employees}
-                    savedRecords={payrollHistory}
-                    month={selectedMonth}
-                    year={selectedYear}
-                    companyProfile={companyProfile}
-                    showAlert={(type, title, message) => showAlert(type as any, title, message)}
-                    finalizedPeriods={finalizedPeriods}
-                />
+            {!isFinalized ? (
+                <div className="flex flex-col items-center justify-center p-12 bg-[#1e293b] rounded-2xl border border-slate-800 text-center space-y-4">
+                    <div className="p-4 bg-slate-900 rounded-full text-slate-500"><Lock size={48} /></div>
+                    <h3 className="text-xl font-bold text-white">Compliance View Locked</h3>
+                    <p className="text-slate-400">Payroll for {globalMonth} {globalYear} must be frozen to generate official reports.</p>
+                </div>
             ) : (
-                <>
-                {!isLocked ? (
-                    <div className="flex flex-col items-center justify-center p-12 bg-[#1e293b] rounded-2xl border border-slate-800 text-center">
-                        <Lock size={48} className="text-slate-600 mb-4" />
-                        <h3 className="text-2xl font-black text-white">Compliance Locked</h3>
-                        <p className="text-slate-400 text-sm max-w-sm">Payroll for {selectedMonth} {selectedYear} must be frozen to generate official reports.</p>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pb-10">
+
+                    {/* CLAUSE 88 NOTE */}
+                    <div className="lg:col-span-2 bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-xl flex items-start gap-3">
+                        <Info className="text-indigo-400 shrink-0 mt-1" size={20} />
+                        <div>
+                            <h4 className="text-sm font-bold text-indigo-300">Code on Social Security, 2020 (Clause 88) Impact</h4>
+                            <p className="text-xs text-indigo-200/70 mt-1 leading-relaxed">
+                                Per Section 142 of the Code on Social Security 2020 (Clause 88), if the aggregate of specified exclusions (allowances) exceeds 50% of the total remuneration, the excess amount shall be deemed as wages.
+                                The system has automatically adjusted the PF & ESI calculations in the reports below where applicable.
+                            </p>
+                        </div>
                     </div>
-                ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pb-10">
-                        <div className="lg:col-span-2 bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-xl flex items-start gap-3">
-                            <Info className="text-indigo-400 shrink-0 mt-1" size={20} />
+
+                    {/* EPF Reports */}
+                    <ReportCard
+                        title="EPF & MP Act, 1952"
+                        icon={Landmark}
+                        color="blue"
+                        reports={[
+                            { label: 'PF ECR (Electronic Challan Return)', action: () => handleDownload('PF ECR', 'Text'), format: 'TXT' },
+                            { label: 'PF ECR (Excel Backup)', action: () => handleDownload('PF ECR', 'Excel'), format: 'XLSX' },
+                            { label: 'PF ECR Arrears (Text format)', action: () => handleDownload('PF ECR Arrears', 'Text'), format: 'TXT', textColor: 'text-amber-400' },
+                            { label: 'PF ECR Arrears (Excel Backup)', action: () => handleDownload('PF ECR Arrears', 'Excel'), format: 'XLSX', textColor: 'text-amber-400' },
+                            { label: 'Form 12A (Revised)', action: () => handleDownload('Form 12A', 'PDF') },
+                            { label: 'Form 3A (Member Annual Card)', action: () => openRangeModal('Form 3A'), format: 'PDF' },
+                            { label: 'Form 6A (Consolidated Annual)', action: () => openRangeModal('Form 6A'), format: 'PDF' },
+                            { label: 'Code 2020 Impact Analysis', action: () => handleDownload('EPF Code Impact', 'PDF'), format: 'PDF' }
+                        ]}
+                    />
+
+                    {/* ESI Reports */}
+                    <ReportCard
+                        title="ESI Act, 1948"
+                        icon={ShieldCheck}
+                        color="pink"
+                        reports={[
+                            { label: 'ESI Monthly Return (Excel)', action: () => handleDownload('ESI', 'Excel'), format: 'XLSX' },
+                            { label: 'Form 5 (Return of Contribution)', action: () => openRangeModal('Form 5'), format: 'PDF' },
+                            { label: 'ESI Code Wages Analysis', action: () => handleDownload('ESI Code Wages', 'PDF'), format: 'PDF' },
+                            { label: 'ESI IP Going out of coverage', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' }
+                        ]}
+                    />
+
+                    {/* Central Labour Law Registers */}
+                    <ReportCard
+                        title="Central Labour Law Registers"
+                        icon={BookOpen}
+                        color="emerald"
+                        reports={[
+                            { label: 'Form B (Register of Wages)', action: () => handleDownload('Form B', 'PDF') },
+                            { label: 'Form C (Muster Roll)', action: () => handleDownload('Form C', 'PDF') },
+                        ]}
+                    />
+
+                    {/* State Labour Law Registers (Dynamic) */}
+                    <ReportCard
+                        title="State Labour Law Registers"
+                        icon={ScrollText}
+                        color="teal"
+                        headerAction={
+                            <select
+                                aria-label="Select state"
+                                value={selectedState}
+                                onChange={e => setSelectedState(e.target.value)}
+                                className="bg-[#1e293b] border border-teal-500/30 text-teal-400 text-[10px] font-bold rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-teal-500"
+                            >
+                                {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                        }
+                        reports={[
+                            { label: currentForms.wage, action: () => handleDownload('Wage Register', 'PDF') },
+                            { label: currentForms.slip, action: () => handleDownload('Pay Slip', 'PDF') },
+                            { label: currentForms.advance, action: () => handleDownload('Advance Register', 'PDF') },
+                        ]}
+                    />
+
+                    {/* Finance & Benefits (Bonus & Gratuity) */}
+                    <ReportCard
+                        title="Finance & Benefits"
+                        icon={HandCoins}
+                        color="amber"
+                        reports={[
+                            { label: 'Bonus Payment Statement', action: () => openRangeModal('Bonus Statement'), format: 'PDF' },
+                            { label: 'Gratuity Liability (Estimated)', action: () => handleDownload('Gratuity', 'PDF') }
+                        ]}
+                    />
+
+                    {/* Taxes & Liabilities */}
+                    <ReportCard
+                        title="Taxes & Liabilities"
+                        icon={ReceiptText}
+                        color="purple"
+                        reports={[
+                            { label: 'Professional Tax (PT) Report', action: () => handleDownload('PT', 'Excel'), format: 'XLSX' },
+                            { label: 'TDS / Income Tax Report', action: () => handleDownload('TDS', 'Excel'), format: 'XLSX' },
+                            { label: 'Form 16 (Part B) Preview', action: () => openRangeModal('Form 16 (Part B)'), format: 'PDF' }
+                        ]}
+                    />
+
+                </div>
+            )}
+
+            {/* Range Selection Modal */}
+            {rangeModal.isOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[#1e293b] w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
+                        <button type="button" aria-label="Close" onClick={() => setRangeModal({ ...rangeModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                            <Calendar size={24} className="text-blue-400" />
                             <div>
-                                <h4 className="text-sm font-bold text-indigo-300">Social Security Code 2020 Compliance</h4>
-                                <p className="text-xs text-indigo-200/70 mt-1">Automatic adjustments applied for Clause 88 (50% exclusion limit).</p>
+                                <h3 className="text-lg font-bold text-white">{rangeModal.reportType}</h3>
+                                <p className="text-xs text-slate-400">Select reporting period</p>
                             </div>
                         </div>
 
-                        <ReportCard title="EPF & MP Act, 1952" icon={Landmark} color="blue" reports={[
-                            { label: 'PF ECR (Electronic Challan Return)', action: () => handleDownload('PF ECR', 'Text'), format: 'TXT' },
-                            { label: 'PF ECR (Excel Backup)', action: () => handleDownload('PF ECR', 'Excel'), format: 'XLSX' },
-                            { label: 'Form 12A (Revised)', action: () => handleDownload('Form 12A', 'PDF') },
-                            { label: 'Annual Form 3A / 6A', action: () => openRangeModal('Form 3A'), format: 'PDF' }
-                        ]} />
+                        <div className="space-y-4">
+                            {rangeModal.reportType === 'Form 5' ? (
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Contribution Period</label>
+                                    <div className="flex gap-2">
+                                        <select aria-label="Select half year period" className="flex-1 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.halfYearPeriod} onChange={e => setRangeModal({ ...rangeModal, halfYearPeriod: e.target.value as any })}>
+                                            <option value="Apr-Sep">Apr - Sep</option>
+                                            <option value="Oct-Mar">Oct - Mar</option>
+                                        </select>
+                                        <select aria-label="Select period year" className="w-24 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.periodYear} onChange={e => setRangeModal({ ...rangeModal, periodYear: +e.target.value })}>
+                                            {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase">Start</label>
+                                            <div className="flex gap-1">
+                                                <select aria-label="Select start month" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.startMonth} onChange={e => setRangeModal({ ...rangeModal, startMonth: e.target.value })}>{months.map(m => <option key={m} value={m}>{m.slice(0, 3)}</option>)}</select>
+                                                <select aria-label="Select start year" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startYear} onChange={e => setRangeModal({ ...rangeModal, startYear: +e.target.value })}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase">End</label>
+                                            <div className="flex gap-1">
+                                                <select aria-label="Select end month" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.endMonth} onChange={e => setRangeModal({ ...rangeModal, endMonth: e.target.value })}>{months.map(m => <option key={m} value={m}>{m.slice(0, 3)}</option>)}</select>
+                                                <select aria-label="Select end year" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endYear} onChange={e => setRangeModal({ ...rangeModal, endYear: +e.target.value })}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {['Form 3A', 'Form 16 (Part B)'].includes(rangeModal.reportType) && (
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase">Employee</label>
+                                            <select aria-label="Select employee" className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({ ...rangeModal, selectedEmployee: e.target.value })}>
+                                                <option value="ALL">All Employees</option>
+                                                {employees.map(e => <option key={e.id} value={e.id}>{e.name} ({e.id})</option>)}
+                                            </select>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
 
-                        <ReportCard title="ESI Act, 1948" icon={ShieldCheck} color="pink" reports={[
-                            { label: 'ESI Monthly Return (Excel)', action: () => handleDownload('ESI', 'Excel'), format: 'XLSX' },
-                            { label: 'ESI Exit List', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' }
-                        ]} />
-
-                        <ReportCard title="Labour Registers" icon={BookOpen} color="emerald" reports={[
-                            { label: 'Form B (Register of Wages)', action: () => handleDownload('Form B', 'PDF') },
-                            { label: 'Form C (Muster Roll)', action: () => handleDownload('Form C', 'PDF') }
-                        ]} />
-
-                        <ReportCard 
-                            title="State Specific Forms" 
-                            icon={ScrollText} 
-                            color="teal" 
-                            headerAction={<select value={selectedState} onChange={e => setSelectedState(e.target.value)} className="bg-[#1e293b] border border-teal-500/30 text-teal-400 text-[10px] font-bold rounded-lg px-2 py-1 outline-none">{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select>}
-                            reports={[
-                                { label: currentForms.wage, action: () => handleDownload('Wage Register', 'PDF') },
-                                { label: currentForms.slip, action: () => handleDownload('Pay Slip', 'PDF') }
-                            ]} 
-                        />
+                        <button onClick={handleGenerateRange} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl mt-4 transition-all shadow-lg flex items-center justify-center gap-2">
+                            <Download size={18} /> Generate Report
+                        </button>
                     </div>
-                )}
-                </>
+                </div>
             )}
 
-            {rangeModal.isOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 p-6 shadow-2xl space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                            <h3 className="text-white font-bold">{rangeModal.reportType}</h3>
-                            <button onClick={() => setRangeModal({ ...rangeModal, isOpen: false })}><X size={20} className="text-slate-400" /></button>
+            {/* Message Modal */}
+            {msgModal.isOpen && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
+                        <button type="button" aria-label="Close" onClick={() => {
+                            if (msgModal.onConfirm) msgModal.onConfirm();
+                            setMsgModal({ ...msgModal, isOpen: false });
+                        }} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <div className="flex flex-col items-center gap-2">
+                            <div className={`p-3 rounded-full border ${msgModal.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50'}`}>
+                                {msgModal.type === 'error' ? <AlertTriangle size={24} /> : <CheckCircle size={24} />}
+                            </div>
+                            <h3 className="text-lg font-bold text-white text-center">{msgModal.title}</h3>
+                            <p className="text-sm text-slate-400 text-center">{msgModal.message}</p>
                         </div>
-                        <button onClick={handleGenerateRange} className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2"><Download size={18} /> Generate</button>
+                        <button type="button" onClick={() => {
+                            if (msgModal.onConfirm) msgModal.onConfirm();
+                            setMsgModal({ ...msgModal, isOpen: false });
+                        }} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
                     </div>
                 </div>
             )}

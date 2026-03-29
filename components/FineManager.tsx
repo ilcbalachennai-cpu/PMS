@@ -1,9 +1,9 @@
 
 import React, { useState, useMemo, useRef } from 'react';
-import { Upload, Save, Lock, AlertTriangle, CheckCircle2, X, Search, Download, Gavel } from 'lucide-react';
+import { Upload, Save, Lock, AlertTriangle, CheckCircle2, X, Search, Download, Gavel, Edit2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, FineRecord, PayrollResult, CompanyProfile } from '../types';
-import { generateExcelWorkbook, getStandardFileName } from '../services/reportService';
+import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
 
 interface FineManagerProps {
     employees: Employee[];
@@ -14,7 +14,6 @@ interface FineManagerProps {
     savedRecords: PayrollResult[];
     hideContextSelector?: boolean;
     companyProfile: CompanyProfile;
-    activePeriod: { month: string; year: number; value: number; };
 }
 
 const FineManager: React.FC<FineManagerProps> = ({
@@ -25,8 +24,7 @@ const FineManager: React.FC<FineManagerProps> = ({
     year,
     savedRecords,
     hideContextSelector = false,
-    companyProfile,
-    activePeriod
+    companyProfile
 }) => {
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -42,17 +40,9 @@ const FineManager: React.FC<FineManagerProps> = ({
         onConfirm?: () => void;
     }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
-    // Check if current month is locked (Strict Sequential Lock)
     const isLocked = useMemo(() => {
-        const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-        const currentVal = (year * 12) + monthsArr.indexOf(month);
-        
-        // Locked if historical period OR specifically finalized
-        const isHistorical = currentVal < activePeriod.value;
-        const isSpecificallyFinalized = savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
-        
-        return isHistorical || isSpecificallyFinalized;
-    }, [savedRecords, month, year, activePeriod]);
+        return savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
+    }, [savedRecords, month, year]);
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -126,7 +116,7 @@ const FineManager: React.FC<FineManagerProps> = ({
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Tax_Fine_Register");
         const fileName = getStandardFileName('Tax_Fine_Template', companyProfile, month, year);
-        await generateExcelWorkbook(wb, fileName);
+        await generateTemplateWorkbook(wb, fileName);
     };
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -198,39 +188,30 @@ const FineManager: React.FC<FineManagerProps> = ({
                 </div>
             )}
 
-            {!isLocked && justSaved && (
-                <div className="bg-emerald-900/20 border border-emerald-700 p-4 rounded-xl flex gap-3 items-center animate-in fade-in slide-in-from-top-2">
-                    <div className="p-2 bg-emerald-900/40 rounded-full text-emerald-400"><CheckCircle2 size={20} /></div>
-                    <div>
-                        <h3 className="font-bold text-emerald-200 text-sm">Changes Saved</h3>
-                        <p className="text-xs text-emerald-300/80">Data is in Read-Only mode. Click 'Modify' to edit.</p>
-                    </div>
-                </div>
-            )}
-
-            <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                    <div className="p-3 rounded-xl bg-red-900/30 border border-red-500/20 text-red-400">
-                        <Gavel size={24} />
+            <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-red-900/30 border border-red-500/20 text-red-400">
+                        <Gavel size={20} />
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-white">Tax & Fine Register</h2>
-                        {!hideContextSelector && <p className="text-xs text-slate-400">{month} {year}</p>}
+                        <h2 className="text-base font-black text-white uppercase tracking-tight">Tax & Fine Register</h2>
+                        {!hideContextSelector && <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{month} {year}</p>}
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3">
                     <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                        <input type="text" title="Search Employee Records" aria-label="Search Employee Records" placeholder="Search..." className="pl-9 pr-4 py-2 bg-[#0f172a] border border-slate-700 rounded-lg text-xs text-white outline-none focus:ring-1 focus:ring-blue-500 w-40" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" size={12} />
+                        <input type="text" title="Search Employee Records" aria-label="Search Employee Records" placeholder="Search..." className="pl-8 pr-3 py-1.5 bg-[#0f172a] border border-slate-700 rounded-lg text-[10px] font-bold text-white outline-none focus:ring-1 focus:ring-blue-500 w-32 tracking-tight" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                     </div>
                     {!isLocked && (
                         <>
-                             <button title={justSaved ? 'Enable Editing' : 'Save Records'} aria-label={justSaved ? 'Enable Editing' : 'Save Records'} onClick={justSaved ? () => setJustSaved(false) : handleSave} disabled={isSaving} className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold text-xs transition-all shadow-lg ${justSaved ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
-                                {isSaving ? <div className="animate-spin rounded-full h-3 w-3 border-2 border-white/30 border-t-white" /> : <Save size={14} />} {justSaved ? 'Modify' : 'Save'}
+                             <button title={justSaved ? 'Enable Editing' : 'Save Records'} aria-label={justSaved ? 'Enable Editing' : 'Save Records'} onClick={justSaved ? () => setJustSaved(false) : handleSave} disabled={isSaving} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-bold text-[12px] transition-all shadow-lg ${justSaved ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-900/20' : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20'}`}>
+                                {isSaving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" /> : justSaved ? <Edit2 size={15} /> : <Save size={15} />}
+                                {justSaved ? 'Modify Records' : 'Save Records'}
                             </button>
-                            <button title="Download Import Template" aria-label="Download Import Template" onClick={downloadTemplate} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-lg font-bold text-xs border border-slate-600"><Download size={14} /> Template</button>
-                            <button title="Import from Excel" aria-label="Import from Excel" onClick={() => fileInputRef.current?.click()} disabled={isUploading || justSaved} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700"><Upload size={14} /> Import</button>
+                             <button title="Download Import Template" aria-label="Download Import Template" onClick={downloadTemplate} className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-lg font-bold text-[12px] border border-slate-600 transition-all"><Download size={15} /> Download Template</button>
+                            <button title="Import from Excel" aria-label="Import from Excel" onClick={() => fileInputRef.current?.click()} disabled={isUploading || justSaved} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-[12px] transition-all shadow-lg disabled:opacity-50 disabled:bg-slate-700"><Upload size={15} /> Import Data</button>
                             <input type="file" title="Excel File Input" aria-label="Excel File Input" ref={fileInputRef} onChange={handleExcelImport} className="hidden" accept=".xlsx, .xls" />
                         </>
                     )}
@@ -239,12 +220,12 @@ const FineManager: React.FC<FineManagerProps> = ({
 
             <div className="bg-[#1e293b] rounded-xl border border-slate-800 overflow-hidden shadow-2xl overflow-x-auto">
                 <table className="w-full text-left">
-                    <thead className="bg-[#0f172a] text-xs font-bold uppercase text-slate-400">
+                    <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-normal font-bold">
                         <tr>
-                            <th className="px-6 py-4">Employee</th>
-                            <th className="px-4 py-4 text-right">Income Tax (₹)</th>
-                            <th className="px-4 py-4 text-right">Fine Amount (₹)</th>
-                            <th className="px-6 py-4">Reason / Remarks</th>
+                            <th className="px-5 py-3">Employee Identity</th>
+                            <th className="px-3 py-3 text-right">Income Tax (₹)</th>
+                            <th className="px-3 py-3 text-right">Fine Amount (₹)</th>
+                            <th className="px-5 py-3">Reason / Remarks</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
@@ -254,44 +235,44 @@ const FineManager: React.FC<FineManagerProps> = ({
 
                             return (
                                 <tr key={emp.id} className="hover:bg-slate-800/50 transition-colors">
-                                    <td className="px-6 py-4">
-                                        <div className="text-sm font-bold text-white">{emp.name}</div>
-                                        <div className="text-[10px] text-slate-500">{emp.id}</div>
+                                    <td className="px-5 py-2.5">
+                                        <div className="text-xs font-bold text-white uppercase tracking-normal">{emp.name}</div>
+                                        <div className="text-[9px] text-slate-500 uppercase tracking-normal font-mono">{emp.id}</div>
                                     </td>
-                                    <td className="px-4 py-4 text-right">
+                                    <td className="px-3 py-2 text-right">
                                         <input
                                             type="number"
                                             title={`Income Tax for ${emp.name}`}
                                             aria-label={`Income Tax for ${emp.name}`}
                                             disabled={inputDisabled}
-                                            className={`w-32 bg-[#0f172a] border rounded-lg p-2 text-right text-sm font-mono outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent ${rec.tax !== undefined && rec.tax > 0 ? 'text-sky-400 font-bold border-sky-900/50' : 'text-slate-400 border-slate-700'}`}
+                                            className={`w-24 bg-[#0f172a] border rounded-lg px-2 py-1.5 text-right text-[11px] font-mono outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent ${rec.tax !== undefined && rec.tax > 0 ? 'text-sky-400 font-bold border-sky-900/50' : 'text-slate-500 border-slate-700/50'}`}
                                             value={rec.tax !== undefined ? rec.tax : ''}
                                             onChange={e => handleUpdate(emp.id, 'tax', e.target.value)}
-                                            placeholder="Auto"
+                                            placeholder="AUTO"
                                         />
                                     </td>
-                                    <td className="px-4 py-4 text-right">
+                                    <td className="px-3 py-2 text-right">
                                         <input
                                             type="number"
                                             title={`Fine Amount for ${emp.name}`}
                                             aria-label={`Fine Amount for ${emp.name}`}
                                             disabled={inputDisabled}
-                                            className={`w-32 bg-[#0f172a] border rounded-lg p-2 text-right text-sm font-mono outline-none focus:ring-1 focus:ring-red-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent ${rec.amount > 0 ? 'text-red-400 font-bold border-red-900/50' : 'text-slate-400 border-slate-700'}`}
+                                            className={`w-24 bg-[#0f172a] border rounded-lg px-2 py-1.5 text-right text-[11px] font-mono outline-none focus:ring-1 focus:ring-red-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent ${rec.amount > 0 ? 'text-red-400 font-bold border-red-900/50' : 'text-slate-500 border-slate-700/50'}`}
                                             value={rec.amount}
                                             onChange={e => handleUpdate(emp.id, 'amount', +e.target.value)}
                                             placeholder="0"
                                         />
                                     </td>
-                                    <td className="px-6 py-4">
+                                    <td className="px-5 py-2">
                                         <input
                                             type="text"
                                             title={`Reason or Remarks for ${emp.name}`}
                                             aria-label={`Reason or Remarks for ${emp.name}`}
                                             disabled={inputDisabled}
-                                            className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent"
+                                            className="w-full bg-[#0f172a] border border-slate-700/50 rounded-lg px-2 py-1.5 text-[10px] font-bold text-white outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent uppercase placeholder:text-slate-600"
                                             value={rec.reason}
                                             onChange={e => handleUpdate(emp.id, 'reason', e.target.value)}
-                                            placeholder={rec.amount > 0 ? "Enter reason..." : "-"}
+                                            placeholder={rec.amount > 0 ? "ENTER REASON..." : "-"}
                                         />
                                     </td>
                                 </tr>

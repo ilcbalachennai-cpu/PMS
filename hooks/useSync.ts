@@ -2,7 +2,7 @@
 import { useEffect } from 'react';
 import { 
   Employee, StatutoryConfig, CompanyProfile, Attendance, 
-  LeaveLedger, AdvanceLedger, PayrollResult, ArrearBatch, FineRecord 
+  LeaveLedger, AdvanceLedger, PayrollResult, ArrearBatch, FineRecord, OTRecord 
 } from '../types';
 
 interface SyncProps {
@@ -16,6 +16,7 @@ interface SyncProps {
   fines: FineRecord[];
   leavePolicy: any;
   arrearHistory: ArrearBatch[];
+  otRecords: OTRecord[];
   logoUrl: string;
   designations: string[];
   divisions: string[];
@@ -28,7 +29,7 @@ interface SyncProps {
 export const useSync = (props: SyncProps) => {
   const {
     employees, config, companyProfile, attendances, leaveLedgers,
-    advanceLedgers, payrollHistory, fines, leavePolicy, arrearHistory,
+    advanceLedgers, payrollHistory, fines, leavePolicy, arrearHistory, otRecords,
     logoUrl, designations, divisions, branches, sites, isSetupComplete,
     safeSave
   } = props;
@@ -38,7 +39,7 @@ export const useSync = (props: SyncProps) => {
     const syncToDB = async () => {
       if ((window as any).electronAPI) {
         const allUsersRaw = localStorage.getItem('app_users');
-        const allUsers = allUsersRaw ? JSON.parse(allUsersRaw) : [];
+        const allUsers = (() => { try { return allUsersRaw ? JSON.parse(allUsersRaw) : []; } catch { return []; } })();
         const keys = [
           { k: 'app_employees', v: employees },
           { k: 'app_config', v: config },
@@ -50,6 +51,7 @@ export const useSync = (props: SyncProps) => {
           { k: 'app_fines', v: fines },
           { k: 'app_leave_policy', v: leavePolicy },
           { k: 'app_arrear_history', v: arrearHistory },
+          { k: 'app_ot_records', v: otRecords },
           { k: 'app_logo', v: logoUrl },
           { k: 'app_master_designations', v: designations },
           { k: 'app_master_divisions', v: divisions },
@@ -66,7 +68,7 @@ export const useSync = (props: SyncProps) => {
     syncToDB();
   }, [
     employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers,
-    payrollHistory, fines, leavePolicy, arrearHistory, logoUrl,
+    payrollHistory, fines, leavePolicy, arrearHistory, otRecords, logoUrl,
     designations, divisions, branches, sites, isSetupComplete
   ]);
 
@@ -85,4 +87,5 @@ export const useSync = (props: SyncProps) => {
   useEffect(() => { safeSave('app_master_sites', sites); }, [sites, safeSave]);
   useEffect(() => { safeSave('app_fines', fines); }, [fines, safeSave]);
   useEffect(() => { safeSave('app_arrear_history', arrearHistory); }, [arrearHistory, safeSave]);
+  useEffect(() => { safeSave('app_ot_records', otRecords); }, [otRecords, safeSave]);
 };

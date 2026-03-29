@@ -1,9 +1,9 @@
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import { 
   Employee, StatutoryConfig, CompanyProfile, PayrollResult, 
   Attendance, LeaveLedger, AdvanceLedger, FineRecord, 
-  ArrearBatch, LeavePolicy 
+  ArrearBatch, LeavePolicy, OTRecord 
 } from '../types';
 import { 
   INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE, 
@@ -112,17 +112,36 @@ export const usePayrollData = (showAlert: any) => {
     } catch (e) { return []; }
   });
 
+  const [otRecords, setOTRecords] = useState<OTRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_ot_records');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
+  });
+
   const [designations, setDesignations] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('app_master_designations') || '[]').length ? JSON.parse(localStorage.getItem('app_master_designations')!) : ['Software Engineer', 'Project Manager', 'HR Manager', 'Accounts Executive', 'Peon']; } catch (e) { return ['Software Engineer', 'Project Manager', 'HR Manager', 'Accounts Executive', 'Peon']; }
+    try { 
+      const raw = localStorage.getItem('app_master_designations');
+      return raw ? JSON.parse(raw) : ['Software Engineer', 'Project Manager', 'HR Manager', 'Accounts Executive', 'Peon']; 
+    } catch (e) { return ['Software Engineer', 'Project Manager', 'HR Manager', 'Accounts Executive', 'Peon']; }
   });
   const [divisions, setDivisions] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('app_master_divisions') || '[]').length ? JSON.parse(localStorage.getItem('app_master_divisions')!) : ['Head Office', 'Manufacturing', 'Sales', 'Marketing', 'Engineering']; } catch (e) { return ['Head Office', 'Manufacturing', 'Sales', 'Marketing', 'Engineering']; }
+    try { 
+      const raw = localStorage.getItem('app_master_divisions');
+      return raw ? JSON.parse(raw) : ['Head Office', 'Manufacturing', 'Sales', 'Marketing', 'Engineering']; 
+    } catch (e) { return ['Head Office', 'Manufacturing', 'Sales', 'Marketing', 'Engineering']; }
   });
   const [branches, setBranches] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('app_master_branches') || '[]').length ? JSON.parse(localStorage.getItem('app_master_branches')!) : ['Chennai', 'New Delhi', 'Mumbai', 'Bangalore']; } catch (e) { return ['Chennai', 'New Delhi', 'Mumbai', 'Bangalore']; }
+    try { 
+      const raw = localStorage.getItem('app_master_branches');
+      return raw ? JSON.parse(raw) : ['Chennai', 'New Delhi', 'Mumbai', 'Bangalore']; 
+    } catch (e) { return ['Chennai', 'New Delhi', 'Mumbai', 'Bangalore']; }
   });
   const [sites, setSites] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('app_master_sites') || '[]').length ? JSON.parse(localStorage.getItem('app_master_sites')!) : ['Main Plant', 'Warehouse A', 'IT Park Office', 'Site-01']; } catch (e) { return ['Main Plant', 'Warehouse A', 'IT Park Office', 'Site-01']; }
+    try { 
+      const raw = localStorage.getItem('app_master_sites');
+      return raw ? JSON.parse(raw) : ['Main Plant', 'Warehouse A', 'IT Park Office', 'Site-01']; 
+    } catch (e) { return ['Main Plant', 'Warehouse A', 'IT Park Office', 'Site-01']; }
   });
 
   const [logoUrl, setLogoUrl] = useState<string>(() => {
@@ -137,21 +156,6 @@ export const usePayrollData = (showAlert: any) => {
       return '../public/logo.png'; // BRAND_CONFIG.logoUrl fallback
     } catch (e) { return '../public/logo.png'; }
   });
-
-  const masters = useMemo(() => ({
-    designations,
-    divisions,
-    branches,
-    sites
-  }), [designations, divisions, branches, sites]);
-
-  const addEmployee = useCallback((data: Employee) => {
-    setEmployees(prev => [...prev, data]);
-  }, []);
-
-  const bulkAddEmployees = useCallback((data: Employee[]) => {
-    setEmployees(prev => [...prev, ...data]);
-  }, []);
 
   // --- PERSISTENCE HELPERS ---
   const safeSave = useCallback((key: string, data: any) => {
@@ -185,8 +189,7 @@ export const usePayrollData = (showAlert: any) => {
       if (currentIdx === 11) { nextMonth = monthsArr[0]; nextYear = globalYear + 1; }
       else { nextMonth = monthsArr[currentIdx + 1]; }
 
-      // Note: Attendance records are maintained for historical reporting and are not cleared during rollover.
-      // New attendance records for the next month are typically created upon first access or import.
+      setAttendances(prev => prev.map(a => a.month === globalMonth && a.year === globalYear ? { ...a, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0, encashedDays: 0 } : a));
       setAdvanceLedgers(prev => {
         const currentHistory = updatedHistory || payrollHistory;
         const finalizedResults = currentHistory.filter(r => r.month === globalMonth && r.year === globalYear && r.status === 'Finalized');
@@ -194,22 +197,13 @@ export const usePayrollData = (showAlert: any) => {
           const payrollResult = finalizedResults.find(r => r.employeeId === a.employeeId);
           const actualRecovered = payrollResult ? (payrollResult.deductions?.advanceRecovery ?? 0) : 0;
           const carryOpening = Math.max(0, (a.opening || 0) + (a.totalAdvance || 0) - actualRecovered);
-          
-          // Carry forward balance to opening, reset all other monthly inputs to 0
-          return { 
-            ...a, 
-            opening: carryOpening, 
-            totalAdvance: 0, 
-            manualPayment: 0, 
-            emiCount: 0, 
-            recovery: 0, 
-            balance: carryOpening,
-            monthlyInstallment: 0,
-            paidAmount: 0
-          };
+          const nextEmiCount = carryOpening > 0 ? (a.emiCount || 0) : 0;
+          let nextRecovery = nextEmiCount > 0 ? Math.min(Math.round(carryOpening / nextEmiCount), carryOpening) : 0;
+          return { ...a, opening: carryOpening, totalAdvance: 0, manualPayment: 0, emiCount: nextEmiCount, recovery: nextRecovery, balance: Math.max(0, carryOpening - nextRecovery) };
         });
       });
       setFines(prev => prev.filter(f => !(f.month === globalMonth && f.year === globalYear)));
+      setOTRecords(prev => prev.filter(f => !(f.month === globalMonth && f.year === globalYear)));
       
       return { nextMonth, nextYear, backupRes, backupFileName };
     } catch (e: any) {
@@ -230,7 +224,7 @@ export const usePayrollData = (showAlert: any) => {
         'app_users', 'app_master_designations', 'app_master_divisions', 'app_master_branches',
         'app_master_sites', 'app_employees', 'app_config', 'app_company_profile',
         'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
-        'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo'
+        'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_ot_records', 'app_logo'
       ];
       for (const k of keysToWipe) {
         try {
@@ -247,6 +241,7 @@ export const usePayrollData = (showAlert: any) => {
     setPayrollHistory([]);
     setFines([]);
     setArrearHistory([]);
+    setOTRecords([]);
     
     showAlert('success', 'Factory Reset Complete', 'All system data has been wiped. The application will now restart.', () => {
       window.location.href = window.location.href.split('#')[0];
@@ -264,13 +259,11 @@ export const usePayrollData = (showAlert: any) => {
     payrollHistory, setPayrollHistory,
     fines, setFines,
     arrearHistory, setArrearHistory,
+    otRecords, setOTRecords,
     designations, setDesignations,
     divisions, setDivisions,
     branches, setBranches,
     sites, setSites,
-    masters,
-    addEmployee,
-    bulkAddEmployees,
     logoUrl, setLogoUrl,
     safeSave, handleRollover, handleNuclearReset,
     isResetting
