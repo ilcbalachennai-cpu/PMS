@@ -133,18 +133,39 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   }, [latestAppVersion, updateDownloaded, setAlertConfig, handleUpdateNow]);
 
   useEffect(() => {
-    if (licenseStatus.valid) {
-      checkNewMessages().then(updates => {
-        if (updates) {
-          setCompanyProfile(prev => ({
-            ...prev,
-            flashNews: updates.scrollNews,
-            postLoginMessage: updates.statutory
-          }));
+    if (!licenseStatus.valid) return;
+
+    const syncMessages = async () => {
+      const updates = await checkNewMessages();
+      if (updates) {
+        setCompanyProfile(prev => ({
+          ...prev,
+          flashNews: updates.scrollNews,
+          postLoginMessage: updates.statutory
+        }));
+
+        // --- NEW: IMMEDIATE FLASH LOGIC ---
+        if (updates.key === 'IMMEDIATE' && updates.messageId) {
+          const today = new Date().toISOString().split('T')[0];
+          const flashedRaw = localStorage.getItem('app_flashed_messages') || '{}';
+          const flashed = JSON.parse(flashedRaw);
+          
+          if (flashed[updates.messageId] !== today) {
+            setShowLoginMessage(true);
+            flashed[updates.messageId] = today;
+            localStorage.setItem('app_flashed_messages', JSON.stringify(flashed));
+          }
         }
-      });
-    }
-  }, [licenseStatus.valid, checkNewMessages, setCompanyProfile]);
+      }
+    };
+
+    // Initial check
+    syncMessages();
+
+    // Periodic check every 10 minutes
+    const interval = setInterval(syncMessages, 600000);
+    return () => clearInterval(interval);
+  }, [licenseStatus.valid, checkNewMessages, setCompanyProfile, setShowLoginMessage]);
 
   useEffect(() => {
     if (currentUser && companyProfile.postLoginMessage && companyProfile.postLoginMessage.trim() !== '') {
@@ -389,8 +410,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
                 <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-blue-500/50 p-8 space-y-6">
                      <h3 className="text-lg font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
-                        <ShieldCheck size={20} />
-                        Administrative Message
+                        <Megaphone size={20} className="text-amber-500" />
+                        Developer Message Board
                      </h3>
                     <p className="text-slate-200 whitespace-pre-wrap">{companyProfile.postLoginMessage}</p>
                     <button onClick={() => setShowLoginMessage(false)} className="w-full py-3 bg-blue-600 text-white font-black rounded-xl">Acknowledge & Continue</button>

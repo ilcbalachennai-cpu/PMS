@@ -13,6 +13,13 @@ const isDev = process.env.NODE_ENV === 'development';
 // ── CONFIGURATION & PERSISTENCE ──
 const CONFIG_PATH = path.join(app.getPath('userData'), 'app-config.json');
 
+console.log(`🚀 Electron v${process.versions.electron} | Node ${process.versions.node} | Chrome ${process.versions.chrome}`);
+if (parseInt(process.versions.electron.split('.')[0]) < 30) {
+    console.warn('⚠️  LEGACY MODE DETECTED: This version is for Windows 7 applications.');
+} else {
+    console.log('✅ WIN10 MODE DETECTED: Layouts optimized for modern Windows environments.');
+}
+
 function getAppConfig() {
     if (fs.existsSync(CONFIG_PATH)) {
         try {

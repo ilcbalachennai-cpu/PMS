@@ -1,10 +1,10 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Scale } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Scale } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
-import { fetchLatestMessages, activateFullLicense, getStoredLicense, isValidKeyFormat } from '../services/licenseService';
+import { fetchLatestMessages, updateDeveloperMessages, activateFullLicense, getStoredLicense, isValidKeyFormat } from '../services/licenseService';
 import { LicenseData } from '../types';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 
@@ -1405,30 +1405,50 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <p className="text-xs text-slate-400">Global Scrolling News & Statutory Compliance Updates</p>
                             </div>
                         </div>
-                        <button
-                            onClick={async () => {
-                                setIsSyncing(true);
-                                const result = await fetchLatestMessages();
-                                setIsSyncing(false);
-                                if (result && (result.scrollNews || result.statutory)) {
-                                    setProfileData(prev => ({
-                                        ...prev,
-                                        flashNews: result.scrollNews || prev.flashNews,
-                                        postLoginMessage: result.statutory || prev.postLoginMessage
-                                    }));
-                                    showAlert?.('success', 'Sync Complete', 'Latest developer messages fetched from cloud.');
-                                } else {
-                                    showAlert?.('info', 'Up to Date', 'You already have the latest messages or are offline.');
-                                }
-                            }}
-                            disabled={isSyncing}
-                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20"
-                            title="Sync News with Cloud"
-                            aria-label="Sync News with Cloud"
-                        >
-                            {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
-                            {isSyncing ? 'SYNCING...' : 'SYNC WITH CLOUD'}
-                        </button>
+                        <div className="flex items-center gap-2">
+                             <button
+                                onClick={async () => {
+                                    setIsSyncing(true);
+                                    const result = await fetchLatestMessages();
+                                    setIsSyncing(false);
+                                    if (result && (result.scrollNews || result.statutory)) {
+                                        setProfileData(prev => ({
+                                            ...prev,
+                                            flashNews: result.scrollNews || prev.flashNews,
+                                            postLoginMessage: result.statutory || prev.postLoginMessage
+                                        }));
+                                        showAlert?.('success', 'Sync Complete', 'Latest developer messages fetched from cloud.');
+                                    } else {
+                                        showAlert?.('info', 'Up to Date', 'You already have the latest messages or are offline.');
+                                    }
+                                }}
+                                disabled={isSyncing}
+                                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-[10px] font-black rounded-lg transition-all flex items-center gap-2 border border-slate-700 uppercase tracking-widest"
+                                title="Fetch Latest from Cloud"
+                             >
+                                {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                                Pull from Cloud
+                             </button>
+
+                             <button
+                                onClick={async () => {
+                                    setIsSyncing(true);
+                                    const result = await updateDeveloperMessages(profileData.flashNews || '', profileData.postLoginMessage || '');
+                                    setIsSyncing(false);
+                                    if (result.success) {
+                                        showAlert?.('success', 'Cloud Update Success', 'Developer board messages pushed to Google Sheets successfully.');
+                                    } else {
+                                        showAlert?.('error', 'Cloud Update Failed', result.message || 'Failed to sync with cloud.');
+                                    }
+                                }}
+                                disabled={isSyncing}
+                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20 uppercase tracking-widest active:scale-95"
+                                title="Push Local to Cloud"
+                             >
+                                {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                                Push to Cloud
+                             </button>
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 gap-6">

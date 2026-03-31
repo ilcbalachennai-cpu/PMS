@@ -179,6 +179,8 @@ export interface CompanyProfile {
   natureOfBusiness: string;
   flashNews?: string; // New field for Flash News
   postLoginMessage?: string; // New field for Post Login Popup Message
+  postLoginHeader?: string; // New field for Post Login Popup Header
+  postLoginAlignment?: 'LEFT' | 'CENTER' | 'RIGHT'; // New field for Text Alignment
   externalAppUrl?: string; // New field for External App Link
   
   // SMTP Configuration

@@ -579,7 +579,7 @@ export const APP_VERSION = "02.01.05";
 /**
  * Fetches the latest developer messages from Google Sheets
  */
-export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statutory: string } | null> => {
+export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statutory: string, header?: string, alignment?: 'LEFT' | 'CENTER' | 'RIGHT', key?: string, messageId?: string } | null> => {
   try {
     const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: "POST",
@@ -587,7 +587,7 @@ export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statu
     });
 
     if (result.success && result.messages) {
-      const { scrollNews, statutory } = result.messages;
+      const { scrollNews, statutory, header, alignment, key, messageId } = result.messages;
 
       // Get current stored messages to check for updates
       const storedProfileRaw = localStorage.getItem('app_company_profile');
@@ -597,19 +597,21 @@ export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statu
 
       let updated = false;
 
-      if (scrollNews.date && scrollNews.date !== lastNewsDate) {
+      if (scrollNews?.date && scrollNews.date !== lastNewsDate) {
         storedProfile.flashNews = scrollNews.message;
         localStorage.setItem('app_last_news_date', scrollNews.date);
         updated = true;
       }
 
-      if (statutory.date && statutory.date !== lastStatutoryDate) {
+      if (statutory?.date && statutory.date !== lastStatutoryDate) {
         storedProfile.postLoginMessage = statutory.message;
+        storedProfile.postLoginHeader = header || storedProfile.postLoginHeader;
+        storedProfile.postLoginAlignment = alignment || storedProfile.postLoginAlignment;
         localStorage.setItem('app_last_statutory_date', statutory.date);
         updated = true;
       }
 
-      if (updated) {
+      if (updated || key === 'IMMEDIATE') {
         localStorage.setItem('app_company_profile', JSON.stringify(storedProfile));
 
         // Also check for version here if available in messages
@@ -621,7 +623,11 @@ export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statu
 
         return {
           scrollNews: storedProfile.flashNews,
-          statutory: storedProfile.postLoginMessage
+          statutory: storedProfile.postLoginMessage,
+          header: storedProfile.postLoginHeader,
+          alignment: storedProfile.postLoginAlignment,
+          key: key,
+          messageId: messageId || statutory?.date || lastStatutoryDate
         };
       }
     }
@@ -629,5 +635,27 @@ export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statu
   } catch (error) {
     console.error("Failed to fetch developer messages:", error);
     return null;
+  }
+};
+
+/**
+ * Updates the cloud Developer Board messages (Push from App to Cloud)
+ */
+export const updateDeveloperMessages = async (scrollNews: string, statutory: string, header?: string, alignment?: string): Promise<ActivationResult> => {
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        action: "UPDATE_MESSAGES",
+        scrollNews,
+        statutory,
+        header,
+        alignment,
+        key: "UPDATED"
+      })
+    });
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `Cloud Sync Error: ${error.message || "Unknown Failure"}` };
   }
 };
