@@ -1,0 +1,5 @@
+﻿App.tsx(71,23): error TS6133: 'setLatestAppVersion' is declared but its value is never read.
+components/MIS/MISDashboard.tsx(2,143): error TS6133: 'Columns' is declared but its value is never read.
+components/MIS/MISDashboard.tsx(139,10): error TS6133: 'showSaveModal' is declared but its value is never read.
+components/MIS/MISDashboard.tsx(226,9): error TS6133: 'handleSaveTemplate' is declared but its value is never read.
+components/Shared/SMTPConfigModal.tsx(2,16): error TS6133: 'CheckCircle2' is declared but its value is never read.

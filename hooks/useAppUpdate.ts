@@ -11,8 +11,12 @@ export const useAppUpdate = (showAlert: any) => {
 
   const isVersionHigher = (latest: string, current: string): boolean => {
     try {
-      const l = latest.split('.').map(Number);
-      const c = current.split('.').map(Number);
+      // Helper to strip non-numeric prefixes like 'V' or 'v'
+      const normalize = (v: string) => v.replace(/^[vV]/, '').split('.');
+      
+      const l = normalize(latest).map(v => parseInt(v, 10) || 0);
+      const c = normalize(current).map(v => parseInt(v, 10) || 0);
+      
       for (let i = 0; i < Math.max(l.length, c.length); i++) {
         const v1 = l[i] || 0;
         const v2 = c[i] || 0;

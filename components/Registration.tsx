@@ -127,7 +127,12 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
             }
 
             if (showAlert && result.message) {
-                showAlert('success', 'Verified', result.message);
+                const isRestoration = result.message.includes('History Found') || result.message.includes('Trial Restored');
+                showAlert(
+                    isRestoration ? 'info' : 'success', 
+                    isRestoration ? 'Trial Restored' : 'Verified', 
+                    result.message
+                );
             }
 
             // Auto-fill profile email from reg email

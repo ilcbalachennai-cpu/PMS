@@ -144,7 +144,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                         <div className="w-full h-1 bg-slate-700/60 rounded-full overflow-hidden">
                             <div
                                 className="h-full bg-emerald-500 rounded-full transition-none"
-                                style={{ width: `${progress}%` }}
+                                style={{ width: `${progress}%` } as React.CSSProperties}
                             />
                         </div>
                         <p className="text-[10px] text-slate-500 text-center mt-1 font-medium tracking-wider">

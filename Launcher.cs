@@ -10,7 +10,7 @@ namespace BharatPayLauncher
 {
     class Program
     {
-        private const string GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYnFPLmvE1vCxLXVG53Ja1qx2VIeMZAz1b2v1-Kgh1k5b1bgo5lZnGM5Y3--r-uKbd/exec?action=GET_MESSAGES";
+        private const string GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec?action=GET_MESSAGES";
         private const string APP_ID = "com.ilcbala.bharatpaypro";
         private const string APP_NAME = "BPP_APP";
         private const string EXE_NAME = "BPP_APP.exe";

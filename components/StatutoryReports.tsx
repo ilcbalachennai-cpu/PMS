@@ -146,6 +146,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         message: '',
         type: 'error'
     });
+    const [showLegalModal, setShowLegalModal] = useState(false);
 
     const openRangeModal = (reportType: string) => {
         const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
@@ -274,7 +275,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         }
     };
 
-    const ReportCard = ({ title, icon: Icon, color, reports, headerAction }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string, textColor?: string }[], headerAction?: React.ReactNode }) => (
+    const ReportCard = ({ title, icon: Icon, color, reports, headerAction }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string, textColor?: string, infoAction?: () => void }[], headerAction?: React.ReactNode }) => (
         <div className="bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group hover:border-slate-700 transition-all h-full">
             <div className="bg-[#0f172a] p-4 flex items-center justify-between border-b border-slate-800">
                 <div className="flex items-center gap-3">
@@ -287,10 +288,21 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             </div>
             <div className="p-4 grid grid-cols-1 gap-2">
                 {reports.map((r, i) => (
-                    <button key={i} onClick={r.action} className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all group/btn text-left">
-                        <span className={`text-xs font-bold ${r.textColor || 'text-slate-300'} group-hover/btn:text-white`}>{r.label}</span>
-                        <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{r.format || 'PDF'}</span>
-                    </button>
+                    <div key={i} className="flex gap-2">
+                        <button onClick={r.action} className="flex-1 flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all group/btn text-left">
+                            <span className={`text-xs font-bold ${r.textColor || 'text-slate-300'} group-hover/btn:text-white`}>{r.label}</span>
+                            <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{r.format || 'PDF'}</span>
+                        </button>
+                        {r.infoAction && (
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); r.infoAction?.(); }}
+                                className="px-3 rounded-lg bg-indigo-900/20 text-indigo-400 hover:bg-indigo-900/40 border border-indigo-900/30 transition-all"
+                                title="Legal Definition / Info"
+                            >
+                                <Info size={16} />
+                            </button>
+                        )}
+                    </div>
                 ))}
             </div>
         </div>
@@ -347,7 +359,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                             { label: 'Form 12A (Revised)', action: () => handleDownload('Form 12A', 'PDF') },
                             { label: 'Form 3A (Member Annual Card)', action: () => openRangeModal('Form 3A'), format: 'PDF' },
                             { label: 'Form 6A (Consolidated Annual)', action: () => openRangeModal('Form 6A'), format: 'PDF' },
-                            { label: 'Code 2020 Impact Analysis', action: () => handleDownload('EPF Code Impact', 'PDF'), format: 'PDF' }
+                            { label: 'Code 2020 Impact Analysis', action: () => handleDownload('EPF Code Impact', 'PDF'), format: 'PDF', infoAction: () => setShowLegalModal(true) }
                         ]}
                     />
 
@@ -359,7 +371,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         reports={[
                             { label: 'ESI Monthly Return (Excel)', action: () => handleDownload('ESI', 'Excel'), format: 'XLSX' },
                             { label: 'Form 5 (Return of Contribution)', action: () => openRangeModal('Form 5'), format: 'PDF' },
-                            { label: 'ESI Code Wages Analysis', action: () => handleDownload('ESI Code Wages', 'PDF'), format: 'PDF' },
+                            { label: 'ESI Code Wages Analysis', action: () => handleDownload('ESI Code Wages', 'PDF'), format: 'PDF', infoAction: () => setShowLegalModal(true) },
                             { label: 'ESI IP Going out of coverage', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' }
                         ]}
                     />
@@ -484,6 +496,88 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         <button onClick={handleGenerateRange} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl mt-4 transition-all shadow-lg flex items-center justify-center gap-2">
                             <Download size={18} /> Generate Report
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Legal Definition Modal */}
+            {showLegalModal && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+                    <div className="bg-[#1e293b] w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-3xl border border-indigo-500/30 shadow-[0_0_50px_rgba(79,70,229,0.2)] flex flex-col relative animate-in zoom-in-95 duration-300">
+                        {/* Header */}
+                        <div className="bg-gradient-to-r from-indigo-600 to-blue-700 p-6 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-white/10 rounded-2xl backdrop-blur-sm">
+                                    <BookOpen className="text-white" size={28} />
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-black text-white tracking-wide uppercase">Legal Definition: "Wages"</h3>
+                                    <p className="text-indigo-100 text-xs font-bold opacity-80">Social Security Code, 2020</p>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => setShowLegalModal(false)}
+                                className="p-2 hover:bg-white/10 rounded-full text-white/70 hover:text-white transition-all"
+                                title="Close"
+                                aria-label="Close Reference Modal"
+                            >
+                                <X size={24} />
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-8 overflow-y-auto space-y-6 custom-scrollbar">
+                            <div className="p-4 bg-indigo-950/40 border border-indigo-500/20 rounded-xl">
+                                <p className="text-[11px] text-indigo-300 italic flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                                    Note: This definition governs the calculation for the 50% threshold limit under the Code on Social Security, 2020.
+                                </p>
+                            </div>
+
+                            <div className="space-y-4 text-slate-300 leading-relaxed text-sm">
+                                <p>
+                                    <span className="font-bold text-white text-base">Social Security Code Sec 2 (88)</span> "wages" means all remuneration, whether by way of salaries, allowances or otherwise, expressed in terms of money or capable of being so expressed which would, if the terms of employment, express or implied, were fulfilled, be payable to a person employed in respect of his employment or of work done in such employment, and <span className="text-indigo-400 font-bold">includes—</span>
+                                </p>
+                                
+                                <ul className="space-y-2 pl-4 border-l-2 border-indigo-500/30">
+                                    <li className="flex gap-2"><span className="text-indigo-400 font-mono">(a)</span> basic pay;</li>
+                                    <li className="flex gap-2"><span className="text-indigo-400 font-mono">(b)</span> dearness allowance; and</li>
+                                    <li className="flex gap-2"><span className="text-indigo-400 font-mono">(c)</span> retaining allowance, if any,</li>
+                                </ul>
+
+                                <p className="pt-2 font-bold text-white uppercase text-xs tracking-widest text-indigo-400">but does not include—</p>
+                                
+                                <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 pl-4 text-[13px] opacity-80">
+                                    <li className="flex gap-2"><span className="text-slate-500">(a)</span> bonus payable under any law;</li>
+                                    <li className="flex gap-2"><span className="text-slate-500">(b)</span> value of house-accommodation;</li>
+                                    <li className="flex gap-2"><span className="text-slate-500">(c)</span> employer PF/pension contributions;</li>
+                                    <li className="flex gap-2"><span className="text-slate-500">(d)</span> conveyance allowance;</li>
+                                    <li className="flex gap-2"><span className="text-slate-500">(e)</span> special nature-of-employment expenses;</li>
+                                    <li className="flex gap-2"><span className="text-slate-500">(f)</span> house rent allowance (HRA);</li>
+                                    <li className="flex gap-2"><span className="text-slate-500">(g)</span> award/settlement remuneration;</li>
+                                    <li className="flex gap-2"><span className="text-slate-500">(h)</span> overtime allowance;</li>
+                                    <li className="flex gap-2"><span className="text-slate-500">(i)</span> commission payable to the employee;</li>
+                                    <li className="flex gap-2"><span className="text-slate-500">(j)</span> gratuity payable on termination;</li>
+                                </ul>
+
+                                <div className="p-5 bg-blue-900/10 border-l-4 border-blue-500 rounded-r-xl mt-6">
+                                    <h4 className="text-xs font-black text-blue-400 uppercase tracking-tighter mb-2 italic">The 50% Proviso:</h4>
+                                    <p className="text-[13px] text-blue-100 font-medium">
+                                        "Provided that... if payments made to an employee under clauses <span className="font-bold">(a) to (i) exceeds one-half (50%)</span> of the total remuneration, the amount which exceeds such one-half shall be deemed as remuneration and <span className="text-blue-400 font-bold underline decoration-wavy decoration-1 underline-offset-4 font-black">shall be considered as wages.</span>"
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-6 bg-[#0f172a] border-t border-slate-800 flex justify-end">
+                            <button 
+                                onClick={() => setShowLegalModal(false)}
+                                className="px-8 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl transition-all shadow-lg hover:shadow-indigo-500/20 active:scale-95"
+                            >
+                                Understood
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, FileBarChart, PieChart, Info, Plus, FileText, Settings2, Trash2, Calendar, Layers, CheckCircle2, Lock, ChevronUp, ChevronDown, Columns, Play, Loader2 } from 'lucide-react';
+import { Mail, FileBarChart, PieChart, Info, Plus, FileText, Settings2, Trash2, Calendar, Layers, CheckCircle2, Lock, ChevronUp, ChevronDown, Play, Loader2 } from 'lucide-react';
 import { PayrollResult, Employee, CompanyProfile } from '../../types';
 import { generateDynamicReportPDF, openSavedReport } from '../../services/reportService';
 import { sendPayslipEmail } from '../../services/mailService';
@@ -109,9 +109,10 @@ interface MISDashboardProps {
   employees: Employee[];
   companyProfile: CompanyProfile;
   showAlert: any;
+  config?: any;
 }
 
-const MISDashboard: React.FC<MISDashboardProps> = ({ payrollHistory, employees, companyProfile, showAlert }) => {
+const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHistory, employees, showAlert }) => {
   const [activeTab, setActiveTab] = useState<'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT'>('DYNAMIC_REPORT');
   
   const [reportYear, setReportYear] = useState<number>(new Date().getFullYear());
@@ -136,8 +137,6 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ payrollHistory, employees, 
 
   // Template Persistence State
   const [savedTemplates, setSavedTemplates] = useState<DynamicTemplate[]>([]);
-  const [showSaveModal, setShowSaveModal] = useState(false);
-  const [newTemplateName, setNewTemplateName] = useState('');
   const [newlyAddedColumnId, setNewlyAddedColumnId] = useState<string | null>(null);
 
   // Focus newly added column header
@@ -223,36 +222,6 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ payrollHistory, employees, 
     loadTemplates();
   }, []);
 
-  const handleSaveTemplate = async () => {
-    const templateToSave = newTemplateName || formName || 'Untitled Template';
-    
-    const newTemplate: DynamicTemplate = {
-      id: Date.now().toString(),
-      templateName: templateToSave,
-      formName,
-      reportType,
-      ruleName,
-      stateName,
-      orientation,
-      columns,
-      createdAt: Date.now()
-    };
-
-    const updated = [...savedTemplates, newTemplate];
-    try {
-      // @ts-ignore
-      await window.electronAPI.dbSet('dynamic_report_templates', JSON.stringify(updated));
-      setSavedTemplates(updated);
-      setShowSaveModal(false);
-      setNewTemplateName('');
-      setSuccessMode('SAVE');
-      setShowPresetSuccess(true);
-      // After saving, return to gallery to show the new template
-      setTimeout(() => setViewMode('GALLERY'), 1500);
-    } catch (e) {
-      showAlert('error', 'Save Failed', 'Could not save the template to the local database.');
-    }
-  };
 
   const handleLoadTemplate = (template: DynamicTemplate) => {
     setColumns(template.columns);
@@ -785,19 +754,24 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ payrollHistory, employees, 
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Form Name</label>
-                                            <input type="text" value={formName} onChange={e => setFormName(e.target.value)} disabled={isPresetLocked} className="w-full bg-[#0f172a] border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all disabled:opacity-40" placeholder="e.g. Attendance Register" />
+                                            <input type="text" value={formName} onChange={e => setFormName(e.target.value)} className="w-full bg-[#0f172a] border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all" placeholder="e.g. Attendance Register" />
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Report Type</label>
-                                            <input type="text" value={reportType} onChange={e => setReportType(e.target.value)} disabled={isPresetLocked} className="w-full bg-[#0f172a] border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all disabled:opacity-40 uppercase" placeholder="FORM XX" />
+                                            <input type="text" value={reportType} onChange={e => setReportType(e.target.value)} className="w-full bg-[#0f172a] border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all uppercase" placeholder="FORM XX" />
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">State Context</label>
-                                            <input type="text" value={stateName} onChange={e => setStateName(e.target.value)} disabled={isPresetLocked} className="w-full bg-[#0f172a] border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all disabled:opacity-40" placeholder="e.g. Tamil Nadu" />
+                                            <input type="text" value={stateName} onChange={e => setStateName(e.target.value)} className="w-full bg-[#0f172a] border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all" placeholder="e.g. Tamil Nadu" />
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Page Orientation</label>
-                                            <select value={orientation} onChange={e => setOrientation(e.target.value)} disabled={isPresetLocked} className="w-full bg-[#0f172a] border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all disabled:opacity-40 cursor-pointer">
+                                            <select 
+                                                title="Choose Page Orientation"
+                                                value={orientation} 
+                                                onChange={e => setOrientation(e.target.value)} 
+                                                className="w-full bg-[#0f172a] border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all cursor-pointer"
+                                            >
                                                 <option>Portrait (Standard)</option>
                                                 <option>Landscape (Wide)</option>
                                             </select>
@@ -851,7 +825,7 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ payrollHistory, employees, 
                                                         </div>
                                                         <div className="flex-[2] space-y-1">
                                                             <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1">Category</label>
-                                                            <select value={col.source} onChange={e => updateColumn(col.id, { source: e.target.value as any, field: '' })} className="w-full bg-[#0f172a] border border-slate-800 rounded-lg px-4 py-2 text-sm text-white cursor-pointer" title="Category">
+                                                            <select title="Select Column Data Source" value={col.source} onChange={e => updateColumn(col.id, { source: e.target.value as any, field: '' })} className="w-full bg-[#0f172a] border border-slate-800 rounded-lg px-4 py-2 text-sm text-white cursor-pointer">
                                                                 {Object.keys(FIELD_OPTIONS).map(cat => <option key={cat} value={cat}>{cat}</option>)}
                                                             </select>
                                                         </div>
@@ -895,12 +869,7 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ payrollHistory, employees, 
                             </div>
                             
                             <div className="bg-slate-900 border-t border-slate-800 p-8 flex items-center justify-between">
-                                <button 
-                                    onClick={() => setShowSaveModal(true)} 
-                                    className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-indigo-400 font-bold uppercase text-[11px] rounded-2xl border border-indigo-500/30 transition-all font-black tracking-widest"
-                                >
-                                    SAVE TEMPLATE
-                                </button>
+                                <div />
                                 <button 
                                     onClick={handleGenerateReport} 
                                     disabled={columns.length === 0} 
@@ -1136,7 +1105,7 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ payrollHistory, employees, 
                             <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800 shadow-inner">
                                 <div 
                                     className="h-full bg-indigo-500 transition-all duration-300 shadow-[0_0_10px_rgba(99,102,241,0.5)]" 
-                                    style={{ width: `${mailProgress}%` }}
+                                    style={{ width: `${mailProgress}%` } as React.CSSProperties}
                                 ></div>
                             </div>
                         </div>

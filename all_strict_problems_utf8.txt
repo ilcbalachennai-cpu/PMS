@@ -1,0 +1,2 @@
+﻿error TS5025: Unknown compiler option '--unusedLocals'. Did you mean 'noUnusedLocals'?
+error TS5025: Unknown compiler option '--unusedParameters'. Did you mean 'noUnusedParameters'?

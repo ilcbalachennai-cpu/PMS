@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, FC } from 'react';
 import {
   LayoutDashboard, Users, Calculator, FileText, Settings as SettingsIcon,
   LogOut, Bot, ShieldCheck,
@@ -22,6 +22,7 @@ import MISDashboard from './components/MIS/MISDashboard';
 import Registration from './components/Registration';
 import AppSetup from './components/AppSetup';
 import CustomModal from './components/Shared/CustomModal';
+import TrialNoticeModal from './components/Shared/TrialNoticeModal';
 
 import { 
   APP_VERSION, getStoredLicense 
@@ -59,15 +60,15 @@ const NavigationItem = ({ view, icon: Icon, label, activeView, setActiveView, is
 );
 
 
-const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
+const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const mainContentRef = useRef<HTMLElement>(null);
   
   // --- Initialize Hooks ---
   const { alertConfig, setAlertConfig, showAlert, closeAlert } = useAlerts();
   const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod();
-  const { licenseStatus, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
+  const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
   const { 
-    latestAppVersion, setLatestAppVersion, 
+    latestAppVersion, 
     showUpdateNotice, isUpdateDownloading, 
     updateDownloaded, handleUpdateNow, handleUpdateLater 
   } = useAppUpdate(showAlert);
@@ -88,6 +89,11 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     showRegistrationManual, setShowRegistrationManual, setSkipSetupRedirect,
     isSetupComplete, setIsSetupComplete
   } = useUIState(employees.length, activeView, setActiveView);
+
+
+  // Trial Notice State
+  const [showTrialNotice, setShowTrialNotice] = useState(false);
+  const [trialInfo, setTrialInfo] = useState<{ daysRemaining: number; expiryDate: string } | null>(null);
 
   // Persistence & Sync Hook
   useSync({
@@ -126,7 +132,6 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   }, [latestAppVersion, updateDownloaded, setAlertConfig, handleUpdateNow]);
 
-  // Handle statutory messages update
   useEffect(() => {
     if (licenseStatus.valid) {
       checkNewMessages().then(updates => {
@@ -136,12 +141,10 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             flashNews: updates.scrollNews,
             postLoginMessage: updates.statutory
           }));
-          const v = localStorage.getItem('app_latest_version');
-          if (v) setLatestAppVersion(v);
         }
       });
     }
-  }, [licenseStatus.valid, checkNewMessages, setCompanyProfile, setLatestAppVersion]);
+  }, [licenseStatus.valid, checkNewMessages, setCompanyProfile]);
 
   useEffect(() => {
     if (currentUser && companyProfile.postLoginMessage && companyProfile.postLoginMessage.trim() !== '') {
@@ -218,6 +221,23 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const handleAuthLogin = (user: User) => {
     handleLogin(user);
+    
+    // Daily Trial Notice
+    const license = getStoredLicense();
+    if (license?.isTrial) {
+      const today = new Date().toISOString().split('T')[0];
+      const lastShown = localStorage.getItem('trial_notice_shown_date');
+      if (lastShown !== today) {
+        const [day, month, year] = license.expiryDate.split('-');
+        const expiry = new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59);
+        const diffMs = expiry.getTime() - Date.now();
+        const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+        setTrialInfo({ daysRemaining: daysLeft, expiryDate: license.expiryDate });
+        setShowTrialNotice(true);
+        localStorage.setItem('trial_notice_shown_date', today);
+      }
+    }
+
     if (!companyProfile?.establishmentName || companyProfile.establishmentName === 'Your Establishment Name') {
       setActiveView(View.Settings);
       setSettingsTab('COMPANY');
@@ -376,7 +396,17 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     <button onClick={() => setShowLoginMessage(false)} className="w-full py-3 bg-blue-600 text-white font-black rounded-xl">Acknowledge & Continue</button>
                 </div>
             </div>
-          )}          <aside 
+          )}
+
+          {showTrialNotice && trialInfo && (
+            <TrialNoticeModal
+              daysRemaining={trialInfo.daysRemaining}
+              expiryDate={trialInfo.expiryDate}
+              onClose={() => setShowTrialNotice(false)}
+            />
+          )}
+
+          <aside 
             className={`${isSidebarOpen ? 'w-64' : 'w-20'} transition-all duration-300 bg-[#0f172a] border-r border-slate-800 flex flex-col z-40`}
             onMouseEnter={() => !isSidebarOpen && setIsSidebarOpen(true)}
           >
@@ -386,7 +416,7 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                    {isSidebarOpen && <span className="text-lg font-black"><span className="text-[#FF9933]">Bharat</span><span className="text-white">Pay</span><span className="text-[#34d399]">Pro</span></span>}
                 </div>
                 {isSidebarOpen && (
-                   <div className="mt-0.5 ml-7 animate-in fade-in slide-in-from-left-2 duration-500">
+                   <div className="mt-0.5 ml-7 animate-in fade-in slide-in-from-left-2 duration-500 flex flex-col gap-0.5">
                       <span className="text-[8px] font-black text-[#FFD700] uppercase tracking-[0.25em] whitespace-nowrap">Indian Payroll Management</span>
                    </div>
                 )}
@@ -420,7 +450,9 @@ const PayrollShell: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     <img src={logoUrl} alt="Logo" className="w-10 h-10 rounded-full border border-slate-700 shadow-xl object-cover" />
                     <div className="flex flex-col">
                        <span className="text-sm font-black text-white tracking-tight">{companyProfile.establishmentName || BRAND_CONFIG.companyName}</span>
-                       <span className="text-[8px] text-slate-500 font-bold uppercase tracking-widest">{BRAND_CONFIG.tagline}</span>
+                       <span className="text-[8px] font-black text-[#FFD700] tracking-widest mt-0.5">
+                          {licenseInfo?.isTrial ? "Trial Valid Upto : " : "License Valid Upto : "}{licenseInfo?.expiryDate || 'N/A'}
+                       </span>
                     </div>
                  </div>
                  <div className="flex-1 px-4 min-w-[300px] max-w-xl mx-auto">

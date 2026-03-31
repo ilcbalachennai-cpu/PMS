@@ -110,7 +110,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       const cleanPassword = password.trim();
 
       // Debug: Log all available usernames (only in dev)
-      const isDev = (import.meta as any).env.DEV || (import.meta as any).env.MODE === 'development';
+      const isDev = (window as any).process?.env?.NODE_ENV === 'development';
       if (isDev) {
         console.log("🔐 Login Attempt:", { username: cleanUsername });
         console.log("👥 Local User DB:", allUsers.map(u => ({ username: u.username, role: u.role })));
@@ -164,7 +164,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
         // --- CLOUD FALLBACK ---
         // If local login fails, try a one-time cloud sync to see if credentials were updated remotely
         console.log("⚠️ Local login failed. Attempting cloud sync fallback...");
-        const syncResult = await validateLicenseStartup();
+        const syncResult = await validateLicenseStartup(true);
+
 
         // 1. Check for newly synced Developer (Bypass license check if developer match)
         const syncedDev = getAppDeveloper();
@@ -430,7 +431,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                   const admin = localUsers.find(u => u.role === 'Administrator');
                   const payrollUser = localUsers.find(u => u.role === 'User');
                   const developer = getAppDeveloper();
-                  const showDev = developer && !(import.meta as any).env.PROD;
+                  const isProd = (window as any).process?.env?.NODE_ENV === 'production';
+                  const showDev = developer && !isProd;
 
                   const buttons = [
                     // Admin Slot

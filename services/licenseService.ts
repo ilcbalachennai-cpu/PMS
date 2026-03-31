@@ -3,7 +3,7 @@ import CryptoJS from 'crypto-js';
 import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYnFPLmvE1vCxLXVG53Ja1qx2VIeMZAz1b2v1-Kgh1k5b1bgo5lZnGM5Y3--r-uKbd/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
 
 export interface ActivationResult {
   success: boolean;
@@ -235,6 +235,8 @@ export const registerTrial = async (
     // ... rest of the logic
     if (result.success) {
       const respData = result.data || {};
+      const isHistorical = !!respData.startDate && respData.startDate !== new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
+
       const licenseData: LicenseData = {
         key: 'TRIAL',
         status: respData.status || 'REGISTERED',
@@ -264,6 +266,11 @@ export const registerTrial = async (
         await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
       }
       localStorage.setItem('app_license_last_check', new Date().toISOString().split('T')[0]);
+
+      // If historical, we adjust the success message
+      if (isHistorical) {
+        result.message = `🛡️ Trial History Found: Your original trial (started ${licenseData.startDate}) has been restored for this machine.`;
+      }
     }
 
     return result;
@@ -345,7 +352,7 @@ export const activateFullLicense = async (
  * Startup validation.
  * Includes a daily online verification sync.
  */
-export const validateLicenseStartup = async (): Promise<{ valid: boolean; message?: string }> => {
+export const validateLicenseStartup = async (force: boolean = false): Promise<{ valid: boolean; message?: string }> => {
   const stored = getStoredLicense();
   const currentMachineId = await getMachineId();
 
@@ -374,13 +381,15 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
   // 2. Online Verification / Developer Rescue Sync
   const lastCheck = localStorage.getItem('app_license_last_check');
   const today = new Date().toISOString().split('T')[0];
-  const isDev = (import.meta as any).env.DEV || (import.meta as any).env.MODE === 'development';
+  const isDev = (window as any).process?.env?.NODE_ENV === 'development';
 
   // Perform online sync if:
   // - No license found yet (Rescue Sync)
   // - OR first login of the day
   // - OR development mode
-  if (!stored || lastCheck !== today || isDev) {
+  // - OR Force sync requested
+  if (!stored || lastCheck !== today || isDev || force) {
+
     if ((GOOGLE_SCRIPT_URL as string) !== "YOUR_GOOGLE_SCRIPT_WEB_APP_URL") {
       try {
         console.log(`🌐 Performing ${stored ? (stored.isTrial ? 'Trial' : 'License') : 'Developer Rescue'} Sync...`);
@@ -428,71 +437,111 @@ export const validateLicenseStartup = async (): Promise<{ valid: boolean; messag
         return { valid: false, message: result.message };
       }
 
-        if (result.success && stored) {
-          // 1. Sync Data Limit
-          if (cloudData.dataSize) {
-            const newLimit = Number(cloudData.dataSize);
-            if (newLimit !== stored.dataSize) {
-              stored.dataSize = newLimit;
-              stored.checksum = generateChecksum(stored);
-              const scrambled = scramble(JSON.stringify(stored));
-              localStorage.setItem('app_license_secure', scrambled);
-              localStorage.setItem('app_data_size', String(newLimit));
+        if (result.success) {
+          let activeLicense = stored;
+
+          // 1. IDENTITY RESTORATION (Rescue/Restoration Sync)
+          // If local license is missing but Cloud recognizes the identity, re-create it locally!
+          if (!activeLicense && cloudData.userName && cloudData.status) {
+            console.log("🛠️ Restoring Identity from Cloud Sync...");
+            const restoredLicense: any = {
+               key: cloudData.licenseKey || (cloudData.isTrial ? "TRIAL" : "RESCUE"),
+               userName: cloudData.userName,
+               userID: cloudData.userID || "RESCUE",
+               registeredTo: cloudData.registeredTo,
+               registeredMobile: cloudData.registeredMobile,
+               startDate: cloudData.startDate,
+               expiryDate: cloudData.expiryDate,
+               machineId: currentMachineId,
+               status: cloudData.status,
+               dataSize: Number(cloudData.dataSize) || 50,
+               isTrial: cloudData.isTrial === true
+            };
+            
+            // Checksum & persistence
+            restoredLicense.checksum = generateChecksum(restoredLicense);
+            const scrambled = scramble(JSON.stringify(restoredLicense));
+            localStorage.setItem('app_license_secure', scrambled);
+            localStorage.setItem('app_data_size', String(restoredLicense.dataSize));
+            // @ts-ignore
+            if (window.electronAPI) {
               // @ts-ignore
-              if (window.electronAPI) {
-                // @ts-ignore
-                window.electronAPI.dbSet('app_license_secure', scrambled);
-                // @ts-ignore
-                window.electronAPI.dbSet('app_data_size', String(newLimit));
-              }
-              console.log(`✅ Data Limit synced from cloud: ${newLimit}`);
+              window.electronAPI.dbSet('app_license_secure', scrambled);
+              // @ts-ignore
+              window.electronAPI.dbSet('app_data_size', String(restoredLicense.dataSize));
             }
+            activeLicense = restoredLicense;
+            console.log("✅ Identity Restored Successfully.");
           }
 
-          // 2. Version Check
-          if (cloudData.latestVersion) {
-            localStorage.setItem('app_latest_version', cloudData.latestVersion);
-            if (cloudData.downloadUrl) localStorage.setItem('app_download_url', cloudData.downloadUrl);
-            if (cloudData.downloadUrlWin7) localStorage.setItem('app_download_url_win7', cloudData.downloadUrlWin7);
-          }
+          if (activeLicense) {
+            // 3. Sync Expiry Date & Key
+            let storageUpdated = false;
+            if (cloudData.expiryDate && cloudData.expiryDate !== activeLicense.expiryDate) {
+              activeLicense.expiryDate = cloudData.expiryDate;
+              storageUpdated = true;
+            }
+            if (cloudData.licenseKey && cloudData.licenseKey !== activeLicense.key) {
+              activeLicense.key = cloudData.licenseKey;
+              storageUpdated = true;
+            }
 
-          // 3. Smart Admin Recovery & Sync
-          const usersRawAfterSync = localStorage.getItem('app_users');
-          let localUsers = usersRawAfterSync ? JSON.parse(usersRawAfterSync) : [];
+            if (storageUpdated) {
+              activeLicense.checksum = generateChecksum(activeLicense);
+              const scrambled = scramble(JSON.stringify(activeLicense));
+              localStorage.setItem('app_license_secure', scrambled);
+              // @ts-ignore
+              if (window.electronAPI) window.electronAPI.dbSet('app_license_secure', scrambled);
+              console.log("✅ License Key/Expiry synced from cloud.");
+            }
 
-          if (cloudData.adminUser || cloudData.adminPass) {
-            const cloudAdminUser = cloudData.adminUser;
-            const cloudAdminPass = cloudData.adminPass;
+            // 4. Version Check
+            if (cloudData.latestVersion) {
+              localStorage.setItem('app_latest_version', cloudData.latestVersion);
+              if (cloudData.downloadUrl) localStorage.setItem('app_download_url', cloudData.downloadUrl);
+              if (cloudData.downloadUrlWin7) localStorage.setItem('app_download_url_win7', cloudData.downloadUrlWin7);
+            }
 
-            const adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
+            // 4. Smart Admin Recovery & Sync
+            const usersRawAfterSync = localStorage.getItem('app_users');
+            let localUsers = usersRawAfterSync ? JSON.parse(usersRawAfterSync) : [];
 
-            if (adminIndex !== -1) {
-              // Update existing if changed in cloud
-              if (localUsers[adminIndex].username !== cloudAdminUser || localUsers[adminIndex].password !== cloudAdminPass) {
-                localUsers[adminIndex].username = cloudAdminUser;
-                localUsers[adminIndex].password = cloudAdminPass;
+            if (cloudData.adminUser || cloudData.adminPass) {
+              const cloudAdminUser = cloudData.adminUser;
+              const cloudAdminPass = cloudData.adminPass;
+
+              const adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
+
+              if (adminIndex !== -1) {
+                // Update existing if changed in cloud
+                if (localUsers[adminIndex].username !== cloudAdminUser || localUsers[adminIndex].password !== cloudAdminPass) {
+                  localUsers[adminIndex].username = cloudAdminUser;
+                  localUsers[adminIndex].password = cloudAdminPass;
+                  localStorage.setItem('app_users', JSON.stringify(localUsers));
+                  // @ts-ignore
+                  if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
+                }
+              } else if (localUsers.length === 0 && cloudAdminUser) {
+                // Recover missing admin using restored identity info (NO defaults!)
+                const recoveredAdmin = {
+                  username: cloudAdminUser,
+                  password: cloudAdminPass,
+                  name: activeLicense ? activeLicense.userName : 'System Administrator',
+                  role: 'Administrator',
+                  email: activeLicense ? activeLicense.registeredTo : ''
+                };
+                localUsers = [recoveredAdmin];
                 localStorage.setItem('app_users', JSON.stringify(localUsers));
                 // @ts-ignore
                 if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
               }
-            } else if (localUsers.length === 0) {
-              // Recover missing admin
-              const recoveredAdmin = {
-                username: cloudAdminUser || 'admin',
-                password: cloudAdminPass || 'admin@123',
-                name: stored.userName || 'System Administrator',
-                role: 'Administrator',
-                email: stored.registeredTo
-              };
-              localUsers = [recoveredAdmin];
-              localStorage.setItem('app_users', JSON.stringify(localUsers));
-              // @ts-ignore
-              if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
             }
           }
 
-          console.log("✅ Daily License/Trial Sync Complete.");
+          localStorage.setItem('app_license_last_check', today);
+          console.log("✅ Daily License/Trial Sync Complete (Database IDs Only).");
         }
+
       } catch (e) {
         console.warn("Offline: Using cached license status.");
       }
@@ -526,7 +575,7 @@ export const trackCloudLogin = async (email: string, machineId: string) => {
   }
 };
 
-export const APP_VERSION = "1.0.12";
+export const APP_VERSION = "02.01.05";
 /**
  * Fetches the latest developer messages from Google Sheets
  */

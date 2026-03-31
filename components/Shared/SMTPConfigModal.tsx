@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mail, CheckCircle2, ShieldAlert, ArrowRight, ExternalLink } from 'lucide-react';
+import { Mail, ShieldAlert, ArrowRight, ExternalLink } from 'lucide-react';
 
 interface SMTPConfigModalProps {
   onClose: () => void;

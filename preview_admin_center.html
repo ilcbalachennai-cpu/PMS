@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Administrator Center - BharatPay Pro</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; padding: 25px; background: #f8fafc; color: #1e293b; line-height: 1.4; overflow-x: hidden; position: relative; max-width: 400px; margin: 20px auto; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+    #loading-overlay { position: absolute; inset: 0; background: rgba(248, 250, 252, 0.95); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin-bottom: 15px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .header-bar { background-color: #083a66; padding: 20px; text-align: center; color: white; margin: -25px -25px 25px -25px; border-radius: 12px 12px 0 0; }
+    .header-bar h1 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: 1px; }
+    .header-bar p { margin: 5px 0 0; opacity: 0.8; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+    h3 { border-bottom: 3px solid #3b82f6; padding-bottom: 10px; text-transform: uppercase; font-size: 18px; color: #0f172a; margin-bottom:15px; }
+    .form-label { display: block; font-size: 9px; font-weight: 800; color: #475569; text-transform: uppercase; margin-bottom: 4px; }
+    input, select { width: 100%; padding: 10px; margin-bottom: 12px; border: 1.5px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; font-size: 13px; }
+    button { width: 100%; padding: 13px; background: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; transition: all 0.2s; }
+    button:hover { background: #2563eb; }
+    .badge { display: inline-block; padding: 2px 6px; background: #dcfce7; color: #166534; font-size: 9px; font-weight: 800; border-radius: 4px; margin-left: 5px; }
+    .sync-text { font-size:11px; font-weight:900; color:#3b82f6; text-transform:uppercase; letter-spacing:2px; }
+    .skip-btn { margin-top:20px; font-size:10px; padding:10px; }
+    .master-label { color:#3b82f6; font-weight:900; }
+    #manual-limit { display:none; border-color:#3b82f6; }
+  </style>
+  <script>
+    function toggleManualLimit() {
+      const val = document.getElementById("limit").value;
+      const manual = document.getElementById("manual-limit");
+      manual.style.display = (val === "manual") ? "block" : "none";
+      if (val === "manual") manual.focus();
+    }
+  </script>
+</head>
+<body>
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <p class="sync-text">Synchronizing Trial Database...</p>
+    <button type="button" onclick="document.getElementById('loading-overlay').style.display='none'" class="skip-btn">Skip Sync (Preview Only)</button>
+  </div>
+
+  <div class="header-bar">
+    <h1>BharatPayPro-Payroll Management</h1>
+    <p>From ILCbala-Decoding Indian Labour Laws</p>
+  </div>
+
+  <div id="form-content">
+    <h3>Administrator Center</h3>
+    <label class="form-label" for="upgrade-select">UPGRADE FROM TRIAL <span class="badge">12 FOUND</span></label>
+    <select id="upgrade-select" aria-label="Upgrade from Trial User Selection"><option value="">-- Manual Entry --</option></select>
+    <input type="text" placeholder="Full Name" aria-label="Full Name">
+    <input type="text" placeholder="User ID" aria-label="User ID">
+    <input type="email" placeholder="Email Address" aria-label="Email Address">
+    <input type="text" placeholder="Mobile Number" aria-label="Mobile Number">
+    <input type="text" value="31-03-2027" aria-label="Validity Expiry Date">
+    
+    <label class="form-label" for="limit">LICENSE LIMIT (EMPLOYEES)</label>
+    <select id="limit" onchange="toggleManualLimit()" title="Select License Limit">
+      <option value="20">Limit: 20 employees</option>
+      <option value="50">Limit: 50 employees</option>
+      <option value="100">Limit: 100 employees</option>
+      <option value="200">Limit: 200 employees</option>
+      <option value="300">Limit: 300 employees</option>
+      <option value="500">Limit: 500 employees</option>
+      <option value="manual">Manual Entry...</option>
+    </select>
+    <input id="manual-limit" type="number" placeholder="Enter Custom Limit" aria-label="Manual Limit Entry">
+
+    <label class="form-label master-label">1. MASTER PASSWORD</label>
+    <input type="password" placeholder="Developer Secret" aria-label="Developer Secret">
+    <button type="submit">Generate Authorization Code</button>
+  </div>
+</body>
+</html>

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Scale } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Scale } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -777,7 +777,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             const buffer = re.target?.result as ArrayBuffer;
                             if (buffer) {
                                 const arr = new Uint8Array(buffer);
-                                const signature = String.fromCharCode(...arr);
+                                const signature = String.fromCharCode(...Array.from(arr));
                                 if (signature.startsWith('SQLite format 3')) {
                                     setIsSqliteFile(true);
                                     setEncryptionKey(''); // Not needed for SQLite
@@ -1775,6 +1775,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
+                                        <span className="text-xs text-slate-400">License Key</span>
+                                        <span className="text-xs font-mono text-pink-400 font-black tracking-wider">
+                                            {licenseInfo?.key ? licenseInfo.key.match(/.{1,4}/g)?.join('-') : 'N/A'}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
                                         <span className="text-xs text-slate-400">Status</span>
                                         <span className={`text-xs font-black uppercase px-2 py-0.5 rounded ${licenseInfo?.isTrial ? 'bg-amber-500/10 text-amber-500' : licenseInfo?.status === 'REGISTERED' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
                                             {licenseInfo?.status || 'UNREGISTERED'}
@@ -1791,10 +1797,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
                                         <span className="text-xs text-slate-400">Mobile No</span>
                                         <span className={`text-xs font-mono ${licenseInfo?.registeredMobile ? 'text-white' : 'text-slate-500 italic'}`}>{licenseInfo?.registeredMobile || 'N/A'}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-                                        <span className="text-xs text-slate-400">Machine ID</span>
-                                        <span className={`text-[10px] font-mono truncate max-w-[150px] ${licenseInfo?.machineId ? 'text-slate-300' : 'text-slate-500 italic'}`} title={licenseInfo?.machineId}>{licenseInfo?.machineId || 'Fetching...'}</span>
                                     </div>
                                     <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
                                         <span className="text-xs text-slate-400">Employee Data Limit</span>

@@ -186,7 +186,7 @@ export const calculatePayroll = (
 
     if (config.pfEsiCalculationBasis === 'OriginalWages') {
         // PF Basis
-        const poc = config.pfOriginalWagesComponents || { basic: true, da: true, retaining: true };
+        const poc = config.pfOriginalWagesComponents || { basic: true, da: true, retaining: true, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false };
         let pfBase = 0;
         if (poc.basic) pfBase += basic;
         if (poc.da) pfBase += da;
@@ -201,7 +201,7 @@ export const calculatePayroll = (
         pfStandardBasisWage = Math.round(pfBase);
 
         // ESI Basis
-        const eoc = config.esiOriginalWagesComponents || { basic: true, da: true, retaining: true };
+        const eoc = config.esiOriginalWagesComponents || { basic: true, da: true, retaining: true, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false };
         let esiBase = 0;
         if (eoc.basic) esiBase += basic;
         if (eoc.da) esiBase += da;
