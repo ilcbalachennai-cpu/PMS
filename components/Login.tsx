@@ -54,6 +54,29 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
 
   // Auto-focus on mount
   useEffect(() => {
+    // --- EMERGENCY AUTO-LOCKOUT PROTECTION ---
+    const checkAdminLockout = () => {
+      const savedUsersRaw = localStorage.getItem('app_users');
+      let hasLocalAdmin = false;
+      if (savedUsersRaw) {
+        try {
+          const savedUsers: UserType[] = JSON.parse(savedUsersRaw);
+          hasLocalAdmin = savedUsers.some(u => u.role === 'Administrator');
+        } catch (e) {}
+      }
+
+      const isSetupComplete = localStorage.getItem('app_setup_complete') === 'true';
+      
+      // If we think setup is done but have no admin, something is wrong
+      if (isSetupComplete && !hasLocalAdmin) {
+         console.warn("🚫 LOCKOUT DETECTED ON MOUNT: Setup marked complete but no Admin found. Resetting...");
+         localStorage.removeItem('app_setup_complete');
+         window.location.reload();
+      }
+    };
+
+    checkAdminLockout();
+
     const timer = setTimeout(() => {
       if (usernameRef.current) {
         usernameRef.current.focus();
@@ -161,6 +184,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
 
         onLogin(user);
       } else {
+        // --- EMERGENCY REDIRECT IF NO ADMINS ---
+        const hasAdmin = allUsers.some(u => u.role === 'Administrator');
+        if (!hasAdmin) {
+            console.warn("🚫 NO ADMINISTRATOR FOUND: System requires local admin character. Resetting to initialization.");
+            localStorage.removeItem('app_setup_complete');
+            window.location.reload();
+            return;
+        }
+
         // --- CLOUD FALLBACK ---
         // If local login fails, try a one-time cloud sync to see if credentials were updated remotely
         console.log("⚠️ Local login failed. Attempting cloud sync fallback...");

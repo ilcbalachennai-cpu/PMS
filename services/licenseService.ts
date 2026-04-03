@@ -579,7 +579,14 @@ export const APP_VERSION = "02.01.05";
 /**
  * Fetches the latest developer messages from Google Sheets
  */
-export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statutory: string, header?: string, alignment?: 'LEFT' | 'CENTER' | 'RIGHT', key?: string, messageId?: string } | null> => {
+export const fetchLatestMessages = async (force: boolean = false): Promise<{ 
+  scrollNews: string, 
+  statutory: string, 
+  header?: string, 
+  alignment?: 'LEFT' | 'CENTER' | 'RIGHT', 
+  key?: string, 
+  messageId?: string 
+} | null> => {
   try {
     const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: "POST",
@@ -597,21 +604,23 @@ export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statu
 
       let updated = false;
 
-      if (scrollNews?.date && scrollNews.date !== lastNewsDate) {
+      // Update NEWS (Marquee) if new date or forced
+      if (scrollNews?.date && (scrollNews.date !== lastNewsDate || force)) {
         storedProfile.flashNews = scrollNews.message;
         localStorage.setItem('app_last_news_date', scrollNews.date);
         updated = true;
       }
 
-      if (statutory?.date && statutory.date !== lastStatutoryDate) {
+      // Update MESSAGE (Developer Board) if new date or forced
+      if (statutory?.date && (statutory.date !== lastStatutoryDate || force)) {
         storedProfile.postLoginMessage = statutory.message;
         storedProfile.postLoginHeader = header || storedProfile.postLoginHeader;
-        storedProfile.postLoginAlignment = alignment || storedProfile.postLoginAlignment;
+        storedProfile.postLoginAlignment = alignment || (storedProfile.postLoginAlignment || 'LEFT');
         localStorage.setItem('app_last_statutory_date', statutory.date);
         updated = true;
       }
 
-      if (updated || key === 'IMMEDIATE') {
+      if (updated || key === 'IMMEDIATE' || force) {
         localStorage.setItem('app_company_profile', JSON.stringify(storedProfile));
 
         // Also check for version here if available in messages
@@ -625,7 +634,7 @@ export const fetchLatestMessages = async (): Promise<{ scrollNews: string, statu
           scrollNews: storedProfile.flashNews,
           statutory: storedProfile.postLoginMessage,
           header: storedProfile.postLoginHeader,
-          alignment: storedProfile.postLoginAlignment,
+          alignment: storedProfile.postLoginAlignment as any,
           key: key,
           messageId: messageId || statutory?.date || lastStatutoryDate
         };

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, Cloud, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Scale } from 'lucide-react';
+import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Scale } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
@@ -1409,13 +1409,15 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                              <button
                                 onClick={async () => {
                                     setIsSyncing(true);
-                                    const result = await fetchLatestMessages();
+                                    const result = await fetchLatestMessages(true);
                                     setIsSyncing(false);
                                     if (result && (result.scrollNews || result.statutory)) {
                                         setProfileData(prev => ({
                                             ...prev,
                                             flashNews: result.scrollNews || prev.flashNews,
-                                            postLoginMessage: result.statutory || prev.postLoginMessage
+                                            postLoginMessage: result.statutory || prev.postLoginMessage,
+                                            postLoginHeader: result.header || prev.postLoginHeader,
+                                            postLoginAlignment: result.alignment || prev.postLoginAlignment
                                         }));
                                         showAlert?.('success', 'Sync Complete', 'Latest developer messages fetched from cloud.');
                                     } else {
@@ -1433,7 +1435,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                              <button
                                 onClick={async () => {
                                     setIsSyncing(true);
-                                    const result = await updateDeveloperMessages(profileData.flashNews || '', profileData.postLoginMessage || '');
+                                    const result = await updateDeveloperMessages(
+                                        profileData.flashNews || '', 
+                                        profileData.postLoginMessage || '',
+                                        profileData.postLoginHeader || '',
+                                        profileData.postLoginAlignment || 'LEFT'
+                                    );
                                     setIsSyncing(false);
                                     if (result.success) {
                                         showAlert?.('success', 'Cloud Update Success', 'Developer board messages pushed to Google Sheets successfully.');
@@ -1451,47 +1458,67 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-6">
+                    <div className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                                <label htmlFor="dev-msg-header" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Message Header (Bold Title)</label>
+                                <input
+                                    id="dev-msg-header"
+                                    type="text"
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-500/60"
+                                    placeholder="e.g., URGENT: SYSTEM UPDATE"
+                                    value={profileData.postLoginHeader || ''}
+                                    onChange={e => setProfileData({ ...profileData, postLoginHeader: e.target.value })}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label htmlFor="dev-msg-align" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Text Alignment</label>
+                                <select
+                                    id="dev-msg-align"
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
+                                    value={profileData.postLoginAlignment || 'LEFT'}
+                                    onChange={e => setProfileData({ ...profileData, postLoginAlignment: e.target.value as any })}
+                                >
+                                    <option value="LEFT">LEFT ALIGNED</option>
+                                    <option value="CENTER">CENTER ALIGNED</option>
+                                    <option value="RIGHT">RIGHT ALIGNED</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label htmlFor="dev-post-login" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Main Message Body (Supports Alt+Enter for New Lines)</label>
+                            <textarea
+                                id="dev-post-login"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[120px] placeholder:text-slate-500/60"
+                                placeholder="Enter detailed message content..."
+                                value={profileData.postLoginMessage || ''}
+                                onChange={e => setProfileData({ ...profileData, postLoginMessage: e.target.value })}
+                            />
+                        </div>
+
                         <div className="space-y-2">
                             <label htmlFor="dev-flash-news" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Dashboard News Ticker (Marquee)</label>
                             <textarea
                                 id="dev-flash-news"
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[100px] placeholder:text-slate-500/60"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[80px] placeholder:text-slate-500/60"
                                 placeholder="Enter scrolling news message..."
                                 value={profileData.flashNews || ''}
                                 onChange={e => setProfileData({ ...profileData, flashNews: e.target.value })}
-                                title="Flash News Message"
-                                aria-label="Flash News Message"
                             />
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <label htmlFor="dev-ai-url" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">AI Studio Integration URL</label>
-                                <div className="relative">
-                                    <Globe className="absolute left-3 top-3 text-slate-500" size={18} />
-                                    <input
-                                        id="dev-ai-url"
-                                        type="url"
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pl-10 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-500/60"
-                                        placeholder="https://..."
-                                        value={profileData.externalAppUrl || ''}
-                                        onChange={e => setProfileData({ ...profileData, externalAppUrl: e.target.value })}
-                                        title="External AI Application URL"
-                                        aria-label="External AI Application URL"
-                                    />
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <label htmlFor="dev-post-login" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Post-Login Modal Message</label>
-                                <textarea
-                                    id="dev-post-login"
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[80px] placeholder:text-slate-500/60"
-                                    placeholder="Enter statutory compliance or system message..."
-                                    value={profileData.postLoginMessage || ''}
-                                    onChange={e => setProfileData({ ...profileData, postLoginMessage: e.target.value })}
-                                    title="Post-Login Information Message"
-                                    aria-label="Post-Login Information Message"
+                        <div className="space-y-2">
+                            <label htmlFor="dev-ai-url" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">AI Studio Integration URL</label>
+                            <div className="relative">
+                                <Globe className="absolute left-3 top-3 text-slate-500" size={18} />
+                                <input
+                                    id="dev-ai-url"
+                                    type="url"
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pl-10 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-500/60"
+                                    placeholder="https://..."
+                                    value={profileData.externalAppUrl || ''}
+                                    onChange={e => setProfileData({ ...profileData, externalAppUrl: e.target.value })}
                                 />
                             </div>
                         </div>

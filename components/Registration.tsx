@@ -135,6 +135,9 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 );
             }
 
+            // Important: We DON'T return/exit here if it's a restoration. 
+            // We MUST proceed to step 2 to set up local credentials.
+
             // Auto-fill profile email from reg email
             setProfile(prev => ({ ...prev, email: regEmail }));
         }

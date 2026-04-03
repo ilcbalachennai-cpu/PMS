@@ -37,6 +37,8 @@ export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
   natureOfBusiness: 'Manufacturing',
   flashNews: 'Welcome to BharatPay Pro! Ensure all PF ECRs are filed before the 15th. Check "Settings" to update this news.',
   postLoginMessage: '# Labour Code  2020 implemented (21-11-2025)\n# Higher Wages , Higher Pension implemented',
+  postLoginHeader: 'Statutory Compliance Update',
+  postLoginAlignment: 'LEFT',
   externalAppUrl: '' // Default empty
 };
 

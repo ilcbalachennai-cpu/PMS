@@ -140,11 +140,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       if (updates) {
         setCompanyProfile(prev => ({
           ...prev,
-          flashNews: updates.scrollNews,
-          postLoginMessage: updates.statutory
+          flashNews: updates.scrollNews || prev.flashNews,
+          postLoginMessage: updates.statutory || prev.postLoginMessage,
+          postLoginHeader: updates.header || prev.postLoginHeader,
+          postLoginAlignment: updates.alignment || prev.postLoginAlignment
         }));
 
-        // --- NEW: IMMEDIATE FLASH LOGIC ---
+        // --- REFINED IMMEDIATE FLASH LOGIC ---
+        // Only show immediate popup if key is IMMEDIATE
         if (updates.key === 'IMMEDIATE' && updates.messageId) {
           const today = new Date().toISOString().split('T')[0];
           const flashedRaw = localStorage.getItem('app_flashed_messages') || '{}';
@@ -154,6 +157,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             setShowLoginMessage(true);
             flashed[updates.messageId] = today;
             localStorage.setItem('app_flashed_messages', JSON.stringify(flashed));
+            
+            // Mark as shown this session to prevent REGULAR trigger
+            sessionStorage.setItem('app_session_last_msg_id', updates.messageId);
           }
         }
       }
@@ -168,8 +174,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   }, [licenseStatus.valid, checkNewMessages, setCompanyProfile, setShowLoginMessage]);
 
   useEffect(() => {
-    if (currentUser && companyProfile.postLoginMessage && companyProfile.postLoginMessage.trim() !== '') {
+    const lastSessionMsgId = sessionStorage.getItem('app_session_last_msg_id');
+    const currentMsgId = localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage;
+
+    if (currentUser && companyProfile.postLoginMessage?.trim() !== '' && lastSessionMsgId !== currentMsgId) {
       setShowLoginMessage(true);
+      if (currentMsgId) sessionStorage.setItem('app_session_last_msg_id', currentMsgId);
     }
   }, [currentUser, companyProfile.postLoginMessage, setShowLoginMessage]);
 
@@ -413,8 +423,23 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         <Megaphone size={20} className="text-amber-500" />
                         Developer Message Board
                      </h3>
-                    <p className="text-slate-200 whitespace-pre-wrap">{companyProfile.postLoginMessage}</p>
-                    <button onClick={() => setShowLoginMessage(false)} className="w-full py-3 bg-blue-600 text-white font-black rounded-xl">Acknowledge & Continue</button>
+                    <div className="space-y-4">
+                        {companyProfile.postLoginHeader && (
+                            <h4 className={`text-md font-bold text-white uppercase tracking-tight ${
+                                companyProfile.postLoginAlignment === 'CENTER' ? 'text-center' : 
+                                companyProfile.postLoginAlignment === 'RIGHT' ? 'text-right' : 'text-left'
+                            }`}>
+                                {companyProfile.postLoginHeader}
+                            </h4>
+                        )}
+                        <p className={`text-slate-200 text-xs leading-relaxed whitespace-pre-wrap ${
+                            companyProfile.postLoginAlignment === 'CENTER' ? 'text-center' : 
+                            companyProfile.postLoginAlignment === 'RIGHT' ? 'text-right' : 'text-left'
+                        }`}>
+                            {companyProfile.postLoginMessage}
+                        </p>
+                    </div>
+                    <button onClick={() => setShowLoginMessage(false)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl uppercase tracking-widest transition-all">Acknowledge & Continue</button>
                 </div>
             </div>
           )}
@@ -482,7 +507,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                          <Megaphone size={16} className="text-amber-500" />
                        </div>
                        <div className="flex-1 overflow-hidden relative">
-                         <div className="animate-marquee inline-block whitespace-nowrap text-[11px] font-bold text-amber-100 uppercase tracking-[0.2em] py-2 px-4 italic">
+                         <div className="animate-marquee-seamless whitespace-nowrap text-[11px] font-bold text-amber-100 uppercase tracking-[0.2em] py-2 italic flex">
                            {companyProfile.flashNews || 'Welcome to BharatPay Pro! Use Configuration to update this message.'}
                          </div>
                        </div>
