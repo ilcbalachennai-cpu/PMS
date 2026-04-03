@@ -28,6 +28,9 @@ import {
     openSavedReport
 } from '../services/reportService';
 
+// Global OS Detection for UI refinement
+const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
+
 interface StatutoryReportsProps {
     payrollHistory: PayrollResult[];
     employees: Employee[];
@@ -276,13 +279,13 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     };
 
     const ReportCard = ({ title, icon: Icon, color, reports, headerAction }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string, textColor?: string, infoAction?: () => void }[], headerAction?: React.ReactNode }) => (
-        <div className="bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group hover:border-slate-700 transition-all h-full">
-            <div className="bg-[#0f172a] p-4 flex items-center justify-between border-b border-slate-800">
+        <div className={`bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group transition-all h-full ${isWin7 ? `hover:border-${color}-500/50 hover:shadow-[0_0_30px_rgba(0,0,0,0.3)]` : 'hover:border-slate-700'}`}>
+            <div className={`p-4 flex items-center justify-between border-b border-slate-800 ${isWin7 ? `bg-gradient-to-r from-[#0f172a] to-[#1e293b]` : 'bg-[#0f172a]'}`}>
                 <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg bg-${color}-900/20 text-${color}-400 border border-${color}-900/30`}>
-                        <Icon size={20} />
+                    <div className={`rounded-xl border shadow-[inset_0_0_10px_rgba(0,0,0,0.2)] ${isWin7 ? `p-2.5 bg-${color}-900/30 text-${color}-400 border-${color}-400/20` : `p-2 bg-${color}-900/20 text-${color}-400 border-${color}-900/30`}`}>
+                        <Icon size={20} className={`${isWin7 ? `drop-shadow-[0_0_8px_currentColor]` : ''}`} />
                     </div>
-                    <h3 className={`font-bold text-${color}-400 text-sm uppercase tracking-widest`}>{title}</h3>
+                    <h3 className={`uppercase ${isWin7 ? `font-black text-${color}-400 text-xs tracking-[0.15em]` : `font-bold text-${color}-400 text-sm tracking-widest`}`}>{title}</h3>
                 </div>
                 {headerAction}
             </div>

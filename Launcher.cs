@@ -14,21 +14,13 @@ namespace BharatPayLauncher
         private const string APP_ID = "com.ilcbala.bharatpaypro";
         private const string APP_NAME = "BPP_APP";
         private const string EXE_NAME = "BPP_APP.exe";
+        private const string CURRENT_VERSION = "02.02.07";
 
         static void Main(string[] args)
         {
             // Show SmartScreen advisory flash message upfront
             Application.EnableVisualStyles();
-            MessageBox.Show(
-                "WHY DO I SEE \"WINDOWS PROTECTED YOUR PC\"?\n\n" +
-                "This is a standard Microsoft SmartScreen warning for unsigned software.\n" +
-                "To proceed, click  \"More Info\"  and then  \"Run Anyway\".\n\n" +
-                "This message is only shown once per session.",
-                "⚠  BharatPay Pro — Software Security Notice",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information
-            );
-
+            
             // ── Single Instance Guard ──────────────────────────────────────────
             var runningInstances = Process.GetProcessesByName("BPP_APP");
             if (runningInstances.Length > 0)
@@ -36,8 +28,8 @@ namespace BharatPayLauncher
                 var choice = MessageBox.Show(
                     "BharatPay Pro (BPP_APP) is already running on this machine.\n\n" +
                     "Only one instance is allowed at a time.\n\n" +
-                    "Click  OK  to close the running instance and launch a fresh one.\n" +
-                    "Click  Cancel  to abort and keep the current session.",
+                    "Click  OK  to close the running instance.\n" +
+                    "Click  Cancel  to abort launch.",
                     "⚠  BharatPay Pro — Already Running",
                     MessageBoxButtons.OKCancel,
                     MessageBoxIcon.Warning
@@ -45,24 +37,17 @@ namespace BharatPayLauncher
 
                 if (choice == DialogResult.OK)
                 {
-                    // Close all running instances
                     foreach (var p in runningInstances)
                     {
                         try { p.Kill(); p.WaitForExit(3000); } catch { }
                     }
-                    Console.WriteLine("ℹ️  Previous BPP_APP instance terminated.");
                 }
-                else
-                {
-                    // User chose Cancel — abort
-                    Console.WriteLine("🚫 Launch aborted by user.");
-                    return;
-                }
+                else { return; }
             }
-            // ──────────────────────────────────────────────────────────────────
 
             Console.WriteLine("=====================================");
             Console.WriteLine("   BharatPay Pro Intelligent Launcher");
+            Console.WriteLine("          Version: " + CURRENT_VERSION);
             Console.WriteLine("=====================================");
             
             try 
@@ -82,8 +67,15 @@ namespace BharatPayLauncher
             }
             catch (Exception ex)
             {
-                Console.WriteLine("\n❌ Error: " + ex.Message);
-                Console.WriteLine("Press any key to exit...");
+                Console.WriteLine("\n❌ Launcher Error: " + ex.Message);
+                MessageBox.Show(
+                    "Launch Error: " + ex.Message + "\n\n" +
+                    "Please check your internet connection and try again.",
+                    "BharatPay Pro — Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+                Console.WriteLine("\nPress any key to exit...");
                 Console.ReadKey();
             }
         }
@@ -111,7 +103,8 @@ namespace BharatPayLauncher
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", APP_NAME, EXE_NAME),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), APP_NAME, EXE_NAME),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), APP_NAME, EXE_NAME),
-                Path.Combine(@"D:\", APP_NAME, EXE_NAME)
+                Path.Combine(@"D:\", APP_NAME, EXE_NAME),
+                Path.Combine(@"C:\", APP_NAME, EXE_NAME)
             };
 
             foreach (var path in commonPaths)
@@ -124,7 +117,7 @@ namespace BharatPayLauncher
 
         static void InstallApplication()
         {
-            Console.WriteLine("\n🌐 Fetching latest version info...");
+            Console.WriteLine("\n🌐 Fetching latest version info from Cloud...");
             
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; // TLS 1.2
             
@@ -132,35 +125,48 @@ namespace BharatPayLauncher
             {
                 string json = client.DownloadString(GOOGLE_SCRIPT_URL);
                 
-                // Simple regex to extract URLs without JSON library
+                // Extract version and URLs. 
+                // Using ExtractJsonValue to find keys regardless of position.
                 string downloadUrl = ExtractJsonValue(json, "downloadUrl");
                 string downloadUrlWin7 = ExtractJsonValue(json, "downloadUrlWin7");
                 string version = ExtractJsonValue(json, "latestVersion");
 
-                Console.WriteLine("📦 Latest Version: " + version);
+                if (string.IsNullOrEmpty(version))
+                {
+                    // Fallback search if the object is nested in 'messages'
+                    version = ExtractJsonValue(json, "version"); 
+                }
+
+                Console.WriteLine("📦 Remote Version Found: " + (string.IsNullOrEmpty(version) ? "Checking..." : version));
                 
-                bool isLegacy = Environment.OSVersion.Version.Major == 6; // Win 7/8/8.1
+                bool isLegacy = Environment.OSVersion.Version.Major == 6 && Environment.OSVersion.Version.Minor == 1; // Exactly Win 7
                 string targetUrl = isLegacy ? downloadUrlWin7 : downloadUrl;
                 
                 if (string.IsNullOrEmpty(targetUrl))
                 {
-                    throw new Exception("Could not retrieve download URL from server.");
+                    string errMsg = "Could not retrieve download URL from server.\n\n" +
+                                   "V: " + version + ", OS7: " + isLegacy + "\n" +
+                                   "W10URL: " + (string.IsNullOrEmpty(downloadUrl) ? "Empty" : "Valid") + "\n" +
+                                   "W7URL: " + (string.IsNullOrEmpty(downloadUrlWin7) ? "Empty" : "Valid") + "\n\n" +
+                                   "Raw Response: " + (json.Length > 200 ? json.Substring(0, 200) + "..." : json);
+                    throw new Exception(errMsg);
                 }
 
-                Console.WriteLine("💻 System: " + (isLegacy ? "Windows 7/8 (Legacy)" : "Windows 10+ (Modern)"));
-                Console.WriteLine("🚀 Downloading Installer...");
+                Console.WriteLine("💻 Target Environment: " + (isLegacy ? "Windows 7 (Legacy)" : "Windows 10+ (Modern)"));
+                Console.WriteLine("🚀 Initiating Secure Download...");
 
-                string tempFile = Path.Combine(Path.GetTempPath(), "BPP_Setup_" + version + ".exe");
+                string tempFile = Path.Combine(Path.GetTempPath(), "BPP_Setup_" + (string.IsNullOrEmpty(version) ? "v5" : version) + ".exe");
                 client.DownloadFile(targetUrl, tempFile);
                 
-                Console.WriteLine("✅ Download Complete. Starting Installation...");
+                Console.WriteLine("✅ Download Complete. Executing Installer...");
                 Process.Start(tempFile);
             }
         }
 
         static string ExtractJsonValue(string json, string key)
         {
-            string pattern = "\"" + key + "\":\"([^\"]*)\"";
+            // Improved regex to handle optional spaces around quotes and colon
+            string pattern = "\"" + key + "\"\\s*:\\s*\"([^\"]*)\"";
             Match match = Regex.Match(json, pattern);
             return match.Success ? match.Groups[1].Value : "";
         }

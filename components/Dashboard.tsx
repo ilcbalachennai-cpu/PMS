@@ -125,8 +125,8 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
           </div>
         </div>
 
-        <div className="w-full flex flex-col items-center gap-4 mt-8 pt-8 border-t border-slate-800/50">
-          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Quick Access Tools</h3>
+        <div className="w-full flex flex-col items-center gap-4 mt-8 pt-8 border-t border-slate-800/50 opacity-40 grayscale pointer-events-none">
+          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Quick Access Tools (Inactive)</h3>
           <QuickLinks centered={true} />
         </div>
       </div>

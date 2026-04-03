@@ -3,6 +3,9 @@ import { User2, Edit2, Trash2 } from 'lucide-react';
 import { Employee, User } from '../../types';
 import { formatDateInd } from '../../services/reportService';
 
+// Global OS Detection for UI refinement
+const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
+
 interface EmployeeTableProps {
     employees: Employee[];
     selectedEmp: Employee | null;
@@ -38,7 +41,11 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                     {employees.map((emp) => (
                         <tr
                             key={emp.id}
-                            className={`hover:bg-slate-800/50 ${selectedEmp?.id === emp.id ? 'bg-blue-900/40 border-l-4 border-blue-500' : 'border-l-4 border-transparent'} ${emp.dol ? 'opacity-60 grayscale' : ''}`}
+                            className={`hover:bg-slate-800/50 transition-all ${selectedEmp?.id === emp.id 
+                                ? (isWin7 
+                                    ? 'bg-gradient-to-r from-blue-600/15 to-transparent border-l-4 border-sky-400 shadow-[inset_4px_0_10px_rgba(56,189,248,0.1)]' 
+                                    : 'bg-blue-900/40 border-l-4 border-blue-500')
+                                : 'border-l-4 border-transparent'} ${emp.dol ? 'opacity-60 grayscale' : ''}`}
                         >
                             <td className="px-4 py-2.5 overflow-hidden">
                                 <button

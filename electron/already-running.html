@@ -20,11 +20,9 @@
       -moz-user-select: none;
       -ms-user-select: none;
       user-select: none;
-      -webkit-app-region: drag;
     }
 
     .card {
-      -webkit-app-region: no-drag;
       background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
       border: 1px solid #334155;
       border-radius: 16px;
@@ -166,5 +164,13 @@
 
     <button type="button" class="btn btn-close" onclick="window.close()">OK — Dismiss</button>
   </div>
+  <script>
+    // Electron-only properties applied via JS to avoid static IDE CSS warnings
+    window.onload = () => {
+      document.body.style.webkitAppRegion = 'drag';
+      const card = document.querySelector('.card');
+      if (card) card.style.webkitAppRegion = 'no-drag';
+    };
+  </script>
 </body>
 </html>

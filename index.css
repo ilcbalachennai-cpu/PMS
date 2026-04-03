@@ -35,7 +35,7 @@ html, body {
 .animate-marquee-seamless {
   display: flex;
   width: max-content;
-  animation: marquee-seamless 30s linear infinite;
+  animation: marquee-seamless 15s linear infinite;
 }
 
 .animate-marquee:hover {
@@ -107,4 +107,21 @@ textarea:focus {
 /* Ensure smooth transitions for inputs */
 input, select, textarea {
   transition: all 0.15s ease;
+}
+
+/* Win7 Specific Contrast Overrides */
+.is-win7 {
+  --tw-bg-opacity: 1 !important;
+}
+
+.is-win7 .backdrop-blur-md,
+.is-win7 .backdrop-blur-lg,
+.is-win7 .backdrop-blur-xl {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background-color: rgb(15, 23, 42) !important; /* Slate-900 */
+}
+
+.is-win7 border-slate-800 {
+  border-color: #334155 !important; /* slate-700 - Brighter */
 }

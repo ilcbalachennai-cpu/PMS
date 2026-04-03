@@ -2,6 +2,9 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, UserX, Save, TrendingUp } from 'lucide-react';
 
+// Global OS Detection for UI refinement
+const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
+
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, ArrearBatch } from '../types';
 import {
     generateExcelReport,
@@ -157,6 +160,7 @@ const Reports: React.FC<ReportsProps> = ({
         const lastDay = new Date(year, mIdx + 1, 0).getDate();
         return `${year}-${String(mIdx + 1).padStart(2, '0')}-${lastDay}`;
     };
+
 
     const handleReportTypeChange = (type: string) => {
         setReportType(type);
@@ -771,8 +775,10 @@ const Reports: React.FC<ReportsProps> = ({
                                 title={`Select ${item.label}`}
                                 aria-label={`Select ${item.label}`}
                                 className={`flex flex-col items-center justify-center gap-3 p-4 rounded-xl border transition-all ${reportType === item.id
-                                    ? 'bg-blue-600 border-blue-500 text-white shadow-lg scale-105'
-                                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600 hover:bg-slate-800'
+                                    ? (isWin7 
+                                        ? 'bg-blue-600 border-white/50 text-white shadow-[0_0_30px_rgba(37,99,235,0.5)] scale-105 ring-2 ring-white/30' 
+                                        : 'bg-blue-600 border-blue-500 text-white shadow-lg scale-105')
+                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-800'
                                     }`}
                             >
                                 <item.icon size={24} />
@@ -861,8 +867,10 @@ const Reports: React.FC<ReportsProps> = ({
                         title={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
                         aria-label={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
                         className={`w-full py-4 font-black rounded-xl shadow-lg flex items-center justify-center gap-3 transition-all mt-6 ${(reportType !== 'Arrear Report' && !isLocked)
-                            ? 'bg-slate-800 hover:bg-slate-700 text-amber-500 border border-slate-700'
-                            : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20'
+                            ? 'bg-slate-800 hover:bg-slate-700 text-amber-500 border border-slate-600'
+                            : (isWin7 
+                                ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl border border-white/20' 
+                                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20')
                             }`}
                     >
                         {isGenerating ? (

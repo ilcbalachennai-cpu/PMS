@@ -24,9 +24,8 @@ import AppSetup from './components/AppSetup';
 import CustomModal from './components/Shared/CustomModal';
 import TrialNoticeModal from './components/Shared/TrialNoticeModal';
 
-import { 
-  APP_VERSION, getStoredLicense 
-} from './services/licenseService';
+import { getStoredLicense, APP_VERSION } from './services/licenseService';
+import { parseExpiryDate, formatExpiryDate } from './utils/formatters';
 import { View, User, Employee, PayrollResult, CompanyProfile, StatutoryConfig } from './types';
 import { BRAND_CONFIG } from './constants';
 
@@ -44,18 +43,26 @@ import { useNavigation } from './hooks/useNavigation';
 
 const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+// Global OS Detection for UI refinement
+const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
+
 const NavigationItem = ({ view, icon: Icon, label, activeView, setActiveView, isSidebarOpen, depth = 0, disabled = false }: { view: View, icon: any, label: string, activeView: View, setActiveView: (v: View) => void, isSidebarOpen: boolean, depth?: number, disabled?: boolean }) => (
   <button
     onClick={() => !disabled && setActiveView(view)}
     title={`Navigate to ${label}`}
     aria-label={`Navigate to ${label}`}
-    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all ${disabled ? 'opacity-40 cursor-not-allowed grayscale' : ''} ${activeView === view
-      ? 'bg-blue-500 text-white shadow-lg'
-      : 'text-slate-300 hover:bg-blue-900/50 hover:text-white'
+    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all relative group ${disabled ? 'opacity-40 cursor-not-allowed grayscale' : ''} ${activeView === view
+      ? (isWin7 
+          ? 'bg-blue-600/60 text-white shadow-[0_0_15px_rgba(37,99,235,0.25)] ring-1 ring-blue-400' 
+          : 'bg-blue-600 text-white shadow-lg')
+      : 'text-slate-300 hover:bg-blue-900/40 hover:text-white'
       } ${depth > 0 ? 'ml-2 border-l border-slate-700 pl-4 w-[95%]' : ''}`}
   >
-    <Icon size={depth > 0 ? 16 : 18} className={`shrink-0 ${depth > 0 ? "opacity-80" : ""}`} />
-    {isSidebarOpen && <span className={`font-semibold text-left whitespace-nowrap tracking-tight ${depth > 0 ? 'text-[13px]' : 'text-sm'}`}>{label}</span>}
+    {activeView === view && isWin7 && (
+      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-blue-500 rounded-r-lg shadow-[0_0_10px_#3b82f6]"></div>
+    )}
+    <Icon size={depth > 0 ? 16 : 18} className={`shrink-0 ${depth > 0 ? "opacity-80" : ""} ${activeView === view && isWin7 ? "text-blue-400" : ""}`} />
+    {isSidebarOpen && <span className={`text-left whitespace-nowrap tracking-tight ${depth > 0 ? 'text-[13px]' : 'text-sm'} ${activeView === view ? 'font-black text-white' : 'font-semibold'}`}>{label}</span>}
   </button>
 );
 
@@ -68,7 +75,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod();
   const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
   const { 
-    latestAppVersion, 
+    latestAppVersion, setLatestAppVersion,
+    setDownloadUrl,
     showUpdateNotice, isUpdateDownloading, 
     updateDownloaded, handleUpdateNow, handleUpdateLater 
   } = useAppUpdate(showAlert);
@@ -90,6 +98,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     isSetupComplete, setIsSetupComplete
   } = useUIState(employees.length, activeView, setActiveView);
 
+  // NEW: Dedicated Flash Message State
+  const [showFlashPopup, setShowFlashPopup] = useState(false);
+
 
   // Trial Notice State
   const [showTrialNotice, setShowTrialNotice] = useState(false);
@@ -104,7 +115,35 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   // --- Specialized Effects ---
   
-  // Handle Update Prompt on Start
+  // Handle New Update Detected
+  useEffect(() => {
+    if (showUpdateNotice && !updateDownloaded && !isUpdateDownloading && latestAppVersion) {
+      setAlertConfig({
+        isOpen: true,
+        type: 'confirm',
+        title: 'New Update Available',
+        message: `A new version (${latestAppVersion}) of BharatPay Pro is available with important enhancements. Would you like to download it now? You can keep working while it downloads in the background.`,
+        confirmLabel: 'Download Now',
+        cancelLabel: 'Later',
+        onConfirm: () => handleUpdateNow(async () => {
+             const keysToPersist = ['app_users', 'app_license_secure', 'app_data_size', 'app_employees', 'app_setup_complete'];
+             for (const k of keysToPersist) {
+               const val = localStorage.getItem(k);
+               if (val && (window as any).electronAPI) {
+                 try {
+                   const parsed = (val.startsWith('{') || val.startsWith('[')) ? JSON.parse(val) : val;
+                   await (window as any).electronAPI.dbSet(k, parsed);
+                 } catch (e) {
+                   await (window as any).electronAPI.dbSet(k, val);
+                 }
+               }
+             }
+        })
+      });
+    }
+  }, [showUpdateNotice, updateDownloaded, isUpdateDownloading, latestAppVersion, setAlertConfig, handleUpdateNow]);
+
+  // Handle Update Prompt on Start (Once Downloaded)
   useEffect(() => {
     if (latestAppVersion && updateDownloaded) {
         setAlertConfig({
@@ -138,28 +177,33 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     const syncMessages = async () => {
       const updates = await checkNewMessages();
       if (updates) {
+        // Sync news/statutory
         setCompanyProfile(prev => ({
           ...prev,
           flashNews: updates.scrollNews || prev.flashNews,
           postLoginMessage: updates.statutory || prev.postLoginMessage,
           postLoginHeader: updates.header || prev.postLoginHeader,
-          postLoginAlignment: updates.alignment || prev.postLoginAlignment
+          postLoginAlignment: updates.alignment || prev.postLoginAlignment,
+          flashPopupMessage: updates.flashPopupMessage || prev.flashPopupMessage,
+          flashPopupHeader: updates.flashPopupHeader || prev.flashPopupHeader,
+          flashPopupId: updates.flashPopupId || prev.flashPopupId
         }));
 
+        // --- NEW: Refresh Global Update State ---
+        if (updates.latestVersion) setLatestAppVersion(updates.latestVersion);
+        if (updates.downloadUrl) setDownloadUrl(updates.downloadUrl);
+
         // --- REFINED IMMEDIATE FLASH LOGIC ---
-        // Only show immediate popup if key is IMMEDIATE
-        if (updates.key === 'IMMEDIATE' && updates.messageId) {
-          const today = new Date().toISOString().split('T')[0];
-          const flashedRaw = localStorage.getItem('app_flashed_messages') || '{}';
-          const flashed = JSON.parse(flashedRaw);
+        // Only show immediate popup if key is IMMEDIATE and it hasn't been seen
+        if (updates.key === 'IMMEDIATE' && updates.flashPopupId) {
+          const seenIdsRaw = localStorage.getItem('app_seen_flash_ids') || '[]';
+          let seenIds: string[] = [];
+          try { seenIds = JSON.parse(seenIdsRaw); } catch { seenIds = []; }
           
-          if (flashed[updates.messageId] !== today) {
-            setShowLoginMessage(true);
-            flashed[updates.messageId] = today;
-            localStorage.setItem('app_flashed_messages', JSON.stringify(flashed));
-            
-            // Mark as shown this session to prevent REGULAR trigger
-            sessionStorage.setItem('app_session_last_msg_id', updates.messageId);
+          if (!seenIds.includes(updates.flashPopupId)) {
+            setShowFlashPopup(true);
+            seenIds.push(updates.flashPopupId);
+            localStorage.setItem('app_seen_flash_ids', JSON.stringify(seenIds));
           }
         }
       }
@@ -177,11 +221,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     const lastSessionMsgId = sessionStorage.getItem('app_session_last_msg_id');
     const currentMsgId = localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage;
 
+    // REGULAR messages only show at login if ID has changed from last session/locally
     if (currentUser && companyProfile.postLoginMessage?.trim() !== '' && lastSessionMsgId !== currentMsgId) {
       setShowLoginMessage(true);
       if (currentMsgId) sessionStorage.setItem('app_session_last_msg_id', currentMsgId);
     }
-  }, [currentUser, companyProfile.postLoginMessage, setShowLoginMessage]);
+  }, [currentUser, companyProfile.postLoginMessage]);
 
   // Auto Logout Timer
   useEffect(() => {
@@ -259,13 +304,17 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       const today = new Date().toISOString().split('T')[0];
       const lastShown = localStorage.getItem('trial_notice_shown_date');
       if (lastShown !== today) {
-        const [day, month, year] = license.expiryDate.split('-');
-        const expiry = new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59);
-        const diffMs = expiry.getTime() - Date.now();
-        const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-        setTrialInfo({ daysRemaining: daysLeft, expiryDate: license.expiryDate });
-        setShowTrialNotice(true);
-        localStorage.setItem('trial_notice_shown_date', today);
+        const expiry = parseExpiryDate(license.expiryDate);
+        if (expiry) {
+          const diffMs = expiry.getTime() - Date.now();
+          const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+          setTrialInfo({ 
+             daysRemaining: daysLeft, 
+             expiryDate: formatExpiryDate(expiry) 
+          });
+          setShowTrialNotice(true);
+          localStorage.setItem('trial_notice_shown_date', today);
+        }
       }
     }
 
@@ -286,6 +335,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     if (adminIdx >= 0) savedUsers[adminIdx] = data.adminUser; else savedUsers.push(data.adminUser);
     localStorage.setItem('app_users', JSON.stringify(savedUsers));
     localStorage.setItem('app_setup_complete', 'true');
+    
+    // Check for Post-Reset Enrollment Mode
+    const isResetMode = localStorage.getItem('app_is_reset_mode') === 'true';
+
     if ((window as any).electronAPI) {
       (window as any).electronAPI.dbSet('app_users', savedUsers);
       (window as any).electronAPI.dbSet('app_setup_complete', 'true');
@@ -295,10 +348,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     setShowRegistrationManual(false);
     setCurrentUser(data.adminUser);
     sessionStorage.setItem('app_session_user', JSON.stringify(data.adminUser));
-    setActiveView(View.Settings);
-    setSettingsTab('COMPANY');
-    setSkipSetupRedirect(false);
-    showAlert('success', 'Setup Complete', `BharatPay Pro is now ready for ${data.companyProfile.establishmentName}.`);
+    
+    if (isResetMode) {
+      localStorage.removeItem('app_is_reset_mode');
+      setActiveView(View.Employees);
+      setSkipSetupRedirect(true);
+      setTimeout(() => {
+        showAlert('success', 'System Reset Ready', 'Start Enrolling Employee', () => {});
+      }, 800);
+    } else {
+      setActiveView(View.Settings);
+      setSettingsTab('COMPANY');
+      setSkipSetupRedirect(false);
+      showAlert('success', 'Setup Complete', `BharatPay Pro is now ready for ${data.companyProfile.establishmentName}.`);
+    }
   };
 
   const handleLogoutAction = () => {
@@ -358,12 +421,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const effectiveUser = (currentUser || { id: 'setup', name: 'Initial Setup', role: 'Administrator', username: 'setup', password: '', email: '' }) as User;
   const isSettingsAccessible = effectiveUser.role === 'Developer' || effectiveUser.role === 'Administrator';
-  const isNavLocked = employees.length === 0 && isSetupComplete;
+  const isNavLocked = employees.length === 0;
 
   if (isAppDirectoryConfigured === null) return <div className="min-h-screen bg-[#020617] flex items-center justify-center"><Loader2 className="animate-spin text-blue-500" size={48} /></div>;
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-[#020617] text-white">
+    <div className={`flex h-[100dvh] overflow-hidden bg-[#020617] text-white ${isWin7 ? 'is-win7' : ''}`}>
       <CustomModal {...alertConfig} onClose={closeAlert} autoCloseSecs={alertConfig.autoCloseSecs} />
 
       {isAppDirectoryConfigured === false && <AppSetup onComplete={() => setIsAppDirectoryConfigured(true)} />}
@@ -389,7 +452,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                             <h2 className="text-2xl font-black uppercase text-white">System Locked</h2>
                             <p className="text-slate-400">{licenseStatus.message}</p>
                             <button onClick={() => (window as any).electronAPI?.closeApp()} className="w-full py-4 bg-red-600 text-white font-black rounded-xl uppercase tracking-widest">Quit Application</button>
-                            <button onClick={handleResetLicenseIdentity} className="text-amber-400 text-xs font-bold uppercase tracking-widest hover:underline"><RefreshCw className="inline mr-1" /> Reset Identity</button>
+                            <button onClick={handleResetLicenseIdentity} className="text-amber-100 text-xs font-bold uppercase tracking-widest hover:underline"><RefreshCw className="inline mr-1" /> Reset Identity</button>
                         </div>
                     )}
                 </div>
@@ -411,7 +474,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           </div>
         </div>
       ) : (!getStoredLicense() && (showRegistrationManual || (!isSetupComplete && employees.length === 0))) ? (
-        <Registration onComplete={handleRegistrationComplete} onRestore={() => window.location.reload()} showAlert={showAlert} />
+        <Registration 
+          onComplete={handleRegistrationComplete} 
+          onRestore={() => window.location.reload()} 
+          showAlert={showAlert} 
+          isResetMode={localStorage.getItem('app_is_reset_mode') === 'true'}
+        />
       ) : !currentUser ? (
         <Login onLogin={handleAuthLogin} currentLogo={logoUrl} setLogo={handleUpdateLogo} />
       ) : (
@@ -440,6 +508,30 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         </p>
                     </div>
                     <button onClick={() => setShowLoginMessage(false)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl uppercase tracking-widest transition-all">Acknowledge & Continue</button>
+                </div>
+            </div>
+          )}
+
+          {showFlashPopup && companyProfile.flashPopupMessage && (
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl">
+                <div className="bg-slate-900 w-full max-w-lg rounded-2xl border-2 border-amber-500/50 p-8 space-y-6 shadow-[0_0_50px_rgba(245,158,11,0.2)]">
+                     <h3 className="text-xl font-black text-amber-500 uppercase tracking-[0.2em] flex items-center gap-3">
+                        <div className="p-2 bg-amber-500/10 rounded-lg">
+                           <Megaphone size={24} className="text-amber-500 animate-bounce" />
+                        </div>
+                        {companyProfile.flashPopupHeader || "Urgent Announcement"}
+                     </h3>
+                    <div className="space-y-4 py-2">
+                        <p className="text-white text-sm leading-relaxed whitespace-pre-wrap font-medium">
+                            {companyProfile.flashPopupMessage}
+                        </p>
+                    </div>
+                    <button 
+                       onClick={() => setShowFlashPopup(false)} 
+                       className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white text-sm font-black rounded-xl uppercase tracking-[0.2em] transition-all shadow-lg hover:shadow-amber-500/20 active:scale-95"
+                    >
+                       I Have Read This Notice
+                    </button>
                 </div>
             </div>
           )}
@@ -497,7 +589,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     <div className="flex flex-col">
                        <span className="text-sm font-black text-white tracking-tight">{companyProfile.establishmentName || BRAND_CONFIG.companyName}</span>
                        <span className="text-[8px] font-black text-[#FFD700] tracking-widest mt-0.5">
-                          {licenseInfo?.isTrial ? "Trial Valid Upto : " : "License Valid Upto : "}{licenseInfo?.expiryDate || 'N/A'}
+                          {licenseInfo?.isTrial ? "Trial Valid Upto : " : "License Valid Upto : "}{formatExpiryDate(licenseInfo?.expiryDate)}
                        </span>
                     </div>
                  </div>
@@ -507,9 +599,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                          <Megaphone size={16} className="text-amber-500" />
                        </div>
                        <div className="flex-1 overflow-hidden relative">
-                         <div className="animate-marquee-seamless whitespace-nowrap text-[11px] font-bold text-amber-100 uppercase tracking-[0.2em] py-2 italic flex">
-                           {companyProfile.flashNews || 'Welcome to BharatPay Pro! Use Configuration to update this message.'}
-                         </div>
+                         <div className="animate-marquee-seamless whitespace-nowrap text-[13px] font-semibold text-amber-100 py-2 flex">
+                            <span className="pr-40">{companyProfile.flashNews || 'Welcome to BharatPay Pro! Use Configuration to update this message.'}</span>
+                            <span className="pr-40">{companyProfile.flashNews || 'Welcome to BharatPay Pro! Use Configuration to update this message.'}</span>
+                          </div>
                        </div>
                     </div>
                  </div>
@@ -543,7 +636,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
              >
                <div className="p-8 max-w-7xl mx-auto">
                  {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={setActiveView} />}
-                 {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} />}
+                 {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} />}
                  {activeView === View.PayProcess && <PayProcess employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} />}
                  {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} />}
                  {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} />}

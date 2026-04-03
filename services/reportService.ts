@@ -886,7 +886,7 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
         const lines = rows.map(r =>
             `${r.uan}#~#${r.name}#~#${r.grossWages}#~#${r.epfWages}#~#${r.epsWages}#~#${r.edliWages}#~#${r.eeEPF}#~#${r.erEPS}#~#${r.erEPF}#~#${r.ncpDays}#~#${r.refund}`
         );
-        const content = lines.join('\n');
+        const content = lines.join('\r\n');
         const u8 = new TextEncoder().encode(content);
         const savedLocally = await electronSaveReport(fileName, u8, 'txt');
 
@@ -2682,7 +2682,7 @@ export const generateArrearECRText = async (
         throw new Error("No valid Arrear ECR records to generate.");
     }
 
-    const content = lines.join('\n');
+    const content = lines.join('\r\n');
     const u8 = new TextEncoder().encode(content);
     const res = await electronSaveReport(fileName, u8, 'txt');
     if (!res.success) {

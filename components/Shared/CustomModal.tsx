@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { X, CheckCircle2, AlertCircle, Info, AlertTriangle, Loader2, FolderOpen } from 'lucide-react';
 
 export type ModalType = 'success' | 'error' | 'info' | 'warning' | 'confirm' | 'danger' | 'loading';
@@ -31,6 +31,13 @@ const CustomModal: React.FC<CustomModalProps> = ({
     autoCloseSecs
 }) => {
     const [progress, setProgress] = useState(100);
+    const progressBarRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (progressBarRef.current) {
+            progressBarRef.current.style.width = `${progress}%`;
+        }
+    }, [progress]);
 
     useEffect(() => {
         if (!isOpen || type !== 'success' || !autoCloseSecs) {
@@ -143,8 +150,8 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     <div className="px-6 pt-2 pb-1">
                         <div className="w-full h-1 bg-slate-700/60 rounded-full overflow-hidden">
                             <div
+                                ref={progressBarRef}
                                 className="h-full bg-emerald-500 rounded-full transition-none"
-                                style={{ '--progress': `${progress}%`, width: 'var(--progress)' } as React.CSSProperties}
                             />
                         </div>
                         <p className="text-[10px] text-slate-500 text-center mt-1 font-medium tracking-wider">

@@ -40,6 +40,9 @@ interface PayProcessProps {
     showAlert: (type: ModalType, title: string, message: string, onConfirm?: () => void) => void;
 }
 
+// Global OS Detection for UI refinement
+const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
+
 const PayProcess: React.FC<PayProcessProps> = (props) => {
     const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'fines' | 'overtime' | 'arrears' | 'payroll'>('attendance');
     const [isGatewayOpen, setIsGatewayOpen] = useState(true);
@@ -57,12 +60,17 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             onClick={() => setActiveTab(id)}
             title={`Switch to ${label} tab`}
             aria-label={`Switch to ${label} tab`}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all text-xs whitespace-nowrap ${activeTab === id
-                ? 'bg-blue-600 text-white shadow-lg'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black transition-all text-xs whitespace-nowrap relative group ${activeTab === id
+                ? (isWin7 
+                    ? 'bg-blue-600/50 text-white shadow-[0_0_20px_rgba(37,99,235,0.25)] border border-blue-400/50' 
+                    : 'bg-blue-600 text-white shadow-lg')
+                : 'text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent'
                 }`}
         >
-            <Icon size={16} />
+            {activeTab === id && isWin7 && (
+                <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-1 bg-blue-500 rounded-t-full shadow-[0_0_12px_#3b82f6]"></div>
+            )}
+            <Icon size={16} className={`${activeTab === id ? (isWin7 ? 'text-blue-400' : 'text-white') : 'text-slate-500'} group-hover:text-blue-400 transition-colors`} />
             {label}
         </button>
     );

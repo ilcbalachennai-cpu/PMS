@@ -212,9 +212,50 @@ export const usePayrollData = (showAlert: any) => {
     }
   }, [companyProfile, payrollHistory, showAlert]);
 
+  const handlePayrollReset = useCallback(async () => {
+    setIsResetting(true);
+    
+    const keysToWipe = [
+      'app_employees', 'app_attendance', 'app_leave_ledgers', 
+      'app_advance_ledgers', 'app_payroll_history', 'app_fines', 
+      'app_arrear_history', 'app_ot_records'
+    ];
+
+    // Clear Local Storage
+    keysToWipe.forEach(k => localStorage.removeItem(k));
+
+    // Wipe electron SQLite database
+    // @ts-ignore
+    if (window.electronAPI && window.electronAPI.dbDelete) {
+      for (const k of keysToWipe) {
+        try {
+          // @ts-ignore
+          await window.electronAPI.dbDelete(k);
+        } catch (e) { console.error(`Error deleting ${k} from db`, e); }
+      }
+    }
+
+    // Refresh State
+    setEmployees([]);
+    setAttendances([]);
+    setLeaveLedgers([]);
+    setAdvanceLedgers([]);
+    setPayrollHistory([]);
+    setFines([]);
+    setArrearHistory([]);
+    setOTRecords([]);
+    
+    setIsResetting(false);
+    
+    showAlert('success', 'Payroll Reset Complete', 'All employee and payroll records have been cleared. Company profile and statutory rules are preserved.', () => {
+       window.location.reload();
+    });
+  }, [showAlert]);
+
   const handleNuclearReset = useCallback(async () => {
     setIsResetting(true);
     localStorage.clear();
+    localStorage.setItem('app_is_reset_mode', 'true');
 
     // Wipe electron SQLite database
     // @ts-ignore
@@ -265,7 +306,7 @@ export const usePayrollData = (showAlert: any) => {
     branches, setBranches,
     sites, setSites,
     logoUrl, setLogoUrl,
-    safeSave, handleRollover, handleNuclearReset,
+    safeSave, handleRollover, handlePayrollReset, handleNuclearReset,
     isResetting
   };
 };

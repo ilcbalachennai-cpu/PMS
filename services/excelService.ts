@@ -18,15 +18,15 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
             const now = new Date();
             const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
             const fileName = getStandardFileName('Employee_Export', company || {} as any, months[now.getMonth()], now.getFullYear());
-            await generateExcelWorkbook(wb, fileName);
-            return;
+            const path = await generateExcelWorkbook(wb, fileName);
+            return path;
         }
 
         // Template Download
         const templateHeaders = [
             "Employee ID", "Full Name", "Gender", "Date of Birth (DD-MM-YYYY)", "Designation",
             "Department/Division", "Branch", "Site", "Date of Joining (DD-MM-YYYY)",
-            "Mobile Number", "Father or Spouse Name", "Relationship",
+            "Mobile Number", "mail_id", "Father or Spouse Name", "Relationship",
             "Married (Yes/No)", "Spouse Name", "Spouse Gender", "Spouse Aadhaar Number",
             "Door No", "Building Name", "Street", "Area", "City", "State", "Pincode",
             "PAN Number", "Aadhaar Number", "UAN Number", "PF Member ID", "ESI Number",
@@ -47,7 +47,7 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
         const sampleRow = [
             "AUTO-GEN", "John Doe", "Male", "15-05-1990", "Software Engineer",
             "Engineering", "Chennai", "Main Plant", "01-01-2024",
-            "9876543210", "Jane Doe", "Spouse",
+            "9876543210", "john.doe@example.com", "Jane Doe", "Spouse",
             "Yes", "Jane Doe", "Female", "999988887777",
             "12A", "Sun Villa", "Main Road", "Guindy", "Chennai", "Tamil Nadu", "600032",
             "ABCDE1234F", "123456789012", "100234567890", "TN/MAS/0012345/000/0000101", "3112345678",
@@ -219,6 +219,7 @@ export const parseEmployeeXLSX = async (
                         site: String(getVal(['Site']) || sites[0]),
                         doj: parseIndDate(getVal(['Date of Joining (DD-MM-YYYY)', 'Date of Joining', 'DOJ', 'Joining Date'])) || new Date().toISOString().split('T')[0],
                         mobile: String(getVal(['Mobile Number', 'Mobile', 'Mobile No']) || ''),
+                        email: String(getVal(['mail_id', 'Mail ID', 'mailDI', 'Email', 'Email ID']) || ''),
                         fatherSpouseName: String(getVal(['Father or Spouse Name', 'Father Name', 'Spouse Name']) || ''),
                         relationship: String(getVal(['Relationship']) || 'Father'),
                         maritalStatus: String(getVal(['Married (Yes/No)', 'Married', 'Marital Status']) || 'No') === 'Yes' ? 'Yes' : 'No',

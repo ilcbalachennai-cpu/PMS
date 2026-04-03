@@ -1,7 +1,11 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { Users } from 'lucide-react';
 import { Employee, User, CompanyProfile } from '../types';
+
+// Global OS Detection for UI refinement
+const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
 import { generateEmployeeXLSX, parseEmployeeXLSX, generateImportFailureReport } from '../services/excelService';
+import { openSavedReport } from '../services/reportService';
 
 // Modular Components
 import EmployeeToolbar from './Employee/EmployeeToolbar';
@@ -51,11 +55,22 @@ interface EmployeeListProps {
     currentUser?: User;
     companyProfile: CompanyProfile;
     dataSizeLimit: number;
+    showAlert: (
+        type: 'info' | 'success' | 'warning' | 'danger' | 'confirm',
+        title: string,
+        message: string | React.ReactNode,
+        onConfirm?: () => void,
+        onSecondaryConfirm?: () => void,
+        confirmLabel?: string,
+        secondaryConfirmLabel?: string,
+        cancelLabel?: string,
+        autoCloseSecs?: number
+    ) => void;
 }
 
 const EmployeeList: React.FC<EmployeeListProps> = ({
     employees, setEmployees, onAddEmployee, onBulkAddEmployees,
-    designations, divisions, branches, sites, currentUser, companyProfile, dataSizeLimit
+    designations, divisions, branches, sites, currentUser, companyProfile, dataSizeLimit, showAlert
 }) => {
     // --- State Management ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -81,8 +96,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     const pfForm2InputRef = useRef<HTMLInputElement>(null);
     const pfForm11InputRef = useRef<HTMLInputElement>(null);
 
-    // --- Form State ---
-    const [newEmpForm, setNewEmpForm] = useState<Partial<Employee>>({
+    const INITIAL_FORM_STATE: Partial<Employee> = {
         id: '', name: '', designation: 'Security Guard', division: 'Security', branch: '', site: '',
         dob: '', doj: '', mobile: '', gender: 'Male', fatherSpouseName: '', relationship: 'Father',
         doorNo: '', buildingName: '', street: '', area: '', city: '', state: 'Tamil Nadu', pincode: '',
@@ -91,7 +105,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         specialAllowance1: 0, specialAllowance2: 0, specialAllowance3: 0,
         pfHigherPension: { enabled: false, isHigherPensionOpted: 'No', contributedBefore2014: 'No', employeeContribution: 'Regular', employerContribution: 'Regular', dojImpact: '' },
         employeeDocuments: {}
-    });
+    };
+
+    // --- Form State ---
+    const [newEmpForm, setNewEmpForm] = useState<Partial<Employee>>(INITIAL_FORM_STATE);
 
     // --- Derived Data ---
     const activeEmployees = useMemo(() => employees.filter(e => !e.dol), [employees]);
@@ -120,9 +137,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     // --- Action Handlers ---
     const handleAddNew = () => {
         const nextId = employees.length > 0 ? `EMP${(Math.max(...employees.map(e => parseInt(e.id.replace('EMP', '')))) + 1).toString().padStart(4, '0')}` : 'EMP0001';
-        setNewEmpForm({ ...newEmpForm, id: nextId, doj: new Date().toISOString().split('T')[0] });
+        setNewEmpForm({ 
+            ...INITIAL_FORM_STATE, 
+            id: nextId, 
+            doj: new Date().toISOString().split('T')[0] 
+        });
         setEditingId(null);
         setIsAdding(true);
+        setIsSeparationUnlocked(false);
     };
 
     const handleEdit = (emp: Employee) => {
@@ -208,8 +230,22 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     });
                     return row;
                 });
-                await generateEmployeeXLSX(dataToExport, companyProfile);
+                const filePath = await generateEmployeeXLSX(dataToExport, companyProfile);
                 setExportModal({ ...exportModal, isOpen: false, password: '', error: '' });
+                
+                if (filePath) {
+                    showAlert(
+                        'success',
+                        'Export Successful',
+                        'Employee data has been exported to your reports folder.',
+                        () => openSavedReport(filePath),
+                        undefined,
+                        'Open Report & Folder',
+                        undefined,
+                        undefined,
+                        2
+                    );
+                }
             } else {
                 setExportModal({ ...exportModal, error: 'Invalid Password. Admin Required.' });
             }
@@ -247,7 +283,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
             <div className="sticky top-0 z-20 bg-slate-950 px-8 pt-2 pb-2 border-b border-slate-800 space-y-3">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
-                        <div className="p-2.5 bg-blue-600/10 rounded-xl text-blue-400 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]">
+                        <div className={`p-2.5 rounded-xl border transition-all ${isWin7 
+                            ? 'bg-blue-600/40 text-white border-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.3)]' 
+                            : 'bg-blue-600/10 text-blue-400 border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]'
+                        }`}>
                             <Users size={28} strokeWidth={2.5} />
                         </div>
                         <div className="flex flex-col md:flex-row md:items-baseline gap-2 md:gap-4">
@@ -264,9 +303,25 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     searchTerm={searchTerm}
                     onSearchChange={setSearchTerm}
                     totalActive={activeEmployees.length}
+                    totalActiveLabel="Active Employees"
                     limit={dataSizeLimit}
                     isImporting={isImporting}
-                    onDownloadTemplate={() => generateEmployeeXLSX([])}
+                    onDownloadTemplate={async () => {
+                        const path = await generateEmployeeXLSX([]);
+                        if (path) {
+                            showAlert(
+                                'success',
+                                'Template Downloaded',
+                                'Employee import template has been saved to your reports folder.',
+                                () => openSavedReport(path),
+                                undefined,
+                                'Open Folder',
+                                undefined,
+                                undefined,
+                                2
+                            );
+                        }
+                    }}
                     onImportClick={handleImport}
                     onExportClick={() => setExportModal({ ...exportModal, isOpen: true })}
                     onShowRejoin={() => setShowRejoinPanel(true)}

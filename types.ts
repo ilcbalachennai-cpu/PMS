@@ -177,10 +177,16 @@ export interface CompanyProfile {
   email: string;
   website: string;
   natureOfBusiness: string;
-  flashNews?: string; // New field for Flash News
-  postLoginMessage?: string; // New field for Post Login Popup Message
-  postLoginHeader?: string; // New field for Post Login Popup Header
-  postLoginAlignment?: 'LEFT' | 'CENTER' | 'RIGHT'; // New field for Text Alignment
+  flashNews?: string; // Ticker News
+  flashNewsKey?: string; // News Mode
+  postLoginMessage?: string; // Global Popup Message
+  postLoginHeader?: string; // Popup Header
+  postLoginAlignment?: 'LEFT' | 'CENTER' | 'RIGHT'; // Text Alignment
+  postLoginKey?: 'REGULAR' | 'IMMEDIATE'; // Message Priority
+  flashPopupMessage?: string; // Flash Popup Content
+  flashPopupHeader?: string; // Flash Popup Header
+  flashPopupPriority?: 'REGULAR' | 'IMMEDIATE'; // Flash Popup Mode
+  flashPopupId?: string; // Flash Date Sync Key
   externalAppUrl?: string; // New field for External App Link
   
   // SMTP Configuration

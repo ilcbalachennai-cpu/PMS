@@ -1,11 +1,15 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Save, AlertCircle, RefreshCw, Building2, ShieldCheck, Upload, Image as ImageIcon, ScrollText, Trash2, Plus, AlertTriangle, CalendarClock, X, KeyRound, Download, Lock, FileText, Phone, Mail, Globe, Database, Loader2, CheckCircle2, Megaphone, HandCoins, Landmark, Percent, Table, Heart, Camera, CheckSquare, Square, Calculator, Wallet, ArrowRight, UserPlus, Eye, EyeOff, Users, Edit2, Scale } from 'lucide-react';
-import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User } from '../types';
-import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
+import { 
+    X, Save, RefreshCw, Loader2, Download, Upload, Trash2, AlertTriangle, 
+    Database, Users, KeyRound, ShieldCheck, Mail, Megaphone, Building2, 
+    CalendarClock, Phone, Globe, CheckCircle2, AlertCircle, Lock, Plus,
+    ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator, 
+    ScrollText, Percent, HandCoins, Wallet, Scale, Trash, RotateCw 
+} from 'lucide-react';
+import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData } from '../types';
+import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
 import CryptoJS from 'crypto-js';
 import { fetchLatestMessages, updateDeveloperMessages, activateFullLicense, getStoredLicense, isValidKeyFormat } from '../services/licenseService';
-import { LicenseData } from '../types';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 
 interface SettingsProps {
@@ -24,41 +28,41 @@ interface SettingsProps {
     currentUser?: User;
     isSetupMode?: boolean;
     onSkipSetupRedirect?: () => void;
-    showAlert?: (type: any, title: string, message: string, onConfirm?: () => void) => void;
+    showAlert: (type: 'success' | 'warning' | 'danger' | 'info' | 'confirm' | 'error', title: string, message: string | JSX.Element, onConfirm?: () => void, onCancel?: () => void, confirmLabel?: string, cancelLabel?: string, cancel2Label?: string) => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, showAlert }) => {
     const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(isSetupMode ? 'COMPANY' : initialTab);
 
-    // SCHEMA MIGRATION: Merge current config with defaults to prevent crashes on new features
     const [formData, setFormData] = useState<StatutoryConfig>(() => {
+        const pfOrig = config.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
+        const esiOrig = config.esiOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents;
+
         return {
             ...INITIAL_STATUTORY_CONFIG,
             ...config,
             higherContributionComponents: {
                 ...INITIAL_STATUTORY_CONFIG.higherContributionComponents,
-                ...config.higherContributionComponents
+                ...(config.higherContributionComponents || {})
             },
             leaveWagesComponents: {
                 ...INITIAL_STATUTORY_CONFIG.leaveWagesComponents,
-                ...config.leaveWagesComponents
+                ...(config.leaveWagesComponents || {})
             },
             otComponents: {
                 ...INITIAL_STATUTORY_CONFIG.otComponents,
-                ...config.otComponents
+                ...(config.otComponents || {})
             },
             otCalculationFactor: config.otCalculationFactor || INITIAL_STATUTORY_CONFIG.otCalculationFactor,
             incomeTaxCalculationType: config.incomeTaxCalculationType || INITIAL_STATUTORY_CONFIG.incomeTaxCalculationType,
             pfEsiCalculationBasis: config.pfEsiCalculationBasis || INITIAL_STATUTORY_CONFIG.pfEsiCalculationBasis,
             pfOriginalWagesComponents: {
                 ...INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents,
-                ...(config as any).pfOriginalWagesComponents,
-                ...(config as any).originalWagesComponents // Migration
+                ...pfOrig
             },
             esiOriginalWagesComponents: {
                 ...INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents,
-                ...(config as any).esiOriginalWagesComponents,
-                ...(config as any).originalWagesComponents // Migration
+                ...esiOrig
             }
         };
     });
@@ -68,8 +72,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [saved, setSaved] = useState(false);
     const [selectedStatePreset, setSelectedStatePreset] = useState<string>('Tamil Nadu');
     const [selectedLWFState, setSelectedLWFState] = useState<string>('Tamil Nadu');
-
-    const logoInputRef = useRef<HTMLInputElement>(null);
 
     const hasData = useMemo(() => {
         try {
@@ -84,16 +86,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         setActiveTab(isSetupMode ? 'COMPANY' : initialTab);
     }, [initialTab, isSetupMode]);
 
-    const [showResetModal, setShowResetModal] = useState(false);
-    const [showPayrollResetModal, setShowPayrollResetModal] = useState(false);
-    const [resetPassword, setResetPassword] = useState('');
-    const [resetError, setResetError] = useState('');
-
     const [showBackupModal, setShowBackupModal] = useState(false);
     const [encryptionKey, setEncryptionKey] = useState('');
-    const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT'>('EXPORT');
-    const backupFileRef = useRef<HTMLInputElement>(null);
-
     const [selectedBackupFile, setSelectedBackupFile] = useState<File | null>(null);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [authPassword, setAuthPassword] = useState('');
@@ -101,39 +95,58 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [pendingAuthAction, setPendingAuthAction] = useState<(() => void) | null>(null);
 
     const [showSMTPModal, setShowSMTPModal] = useState(false);
-
     const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
 
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
-    const [isActivating, setIsActivating] = useState(false);
+
     const [processProgress, setProcessProgress] = useState(0);
     const [processStatus, setProcessStatus] = useState('');
     const [isSqliteFile, setIsSqliteFile] = useState(false);
 
-    // License Management State
     const [licenseInfo, setLicenseInfo] = useState<LicenseData | null>(() => getStoredLicense());
     const [newLicenseKey, setNewLicenseKey] = useState('');
     const [newUserName, setNewUserName] = useState(licenseInfo?.userName || '');
     const [newRegEmail, setNewRegEmail] = useState('');
     const [newRegMobile, setNewRegMobile] = useState('');
     const [newUserID, setNewUserID] = useState(licenseInfo?.userID || '');
-    const [_currentMachineId] = useState('');
-    const fullNameRef = useRef<HTMLInputElement>(null);
-    const progressRef = useRef<HTMLDivElement>(null);
+    const [showResetModal, setShowResetModal] = useState(false);
+    const [showPayrollResetModal, setShowPayrollResetModal] = useState(false);
+    const [resetPassword, setResetPassword] = useState('');
+    const [resetError, setResetError] = useState('');
+    const [isActivating, setIsActivating] = useState(false);
 
-    // Sync progress bar width via Ref to bypass "no-inline-styles" linter
+    const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT'>('EXPORT');
+    const backupFileRef = useRef<HTMLInputElement>(null);
+
+    const progressRef = useRef<HTMLDivElement>(null);
+    const logoInputRef = useRef<HTMLInputElement>(null);
+
+    const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64String = reader.result as string;
+                setLogo(base64String);
+                localStorage.setItem('app_logo', base64String);
+                if (window.electronAPI) window.electronAPI.dbSet('app_logo', base64String);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+
     useEffect(() => {
         if (progressRef.current) {
             progressRef.current.style.width = `${processProgress}%`;
         }
     }, [processProgress]);
 
-    // ── User Management State ──
     const [appUsers, setAppUsers] = useState<User[]>(() => {
         try { return JSON.parse(localStorage.getItem('app_users') || '[]'); } catch { return []; }
     });
-    const [umForm, setUmForm] = useState({ name: '', username: '', password: '', role: 'User' as 'Administrator' | 'User' });
+    const [umForm, setUmForm] = useState({ name: '', username: '', password: '', role: 'User' as 'Administrator' | 'User', email: '' });
     const [umEditId, setUmEditId] = useState<string | null>(null);
     const [umShowPwd, setUmShowPwd] = useState(false);
     const [umError, setUmError] = useState('');
@@ -142,11 +155,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const saveAppUsers = (users: User[]) => {
         setAppUsers(users);
         localStorage.setItem('app_users', JSON.stringify(users));
-        // @ts-ignore
         if (window.electronAPI) window.electronAPI.dbSet('app_users', users);
     };
 
-    const handleUmSave = () => {
+    const handleUmSave = async () => {
         setUmError('');
         if (!umForm.name.trim() || !umForm.username.trim() || !umForm.password.trim()) {
             setUmError('All fields are required.'); return;
@@ -157,21 +169,19 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         if (existing) { setUmError('Username already exists.'); return; }
 
         if (umEditId) {
-            // Edit mode — update the matched user
             const updated = appUsers.map(u => u.username.toLowerCase() === umEditId.toLowerCase() ? { ...u, name: umForm.name.trim(), username: cleanUsername, password: umForm.password, role: umForm.role } : u);
             saveAppUsers(updated);
         } else {
-            // Add new user
-            const newUser: User = { name: umForm.name.trim(), username: cleanUsername, password: umForm.password, role: umForm.role, email: '' };
+            const newUser: User = { name: umForm.name.trim(), username: cleanUsername, password: umForm.password, role: umForm.role, email: umForm.email };
             saveAppUsers([...appUsers, newUser]);
         }
-        setUmForm({ name: '', username: '', password: '', role: 'User' });
+        setUmForm({ name: '', username: '', password: '', role: 'User', email: '' });
         setUmEditId(null);
         setUmShowPwd(false);
     };
 
     const handleUmEdit = (u: User) => {
-        setUmForm({ name: u.name, username: u.username, password: u.password ?? '', role: (u.role === 'Administrator' ? 'Administrator' : 'User') });
+        setUmForm({ name: u.name, username: u.username, password: u.password ?? '', role: (u.role === 'Administrator' ? 'Administrator' : 'User'), email: u.email || '' });
         setUmEditId(u.username);
         setUmShowPwd(false);
         setUmError('');
@@ -183,8 +193,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         saveAppUsers(appUsers.filter(u => u.username !== username));
     };
 
-
-    // License Form Synchronization
     useEffect(() => {
         if (licenseInfo) {
             setNewRegEmail(licenseInfo.registeredTo || '');
@@ -194,21 +202,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         }
     }, [licenseInfo]);
 
-    // License Activation Focus
-    useEffect(() => {
-        if (activeTab === 'LICENSE') {
-            setTimeout(() => fullNameRef.current?.focus(), 400);
-        }
-    }, [activeTab]);
-
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-    const requireAuth = (callback: () => void) => {
-        setPendingAuthAction(() => callback);
-        setAuthPassword('');
-        setAuthError('');
-        setShowAuthModal(true);
-    };
 
     const handleAuthSubmit = () => {
         const isAuthorized = (isSetupMode && (authPassword === 'setup' || authPassword === '')) || (authPassword === currentUser?.password);
@@ -223,116 +217,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         }
     };
 
-    const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setLogo(reader.result as string);
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleEncryptedExport = async () => {
-        if (!encryptionKey) {
-            showAlert?.('warning', 'Security Required', 'Please enter a secure password to encrypt your data file.');
-            return;
-        }
-
-        setIsProcessing(true);
-        setProcessProgress(50);
-        setProcessStatus('Processing...');
-
-        try {
-            const rawLogo = localStorage.getItem('app_logo');
-            let processedLogo = rawLogo;
-            if (rawLogo && rawLogo.startsWith('"')) {
-                try { processedLogo = JSON.parse(rawLogo); } catch (e) { }
-            }
-
-            const dataBundle = {
-                employees: (() => { try { return JSON.parse(localStorage.getItem('app_employees') || '[]'); } catch { return []; } })(),
-                config: (() => { try { return JSON.parse(localStorage.getItem('app_config') || '{}'); } catch { return {}; } })(),
-                companyProfile: (() => { try { return JSON.parse(localStorage.getItem('app_company_profile') || '{}'); } catch { return {}; } })(),
-                attendance: (() => { try { return JSON.parse(localStorage.getItem('app_attendance') || '[]'); } catch { return []; } })(),
-                leaveLedgers: (() => { try { return JSON.parse(localStorage.getItem('app_leave_ledgers') || '[]'); } catch { return []; } })(),
-                advanceLedgers: (() => { try { return JSON.parse(localStorage.getItem('app_advance_ledgers') || '[]'); } catch { return []; } })(),
-                payrollHistory: (() => { try { return JSON.parse(localStorage.getItem('app_payroll_history') || '[]'); } catch { return []; } })(),
-                fines: (() => { try { return JSON.parse(localStorage.getItem('app_fines') || '[]'); } catch { return []; } })(),
-                leavePolicy: (() => { try { return JSON.parse(localStorage.getItem('app_leave_policy') || '{}'); } catch { return {}; } })(),
-                arrearHistory: (() => { try { return JSON.parse(localStorage.getItem('app_arrear_history') || '[]'); } catch { return []; } })(),
-                users: (() => { try { return JSON.parse(localStorage.getItem('app_users') || '[]'); } catch { return []; } })(),
-                developerMetadata: {
-                    lastNewsDate: localStorage.getItem('app_last_news_date') || "",
-                    lastStatutoryDate: localStorage.getItem('app_last_statutory_date') || ""
-                },
-                masters: {
-                    designations: (() => { try { return JSON.parse(localStorage.getItem('app_master_designations') || '[]'); } catch { return []; } })(),
-                    divisions: (() => { try { return JSON.parse(localStorage.getItem('app_master_divisions') || '[]'); } catch { return []; } })(),
-                    branches: (() => { try { return JSON.parse(localStorage.getItem('app_master_branches') || '[]'); } catch { return []; } })(),
-                    sites: (() => { try { return JSON.parse(localStorage.getItem('app_master_sites') || '[]'); } catch { return []; } })(),
-                },
-                logo: processedLogo,
-                timestamp: new Date().toISOString()
-            };
-
-            const jsonString = JSON.stringify(dataBundle);
-            const encrypted = CryptoJS.AES.encrypt(jsonString, encryptionKey).toString();
-
-            const blob = new Blob([encrypted], { type: 'text/plain' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-
-            const today = new Date();
-            let fyStart = today.getFullYear();
-            if (today.getMonth() < 3) {
-                fyStart = fyStart - 1;
-            }
-            const fyEnd = fyStart + 1;
-            const compName = companyProfile.establishmentName ? companyProfile.establishmentName.replace(/[^a-zA-Z0-9]/g, '_') : 'Company';
-
-            a.download = `${compName}_Backup_${fyStart}-${fyEnd}.enc`;
-
-            // @ts-ignore
-            if (window.electronAPI && window.electronAPI.runBackup) {
-                setProcessStatus('Saving to BharatPP location...');
-                // @ts-ignore
-                const res = await window.electronAPI.runBackup(encrypted);
-                if (res.success) {
-                    setProcessProgress(100);
-                    setProcessStatus('Backup Saved Successfully');
-                    showAlert?.('success', 'Safe Local Backup Created', `Your data has been encrypted and saved to the BharatPP/Data backup directory as: ${res.fileName}`);
-                } else {
-                    throw new Error(res.error || "Failed to save file to BharatPP directory.");
-                }
-            } else {
-                // Fallback for Web/Browser
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
-                setProcessProgress(100);
-                setProcessStatus('Export Complete');
-            }
-
-            setTimeout(() => {
-                setShowBackupModal(false);
-                setEncryptionKey('');
-                setIsProcessing(false);
-            }, 1500);
-
-        } catch (e: any) {
-            console.error(e);
-            setIsProcessing(false);
-            showAlert?.('error', 'Export Failed', e.message || 'Encryption failed. Please try again.');
-        }
-    };
-
     const executeImport = async () => {
         const file = selectedBackupFile;
-        // Optimization: SQLite files don't need decryption password
         if (!file || (!encryptionKey && !isSqliteFile)) {
             showAlert?.('warning', 'Missing Information', 'Please select a file and enter the decryption password.');
             return;
@@ -341,94 +227,48 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         setIsProcessing(true);
         setProcessProgress(0);
 
-        // Immediate logic for SQLite restoration to avoid unnecessary FileReader overhead
         if (isSqliteFile) {
             try {
                 setProcessStatus('Restoring Database File...');
                 setProcessProgress(40);
-                // @ts-ignore
-                const res = await window.electronAPI.restoreSqliteBackup((file as any).path);
+                const res = await window.electronAPI.restoreSqliteBackup((file as unknown as { path: string }).path);
                 if (res.success) {
                     setProcessProgress(100);
-                    setProcessStatus('Database Restored Successfully!');
-
-                    // CRITICAL FIX: Extract all relevant data from the newly restored SQLite database
-                    // and populate localStorage. This ensures the app reloads with the restored state
-                    // without losing critical un-backed-up system keys (like partial older backups).
-                    const dataKeys = [
-                        'app_employees', 'app_config', 'app_company_profile',
-                        'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
-                        'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo',
-                        'app_master_designations', 'app_master_divisions', 'app_master_branches', 'app_master_sites'
-                    ];
-
-                    const systemKeys = [
-                        'app_license_secure', 'app_data_size', 'app_machine_id', 'app_setup_complete', 'app_users'
-                    ];
+                    const dataKeys = ['app_employees', 'app_config', 'app_company_profile', 'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history', 'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo', 'app_master_designations', 'app_master_divisions', 'app_master_branches', 'app_master_sites', 'app_ot_records'];
+                    const systemKeys = ['app_license_secure', 'app_data_size', 'app_machine_id', 'app_setup_complete', 'app_users'];
 
                     for (const k of dataKeys) {
-                        // @ts-ignore
                         const dbRes = await window.electronAPI.dbGet(k);
                         if (dbRes.success && dbRes.data !== null && dbRes.data !== undefined) {
                             localStorage.setItem(k, typeof dbRes.data === 'string' ? dbRes.data : JSON.stringify(dbRes.data));
                         } else {
-                            localStorage.removeItem(k); // If it's a data key missing in DB, it wasn't there at backup time
+                            localStorage.removeItem(k);
                         }
                     }
 
                     for (const k of systemKeys) {
-                        // @ts-ignore
                         const dbRes = await window.electronAPI.dbGet(k);
                         if (dbRes.success && dbRes.data !== null && dbRes.data !== undefined) {
                             localStorage.setItem(k, typeof dbRes.data === 'string' ? dbRes.data : JSON.stringify(dbRes.data));
                         }
-                        // We DO NOT remove systemKeys if missing in DB, to prevent breaking license/login on older backups.
                     }
-
 
                     await delay(500);
                     setIsProcessing(false);
                     setShowBackupModal(false);
                     setSelectedBackupFile(null);
                     setEncryptionKey('');
-                    setTimeout(() => {
-                        showAlert?.('success', 'System Restore Successful', (
-                            <div className="space-y-3 text-left">
-                                <div className="flex items-center gap-3 mb-2">
-                                    <div className="p-2 bg-emerald-500/20 rounded-full border border-emerald-500/30">
-                                        <CheckCircle2 size={24} className="text-emerald-400" />
-                                    </div>
-                                    <h4 className="text-lg font-black text-white uppercase tracking-tighter">Restore Complete</h4>
-                                </div>
-                                <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl space-y-2">
-                                    <p className="text-xs text-slate-300 leading-relaxed font-medium italic">
-                                        "Your entire establishment profile, payroll history, and system configurations have been successfully recovered from the backup vault."
-                                    </p>
-                                    <div className="h-px bg-slate-800/80 w-full" />
-                                    <p className="text-[10px] text-slate-500 font-mono break-all">{file.name}</p>
-                                </div>
-                                <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                                    <AlertCircle size={14} className="text-amber-500 shrink-0" />
-                                    <p className="text-[10px] text-amber-500 font-bold uppercase tracking-widest">Session Reload Required to Finalize</p>
-                                </div>
-                            </div>
-                        ) as any, () => {
-                            onRestore();
-                        });
-                    }, 100);
+                    onRestore();
                     return;
                 } else {
                     throw new Error(res.error || "Failed to restore database file.");
                 }
             } catch (err: any) {
-                console.error(err);
                 setIsProcessing(false);
                 showAlert?.('error', 'Restoration Failed', `Restore Error: ${err.message}`);
                 return;
             }
         }
-
-        setProcessStatus('Reading backup file...');
 
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -436,8 +276,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 const content = e.target?.result;
                 if (!content) throw new Error("Could not read file content");
 
-
-                // Fallback to existing encrypted JSON logic
                 const encryptedContent = content as string;
                 setProcessStatus('Decrypting data...');
                 setProcessProgress(40);
@@ -447,83 +285,39 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 try {
                     const bytes = CryptoJS.AES.decrypt(encryptedContent, encryptionKey);
                     decryptedString = bytes.toString(CryptoJS.enc.Utf8);
-
-                    if (!decryptedString) {
-                        throw new Error("Invalid Decryption Result");
-                    }
+                    if (!decryptedString) throw new Error("Invalid Decryption Result");
                 } catch (cryptoErr) {
                     throw new Error("Wrong Password or Corrupt File");
                 }
 
-                setProcessStatus('Verifying data integrity...');
-                setProcessProgress(60);
-                await delay(300);
-
                 const data = JSON.parse(decryptedString);
-                setProcessStatus('Restoring database...');
-                setProcessProgress(80);
-                await delay(400);
-
-                // Preserve critical system keys
-                const session = sessionStorage.getItem('app_session_user');
-                const licenseSecure = localStorage.getItem('app_license_secure');
-                const mid = localStorage.getItem('app_machine_id');
-                const lastCheck = localStorage.getItem('app_license_last_check');
-                const size = localStorage.getItem('app_data_size');
-                const setup = localStorage.getItem('app_setup_complete');
-
-                // Surgical Clear: Remove data keys but KEEP identity
-                const dataKeys = [
-                    'app_employees', 'app_config', 'app_company_profile', 'app_attendance',
-                    'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
-                    'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo', 'app_users'
-                ];
+                const dataKeys = ['app_employees', 'app_config', 'app_company_profile', 'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history', 'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo', 'app_users', 'app_ot_records'];
                 dataKeys.forEach(k => localStorage.removeItem(k));
-                localStorage.removeItem('app_license'); // Cleanup legacy key if any
 
-                // Re-apply preserved keys just in case
-                if (session) sessionStorage.setItem('app_session_user', session);
-                if (licenseSecure) localStorage.setItem('app_license_secure', licenseSecure);
-                if (mid) localStorage.setItem('app_machine_id', mid);
-                if (lastCheck) localStorage.setItem('app_license_last_check', lastCheck);
-                if (size) localStorage.setItem('app_data_size', size);
-                localStorage.setItem('app_setup_complete', setup || 'true');
+                const keyMap: Record<string, string[]> = {
+                    'employees': ['employees'],
+                    'config': ['config'],
+                    'company_profile': ['company_profile', 'companyProfile'],
+                    'attendance': ['attendance'],
+                    'leave_ledgers': ['leave_ledgers', 'leaveLedgers'],
+                    'advance_ledgers': ['advance_ledgers', 'advanceLedgers'],
+                    'payroll_history': ['payroll_history', 'payrollHistory'],
+                    'fines': ['fines'],
+                    'leave_policy': ['leave_policy', 'leavePolicy'],
+                    'arrear_history': ['arrear_history', 'arrearHistory'],
+                    'ot_records': ['ot_records', 'otRecords'],
+                    'logo': ['logo'],
+                    'users': ['users']
+                };
 
-                // HELPER: Get value from unified or legacy key
-                const getVal = (key: string) => data[key] || data[`app_${key}`];
-
-                const employees = getVal('employees');
-                const config = getVal('config');
-                const profile = getVal('companyProfile');
-                const attendance = getVal('attendance');
-                const leaveLedgers = getVal('leaveLedgers');
-                const advanceLedgers = getVal('advanceLedgers');
-                const payrollHistory = getVal('payrollHistory');
-                const fines = getVal('fines');
-                const leavePolicy = getVal('leavePolicy');
-                const arrearHistory = getVal('arrearHistory');
-                const logo = getVal('logo');
-                const users = getVal('users');
-                const devMeta = getVal('developerMetadata');
-
-                if (employees) localStorage.setItem('app_employees', JSON.stringify(employees));
-                if (config) localStorage.setItem('app_config', JSON.stringify(config));
-                if (profile) localStorage.setItem('app_company_profile', JSON.stringify(profile));
-                if (attendance) localStorage.setItem('app_attendance', JSON.stringify(attendance));
-                if (leaveLedgers) localStorage.setItem('app_leave_ledgers', JSON.stringify(leaveLedgers));
-                if (advanceLedgers) localStorage.setItem('app_advance_ledgers', JSON.stringify(advanceLedgers));
-                if (payrollHistory) localStorage.setItem('app_payroll_history', JSON.stringify(payrollHistory));
-                if (fines) localStorage.setItem('app_fines', JSON.stringify(fines));
-                if (leavePolicy) localStorage.setItem('app_leave_policy', JSON.stringify(leavePolicy));
-                if (arrearHistory) localStorage.setItem('app_arrear_history', JSON.stringify(arrearHistory));
-                if (logo) localStorage.setItem('app_logo', JSON.stringify(logo));
-                if (users) {
-                    localStorage.setItem('app_users', JSON.stringify(users));
-                    // @ts-ignore
-                    if (window.electronAPI) window.electronAPI.dbSet('app_users', users);
-                }
-                if (devMeta?.lastNewsDate) localStorage.setItem('app_last_news_date', devMeta.lastNewsDate);
-                if (devMeta?.lastStatutoryDate) localStorage.setItem('app_last_statutory_date', devMeta.lastStatutoryDate);
+                Object.entries(keyMap).forEach(([storageKey, bundleKeys]) => {
+                    let val = null;
+                    for (const bk of bundleKeys) {
+                        val = data[bk] || data[`app_${bk}`];
+                        if (val) break;
+                    }
+                    if (val) localStorage.setItem(`app_${storageKey}`, JSON.stringify(val));
+                });
 
                 const masters = data.masters || data.app_masters;
                 if (masters) {
@@ -563,7 +357,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <p className="text-[10px] text-amber-500 font-bold uppercase tracking-widest">Session Reload Required to Finalize</p>
                             </div>
                         </div>
-                    ) as any, () => {
+                    ), () => {
                         onRestore();
                     });
                 }, 100);
@@ -583,19 +377,103 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
     const initiateRestore = () => {
         const file = selectedBackupFile;
-        // Bypassing encryptionKey check if it's an automatic SQLite backup
         if (!file || (!encryptionKey && !isSqliteFile)) {
             showAlert?.('warning', 'Input Required', 'Please select a backup file and enter the decryption password.');
             return;
         }
-        if (hasData) {
-            setShowOverwriteConfirm(true);
-        } else {
-            executeImport();
+
+        // 2FA: Require Login Password to finalize the restore
+        requireAuth(() => {
+            if (hasData) {
+                setShowOverwriteConfirm(true);
+            } else {
+                executeImport();
+            }
+        });
+    };
+
+    const requireAuth = (callback: () => void) => {
+        setPendingAuthAction(() => callback);
+        setAuthPassword('');
+        setAuthError('');
+        setShowAuthModal(true);
+    };
+
+    const handleEncryptedExport = async () => {
+        if (!encryptionKey) {
+            showAlert?.('warning', 'Security Required', 'Please enter a secure password to encrypt your data file.');
+            return;
+        }
+        setIsProcessing(true);
+        setProcessProgress(50);
+        setProcessStatus('Processing...');
+        try {
+            const rawLogo = localStorage.getItem('app_logo');
+            let processedLogo = rawLogo;
+            if (rawLogo && rawLogo.startsWith('"')) {
+                try { processedLogo = JSON.parse(rawLogo); } catch (e) { }
+            }
+            const dataBundle = {
+                employees: (() => { try { return JSON.parse(localStorage.getItem('app_employees') || '[]'); } catch { return []; } })(),
+                config: (() => { try { return JSON.parse(localStorage.getItem('app_config') || '{}'); } catch { return {}; } })(),
+                company_profile: (() => { try { return JSON.parse(localStorage.getItem('app_company_profile') || '{}'); } catch { return {}; } })(),
+                attendance: (() => { try { return JSON.parse(localStorage.getItem('app_attendance') || '[]'); } catch { return []; } })(),
+                leave_ledgers: (() => { try { return JSON.parse(localStorage.getItem('app_leave_ledgers') || '[]'); } catch { return []; } })(),
+                advance_ledgers: (() => { try { return JSON.parse(localStorage.getItem('app_advance_ledgers') || '[]'); } catch { return []; } })(),
+                payroll_history: (() => { try { return JSON.parse(localStorage.getItem('app_payroll_history') || '[]'); } catch { return []; } })(),
+                fines: (() => { try { return JSON.parse(localStorage.getItem('app_fines') || '[]'); } catch { return []; } })(),
+                leave_policy: (() => { try { return JSON.parse(localStorage.getItem('app_leave_policy') || '{}'); } catch { return {}; } })(),
+                arrear_history: (() => { try { return JSON.parse(localStorage.getItem('app_arrear_history') || '[]'); } catch { return []; } })(),
+                ot_records: (() => { try { return JSON.parse(localStorage.getItem('app_ot_records') || '[]'); } catch { return []; } })(),
+                users: (() => { try { return JSON.parse(localStorage.getItem('app_users') || '[]'); } catch { return []; } })(),
+                developerMetadata: {
+                    lastNewsDate: localStorage.getItem('app_last_news_date') || "",
+                    lastStatutoryDate: localStorage.getItem('app_last_statutory_date') || ""
+                },
+                masters: {
+                    designations: (() => { try { return JSON.parse(localStorage.getItem('app_master_designations') || '[]'); } catch { return []; } })(),
+                    divisions: (() => { try { return JSON.parse(localStorage.getItem('app_master_divisions') || '[]'); } catch { return []; } })(),
+                    branches: (() => { try { return JSON.parse(localStorage.getItem('app_master_branches') || '[]'); } catch { return []; } })(),
+                    sites: (() => { try { return JSON.parse(localStorage.getItem('app_master_sites') || '[]'); } catch { return []; } })(),
+                },
+                logo: processedLogo,
+                timestamp: new Date().toISOString()
+            };
+            const jsonString = JSON.stringify(dataBundle);
+            const encrypted = CryptoJS.AES.encrypt(jsonString, encryptionKey).toString();
+            const blob = new Blob([encrypted], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const today = new Date();
+            let fyStart = today.getFullYear();
+            if (today.getMonth() < 3) fyStart = fyStart - 1;
+            const fyEnd = fyStart + 1;
+            const compName = companyProfile.establishmentName ? companyProfile.establishmentName.replace(/[^a-zA-Z0-9]/g, '_') : 'Company';
+            a.download = `${compName}_Backup_${fyStart}-${fyEnd}.enc`;
+            if (window.electronAPI && window.electronAPI.runBackup) {
+                setProcessStatus('Saving to BharatPP location...');
+                const res = await window.electronAPI.runBackup(encrypted);
+                if (res.success) {
+                    setProcessProgress(100);
+                    setProcessStatus('Backup Saved Successfully');
+                    showAlert?.('success', 'Safe Local Backup Created', `Your data has been encrypted and saved as: ${res.fileName}`);
+                } else throw new Error(res.error);
+            } else {
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                setProcessProgress(100);
+                setProcessStatus('Export Complete');
+            }
+            setTimeout(() => { setShowBackupModal(false); setEncryptionKey(''); setIsProcessing(false); }, 1500);
+        } catch (e: any) {
+            setIsProcessing(false);
+            showAlert?.('error', 'Export Failed', e.message || 'Encryption failed.');
         }
     };
 
-    // ... (rest of the component remains unchanged)
     const handlePFTypeChange = (type: PFComplianceType) => {
         const newRate = type === 'Statutory' ? 0.12 : 0.10;
         setFormData({
@@ -1394,132 +1272,129 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             )}
 
             {activeTab === 'DEVELOPER' && userRole === 'Developer' && (
-                <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20">
-                                <Megaphone size={24} />
+                <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="bg-[#1e293b] rounded-2xl border border-slate-800 p-8 shadow-xl">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-6 mb-6">
+                            <div className="flex items-center gap-3">
+                                <div className="p-3 bg-indigo-900/40 text-indigo-400 rounded-xl border border-indigo-500/20 shadow-lg"><Megaphone size={28} /></div>
+                                <div>
+                                    <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Developer Command Center</h2>
+                                    <p className="text-xs text-slate-400">Consolidated Global Messaging Board</p>
+                                </div>
                             </div>
-                            <div>
-                                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Developer Options</h2>
-                                <p className="text-xs text-slate-400">Global Scrolling News & Statutory Compliance Updates</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                             <button
+                            <button
                                 onClick={async () => {
                                     setIsSyncing(true);
                                     const result = await fetchLatestMessages(true);
                                     setIsSyncing(false);
-                                    if (result && (result.scrollNews || result.statutory)) {
+                                    if (result) {
                                         setProfileData(prev => ({
                                             ...prev,
                                             flashNews: result.scrollNews || prev.flashNews,
+                                            flashNewsKey: result.key || prev.flashNewsKey,
                                             postLoginMessage: result.statutory || prev.postLoginMessage,
                                             postLoginHeader: result.header || prev.postLoginHeader,
-                                            postLoginAlignment: result.alignment || prev.postLoginAlignment
+                                            postLoginAlignment: result.alignment || prev.postLoginAlignment,
+                                            postLoginKey: (result.key as any) || prev.postLoginKey,
+                                            flashPopupMessage: result.flashPopupMessage || prev.flashPopupMessage,
+                                            flashPopupHeader: result.flashPopupHeader || prev.flashPopupHeader,
+                                            flashPopupPriority: (result.flashPopupPriority as any) || prev.flashPopupPriority,
+                                            flashPopupId: result.flashPopupId || prev.flashPopupId
                                         }));
-                                        showAlert?.('success', 'Sync Complete', 'Latest developer messages fetched from cloud.');
-                                    } else {
-                                        showAlert?.('info', 'Up to Date', 'You already have the latest messages or are offline.');
+                                        showAlert?.('success', 'Full Sync Complete', 'Developer messages refreshed from cloud.');
                                     }
                                 }}
                                 disabled={isSyncing}
-                                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-[10px] font-black rounded-lg transition-all flex items-center gap-2 border border-slate-700 uppercase tracking-widest"
-                                title="Fetch Latest from Cloud"
-                             >
-                                {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                                Pull from Cloud
-                             </button>
-
-                             <button
-                                onClick={async () => {
-                                    setIsSyncing(true);
-                                    const result = await updateDeveloperMessages(
-                                        profileData.flashNews || '', 
-                                        profileData.postLoginMessage || '',
-                                        profileData.postLoginHeader || '',
-                                        profileData.postLoginAlignment || 'LEFT'
-                                    );
-                                    setIsSyncing(false);
-                                    if (result.success) {
-                                        showAlert?.('success', 'Cloud Update Success', 'Developer board messages pushed to Google Sheets successfully.');
-                                    } else {
-                                        showAlert?.('error', 'Cloud Update Failed', result.message || 'Failed to sync with cloud.');
-                                    }
-                                }}
-                                disabled={isSyncing}
-                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20 uppercase tracking-widest active:scale-95"
-                                title="Push Local to Cloud"
-                             >
-                                {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-                                Push to Cloud
-                             </button>
+                                className="px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-sky-400 text-[10px] font-black rounded-xl transition-all flex items-center gap-1 border border-slate-700 uppercase tracking-widest"
+                            >
+                                {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Master Pull
+                            </button>
                         </div>
-                    </div>
-
-                    <div className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <label htmlFor="dev-msg-header" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Message Header (Bold Title)</label>
-                                <input
-                                    id="dev-msg-header"
-                                    type="text"
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-500/60"
-                                    placeholder="e.g., URGENT: SYSTEM UPDATE"
-                                    value={profileData.postLoginHeader || ''}
-                                    onChange={e => setProfileData({ ...profileData, postLoginHeader: e.target.value })}
-                                />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="bg-[#0f172a] rounded-2xl border border-slate-800 p-6 flex flex-col space-y-4">
+                                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                                    <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest">Main Message Broadcast</h3>
+                                    <button 
+                                        onClick={async () => { 
+                                            setIsSyncing(true); 
+                                            const res = await updateDeveloperMessages(profileData.postLoginMessage || '', 'MESSAGE', profileData.postLoginHeader, profileData.postLoginAlignment, profileData.postLoginKey); 
+                                            setIsSyncing(false); 
+                                            if (res.success) showAlert?.('success', 'Published', 'Main Message updated globally.'); 
+                                        }} 
+                                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black rounded-lg transition-all"
+                                    >
+                                        PUSH TO CLOUD
+                                    </button>
+                                </div>
+                                <div className="space-y-4">
+                                    <input type="text" title="Header" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white" placeholder="Message Header" value={profileData.postLoginHeader || ''} onChange={e => setProfileData({...profileData, postLoginHeader: e.target.value})} />
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] text-slate-500 font-bold uppercase">Alignment</label>
+                                            <select title="Alignment" className="w-full bg-slate-950 border border-slate-800 text-white text-[10px] p-2 rounded-lg" value={profileData.postLoginAlignment || 'LEFT'} onChange={e => setProfileData({...profileData, postLoginAlignment: e.target.value as any})}><option value="LEFT">LEFT</option><option value="CENTER">CENTER</option></select>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] text-slate-500 font-bold uppercase">Priority</label>
+                                            <select title="Priority" className="w-full bg-slate-100 border border-slate-800 text-black text-[10px] p-2 rounded-lg font-bold" value={profileData.postLoginKey || 'REGULAR'} onChange={e => setProfileData({...profileData, postLoginKey: e.target.value as any})}><option value="REGULAR">Regular</option><option value="IMMEDIATE">Immediate</option></select>
+                                        </div>
+                                    </div>
+                                    <textarea title="Message Content" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-slate-300 min-h-[160px] leading-relaxed" value={profileData.postLoginMessage || ''} onChange={e => setProfileData({...profileData, postLoginMessage: e.target.value})} />
+                                </div>
                             </div>
-                            <div className="space-y-2">
-                                <label htmlFor="dev-msg-align" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Text Alignment</label>
-                                <select
-                                    id="dev-msg-align"
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
-                                    value={profileData.postLoginAlignment || 'LEFT'}
-                                    onChange={e => setProfileData({ ...profileData, postLoginAlignment: e.target.value as any })}
-                                >
-                                    <option value="LEFT">LEFT ALIGNED</option>
-                                    <option value="CENTER">CENTER ALIGNED</option>
-                                    <option value="RIGHT">RIGHT ALIGNED</option>
-                                </select>
+                            <div className="bg-[#0f172a] rounded-2xl border border-slate-800 p-6 flex flex-col space-y-4">
+                                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                                    <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest">News Ticker broadcast</h3>
+                                    <button 
+                                        onClick={async () => { 
+                                            setIsSyncing(true); 
+                                            const res = await updateDeveloperMessages(profileData.flashNews || '', 'NEWS', 'MARQUEE', 'LEFT', profileData.flashNewsKey); 
+                                            setIsSyncing(false); 
+                                            if (res.success) showAlert?.('success', 'Published', 'Ticker updated globally.'); 
+                                        }} 
+                                        className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black rounded-lg transition-all"
+                                    >
+                                        PUSH TO CLOUD
+                                    </button>
+                                </div>
+                                <div className="flex flex-col h-full space-y-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] text-slate-500 font-bold uppercase">Ticker Mode</label>
+                                        <select title="Ticker Mode" className="w-full bg-slate-950 border border-slate-800 text-white text-[10px] p-2 rounded-lg" value={profileData.flashNewsKey || 'REGULAR'} onChange={e => setProfileData({...profileData, flashNewsKey: e.target.value})}><option value="REGULAR">Regular Scroll</option><option value="IMMEDIATE">Urgent Priority</option></select>
+                                    </div>
+                                    <textarea title="Ticker Content" className="w-full flex-grow bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-emerald-400 min-h-[120px] leading-relaxed" value={profileData.flashNews || ''} onChange={e => setProfileData({...profileData, flashNews: e.target.value})} />
+                                </div>
                             </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <label htmlFor="dev-post-login" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Main Message Body (Supports Alt+Enter for New Lines)</label>
-                            <textarea
-                                id="dev-post-login"
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[120px] placeholder:text-slate-500/60"
-                                placeholder="Enter detailed message content..."
-                                value={profileData.postLoginMessage || ''}
-                                onChange={e => setProfileData({ ...profileData, postLoginMessage: e.target.value })}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label htmlFor="dev-flash-news" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Dashboard News Ticker (Marquee)</label>
-                            <textarea
-                                id="dev-flash-news"
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all min-h-[80px] placeholder:text-slate-500/60"
-                                placeholder="Enter scrolling news message..."
-                                value={profileData.flashNews || ''}
-                                onChange={e => setProfileData({ ...profileData, flashNews: e.target.value })}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label htmlFor="dev-ai-url" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">AI Studio Integration URL</label>
-                            <div className="relative">
-                                <Globe className="absolute left-3 top-3 text-slate-500" size={18} />
-                                <input
-                                    id="dev-ai-url"
-                                    type="url"
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pl-10 text-white text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-500/60"
-                                    placeholder="https://..."
-                                    value={profileData.externalAppUrl || ''}
-                                    onChange={e => setProfileData({ ...profileData, externalAppUrl: e.target.value })}
-                                />
+                            <div className="bg-[#0f172a] rounded-2xl border border-slate-800 p-6 flex flex-col space-y-4 md:col-span-2">
+                                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                                    <h3 className="text-xs font-black text-amber-400 uppercase tracking-widest">Flash Popup Alert (3rd Tier)</h3>
+                                    <button 
+                                        onClick={async () => { 
+                                            setIsSyncing(true); 
+                                            const res = await updateDeveloperMessages(profileData.flashPopupMessage || '', 'FLASH', profileData.flashPopupHeader, 'CENTER', profileData.flashPopupPriority); 
+                                            setIsSyncing(false); 
+                                            if (res.success) showAlert?.('success', 'Published', 'Flash Alert updated globally.'); 
+                                        }} 
+                                        className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black rounded-lg transition-all"
+                                    >
+                                        PUSH TO CLOUD
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div className="lg:col-span-1 space-y-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] text-slate-500 font-bold uppercase">Alert Header</label>
+                                            <input type="text" title="Flash Header" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white" placeholder="FLASH ALERT" value={profileData.flashPopupHeader || ''} onChange={e => setProfileData({...profileData, flashPopupHeader: e.target.value})} />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] text-slate-500 font-bold uppercase">Priority</label>
+                                            <select title="Flash Priority" className="w-full bg-slate-950 border border-slate-800 text-white text-[10px] p-2 rounded-lg" value={profileData.flashPopupPriority || 'REGULAR'} onChange={e => setProfileData({...profileData, flashPopupPriority: e.target.value as any})}><option value="REGULAR">Standard</option><option value="IMMEDIATE">System Critical (Auto-Show)</option></select>
+                                        </div>
+                                        <p className="text-[9px] text-slate-500 italic">Flash alerts appear as a persistent floating notice until cleared by the user.</p>
+                                    </div>
+                                    <div className="lg:col-span-2">
+                                        <textarea title="Flash Content" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-amber-200 min-h-[140px] leading-relaxed" value={profileData.flashPopupMessage || ''} onChange={e => setProfileData({...profileData, flashPopupMessage: e.target.value})} />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1533,120 +1408,126 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <Database size={24} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-white text-lg">Data Management</h3>
-                            <p className="text-xs text-slate-400">Secure backup and restore operations.</p>
+                            <h3 className="font-black text-white text-lg uppercase tracking-tighter">Data Management Center</h3>
+                            <p className="text-xs text-slate-400">Secure Backup, Restoration & System Maintenance</p>
                         </div>
                     </div>
 
                     {isSetupMode ? (
-                        <div className="space-y-8 py-4">
-                            {/* Pro-active Info Note - Only if company name has been customized (Partial Reset) */}
-                            {companyProfile.establishmentName !== INITIAL_COMPANY_PROFILE.establishmentName && (
-                                <div className="bg-indigo-600/10 border border-indigo-500/30 p-5 rounded-2xl flex items-start gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
-                                    <div className="p-2.5 bg-indigo-600/20 text-indigo-400 rounded-xl">
-                                        <AlertCircle size={24} />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-indigo-200 mb-1 leading-tight">System Ready for Input</h4>
-                                        <p className="text-sm text-indigo-300/80 leading-relaxed font-medium italic">
-                                            "Company Profile & Statutory Compliance pre-exist. Proceed to add Employee and Attendance through 'START AFRESH' or restore full data through 'BACKUP DATA'."
-                                        </p>
-                                    </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="bg-[#0f172a] p-8 rounded-2xl border border-blue-500/20 flex flex-col items-center group hover:border-blue-500/40 transition-all">
+                                <div className="p-4 bg-blue-900/20 text-blue-400 rounded-full mb-4 shadow-lg group-hover:scale-110 transition-transform">
+                                    <Plus size={32} />
                                 </div>
-                            )}
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                {/* Option 1: Start Fresh */}
-                                <div className="bg-[#0f172a] p-8 rounded-2xl border border-blue-500/20 hover:border-blue-500/50 transition-all flex flex-col items-center text-center group">
-                                    <div className="w-16 h-16 bg-blue-900/20 text-blue-400 rounded-2xl flex items-center justify-center mb-6 border border-blue-500/20 group-hover:scale-110 transition-transform">
-                                        <Plus size={32} />
-                                    </div>
-                                    <h4 className="text-xl font-black text-white mb-2 uppercase tracking-tight">Enter Fresh Data</h4>
-                                    <p className="text-sm text-slate-400 leading-relaxed mb-6">Start with an empty database. You can manually enter employee details from the Employee Master.</p>
-                                    <button
-                                        onClick={onSkipSetupRedirect}
-                                        className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-3 mt-auto"
-                                        title="Start Fresh (Nuke All Data)"
-                                        aria-label="Start Fresh (Nuke All Data)"
-                                    >
-                                        START FRESH <ArrowRight size={18} />
-                                    </button>
+                                <h4 className="text-white font-black mb-1 uppercase tracking-tighter">Enter Fresh Data</h4>
+                                <p className="text-[10px] text-slate-500 text-center mb-6">Start with an empty system for new installation.</p>
+                                <button onClick={onSkipSetupRedirect} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all">Skip to Dashboard</button>
+                            </div>
+                            <div className="bg-[#0f172a] p-8 rounded-2xl border border-emerald-500/20 flex flex-col items-center group hover:border-emerald-500/40 transition-all">
+                                <div className="p-4 bg-emerald-900/20 text-emerald-400 rounded-full mb-4 shadow-lg group-hover:scale-110 transition-transform">
+                                    <Upload size={32} />
                                 </div>
-
-                                {/* Option 2: Restore */}
-                                <div className="bg-[#0f172a] p-8 rounded-2xl border border-emerald-500/20 hover:border-emerald-500/50 transition-all flex flex-col items-center text-center group">
-                                    <div className="w-16 h-16 bg-emerald-900/20 text-emerald-400 rounded-2xl flex items-center justify-center mb-6 border border-emerald-500/20 group-hover:scale-110 transition-transform">
-                                        <Upload size={32} />
-                                    </div>
-                                    <h4 className="text-xl font-black text-white mb-2 uppercase tracking-tight">Restore from Backup</h4>
-                                    <p className="text-sm text-slate-400 leading-relaxed mb-6">Restoring data from a prior encrypted backup file (.enc) including all history.</p>
-                                    <button
-                                        onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }}
-                                        className="w-full py-4 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-xl font-bold transition-all flex items-center justify-center gap-3 mt-auto"
-                                        title="Restore from Backup"
-                                        aria-label="Restore from Backup"
-                                    >
-                                        <Upload size={18} /> RESTORE BACKUP
-                                    </button>
-                                </div>
+                                <h4 className="text-white font-black mb-1 uppercase tracking-tighter">Restore Existing Backup</h4>
+                                <p className="text-[10px] text-slate-500 text-center mb-6">Import data from a .enc or .sqlite backup file.</p>
+                                <button onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-emerald-900/20 transition-all flex items-center justify-center gap-2"><Upload size={14} /> Restore File</button>
                             </div>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {hasData && (
-                                <div className="bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-blue-500/50 transition-all group">
-                                    <div className="p-3 bg-blue-900/20 text-blue-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
-                                        <Download size={24} />
+                        <>
+                            {/* Backup & Restore Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="bg-[#0f172a] p-6 rounded-2xl border border-slate-800 hover:border-blue-500/30 transition-all group shadow-lg relative overflow-hidden">
+                                    <div className="flex items-center gap-4 mb-4">
+                                        <div className="p-3 bg-blue-900/20 text-blue-400 rounded-xl group-hover:scale-110 transition-transform">
+                                            <Download size={24} />
+                                        </div>
+                                        <div>
+                                            <h4 className="font-black text-white uppercase tracking-tighter">Local Secure Backup</h4>
+                                            <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded">Encrypted (.enc)</span>
+                                        </div>
                                     </div>
-                                    <h4 className="font-bold text-white mb-2">Backup Data</h4>
-                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">Create a secure, encrypted backup file (.enc) of your entire system data.</p>
-                                    <button onClick={() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); }} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2" title="Create Backup" aria-label="Create Backup">
-                                        <Download size={16} /> Create Backup
+                                    <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Create a secure, portable snapshot of your entire payroll database (Employees, Attendance, Settings) for archival or migration."</p>
+                                    <button 
+                                        onClick={() => requireAuth(() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); })} 
+                                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        <Lock size={14} /> Authorize & Backup
                                     </button>
                                 </div>
-                            )}
-                            <div className={`bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-emerald-500/50 transition-all group ${!hasData ? 'md:col-span-2' : ''}`}>
-                                <div className="p-3 bg-emerald-900/20 text-emerald-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
-                                    <Upload size={24} />
+
+                                <div className="bg-[#0f172a] p-6 rounded-2xl border border-slate-800 hover:border-emerald-500/30 transition-all group shadow-lg">
+                                    <div className="flex items-center gap-4 mb-4">
+                                        <div className="p-3 bg-emerald-900/20 text-emerald-400 rounded-xl group-hover:scale-110 transition-transform">
+                                            <Upload size={24} />
+                                        </div>
+                                        <div>
+                                            <h4 className="font-black text-white uppercase tracking-tighter">Universal Restoration</h4>
+                                            <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">Enc / SQLite</span>
+                                        </div>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Reverse previous exports or recover from database files directly. Atomic restoration ensures system integrity on failure."</p>
+                                    <button 
+                                        onClick={() => backupFileRef.current?.click()} 
+                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        <Upload size={14} /> Select & Restore
+                                    </button>
                                 </div>
-                                <h4 className="font-bold text-white mb-2">Restore Data</h4>
-                                <p className="text-xs text-slate-400 mb-6 leading-relaxed">Restore system from an encrypted file. Overwrites current session.</p>
-                                <button onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }} className="w-full py-3 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-lg font-bold transition-all flex items-center justify-center gap-2" title="Restore Backup" aria-label="Restore Backup">
-                                    <Upload size={16} /> Restore Backup
-                                </button>
                             </div>
-                            {hasData && (
-                                <div className="bg-[#0f172a] p-6 rounded-xl border border-slate-800 hover:border-amber-500/50 transition-all group md:col-span-2">
-                                    <div className="p-3 bg-amber-900/20 text-amber-400 rounded-full w-fit mb-4 group-hover:scale-110 transition-transform">
-                                        <Trash2 size={24} />
-                                    </div>
-                                    <h4 className="font-bold text-white mb-2">Payroll Data Reset</h4>
-                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">Remove only employee and payroll records. <span className="text-amber-400 font-bold">Keeps Statutory Rules and Company Profile intact.</span></p>
-                                    <button onClick={() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); }} className="w-full py-3 bg-amber-600/20 hover:bg-amber-600 text-amber-400 hover:text-white border border-amber-600/50 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2" title="Reset Employee Database" aria-label="Reset Employee Database">
-                                        <RefreshCw size={16} /> Reset Employee Database
-                                    </button>
+
+                            {/* System Maintenance Sections */}
+                            <div className="space-y-6">
+                                <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                                    <AlertTriangle size={14} className="text-amber-500" />
+                                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Maintenance Tools</h4>
                                 </div>
-                            )}
-                        </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {/* Standard Maintenance Card */}
+                                    <div className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-900/60 transition-colors flex flex-col justify-between group">
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-3">
+                                                <div className="p-2 bg-amber-900/20 text-amber-500 rounded-lg group-hover:rotate-12 transition-transform">
+                                                    <RotateCw size={18} />
+                                                </div>
+                                                <h5 className="text-xs font-black text-slate-200 uppercase tracking-tighter">Standard Maintenance</h5>
+                                            </div>
+                                            <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Clear all <span className="text-amber-400 font-bold underline underline-offset-2">Transactional Records</span> (Employees, Attendance, PayHistory) while keeping Company Profile and Master Config intact.</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => requireAuth(() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); })}
+                                            className="mt-4 py-2.5 px-4 bg-amber-900/20 hover:bg-amber-600 text-amber-500 hover:text-white border border-amber-900/50 hover:border-amber-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                        >
+                                            Initiate Payroll Reset
+                                        </button>
+                                    </div>
+
+                                    {/* System Maintenance Card */}
+                                    <div className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-900/60 transition-colors flex flex-col justify-between group">
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-3">
+                                                <div className="p-2 bg-red-900/20 text-red-500 rounded-lg group-hover:scale-110 transition-transform">
+                                                    <Trash2 size={18} />
+                                                </div>
+                                                <h5 className="text-xs font-black text-slate-200 uppercase tracking-tighter">System Maintenance</h5>
+                                            </div>
+                                            <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Perform a full <span className="text-red-500 font-bold underline underline-offset-2">Wipe-Out</span>. Clears all data including License Identity and User Accounts. Used for system decommissioning.</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => requireAuth(() => { setShowResetModal(true); setResetPassword(''); setResetError(''); })}
+                                            className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                        >
+                                            Initiate Factory Reset
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </>
                     )}
-                    <div className="pt-6 border-t border-slate-800">
-                        <div className="bg-red-900/10 border border-red-900/30 p-4 rounded-xl flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div className="p-2 bg-red-900/20 text-red-500 rounded-lg">
-                                    <AlertTriangle size={20} />
-                                </div>
-                                <div>
-                                    <h4 className="font-bold text-red-200 text-sm">Danger Zone</h4>
-                                    <p className="text-xs text-red-300/60">Permanently delete all data.</p>
-                                </div>
-                            </div>
-                            <button onClick={() => { setShowResetModal(true); setResetPassword(''); setResetError(''); }} className="px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/50 rounded-lg text-xs font-bold transition-all" title="Factory Reset" aria-label="Factory Reset">Factory Reset</button>
-                        </div>
-                    </div>
                 </div>
             )}
 
-            {/* ... (Footer actions and Modals) ... */}
+
             {activeTab !== 'DATA' && !isSetupMode && (
                 <div className="flex justify-between items-center p-2 pt-6 border-t border-slate-800">
                     <div></div>
@@ -1658,388 +1539,158 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             )}
 
             {showResetModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-[#1e293b] w-full max-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Factory Reset Modal" aria-label="Close Factory Reset Modal"><X size={20} /></button>}
+                <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                        {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Factory Reset Modal"><X size={20} /></button>}
                         <div className="flex flex-col items-center gap-2">
-                            <div className="p-4 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2">
-                                <AlertTriangle size={32} />
-                            </div>
+                            <div className="p-4 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><AlertTriangle size={32} /></div>
                             <h3 className="text-xl font-black text-white text-center">FACTORY RESET</h3>
                             <p className="text-xs text-red-300 text-center leading-relaxed">CRITICAL WARNING: This action is IRREVERSIBLE.</p>
                         </div>
                         <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <div className="flex items-center gap-2 text-sm text-slate-400 mb-2"><KeyRound size={16} /><span>Confirm Identity</span></div>
-                            <input type="password" placeholder="Enter Login Password" title="Identity Verification Password" aria-label="Identity Verification Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all disabled:opacity-50`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executeFactoryReset()} />
+                            <input type="password" placeholder="Enter Login Password" title="Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executeFactoryReset()} />
                             {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
                         </div>
-                        <button onClick={executeFactoryReset} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-900/20 transition-all flex items-center justify-center gap-2">
-                            {isProcessing ? <><Loader2 size={18} className="animate-spin" /> ERASING DATA...</> : <><Trash2 size={18} /> CONFIRM DELETE ALL DATA</>}
+                        <button onClick={executeFactoryReset} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                            {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />} {isProcessing ? 'ERASING...' : 'CONFIRM DELETE ALL'}
                         </button>
                     </div>
                 </div>
             )}
 
             {showPayrollResetModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowPayrollResetModal(false)} title="Close Payroll Reset Modal" aria-label="Close Payroll Reset Modal" className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <button onClick={() => setShowPayrollResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Payroll Reset Modal"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
-                            <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full border border-amber-900/50 mb-2">
-                                <Trash2 size={32} />
-                            </div>
-                            <h3 className="text-xl font-black text-white text-center uppercase">Payroll Reset</h3>
-                            <p className="text-xs text-amber-300 text-center leading-relaxed">Warning: This will delete ALL employees and payroll history but preserve your Company & Statutory Profile.</p>
+                            <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full border border-amber-900/50 mb-2"><Trash2 size={32} /></div>
+                            <h3 className="text-xl font-black text-white text-center">PAYROLL RESET</h3>
+                            <p className="text-xs text-amber-300 text-center leading-relaxed">This will erase all employees but preserve company settings.</p>
                         </div>
                         <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <div className="flex items-center gap-2 text-sm text-slate-400 mb-2"><KeyRound size={16} /><span>Confirm Identity</span></div>
-                            <input type="password" placeholder="Enter Login Password" title="Identity Verification Password" aria-label="Identity Verification Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all disabled:opacity-50`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
+                            <input type="password" placeholder="Enter Login Password" title="Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
                             {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
                         </div>
-                        <button onClick={executePayrollReset} disabled={isProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-900/20 transition-all flex items-center justify-center gap-2">
-                            {isProcessing ? <><Loader2 size={18} className="animate-spin" /> CLEARING PAYROLL DATA...</> : <><CheckCircle2 size={18} /> CONFIRM PAYROLL RESET</>}
+                        <button onClick={executePayrollReset} disabled={isProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                             {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />} {isProcessing ? 'CLEARING...' : 'CONFIRM RESET'}
                         </button>
                     </div>
                 </div>
             )}
 
             {showBackupModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        {!isProcessing && (
-                            <button onClick={() => { setShowBackupModal(false); setSelectedBackupFile(null); setEncryptionKey(''); }} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Backup Modal" aria-label="Close Backup Modal"><X size={20} /></button>
-                        )}
+                        {!isProcessing && <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Backup Modal"><X size={20} /></button>}
                         <div className="flex flex-col items-center gap-2">
-                            <div className={`p-4 rounded-full border mb-2 transition-all duration-500 ${processProgress === 100 ? 'bg-emerald-900/30 text-emerald-400 border-emerald-500/50' : isProcessing ? 'bg-indigo-900/30 text-indigo-400 border-indigo-500/50' : 'bg-blue-900/20 text-blue-400 border-blue-900/50'}`}>
-                                {processProgress === 100 ? <CheckCircle2 size={32} /> : isProcessing ? <Loader2 size={32} className="animate-spin" /> : <Lock size={32} />}
-                            </div>
-                            <h3 className="text-xl font-black text-white text-center">
-                                {isProcessing ? (backupMode === 'EXPORT' ? 'Exporting Data...' : 'Restoring System...') : (backupMode === 'EXPORT' ? 'Encrypted Export' : 'Secure Restore')}
-                            </h3>
+                            <div className="p-4 bg-blue-900/20 text-blue-400 rounded-full border border-blue-900/50 mb-2">{backupMode === 'EXPORT' ? <Lock size={32} /> : <Database size={32} />}</div>
+                            <h3 className="text-xl font-black text-white text-center uppercase tracking-widest">{backupMode === 'EXPORT' ? 'SECURE EXPORT' : 'Secure Restore'}</h3>
                         </div>
-                        {isProcessing ? (
-                            <div className="w-full py-6 px-2 space-y-4">
+                        
+                        <div className="space-y-4 mt-2">
+                            {backupMode === 'IMPORT' && (
                                 <div className="space-y-2">
-                                    <div className="flex justify-between items-end mb-2">
-                                        <span className={`text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${processProgress === 100 ? 'text-emerald-400 text-sm animate-pulse' : 'text-slate-400'}`}>{processStatus}</span>
-                                        <span className={`text-xs font-bold font-mono ${processProgress === 100 ? 'text-emerald-400' : 'text-slate-500'}`}>{processProgress}%</span>
-                                    </div>
-                                    <div className="relative h-2 w-full bg-slate-900/50 rounded-full overflow-hidden border border-slate-800">
-                                        <div 
-                                            ref={progressRef}
-                                            className={`h-full transition-all duration-300 ease-out progress-shadow-blue ${backupMode === 'EXPORT' ? 'bg-blue-600' : 'bg-emerald-600'}`} 
-                                        ></div>
-                                        <span className="sr-only" role="status">
-                                            {`Progress: ${Math.round(processProgress)}% - ${processStatus}`}
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">SELECT BACKUP FILE</label>
+                                    <div className="flex items-center gap-3 p-3 bg-slate-900/50 border border-slate-700 rounded-xl">
+                                        <button 
+                                            onClick={() => backupFileRef.current?.click()}
+                                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg border border-slate-700 transition-colors uppercase"
+                                        >
+                                            Choose File
+                                        </button>
+                                        <span className="text-[10px] text-slate-400 font-medium truncate flex-1">
+                                            {selectedBackupFile ? selectedBackupFile.name : 'No file chosen'}
                                         </span>
                                     </div>
                                 </div>
+                            )}
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
+                                    {backupMode === 'EXPORT' ? 'SET ENCRYPTION PASSWORD' : 'ENTER DECRYPTION PASSWORD'}
+                                </label>
+                                <input 
+                                    type="password" 
+                                    placeholder="Enter Password" 
+                                    title="Password" 
+                                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
+                                    value={encryptionKey} 
+                                    onChange={(e) => setEncryptionKey(e.target.value)} 
+                                />
                             </div>
-                        ) : (
-                            <div className="space-y-4 mt-2 w-full">
-                                {backupMode === 'IMPORT' && (
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase">Selected Backup File</label>
-                                        <div className="flex gap-2">
-                                            <div className="flex-1 bg-slate-900/50 border border-slate-700 rounded-lg p-2.5 text-xs text-emerald-400 font-mono truncate flex items-center gap-2">
-                                                <FileText size={14} /> {selectedBackupFile?.name || 'No file selected'}
-                                            </div>
-                                            <button
-                                                onClick={() => backupFileRef.current?.click()}
-                                                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-[10px] font-black uppercase tracking-widest rounded-lg border border-slate-700 transition-all text-slate-300"
-                                                title="Change Backup File"
-                                                aria-label="Change Backup File"
-                                            >
-                                                Change
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                                {!isSqliteFile && (
-                                    <div className="space-y-1">
-                                        <label htmlFor="backup-encryption-key" className="text-[10px] font-bold text-slate-500 uppercase">{backupMode === 'EXPORT' ? 'Set Encryption Password' : 'Enter Decryption Password'}</label>
-                                        <input id="backup-encryption-key" type="password" placeholder="Enter Password" className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={encryptionKey} onChange={(e) => setEncryptionKey(e.target.value)} title={backupMode === 'EXPORT' ? 'Backup Encryption Password' : 'Backup Decryption Password'} />
-                                    </div>
-                                )}
-                                {isSqliteFile && (
-                                    <div className="bg-emerald-900/10 border border-emerald-500/20 p-3 rounded-xl">
-                                        <p className="text-[10px] text-emerald-400 leading-relaxed font-bold">
-                                            Auto-detected Database Backup. No file password required.
-                                        </p>
-                                    </div>
-                                )}
-                                <button onClick={backupMode === 'EXPORT' ? () => requireAuth(handleEncryptedExport) : () => { const file = selectedBackupFile; if (!file || (!encryptionKey && !isSqliteFile)) { showAlert?.('warning', 'Input Required', 'Please select a file and enter password.'); return; } requireAuth(initiateRestore); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2" title={backupMode === 'EXPORT' ? 'Download Encrypted Backup' : 'Restore Data from Backup'} aria-label={backupMode === 'EXPORT' ? 'Download Encrypted Backup' : 'Restore Data from Backup'}>
-                                    {backupMode === 'EXPORT' ? 'DOWNLOAD BACKUP' : 'RESTORE DATA'}
-                                </button>
-                            </div>
-                        )}
+
+                            {processStatus && <p className="text-[10px] text-blue-400 font-bold text-center animate-pulse uppercase tracking-widest">{processStatus}</p>}
+                            
+                            <button 
+                                onClick={backupMode === 'EXPORT' ? handleEncryptedExport : initiateRestore} 
+                                disabled={isProcessing || (backupMode === 'IMPORT' && !selectedBackupFile)} 
+                                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
+                            >
+                                {isProcessing ? <Loader2 size={16} className="animate-spin" /> : (backupMode === 'EXPORT' ? <Download size={16} /> : <RefreshCw size={16} />)}
+                                {backupMode === 'EXPORT' ? 'DOWNLOAD ENCRYPTED BACKUP' : 'RESTORE DATA'}
+                            </button>
+                            
+                            {backupMode === 'IMPORT' && !selectedBackupFile && (
+                                <p className="text-[9px] text-slate-500 text-center italic font-medium">
+                                    * Please select a valid .enc or .sqlite file to proceed
+                                </p>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
 
             {activeTab === 'LICENSE' && (
                 <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-                        <div className="p-2 bg-pink-900/30 text-pink-400 rounded-lg border border-pink-500/20">
-                            <ShieldCheck size={24} />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-black text-white uppercase tracking-tighter">License Management</h2>
-                            <p className="text-xs text-slate-400">System Activation & Machine Lock Status</p>
-                        </div>
-                    </div>
-
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4"><div className="p-2 bg-pink-900/30 text-pink-400 rounded-lg border border-pink-500/20"><ShieldCheck size={24} /></div><div><h2 className="text-xl font-black text-white uppercase tracking-tighter">License Management</h2><p className="text-xs text-slate-400">System Activation & Machine Lock Status</p></div></div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-6">
-                            <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
-                                <div className="flex items-center justify-between">
-                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                        <Lock size={14} className="text-pink-500" /> Current License Info
-                                    </h3>
-                                    <button
-                                        onClick={async () => {
-                                            setIsSyncing(true);
-                                            try {
-                                                const { validateLicenseStartup } = await import('../services/licenseService');
-                                                await validateLicenseStartup();
-                                                setLicenseInfo(getStoredLicense());
-                                                showAlert?.('success', 'Sync Complete', 'License data successfully refreshed from cloud.');
-                                            } catch (err) {
-                                                showAlert?.('error', 'Sync Failed', 'Could not connect to cloud services.');
-                                            } finally {
-                                                setIsSyncing(false);
-                                            }
-                                        }}
-                                        disabled={isSyncing}
-                                        className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-[10px] font-black uppercase tracking-widest rounded-lg border border-slate-700 transition-all text-sky-400 disabled:opacity-50"
-                                        title="Sync License Info with Cloud"
-                                        aria-label="Sync License Info with Cloud"
-                                    >
-                                        <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-                                        {isSyncing ? 'Syncing...' : 'Sync Cloud'}
-                                    </button>
-                                </div>
-
-                                <div className="space-y-3">
-                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-                                        <span className="text-xs text-slate-400">License Key</span>
-                                        <span className="text-xs font-mono text-pink-400 font-black tracking-wider">
-                                            {licenseInfo?.key ? licenseInfo.key.match(/.{1,4}/g)?.join('-') : 'N/A'}
-                                        </span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-                                        <span className="text-xs text-slate-400">Status</span>
-                                        <span className={`text-xs font-black uppercase px-2 py-0.5 rounded ${licenseInfo?.isTrial ? 'bg-amber-500/10 text-amber-500' : licenseInfo?.status === 'REGISTERED' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
-                                            {licenseInfo?.status || 'UNREGISTERED'}
-                                        </span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-                                        <span className="text-xs text-slate-400">User ID</span>
-                                        <span className={`text-xs font-mono ${licenseInfo?.userID ? 'text-white' : 'text-slate-500 italic'}`}>{licenseInfo?.userID || 'N/A'}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-                                        <span className="text-xs text-slate-400">Email ID</span>
-                                        <span className={`text-[10px] truncate max-w-[150px] ${licenseInfo?.registeredTo ? 'text-slate-300' : 'text-slate-500 italic'}`} title={licenseInfo?.registeredTo}>{licenseInfo?.registeredTo || 'N/A'}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-                                        <span className="text-xs text-slate-400">Mobile No</span>
-                                        <span className={`text-xs font-mono ${licenseInfo?.registeredMobile ? 'text-white' : 'text-slate-500 italic'}`}>{licenseInfo?.registeredMobile || 'N/A'}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-                                        <span className="text-xs text-slate-400">Employee Data Limit</span>
-                                        <span className={`text-xs font-mono font-black ${licenseInfo?.dataSize ? 'text-emerald-400' : 'text-slate-500 italic'}`}>{licenseInfo?.dataSize || 'N/A'}</span>
-                                    </div>
-                                    <div className={`flex justify-between items-center py-2 font-bold ${licenseInfo?.expiryDate ? 'text-pink-400' : 'text-slate-500 italic'}`}>
-                                        <span className="text-xs text-slate-400 font-normal">Expiry Date</span>
-                                        <span className="text-xs">{licenseInfo?.expiryDate || 'N/A'}</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="p-4 bg-blue-900/10 border border-blue-500/20 rounded-xl">
-                                <p className="text-[10px] text-blue-300 leading-relaxed italic">
-                                    * License is locked to this Machine ID. To move BharatPay Pro to another computer, please contact support for a license reset.
-                                </p>
+                        <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
+                            <div className="flex items-center justify-between"><h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"><Lock size={14} className="text-pink-500" /> Current License Info</h3></div>
+                            <div className="space-y-3">
+                                <div className="flex justify-between items-center py-2 border-b border-slate-800/50"><span className="text-xs text-slate-400">License Key</span><span className="text-xs font-mono text-pink-400 font-black tracking-wider">{licenseInfo?.key || 'N/A'}</span></div>
+                                <div className="flex justify-between items-center py-2 border-b border-slate-800/50"><span className="text-xs text-slate-400">Status</span><span className="text-xs font-black uppercase text-emerald-500">{licenseInfo?.status || 'UNREGISTERED'}</span></div>
                             </div>
                         </div>
-
-                        <div className="space-y-6">
-                            <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-6">
-                                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                    <ArrowRight size={14} className="text-blue-500" /> Re-Activate System
-                                </h3>
-
-                                <div className="space-y-4">
-                                    <div className="space-y-1">
-                                        <label htmlFor="license-full-name" className="text-[10px] font-bold text-slate-500 uppercase pl-1">Full Name / Authorized Person</label>
-                                        <input id="license-full-name" ref={fullNameRef} type="text" placeholder="Your Name - as mentioned in App request mail" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserName} onChange={e => setNewUserName(e.target.value)} title="Full Name for License" aria-label="Full Name for License" />
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-1">
-                                            <label htmlFor="license-user-id" className="text-[10px] font-bold text-slate-500 uppercase pl-1">User ID</label>
-                                            <input id="license-user-id" type="text" placeholder="User ID" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-mono focus:ring-2 focus:ring-blue-500/50 outline-none transition-all" value={newUserID} onChange={e => setNewUserID(e.target.value)} title="License User ID" aria-label="License User ID" />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label htmlFor="license-key-input" className="text-[10px] font-bold text-slate-500 uppercase pl-1">License Key (16-Digit)</label>
-                                            <input id="license-key-input" type="text" placeholder="XXXX-XXXX-XXXX-XXXX" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white placeholder:text-slate-500 text-sm font-mono focus:ring-2 focus:ring-pink-500/50 outline-none transition-all uppercase" value={newLicenseKey} onChange={e => setNewLicenseKey(e.target.value.toUpperCase())} title="16-Digit License Key" aria-label="16-Digit License Key" />
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-1">
-                                            <label htmlFor="license-email" className="text-[10px] font-bold text-slate-500 uppercase pl-1">Email ID</label>
-                                            <input id="license-email" type="email" title="Registered Email" aria-label="Registered Email" placeholder="Email Address" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegEmail} onChange={e => setNewRegEmail(e.target.value)} />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label htmlFor="license-mobile" className="text-[10px] font-bold text-slate-500 uppercase pl-1">Mobile No</label>
-                                            <input id="license-mobile" type="tel" title="Activation Mobile Number" aria-label="Activation Mobile Number" placeholder="10-digit mobile" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:ring-2 focus:ring-pink-500/50 outline-none transition-all" value={newRegMobile} onChange={e => setNewRegMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} />
-                                        </div>
-                                    </div>
-
-                                    <button
-                                        onClick={async () => {
-                                            if (!isValidKeyFormat(newLicenseKey)) {
-                                                showAlert?.('warning', 'Invalid Input', 'Please enter a valid 16-digit license key.');
-                                                return;
-                                            }
-                                            if (!newUserName || !newUserID || !newRegEmail || !newRegMobile) {
-                                                showAlert?.('warning', 'Input Required', 'All fields are required for activation.');
-                                                return;
-                                            }
-
-                                            setIsActivating(true);
-                                            const result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile);
-                                            setIsActivating(false);
-
-                                            if (result.success) {
-                                                showAlert?.('success', 'Success', 'License activated and machine locked successfully.');
-                                                setLicenseInfo(getStoredLicense());
-                                                setNewLicenseKey('');
-                                            } else {
-                                                showAlert?.('error', 'Failed', result.message || 'Activation Failed.');
-                                            }
-                                        }}
-                                        disabled={isActivating}
-                                        title="Activate License"
-                                        aria-label="Activate License"
-                                        className="w-full py-4 bg-pink-600 hover:bg-pink-700 disabled:opacity-50 text-white font-black uppercase tracking-widest rounded-xl shadow-xl shadow-pink-500/20 transition-all flex items-center justify-center gap-3"
-                                    >
-                                        {isActivating ? <Loader2 size={24} className="animate-spin" /> : <>Re-Activate System <ArrowRight size={20} /></>}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-2xl p-6 space-y-4">
-                                <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                                    <ShieldCheck size={16} /> Software Security & Trust Guide
-                                </h3>
-                                <div className="space-y-4">
-                                    <div className="space-y-1">
-                                        <p className="text-[11px] font-bold text-slate-300 uppercase tracking-wider underline decoration-indigo-500/50">Why do I see "Windows protected your PC"?</p>
-                                        <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
-                                            This is a standard Microsoft SmartScreen warning for unsigned software. To proceed, click <b>"More Info"</b> and then <b>"Run Anyway"</b>.
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
+                        <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
+                           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Re-Activate</h3>
+                           <div className="space-y-3">
+                               <input type="text" placeholder="License Key" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs font-mono uppercase" value={newLicenseKey} onChange={e => setNewLicenseKey(e.target.value.toUpperCase())} />
+                               <button onClick={async () => { if (!isValidKeyFormat(newLicenseKey)) return; setIsActivating(true); await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile); setIsActivating(false); setLicenseInfo(getStoredLicense()); }} disabled={isActivating} className="w-full py-3 bg-pink-600 hover:bg-pink-700 text-white font-black uppercase text-xs rounded-xl shadow-lg transition-all">ACTIVATE NOW</button>
+                           </div>
                         </div>
                     </div>
-
                 </div>
             )}
+
             {activeTab === 'USERS' && (
                 <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-                        <div className="p-2 bg-sky-900/30 text-sky-400 rounded-lg border border-sky-500/20">
-                            <Users size={24} />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-black text-white uppercase tracking-tighter">User Management</h2>
-                            <p className="text-xs text-slate-400">Account Control & Access Permissions</p>
-                        </div>
-                    </div>
-
-                    <div className="space-y-6">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-sky-900/30 text-sky-400 rounded-lg border border-sky-500/20"><Users size={20} /></div>
-                            <div>
-                                <h3 className="text-sm font-black text-white uppercase tracking-tighter">App User Management</h3>
-                                <p className="text-xs text-slate-400">Create & manage BharatPay Pro login accounts</p>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {/* Left: User List */}
-                            <div className="bg-slate-900/50 rounded-2xl border border-slate-800 overflow-hidden">
-                                <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-2">
-                                    <Users size={14} className="text-sky-400" />
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Existing Users ({appUsers.length})</span>
-                                </div>
-                                {appUsers.length === 0 ? (
-                                    <div className="p-6 text-center text-slate-500 text-xs italic">No users created yet.</div>
-                                ) : (
-                                    <div className="divide-y divide-slate-800/60">
-                                        {appUsers.map(u => (
-                                            <div key={u.username} className="px-4 py-3 flex items-center justify-between hover:bg-slate-800/40 transition-colors group">
-                                                <div className="flex items-center gap-3">
-                                                    <div className={`p-1.5 rounded-lg ${u.role === 'Administrator' ? 'bg-amber-900/20 text-amber-500' : 'bg-slate-800 text-slate-400'}`}>
-                                                        <ShieldCheck size={14} />
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-xs font-black text-white uppercase tracking-tighter">{u.name}</div>
-                                                        <div className="text-[10px] text-slate-500 flex items-center gap-2">
-                                                            <span>@{u.username}</span>
-                                                            <span className="w-1 h-1 rounded-full bg-slate-700"></span>
-                                                            <span className={`uppercase font-bold ${u.role === 'Administrator' ? 'text-amber-600' : 'text-slate-500'}`}>{u.role}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-1">
-                                                    <button onClick={() => handleUmEdit(u)} className="p-1.5 hover:bg-slate-700 text-sky-400 rounded-md transition-colors" title="Edit User" aria-label="Edit User"><Edit2 size={14} /></button>
-                                                    <button onClick={() => { if (u.username === currentUser?.username) { showAlert?.('error', 'Action Restricted', 'Cannot delete your own account.'); } else { requireAuth(() => handleUmDelete(u.username)); } }} className="p-1.5 hover:bg-red-900/20 text-red-400 rounded-md transition-colors" title="Delete User" aria-label="Delete User"><Trash2 size={14} /></button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Right: Add/Edit Form */}
-                            <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
-                                <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                    {umEditId ? <Edit2 size={12} className="text-sky-400" /> : <UserPlus size={12} className="text-sky-400" />}
-                                    {umEditId ? 'Modify Account' : 'Create New Account'}
-                                </h3>
-
-                                <div className="space-y-3">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Full Name</label>
-                                        <input ref={umNameRef} type="text" value={umForm.name} onChange={e => setUmForm({ ...umForm, name: e.target.value })} placeholder="Enter user's full name" className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none" title="User Full Name" aria-label="User Full Name" />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Username / ID</label>
-                                        <input type="text" value={umForm.username} onChange={e => setUmForm({ ...umForm, username: e.target.value.toLowerCase().replace(/\s/g, '') })} placeholder="Pick a unique login ID" disabled={!!umEditId} className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none disabled:opacity-50" title="Username" aria-label="Username" />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Login Password</label>
-                                        <div className="relative">
-                                            <input type={umShowPwd ? 'text' : 'password'} value={umForm.password} onChange={e => setUmForm({ ...umForm, password: e.target.value })} placeholder="Enter secure password" className="w-full bg-slate-800 border-slate-700 border rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition-all outline-none pr-10" title="Login Password" aria-label="Login Password" />
-                                            <button onClick={() => setUmShowPwd(!umShowPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-sky-400 transition-colors" title={umShowPwd ? 'Hide Password' : 'Show Password'} aria-label={umShowPwd ? 'Hide Password' : 'Show Password'}>{umShowPwd ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4"><div className="p-2 bg-sky-900/30 text-sky-400 rounded-lg border border-sky-500/20"><Users size={24} /></div><div><h2 className="text-xl font-black text-white uppercase tracking-tighter">User Management</h2><p className="text-xs text-slate-400">Account Control & Access Permissions</p></div></div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-slate-900/50 rounded-2xl border border-slate-800 overflow-hidden">
+                            <div className="px-4 py-3 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Existing Users ({appUsers.length})</div>
+                            <div className="divide-y divide-slate-800/60 max-h-[300px] overflow-y-auto">
+                                {appUsers.map(u => (
+                                    <div key={u.username} className="px-4 py-3 flex items-center justify-between hover:bg-slate-800/40">
+                                        <div><div className="text-xs font-black text-white uppercase">{u.name}</div><div className="text-[10px] text-slate-500">@{u.username} • {u.role}</div></div>
+                                        <div className="flex gap-1">
+                                            <button onClick={() => handleUmEdit(u)} className="p-1 px-2 bg-sky-600/20 text-sky-400 text-[9px] font-bold rounded">Edit</button>
+                                            <button onClick={() => handleUmDelete(u.username)} className="p-1 px-2 bg-rose-600/20 text-rose-400 text-[9px] font-bold rounded hover:bg-rose-600/40 transition-colors" title="Delete User" aria-label={`Delete user ${u.username}`}><Trash size={12} /></button>
                                         </div>
                                     </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">System Role</label>
-                                        <div className="flex gap-2 p-1 bg-slate-800 rounded-xl border border-slate-700">
-                                            {(['Administrator', 'User'] as const).map(role => (
-                                                <button key={role} onClick={() => setUmForm({ ...umForm, role })} title={`Set User Role to ${role}`} aria-label={`Set User Role to ${role}`} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${umForm.role === role ? 'bg-sky-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>{role}</button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    {umError && <div className="p-2 bg-red-900/20 border border-red-500/20 rounded-lg text-[10px] text-red-400 flex items-center gap-2"><AlertCircle size={12} /> {umError}</div>}
-                                    <div className="flex gap-2 pt-2">
-                                        {umEditId && <button onClick={() => { setUmEditId(null); setUmForm({ name: '', username: '', password: '', role: 'User' }); }} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all" title="Cancel Editing" aria-label="Cancel Editing">Cancel</button>}
-                                        <button onClick={handleUmSave} title={umEditId ? 'Update User Information' : 'Save New User'} aria-label={umEditId ? 'Update User Information' : 'Save New User'} className="flex-[2] py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-black uppercase text-[10px] tracking-widest rounded-xl shadow-lg shadow-sky-500/20 transition-all flex items-center justify-center gap-2">{umEditId ? 'Update User' : 'Save User'}</button>
-                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
+                            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{umEditId ? 'Modify Access' : 'Create Access'}</h3>
+                            <div className="space-y-3">
+                                <input type="text" value={umForm.name} onChange={e => setUmForm({...umForm, name: e.target.value})} placeholder="Name" className="w-full bg-slate-800 border-slate-700 border rounded-lg p-2 text-xs text-white" />
+                                <input type="text" value={umForm.username} onChange={e => setUmForm({...umForm, username: e.target.value.toLowerCase()})} placeholder="User ID" disabled={!!umEditId} className="w-full bg-slate-800 border-slate-700 border rounded-lg p-2 text-xs text-white" />
+                                <div className="relative">
+                                    <input type={umShowPwd ? "text" : "password"} value={umForm.password} onChange={e => setUmForm({...umForm, password: e.target.value})} placeholder="Password" className="w-full bg-slate-800 border-slate-700 border rounded-lg p-2 text-xs text-white" />
+                                    <button onClick={() => setUmShowPwd(!umShowPwd)} className="absolute right-2 top-2 text-slate-500" title={umShowPwd ? "Hide Password" : "Show Password"} aria-label={umShowPwd ? "Hide Password" : "Show Password"}><Lock size={14} /></button>
                                 </div>
+                                {umError && <p className="text-[10px] text-rose-400 font-bold animate-pulse">{umError}</p>}
+                                <button onClick={handleUmSave} className="w-full py-2 bg-sky-600 text-white rounded-lg text-[10px] font-black uppercase">Save User</button>
                             </div>
                         </div>
                     </div>
@@ -2047,42 +1698,35 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             )}
 
             {showOverwriteConfirm && (
-                <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowOverwriteConfirm(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Overwrite Confirmation Modal" aria-label="Close Overwrite Confirmation Modal"><X size={20} /></button>
+                        <button onClick={() => setShowOverwriteConfirm(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Overwrite Confirmation"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
-                            <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2">
-                                <AlertTriangle size={32} />
-                            </div>
+                            <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><AlertTriangle size={32} /></div>
                             <h3 className="text-xl font-black text-white text-center">Overwrite Data?</h3>
-                            <p className="text-xs text-slate-300 text-center leading-relaxed">
-                                Existing data detected. Restoring a backup will <span className="text-red-400 font-bold">PERMANENTLY REPLACE</span> all current records.
-                            </p>
+                            <p className="text-xs text-slate-300 text-center">Restoring a backup will <span className="text-red-400 font-bold">REPLACE ALL CURRENT RECORDS</span>.</p>
                         </div>
                         <div className="flex gap-3 mt-4">
-                            <button onClick={() => setShowOverwriteConfirm(false)} title="Cancel Overwrite" aria-label="Cancel Overwrite" className="flex-1 py-3 border border-slate-600 rounded-xl text-slate-300 font-bold hover:bg-slate-800 transition-all">Cancel</button>
-                            <button onClick={() => { setShowOverwriteConfirm(false); executeImport(); }} title="Confirm and Overwrite Data" aria-label="Confirm and Overwrite Data" className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-lg transition-all">Proceed & Overwrite</button>
+                            <button onClick={() => setShowOverwriteConfirm(false)} className="flex-1 py-3 border border-slate-600 rounded-xl text-slate-300 font-bold">Cancel</button>
+                            <button onClick={() => { setShowOverwriteConfirm(false); executeImport(); }} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold">Overwrite</button>
                         </div>
                     </div>
                 </div>
             )}
 
             {showAuthModal && (
-                <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+                <div className="fixed inset-0 z-[800] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-indigo-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close Authentication Modal" aria-label="Close Authentication Modal"><X size={20} /></button>
+                        <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Authorization Modal"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
-                            <div className="p-4 bg-indigo-900/20 text-indigo-500 rounded-full border border-indigo-900/50 mb-2">
-                                <KeyRound size={32} />
-                            </div>
-                            <h3 className="text-xl font-black text-white text-center">AUTHORIZE ACTION</h3>
+                            <div className="p-4 bg-indigo-900/20 text-indigo-500 rounded-full border border-indigo-900/50 mb-2"><KeyRound size={32} /></div>
+                            <h3 className="text-xl font-black text-white text-center uppercase tracking-widest">Authorize Action</h3>
                         </div>
                         <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <label htmlFor="auth-pwd" className="sr-only">Login Password</label>
-                            <input id="auth-pwd" type="password" placeholder="Login Password" autoFocus className={`w-full bg-[#0f172a] border ${authError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all`} value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }} onKeyDown={(e) => e.key === 'Enter' && handleAuthSubmit()} title="Login Password" />
+                            <input type="password" placeholder="Login Password" autoFocus className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-mono" value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }} onKeyDown={(e) => e.key === 'Enter' && handleAuthSubmit()} />
                             {authError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{authError}</p>}
                         </div>
-                        <button onClick={handleAuthSubmit} title="Verify Password and Proceed" aria-label="Verify Password and Proceed" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                        <button onClick={handleAuthSubmit} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
                             <CheckCircle2 size={18} /> VERIFY & PROCEED
                         </button>
                     </div>

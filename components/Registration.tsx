@@ -32,9 +32,10 @@ interface RegistrationProps {
     }) => void;
     onRestore: () => void;
     showAlert?: (type: 'success' | 'error' | 'info' | 'warning' | 'confirm', title: string, message: string, onConfirm?: () => void) => void;
+    isResetMode?: boolean;
 }
 
-const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert }) => {
+const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert, isResetMode }) => {
     const [step, setStep] = useState(1);
     const [userName, setUserName] = useState('');
     const [userID, setUserID] = useState('');
@@ -667,21 +668,23 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                             {!showRestoreFields ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div
-                                        onClick={() => setShowRestoreFields(true)}
-                                        className="bg-[#0f172a] p-6 rounded-2xl border-2 border-slate-800 hover:border-blue-500/50 transition-all cursor-pointer group flex flex-col items-center text-center"
-                                    >
-                                        <div className="w-12 h-12 rounded-full bg-blue-900/20 text-blue-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                                            <Database size={28} />
+                                    {!isResetMode && (
+                                        <div
+                                            onClick={() => setShowRestoreFields(true)}
+                                            className="bg-[#0f172a] p-6 rounded-2xl border-2 border-slate-800 hover:border-blue-500/50 transition-all cursor-pointer group flex flex-col items-center text-center"
+                                        >
+                                            <div className="w-12 h-12 rounded-full bg-blue-900/20 text-blue-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                                                <Database size={28} />
+                                            </div>
+                                            <h3 className="text-lg font-bold mb-1 text-slate-100">Restore Data Backup</h3>
+                                            <p className="text-xs text-slate-400 leading-relaxed px-2">Recommended if you have a backup of employees, profiles, and attendance.</p>
+                                            <div className="mt-4 px-5 py-1.5 bg-blue-600 group-hover:bg-blue-700 text-white font-bold rounded-lg transition-colors text-sm">Select Backup File</div>
                                         </div>
-                                        <h3 className="text-lg font-bold mb-1 text-slate-100">Restore Data Backup</h3>
-                                        <p className="text-xs text-slate-400 leading-relaxed px-2">Recommended if you have a backup of employees, profiles, and attendance.</p>
-                                        <div className="mt-4 px-5 py-1.5 bg-blue-600 group-hover:bg-blue-700 text-white font-bold rounded-lg transition-colors text-sm">Select Backup File</div>
-                                    </div>
+                                    )}
 
                                     <div
                                         onClick={handleFreshSetup}
-                                        className="bg-[#0f172a] p-8 rounded-2xl border-2 border-slate-800 hover:border-emerald-500/50 transition-all cursor-pointer group flex flex-col items-center text-center"
+                                        className={`bg-[#0f172a] ${isResetMode ? 'md:col-span-2' : ''} p-8 rounded-2xl border-2 border-slate-800 hover:border-emerald-500/50 transition-all cursor-pointer group flex flex-col items-center text-center`}
                                     >
                                         <div className="w-16 h-16 rounded-full bg-emerald-900/20 text-emerald-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                             <Building2 size={32} />

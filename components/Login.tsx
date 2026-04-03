@@ -288,6 +288,29 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
         {isFullScreen ? <Minimize size={20} /> : <Maximize size={20} />}
       </button>
 
+      {/* Quit Application Button - Top Right per User Request */}
+      <button
+        onClick={async () => {
+          const api = (window as any).electronAPI;
+          if (api) {
+            try {
+              if (api.closeApp) api.closeApp();
+              else if (api.invoke) api.invoke('close-app');
+            } catch (err) {
+              console.error("LOGIN: Close failed", err);
+            }
+          } else {
+            window.close();
+            setTimeout(() => window.location.reload(), 100);
+          }
+        }}
+        className="absolute top-4 right-16 z-50 p-2.5 bg-red-950/20 hover:bg-red-900/40 text-red-400 rounded-full border border-red-500/30 backdrop-blur-sm transition-all shadow-lg hover:scale-105 flex items-center gap-2 px-4 group"
+        title="Quit Application"
+      >
+        <Power size={18} className="group-hover:rotate-12 transition-transform" />
+        <span className="text-[10px] font-black uppercase tracking-widest hidden sm:block">Quit Application</span>
+      </button>
+
       {/* Background Decor - Fixed Position to avoid layout shift */}
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-amber-600/10 rounded-full blur-[100px]"></div>
@@ -420,113 +443,91 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                 )}
               </button>
 
-              <div className="flex justify-center mt-2">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const api = (window as any).electronAPI;
-                    if (api) {
+              {/* Quick Access Roles - Moved further Up inside the main interaction zone */}
+              <div className="pt-2">
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-3 text-center">Quick Access Roles</p>
+                <div className={`grid ${getAppDeveloper() && !import.meta.env.PROD ? 'grid-cols-3' : 'grid-cols-2'} gap-2 max-w-sm mx-auto`}>
+                  {(() => {
+                    const savedUsersRaw = localStorage.getItem('app_users');
+                    let localUsers: UserType[] = [];
+                    
+                    if (savedUsersRaw) {
                       try {
-                        if (api.closeApp) api.closeApp();
-                        else if (api.invoke) api.invoke('close-app');
-                      } catch (err) {
-                        console.error("LOGIN: Close failed", err);
-                      }
-                    } else {
-                      window.close();
-                      setTimeout(() => window.location.reload(), 100);
+                        localUsers = JSON.parse(savedUsersRaw);
+                      } catch (e) { }
                     }
-                  }}
-                  className="flex items-center gap-2 text-slate-500 hover:text-red-400 transition-colors text-[10px] font-black uppercase tracking-[0.2em] px-4 py-2 rounded-xl hover:bg-red-500/10 border border-transparent hover:border-red-500/20"
-                  title="Quit Application"
-                >
-                  <Power size={14} />
-                  Quit Application
-                </button>
-              </div>
-            </form>
 
-            {/* Quick Access Roles */}
-            <div className="mt-8 pt-6 border-t border-slate-800">
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-3 text-center">Quick Access Roles</p>
-              <div className={`grid ${getAppDeveloper() && !(import.meta as any).env.PROD ? 'grid-cols-3' : 'grid-cols-2'} gap-2 max-w-md mx-auto`}>
-                {(() => {
-                  const savedUsersRaw = localStorage.getItem('app_users');
-                  let localUsers: UserType[] = [];
-                  
-                  if (savedUsersRaw) {
-                    try {
-                      localUsers = JSON.parse(savedUsersRaw);
-                    } catch (e) { }
-                  }
+                    const admin = localUsers.find(u => u.role === 'Administrator');
+                    const payrollUser = localUsers.find(u => u.role === 'User');
+                    const developer = getAppDeveloper();
+                    const isProd = import.meta.env.PROD;
+                    const showDev = developer && !isProd;
 
-                  const admin = localUsers.find(u => u.role === 'Administrator');
-                  const payrollUser = localUsers.find(u => u.role === 'User');
-                  const developer = getAppDeveloper();
-                  const isProd = (window as any).process?.env?.NODE_ENV === 'production';
-                  const showDev = developer && !isProd;
-
-                  const buttons = [
-                    // Admin Slot
-                    <button 
-                      key="admin" 
-                      onClick={() => admin && autofill(admin.username)} 
-                      disabled={!admin}
-                      title={admin ? `Login as ${admin.name}` : 'Admin user not active'}
-                      aria-label={admin ? `Login as ${admin.name}` : 'Admin user not active'}
-                      className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
-                        admin 
-                          ? 'bg-blue-900/10 hover:bg-blue-900/20 border border-blue-900/30' 
-                          : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
-                      }`}
-                    >
-                      <ShieldCheck className={`${admin ? 'text-blue-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
-                      <span className={`text-[10px] font-bold ${admin ? 'text-blue-500' : 'text-slate-500'} truncate w-full px-1`}>
-                        {admin ? admin.name : 'ADMIN INACTIVE'}
-                      </span>
-                    </button>,
-                    // User Slot (Payroll Executive)
-                    <button 
-                      key="user" 
-                      onClick={() => payrollUser && autofill(payrollUser.username)} 
-                      disabled={!payrollUser}
-                      title={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
-                      aria-label={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
-                      className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
-                        payrollUser 
-                          ? 'bg-emerald-900/10 hover:bg-emerald-900/20 border border-emerald-900/30' 
-                          : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
-                      }`}
-                    >
-                      <UserIcon className={`${payrollUser ? 'text-emerald-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
-                      <span className={`text-[10px] font-bold ${payrollUser ? 'text-emerald-500' : 'text-slate-500'} truncate w-full px-1`}>
-                        {payrollUser ? payrollUser.name : 'PAYROLL INACTIVE'}
-                      </span>
-                    </button>
-                  ];
-
-                  if (showDev) {
-                    buttons.push(
+                    const buttons = [
+                      // Admin Slot
                       <button 
-                        key="developer" 
-                        onClick={() => developer && autofill(developer.username)} 
-                        disabled={!developer}
-                        title={developer ? `Login as ${developer.name}` : 'Developer access not active'}
-                        aria-label={developer ? `Login as ${developer.name}` : 'Developer access not active'}
-                        className="flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30"
+                        key="admin" 
+                        onClick={() => admin && autofill(admin.username)} 
+                        disabled={!admin}
+                        type="button"
+                        title={admin ? `Login as ${admin.name}` : 'Admin user not active'}
+                        aria-label={admin ? `Login as ${admin.name}` : 'Admin user not active'}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
+                          admin 
+                            ? 'bg-blue-900/10 hover:bg-blue-900/20 border border-blue-900/30' 
+                            : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
+                        }`}
                       >
-                        <IndianRupee className="text-[#FF9933] mb-1 group-hover:scale-110 transition-transform" size={16} />
-                        <span className="text-[10px] font-bold text-[#FF9933] truncate w-full px-1">
-                          {developer.name}
+                        <ShieldCheck className={`${admin ? 'text-blue-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
+                        <span className={`text-[10px] font-bold ${admin ? 'text-blue-500' : 'text-slate-500'} truncate w-full px-1`}>
+                          {admin ? admin.name : 'ADMIN INACTIVE'}
+                        </span>
+                      </button>,
+                      // User Slot (Payroll Executive)
+                      <button 
+                        key="user" 
+                        onClick={() => payrollUser && autofill(payrollUser.username)} 
+                        disabled={!payrollUser}
+                        type="button"
+                        title={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
+                        aria-label={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
+                          payrollUser 
+                            ? 'bg-emerald-900/10 hover:bg-emerald-900/20 border border-emerald-900/30' 
+                            : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <UserIcon className={`${payrollUser ? 'text-emerald-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
+                        <span className={`text-[10px] font-bold ${payrollUser ? 'text-emerald-500' : 'text-slate-500'} truncate w-full px-1`}>
+                          {payrollUser ? payrollUser.name : 'PAYROLL INACTIVE'}
                         </span>
                       </button>
-                    );
-                  }
+                    ];
 
-                  return buttons;
-                })()}
+                    if (showDev) {
+                      buttons.push(
+                        <button 
+                          key="developer" 
+                          onClick={() => developer && autofill(developer.username)} 
+                          disabled={!developer}
+                          type="button"
+                          title={developer ? `Login as ${developer.name}` : 'Developer access not active'}
+                          aria-label={developer ? `Login as ${developer.name}` : 'Developer access not active'}
+                          className="flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30"
+                        >
+                          <IndianRupee className="text-[#FF9933] mb-1 group-hover:scale-110 transition-transform" size={16} />
+                          <span className="text-[10px] font-bold text-[#FF9933] truncate w-full px-1">
+                            {developer.name}
+                          </span>
+                        </button>
+                      );
+                    }
+
+                    return buttons;
+                  })()}
+                </div>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 

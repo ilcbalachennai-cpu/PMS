@@ -3,7 +3,8 @@ import CryptoJS from 'crypto-js';
 import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
+export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
+export const APP_VERSION = "02.02.07";
 
 export interface ActivationResult {
   success: boolean;
@@ -575,9 +576,8 @@ export const trackCloudLogin = async (email: string, machineId: string) => {
   }
 };
 
-export const APP_VERSION = "02.01.05";
 /**
- * Fetches the latest developer messages from Google Sheets
+ * Fetches the latest developer messages from Google Sheets (Consolidated)
  */
 export const fetchLatestMessages = async (force: boolean = false): Promise<{ 
   scrollNews: string, 
@@ -585,7 +585,14 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
   header?: string, 
   alignment?: 'LEFT' | 'CENTER' | 'RIGHT', 
   key?: string, 
-  messageId?: string 
+  messageId?: string,
+  flashPopupMessage?: string,
+  flashPopupHeader?: string,
+  flashPopupPriority?: 'REGULAR' | 'IMMEDIATE',
+  flashPopupId?: string,
+  latestVersion?: string,
+  downloadUrl?: string,
+  downloadUrlWin7?: string
 } | null> => {
   try {
     const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
@@ -594,49 +601,69 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
     });
 
     if (result.success && result.messages) {
-      const { scrollNews, statutory, header, alignment, key, messageId } = result.messages;
+      const { scrollNews, statutory, flash } = result.messages;
 
       // Get current stored messages to check for updates
       const storedProfileRaw = localStorage.getItem('app_company_profile');
       const storedProfile = (() => { try { return JSON.parse(storedProfileRaw || '{}'); } catch { return {}; } })();
       const lastNewsDate = localStorage.getItem('app_last_news_date') || "";
       const lastStatutoryDate = localStorage.getItem('app_last_statutory_date') || "";
+      const lastFlashId = localStorage.getItem('app_last_flash_id') || "";
 
       let updated = false;
 
-      // Update NEWS (Marquee) if new date or forced
+      // 1. Update NEWS (Marquee)
       if (scrollNews?.date && (scrollNews.date !== lastNewsDate || force)) {
         storedProfile.flashNews = scrollNews.message;
         localStorage.setItem('app_last_news_date', scrollNews.date);
         updated = true;
       }
 
-      // Update MESSAGE (Developer Board) if new date or forced
+      // 2. Update STATUTORY (Main Message)
       if (statutory?.date && (statutory.date !== lastStatutoryDate || force)) {
         storedProfile.postLoginMessage = statutory.message;
-        storedProfile.postLoginHeader = header || storedProfile.postLoginHeader;
-        storedProfile.postLoginAlignment = alignment || (storedProfile.postLoginAlignment || 'LEFT');
+        storedProfile.postLoginHeader = statutory.header || storedProfile.postLoginHeader;
+        storedProfile.postLoginAlignment = statutory.alignment || (storedProfile.postLoginAlignment || 'LEFT');
+        storedProfile.postLoginKey = statutory.key || 'REGULAR';
         localStorage.setItem('app_last_statutory_date', statutory.date);
         updated = true;
       }
 
-      if (updated || key === 'IMMEDIATE' || force) {
+      // 3. Update FLASH (Popup Alert)
+      if (flash?.date && (flash.date !== lastFlashId || force)) {
+        storedProfile.flashPopupMessage = flash.message;
+        storedProfile.flashPopupHeader = flash.header || "FLASH ALERT";
+        storedProfile.flashPopupPriority = flash.key || 'REGULAR';
+        storedProfile.flashPopupId = flash.date;
+        localStorage.setItem('app_last_flash_id', flash.date);
+        updated = true;
+      }
+
+      // --- VERSION SYNC ---
+      let versionInfo: any = null;
+      if (result.latestVersion) {
+        versionInfo = {
+          latestVersion: result.latestVersion,
+          downloadUrl: result.downloadUrl,
+          downloadUrlWin7: result.downloadUrlWin7
+        };
+        localStorage.setItem('app_latest_version', result.latestVersion);
+      }
+
+      if (updated || force || versionInfo) {
         localStorage.setItem('app_company_profile', JSON.stringify(storedProfile));
-
-        // Also check for version here if available in messages
-        if (result.latestVersion) {
-          localStorage.setItem('app_latest_version', result.latestVersion);
-          if (result.downloadUrl) localStorage.setItem('app_download_url', result.downloadUrl);
-          if (result.downloadUrlWin7) localStorage.setItem('app_download_url_win7', result.downloadUrlWin7);
-        }
-
         return {
           scrollNews: storedProfile.flashNews,
           statutory: storedProfile.postLoginMessage,
           header: storedProfile.postLoginHeader,
           alignment: storedProfile.postLoginAlignment as any,
-          key: key,
-          messageId: messageId || statutory?.date || lastStatutoryDate
+          key: statutory?.key || 'REGULAR',
+          messageId: statutory?.date || lastStatutoryDate,
+          flashPopupMessage: storedProfile.flashPopupMessage,
+          flashPopupHeader: storedProfile.flashPopupHeader,
+          flashPopupPriority: storedProfile.flashPopupPriority as any,
+          flashPopupId: storedProfile.flashPopupId,
+          ...versionInfo
         };
       }
     }
@@ -648,19 +675,25 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
 };
 
 /**
- * Updates the cloud Developer Board messages (Push from App to Cloud)
+ * Updates the Cloud Developer Board message
  */
-export const updateDeveloperMessages = async (scrollNews: string, statutory: string, header?: string, alignment?: string): Promise<ActivationResult> => {
+export const updateDeveloperMessages = async (
+  message: string, 
+  type: 'MESSAGE' | 'NEWS' | 'FLASH', 
+  header?: string, 
+  alignment?: string, 
+  key?: string
+): Promise<ActivationResult> => {
   try {
     const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: "POST",
       body: JSON.stringify({
         action: "UPDATE_MESSAGES",
-        scrollNews,
-        statutory,
+        message,
+        type,
         header,
         alignment,
-        key: "UPDATED"
+        key
       })
     });
     return result;
@@ -668,3 +701,4 @@ export const updateDeveloperMessages = async (scrollNews: string, statutory: str
     return { success: false, message: `Cloud Sync Error: ${error.message || "Unknown Failure"}` };
   }
 };
+

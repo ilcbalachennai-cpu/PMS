@@ -184,6 +184,13 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHist
   const [mailProgress, setMailProgress] = useState(0);
   const [mailStatus, setMailStatus] = useState('');
   const [mailSearch, setMailSearch] = useState('');
+  const mailProgressRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (mailProgressRef.current) {
+        mailProgressRef.current.style.width = `${mailProgress}%`;
+    }
+  }, [mailProgress]);
 
   // Sync mailingPeriod when availablePeriods changes
   React.useEffect(() => {
@@ -522,6 +529,8 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHist
               <button 
                 onClick={() => setShowPresetSuccess(false)}
                 className="mt-4 px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest rounded-xl transition-colors shadow-lg shadow-emerald-900/50 w-full"
+                title="Dismiss Success Message"
+                aria-label="Dismiss Success Message"
               >
                  Great!
               </button>
@@ -1104,8 +1113,8 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHist
                             </div>
                             <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800 shadow-inner">
                                 <div 
+                                    ref={mailProgressRef}
                                     className="h-full bg-indigo-500 transition-all duration-300 shadow-[0_0_10px_rgba(99,102,241,0.5)]" 
-                                    style={{ '--mail-progress': `${mailProgress}%`, width: 'var(--mail-progress)' } as React.CSSProperties}
                                 ></div>
                             </div>
                         </div>
