@@ -66,11 +66,14 @@ interface EmployeeListProps {
         cancelLabel?: string,
         autoCloseSecs?: number
     ) => void;
+    globalMonth: string;
+    globalYear: number;
 }
 
 const EmployeeList: React.FC<EmployeeListProps> = ({
     employees, setEmployees, onAddEmployee, onBulkAddEmployees,
-    designations, divisions, branches, sites, currentUser, companyProfile, dataSizeLimit, showAlert
+    designations, divisions, branches, sites, currentUser, companyProfile, dataSizeLimit, showAlert,
+    globalMonth, globalYear
 }) => {
     // --- State Management ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -130,7 +133,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
 
     // --- Helper Functions ---
     const calculateGrossWage = (emp: Partial<Employee> | Employee) => {
-        const total = (emp.basicPay || 0) + (emp.da || 0) + (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + (emp.attire || 0) + (emp.specialAllowance1 || 0) + (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0);
+        const total = (emp.basicPay || 0) + (emp.da || 0) + (emp.retainingAllowance || 0) + (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + (emp.attire || 0) + (emp.specialAllowance1 || 0) + (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0);
         return Math.round(total);
     };
 
@@ -358,7 +361,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     onSearchChange={setRejoinSearch}
                     filteredExEmployees={filteredExEmployees}
                     onInitiateRejoin={(emp) => {
-                        setNewEmpForm({ ...emp, dol: '', leavingReason: '' });
+                        setNewEmpForm({ ...emp }); // DOJ will be pink/restructured in Form
                         setEditingId(emp.id);
                         setIsAdding(true);
                         setShowRejoinPanel(false);
@@ -388,6 +391,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                         calculateGrossWage={calculateGrossWage}
                         isSeparationUnlocked={isSeparationUnlocked}
                         onUnlockSeparation={() => setAuthModal({ isOpen: true, password: '', error: '', targetEmp: null, mode: 'UNLOCK_SEPARATION' })}
+                        globalMonth={globalMonth}
+                        globalYear={globalYear}
                     />
                 )}
 

@@ -114,6 +114,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       const cloudDev = getAppDeveloper();
       if (cloudDev) {
         allUsers.push(cloudDev);
+      } else if (!import.meta.env.PROD) {
+        // Fallback for local dev if sync hasn't happened yet
+        allUsers.push({
+          username: 'ILCbala',
+          password: 'password', // Default local fallback
+          role: 'Developer',
+          name: 'ILCbala(Developer)',
+          email: 'developer@bharatpay.com'
+        } as any);
       }
 
       if (savedUsersRaw) {
@@ -133,7 +142,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       const cleanPassword = password.trim();
 
       // Debug: Log all available usernames (only in dev)
-      const isDev = (window as any).process?.env?.NODE_ENV === 'development';
+      const isDev = import.meta.env.DEV;
       if (isDev) {
         console.log("🔐 Login Attempt:", { username: cleanUsername });
         console.log("👥 Local User DB:", allUsers.map(u => ({ username: u.username, role: u.role })));
@@ -446,8 +455,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
               {/* Quick Access Roles - Moved further Up inside the main interaction zone */}
               <div className="pt-2">
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-3 text-center">Quick Access Roles</p>
-                <div className={`grid ${getAppDeveloper() && !import.meta.env.PROD ? 'grid-cols-3' : 'grid-cols-2'} gap-2 max-w-sm mx-auto`}>
+                <div className={`grid ${(!import.meta.env.PROD || getAppDeveloper()) ? 'grid-cols-3' : 'grid-cols-2'} gap-2 max-w-sm mx-auto`}>
                   {(() => {
+                    const isDevMode = !import.meta.env.PROD;
                     const savedUsersRaw = localStorage.getItem('app_users');
                     let localUsers: UserType[] = [];
                     
@@ -460,8 +470,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                     const admin = localUsers.find(u => u.role === 'Administrator');
                     const payrollUser = localUsers.find(u => u.role === 'User');
                     const developer = getAppDeveloper();
-                    const isProd = import.meta.env.PROD;
-                    const showDev = developer && !isProd;
+                    const showDev = isDevMode || developer;
 
                     const buttons = [
                       // Admin Slot
@@ -508,16 +517,18 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                       buttons.push(
                         <button 
                           key="developer" 
-                          onClick={() => developer && autofill(developer.username)} 
-                          disabled={!developer}
+                          onClick={() => {
+                            if (developer) autofill(developer.username);
+                            else autofill('ILCbala'); // Fallback for local developer mode
+                          }} 
                           type="button"
-                          title={developer ? `Login as ${developer.name}` : 'Developer access not active'}
-                          aria-label={developer ? `Login as ${developer.name}` : 'Developer access not active'}
+                          title={developer ? `Login as ${developer.name} (Cloud Account)` : 'Login as Developer (Local Mode)'}
+                          aria-label={developer ? `Login as ${developer.name}` : 'Login as Developer'}
                           className="flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30"
                         >
                           <IndianRupee className="text-[#FF9933] mb-1 group-hover:scale-110 transition-transform" size={16} />
                           <span className="text-[10px] font-bold text-[#FF9933] truncate w-full px-1">
-                            {developer.name}
+                            {developer ? developer.name : 'ILCbala(Developer)'}
                           </span>
                         </button>
                       );

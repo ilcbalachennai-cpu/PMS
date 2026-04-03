@@ -5,6 +5,7 @@ interface EmployeeToolbarProps {
     searchTerm: string;
     onSearchChange: (value: string) => void;
     totalActive: number;
+    totalActiveLabel?: string;
     limit: number;
     isImporting: boolean;
     onDownloadTemplate: () => void;
@@ -18,6 +19,7 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
     searchTerm,
     onSearchChange,
     totalActive,
+    totalActiveLabel = "Active",
     limit,
     isImporting,
     onDownloadTemplate,
@@ -80,7 +82,7 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_#10b981]"></span>
                     </div>
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">
-                        Active: <span className="text-white ml-1 font-bold">{totalActive}</span>
+                        {totalActiveLabel}: <span className="text-white ml-1 font-bold">{totalActive}</span>
                         <span className="mx-2 text-slate-700">/</span>
                         Limit: <span className="text-sky-400 font-bold">{limit}</span>
                     </span>

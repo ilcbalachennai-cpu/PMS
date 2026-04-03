@@ -4,7 +4,8 @@ import {
     Database, Users, KeyRound, ShieldCheck, Mail, Megaphone, Building2, 
     CalendarClock, Phone, Globe, CheckCircle2, AlertCircle, Lock, Plus,
     ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator, 
-    ScrollText, Percent, HandCoins, Wallet, Scale, Trash, RotateCw, TrendingUp
+    ScrollText, Percent, HandCoins, Wallet, Scale, Trash, RotateCw, TrendingUp,
+    ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff
 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
@@ -28,10 +29,11 @@ interface SettingsProps {
     currentUser?: User;
     isSetupMode?: boolean;
     onSkipSetupRedirect?: () => void;
+    onDirtyChange?: (isDirty: boolean) => void;
     showAlert: (type: 'success' | 'warning' | 'danger' | 'info' | 'confirm' | 'error', title: string, message: string | JSX.Element, onConfirm?: () => void, onCancel?: () => void, confirmLabel?: string, cancelLabel?: string, cancel2Label?: string) => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, showAlert }) => {
+const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange, showAlert }) => {
     const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(isSetupMode ? 'COMPANY' : initialTab);
 
     const [formData, setFormData] = useState<StatutoryConfig>(() => {
@@ -81,6 +83,17 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             return false;
         }
     }, []);
+
+    const isDirty = useMemo(() => {
+        const statutoryDirty = JSON.stringify(formData) !== JSON.stringify(config);
+        const profileDirty = JSON.stringify(profileData) !== JSON.stringify(companyProfile);
+        const leaveDirty = JSON.stringify(localLeavePolicy) !== JSON.stringify(leavePolicy);
+        return statutoryDirty || profileDirty || leaveDirty;
+    }, [formData, config, profileData, companyProfile, localLeavePolicy, leavePolicy]);
+
+    useEffect(() => {
+        onDirtyChange?.(isDirty);
+    }, [isDirty, onDirtyChange]);
 
     useEffect(() => {
         setActiveTab(isSetupMode ? 'COMPANY' : initialTab);
@@ -201,6 +214,24 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             setNewUserID(licenseInfo.userID || '');
         }
     }, [licenseInfo]);
+
+    const handleCloudSync = async () => {
+        setIsSyncing(true);
+        try {
+            const result = await validateLicenseStartup(true); // Force sync
+            const updated = getStoredLicense();
+            setLicenseInfo(updated);
+            if (result.valid) {
+                showAlert?.('success', 'Sync Successful', 'License credentials and limits refreshed from cloud.');
+            } else {
+                showAlert?.('warning', 'Sync Issue', result.message || 'Could not verify license status.');
+            }
+        } catch (error) {
+            showAlert?.('danger', 'Sync Failed', 'Connection error while contacting licensing server.');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -668,39 +699,71 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                     }
                 }}
             />
-            <div className="sticky top-0 z-30 bg-[#020617] pt-2 flex border-b border-slate-700 overflow-x-auto pb-1 custom-scrollbar -mt-8">
-                <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                    <ShieldCheck size={16} /> Statutory Rules
-                </button>
-                <button onClick={() => setActiveTab('COMPANY')} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'COMPANY' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                    <Building2 size={16} /> Company Profile
-                </button>
-                <button onClick={() => setActiveTab('DATA')} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'DATA' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                    <Database size={16} /> Data Management
-                </button>
-                {userRole === 'Developer' && (
-                    <button onClick={() => setActiveTab('DEVELOPER')} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'DEVELOPER' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                        <Megaphone size={16} /> Developer Options
-                    </button>
-                )}
-                {!isSetupMode && (
-                    <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'LICENSE' ? 'border-pink-500 text-pink-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                        <ShieldCheck size={16} /> License Management
-                    </button>
-                )}
-                {(licenseInfo || !isSetupMode || appUsers.length > 0) && (
-                    <button onClick={() => setActiveTab('USERS')} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`flex-1 whitespace-nowrap pb-3 px-2 text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === 'USERS' ? 'border-sky-500 text-sky-400' : 'border-transparent text-slate-400 hover:text-white'}`}>
-                        <Users size={16} /> User Management
-                    </button>
-                )}
-                {isSetupMode && (
-                    <div className="ml-auto flex items-center pb-2 pl-4">
-                        <button onClick={handleSave} className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-black transition-all shadow-lg ${saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`} title="Save Configuration" aria-label="Save Configuration">
-                            {saved ? <CheckCircle2 size={14} /> : <Save size={14} />}
-                            {saved ? 'SAVED' : 'SAVE CONFIGURATION'}
+            <div className="sticky top-0 z-30 bg-[#020617] -mt-8 pb-1 border-b border-slate-700 flex flex-col">
+                {/* Top Row: Title & Save Button */}
+                <div className="flex items-center justify-between px-6 py-3 bg-[#020617]">
+                    <div className="flex items-center gap-4">
+                        <div className="p-2.5 bg-blue-500/10 rounded-xl border border-blue-500/20 shadow-inner">
+                            <SettingsIcon size={20} className="text-blue-400" />
+                        </div>
+                        <div>
+                            <h2 className="text-sm font-black uppercase tracking-[0.2em] text-white">System Configuration</h2>
+                            <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Establishment Compliance & Advanced Settings</p>
+                        </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                        {isDirty && (
+                            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-xl animate-pulse">
+                                <AlertCircle size={12} className="text-amber-500" />
+                                <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Unsaved Changes</span>
+                            </div>
+                        )}
+                        <button 
+                            onClick={handleSave} 
+                            className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-[11px] font-black transition-all shadow-xl active:scale-95 ${
+                                saved 
+                                ? 'bg-emerald-600 text-white shadow-emerald-900/40 ring-2 ring-emerald-500/50' 
+                                : isDirty 
+                                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/40 ring-2 ring-white/20' 
+                                    : 'bg-slate-800 text-slate-400 cursor-default opacity-80'
+                            }`} 
+                            title="Save Configuration" 
+                            aria-label="Save Configuration"
+                        >
+                            {saved ? <CheckCircle2 size={14} /> : isDirty ? <Save size={14} /> : <div className="w-1.5 h-1.5 rounded-full bg-slate-600" />}
+                            {saved ? 'DATA SAVED' : isDirty ? 'SAVE CONFIGURATION' : 'SYSTEM SYNCHRONIZED'}
                         </button>
                     </div>
-                )}
+                </div>
+
+                {/* Bottom Row: Navigation Tabs */}
+                <div className="flex overflow-x-auto pb-1 custom-scrollbar scroll-smooth px-4 mt-1">
+                    <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
+                        <ShieldCheck size={16} /> STATUTORY RULES
+                    </button>
+                    <button onClick={() => setActiveTab('COMPANY')} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'COMPANY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
+                        <Building2 size={16} /> COMPANY PROFILE
+                    </button>
+                    <button onClick={() => setActiveTab('DATA')} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'DATA' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
+                        <Database size={16} /> DATA MANAGEMENT
+                    </button>
+                    {userRole === 'Developer' && (
+                        <button onClick={() => setActiveTab('DEVELOPER')} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'DEVELOPER' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
+                            <Megaphone size={16} /> DEVELOPER OPTIONS
+                        </button>
+                    )}
+                    {!isSetupMode && (
+                        <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'LICENSE' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
+                            <ShieldCheck size={16} /> LICENSE MANAGEMENT
+                        </button>
+                    )}
+                    {(licenseInfo || !isSetupMode || appUsers.length > 0) && (
+                        <button onClick={() => setActiveTab('USERS')} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'USERS' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
+                            <Users size={16} /> USER MANAGEMENT
+                        </button>
+                    )}
+                </div>
             </div>
 
             {activeTab === 'STATUTORY' && (
@@ -1553,15 +1616,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             )}
 
 
-            {activeTab !== 'DATA' && !isSetupMode && (
-                <div className="flex justify-between items-center p-2 pt-6 border-t border-slate-800">
-                    <div></div>
-                    <button onClick={handleSave} className={`flex items-center gap-3 px-10 py-4 rounded-2xl font-black transition-all shadow-2xl ${saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
-                        {saved ? <RefreshCw size={20} className="animate-spin" /> : <Save size={20} />}
-                        {saved ? 'CONFIGURATION SAVED!' : 'UPDATE ALL PARAMETERS'}
-                    </button>
-                </div>
-            )}
 
             {showResetModal && (
                 <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -1666,56 +1720,342 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             )}
 
             {activeTab === 'LICENSE' && (
-                <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4"><div className="p-2 bg-pink-900/30 text-pink-400 rounded-lg border border-pink-500/20"><ShieldCheck size={24} /></div><div><h2 className="text-xl font-black text-white uppercase tracking-tighter">License Management</h2><p className="text-xs text-slate-400">System Activation & Machine Lock Status</p></div></div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
-                            <div className="flex items-center justify-between"><h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"><Lock size={14} className="text-pink-500" /> Current License Info</h3></div>
-                            <div className="space-y-3">
-                                <div className="flex justify-between items-center py-2 border-b border-slate-800/50"><span className="text-xs text-slate-400">License Key</span><span className="text-xs font-mono text-pink-400 font-black tracking-wider">{licenseInfo?.key || 'N/A'}</span></div>
-                                <div className="flex justify-between items-center py-2 border-b border-slate-800/50"><span className="text-xs text-slate-400">Status</span><span className="text-xs font-black uppercase text-emerald-500">{licenseInfo?.status || 'UNREGISTERED'}</span></div>
+                <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                    {/* Header with Global Save Action */}
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2.5 bg-pink-900/30 text-pink-400 rounded-xl border border-pink-500/20 shadow-lg">
+                                <ShieldCheck size={28} />
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-black text-white uppercase tracking-tighter">License Management</h2>
+                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">System Activation & Machine Lock Status</p>
                             </div>
                         </div>
-                        <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
-                           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Re-Activate</h3>
-                           <div className="space-y-3">
-                               <input type="text" placeholder="License Key" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs font-mono uppercase" value={newLicenseKey} onChange={e => setNewLicenseKey(e.target.value.toUpperCase())} />
-                               <button onClick={async () => { if (!isValidKeyFormat(newLicenseKey)) return; setIsActivating(true); await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile); setIsActivating(false); setLicenseInfo(getStoredLicense()); }} disabled={isActivating} className="w-full py-3 bg-pink-600 hover:bg-pink-700 text-white font-black uppercase text-xs rounded-xl shadow-lg transition-all">ACTIVATE NOW</button>
-                           </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        {/* Left Column: Current License Details */}
+                        <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col justify-between">
+                            <div className="space-y-6">
+                                <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                        <Lock size={14} className="text-pink-500" /> Current License Info
+                                    </h3>
+                                    <button 
+                                        onClick={handleCloudSync}
+                                        disabled={isSyncing}
+                                        className="px-4 py-1.5 bg-sky-900/20 hover:bg-sky-900/40 text-sky-400 text-[10px] font-black rounded-lg border border-sky-500/20 transition-all flex items-center gap-2 uppercase tracking-widest"
+                                    >
+                                        {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                                        Sync Cloud
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center py-1.5">
+                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">License Key</span>
+                                        <span className="text-xs font-mono text-rose-500 font-black tracking-widest bg-rose-500/10 px-3 py-1 rounded-lg border border-rose-500/20">
+                                            {licenseInfo?.key || 'N/A'}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status</span>
+                                        <span className="text-xs font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-3 py-1 rounded-lg border border-amber-500/20">
+                                            {licenseInfo?.status || 'UNREGISTERED'}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">User ID</span>
+                                        <span className="text-xs font-black text-slate-300">{licenseInfo?.userID || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Email ID</span>
+                                        <span className="text-xs font-bold text-slate-400 lowercase">{licenseInfo?.registeredTo || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mobile No</span>
+                                        <span className="text-xs font-mono text-slate-300">{licenseInfo?.registeredMobile || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Employee Data Limit</span>
+                                        <span className="text-sm font-black text-emerald-500 font-mono bg-emerald-500/10 px-4 py-1 rounded-lg border border-emerald-500/20">
+                                            {licenseInfo?.dataSize || 0}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Expiry Date</span>
+                                        <span className="text-xs font-bold text-pink-400 italic">
+                                            {licenseInfo?.expiryDate ? new Date(licenseInfo.expiryDate.split('-').reverse().join('-')).toDateString() : 'N/A'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-8 p-4 bg-sky-900/10 rounded-2xl border border-sky-500/20 flex gap-3">
+                                <Info size={18} className="text-sky-400 shrink-0" />
+                                <p className="text-[10px] text-sky-300/80 leading-relaxed font-medium italic">
+                                    * License is locked to this Machine ID. To move BharatPay Pro to another computer, please contact support for a license reset.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Right Column: Re-Activation Form */}
+                        <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col gap-6">
+                            <div className="flex items-center gap-3">
+                                <ChevronRight size={20} className="text-pink-500" />
+                                <div>
+                                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">Re-Activate System</h3>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Update credentials to restore full access</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Full Name / Authorized Person</label>
+                                    <input 
+                                        type="text" 
+                                        placeholder="Enter Full Name"
+                                        className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                        value={newUserName}
+                                        onChange={e => setNewUserName(e.target.value)}
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">User ID</label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="Sbobby12"
+                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                            value={newUserID}
+                                            onChange={e => setNewUserID(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">License Key (16-Digit)</label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="XXXX-XXXX-XXXX-XXXX"
+                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono uppercase outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                            value={newLicenseKey}
+                                            onChange={e => setNewLicenseKey(e.target.value.toUpperCase())}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Email ID</label>
+                                        <input 
+                                            type="email" 
+                                            placeholder="bala.saipra@gmail.com"
+                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                            value={newRegEmail}
+                                            onChange={e => setNewRegEmail(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Mobile No</label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="9962520292"
+                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                            value={newRegMobile}
+                                            onChange={e => setNewRegMobile(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={async () => {
+                                    if (!isValidKeyFormat(newLicenseKey)) {
+                                        showAlert?.('warning', 'Invalid Key', 'Please enter a valid 16-digit license key.');
+                                        return;
+                                    }
+                                    setIsActivating(true);
+                                    const result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile);
+                                    setIsActivating(false);
+                                    if (result.success) {
+                                        showAlert?.('success', 'Activation Successful', result.message);
+                                        setLicenseInfo(getStoredLicense());
+                                    } else {
+                                        showAlert?.('danger', 'Activation Failed', result.message);
+                                    }
+                                }}
+                                disabled={isActivating}
+                                className="mt-4 w-full py-4 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white font-black uppercase text-sm rounded-xl shadow-xl shadow-pink-900/20 transition-all flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50"
+                            >
+                                {isActivating ? <Loader2 size={20} className="animate-spin" /> : <Shield size={20} />}
+                                {isActivating ? 'Activating...' : 'Re-Activate System'}
+                            </button>
                         </div>
                     </div>
                 </div>
             )}
 
             {activeTab === 'USERS' && (
-                <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4"><div className="p-2 bg-sky-900/30 text-sky-400 rounded-lg border border-sky-500/20"><Users size={24} /></div><div><h2 className="text-xl font-black text-white uppercase tracking-tighter">User Management</h2><p className="text-xs text-slate-400">Account Control & Access Permissions</p></div></div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="bg-slate-900/50 rounded-2xl border border-slate-800 overflow-hidden">
-                            <div className="px-4 py-3 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Existing Users ({appUsers.length})</div>
-                            <div className="divide-y divide-slate-800/60 max-h-[300px] overflow-y-auto">
-                                {appUsers.map(u => (
-                                    <div key={u.username} className="px-4 py-3 flex items-center justify-between hover:bg-slate-800/40">
-                                        <div><div className="text-xs font-black text-white uppercase">{u.name}</div><div className="text-[10px] text-slate-500">@{u.username} • {u.role}</div></div>
-                                        <div className="flex gap-1">
-                                            <button onClick={() => handleUmEdit(u)} className="p-1 px-2 bg-sky-600/20 text-sky-400 text-[9px] font-bold rounded">Edit</button>
-                                            <button onClick={() => handleUmDelete(u.username)} className="p-1 px-2 bg-rose-600/20 text-rose-400 text-[9px] font-bold rounded hover:bg-rose-600/40 transition-colors" title="Delete User" aria-label={`Delete user ${u.username}`}><Trash size={12} /></button>
-                                        </div>
-                                    </div>
-                                ))}
+                <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                    {/* Header with Global Save Action */}
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2.5 bg-sky-900/30 text-sky-400 rounded-xl border border-sky-500/20 shadow-lg">
+                                <Users size={28} />
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-black text-white uppercase tracking-tighter">User Management</h2>
+                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Account Control & Access Permissions</p>
                             </div>
                         </div>
-                        <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
-                            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{umEditId ? 'Modify Access' : 'Create Access'}</h3>
-                            <div className="space-y-3">
-                                <input type="text" value={umForm.name} onChange={e => setUmForm({...umForm, name: e.target.value})} placeholder="Name" className="w-full bg-slate-800 border-slate-700 border rounded-lg p-2 text-xs text-white" />
-                                <input type="text" value={umForm.username} onChange={e => setUmForm({...umForm, username: e.target.value.toLowerCase()})} placeholder="User ID" disabled={!!umEditId} className="w-full bg-slate-800 border-slate-700 border rounded-lg p-2 text-xs text-white" />
-                                <div className="relative">
-                                    <input type={umShowPwd ? "text" : "password"} value={umForm.password} onChange={e => setUmForm({...umForm, password: e.target.value})} placeholder="Password" className="w-full bg-slate-800 border-slate-700 border rounded-lg p-2 text-xs text-white" />
-                                    <button onClick={() => setUmShowPwd(!umShowPwd)} className="absolute right-2 top-2 text-slate-500" title={umShowPwd ? "Hide Password" : "Show Password"} aria-label={umShowPwd ? "Hide Password" : "Show Password"}><Lock size={14} /></button>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        {/* Left Column: Existing Users */}
+                        <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col h-full">
+                            <div className="flex items-center justify-between border-b border-white/5 pb-4 mb-6">
+                                <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                                    <Users size={14} className="text-sky-500" /> Existing Users ({appUsers.length})
+                                </h3>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2 min-h-[400px]">
+                                {appUsers.length === 0 ? (
+                                    <div className="h-full flex flex-col items-center justify-center text-slate-500 py-20">
+                                        <Users size={48} className="opacity-10 mb-4" />
+                                        <p className="text-sm font-bold uppercase tracking-widest italic opacity-40">No users created yet.</p>
+                                    </div>
+                                ) : (
+                                    appUsers.map(u => (
+                                        <div key={u.username} className="group p-4 bg-[#0a0f1d] border border-white/5 hover:border-sky-500/30 rounded-2xl transition-all flex items-center justify-between shadow-lg">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center border border-sky-500/20 text-sky-400 font-black">
+                                                    {u.name.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs font-black text-white uppercase tracking-tight">{u.name}</div>
+                                                    <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
+                                                        @{u.username} • <span className="text-sky-500/80">{u.role}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button 
+                                                    onClick={() => handleUmEdit(u)}
+                                                    className="p-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-lg border border-sky-500/20 transition-all shadow-inner"
+                                                    title="Edit User"
+                                                >
+                                                    <RotateCw size={14} />
+                                                </button>
+                                                {/* Delete restricted: Cannot delete self, and Admins can only be deleted by Developers */}
+                                                {u.username !== currentUser?.username && (u.role !== 'Administrator' || userRole === 'Developer') && (
+                                                    <button 
+                                                        onClick={() => handleUmDelete(u.username)}
+                                                        className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-rose-500/20 transition-all shadow-inner"
+                                                        title="Delete User"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Right Column: User Creation Form */}
+                        <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col gap-8 h-full">
+                            <div className="flex items-center gap-3 pb-2 border-b border-white/5">
+                                <Plus size={20} className="text-sky-500" />
+                                <div>
+                                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">{umEditId ? 'Modify Account' : 'Create New Account'}</h3>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{umEditId ? 'Update user credentials and roles' : 'Initialize a fresh secure login'}</p>
                                 </div>
-                                {umError && <p className="text-[10px] text-rose-400 font-bold animate-pulse">{umError}</p>}
-                                <button onClick={handleUmSave} className="w-full py-2 bg-sky-600 text-white rounded-lg text-[10px] font-black uppercase">Save User</button>
+                            </div>
+
+                            <div className="space-y-6">
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Full Name</label>
+                                    <input 
+                                        ref={umNameRef}
+                                        type="text" 
+                                        placeholder="Enter user's full name"
+                                        className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-sky-500/10 placeholder-gray-600"
+                                        value={umForm.name}
+                                        onChange={e => setUmForm({...umForm, name: e.target.value})}
+                                    />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Username / ID</label>
+                                    <input 
+                                        type="text" 
+                                        placeholder="Pick a unique login id"
+                                        disabled={!!umEditId}
+                                        className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono lowercase outline-none transition-all focus:ring-4 focus:ring-sky-500/10 ${!!umEditId ? 'opacity-50 grayscale cursor-not-allowed' : ''} placeholder-gray-600`}
+                                        value={umForm.username}
+                                        onChange={e => setUmForm({...umForm, username: e.target.value.toLowerCase()})}
+                                    />
+                                </div>
+
+                                <div className="space-y-1.5 relative">
+                                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Login Password</label>
+                                    <div className="relative group">
+                                        <input 
+                                            type={umShowPwd ? "text" : "password"} 
+                                            placeholder="Enter secure password"
+                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-sky-500/10 pr-12 placeholder-gray-600"
+                                            value={umForm.password}
+                                            onChange={e => setUmForm({...umForm, password: e.target.value})}
+                                        />
+                                        <button 
+                                            onClick={() => setUmShowPwd(!umShowPwd)}
+                                            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-sky-400 transition-colors bg-white/5 p-1 rounded-lg"
+                                            title={umShowPwd ? "Hide Password" : "Show Password"}
+                                        >
+                                            {umShowPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">System Role</label>
+                                    <div className="grid grid-cols-2 gap-2 bg-[#0a0f1d] p-1.5 rounded-2xl border border-white/5">
+                                        <button 
+                                            onClick={() => setUmForm({...umForm, role: 'Administrator'})}
+                                            className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'Administrator' ? 'bg-sky-600/20 text-sky-400 ring-2 ring-sky-500/30 shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                                        >
+                                            Administrator
+                                        </button>
+                                        <button 
+                                            onClick={() => setUmForm({...umForm, role: 'User'})}
+                                            className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'User' ? 'bg-sky-600 text-white shadow-xl shadow-sky-900/40 ring-2 ring-white/20' : 'text-slate-500 hover:text-slate-300'}`}
+                                        >
+                                            User
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-auto pt-6 border-t border-white/5 flex flex-col gap-3">
+                                {umError && <div className="px-4 py-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-500 text-[10px] font-bold text-center animate-pulse uppercase tracking-widest">{umError}</div>}
+                                <div className="flex gap-3">
+                                    {umEditId && (
+                                        <button 
+                                            onClick={() => { setUmEditId(null); setUmForm({ name: '', username: '', password: '', role: 'User', email: '' }); }}
+                                            className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black uppercase text-xs rounded-xl transition-all active:scale-[0.98]"
+                                        >
+                                            Cancel
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={handleUmSave}
+                                        className="flex-[2] py-4 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white font-black uppercase text-xs rounded-xl shadow-xl shadow-sky-900/30 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                    >
+                                        <Save size={16} />
+                                        {umEditId ? 'Update Identity' : 'Save User Account'}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -46,9 +46,9 @@ const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July
 // Global OS Detection for UI refinement
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
 
-const NavigationItem = ({ view, icon: Icon, label, activeView, setActiveView, isSidebarOpen, depth = 0, disabled = false }: { view: View, icon: any, label: string, activeView: View, setActiveView: (v: View) => void, isSidebarOpen: boolean, depth?: number, disabled?: boolean }) => (
+const NavigationItem = ({ view, icon: Icon, label, activeView, onNavigate, isSidebarOpen, depth = 0, disabled = false }: { view: View, icon: any, label: string, activeView: View, onNavigate: (v: View) => void, isSidebarOpen: boolean, depth?: number, disabled?: boolean }) => (
   <button
-    onClick={() => !disabled && setActiveView(view)}
+    onClick={() => !disabled && onNavigate(view)}
     title={`Navigate to ${label}`}
     aria-label={`Navigate to ${label}`}
     className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all relative group ${disabled ? 'opacity-40 cursor-not-allowed grayscale' : ''} ${activeView === view
@@ -100,6 +100,28 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   // NEW: Dedicated Flash Message State
   const [showFlashPopup, setShowFlashPopup] = useState(false);
+  const [isSettingsDirty, setIsSettingsDirty] = useState(false);
+
+  const safeNavigate = (view: View, tab?: string) => {
+    if (activeView === View.Settings && isSettingsDirty && view !== View.Settings) {
+      showAlert(
+        'confirm',
+        'Unsaved Configuration',
+        'You have unsaved changes in the configuration section. Would you like to stay and save them, or discard and leave?',
+        () => { /* Stay - Do nothing */ },
+        () => { 
+          setIsSettingsDirty(false);
+          setActiveView(view);
+          if (tab) setSettingsTab(tab as any);
+        },
+        'Stay & Save',
+        'Discard & Leave'
+      );
+      return;
+    }
+    setActiveView(view);
+    if (tab) setSettingsTab(tab as any);
+  };
 
 
   // Trial Notice State
@@ -365,6 +387,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   };
 
   const handleLogoutAction = () => {
+    if (activeView === View.Settings && isSettingsDirty) {
+      showAlert('warning', 'Unsaved Changes', 'You are about to sign out with unsaved configuration changes. These changes will be lost. Proceed anyway?', () => {
+        setIsSettingsDirty(false);
+        logout();
+        window.location.reload();
+      }, () => {}, 'Discard & Sign Out', 'Stay Here');
+      return;
+    }
     showAlert('confirm', 'Sign Out', 'Select an action to proceed:', () => { 
         logout(); 
         window.location.reload(); 
@@ -560,16 +590,16 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 )}
              </div>
              <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
-                <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked && activeView !== View.Dashboard} />
-                <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.MIS} icon={IndianRupee} label="Management Info (MIS)" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.PFCalculator} icon={Calculator} label="PF ECR Calculator" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                <NavigationItem view={View.AI_Assistant} icon={Bot} label="Compliance AI" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
-                {isSettingsAccessible && <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} setActiveView={setActiveView} isSidebarOpen={isSidebarOpen} />}
+                <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked && activeView !== View.Dashboard} />
+                <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.MIS} icon={IndianRupee} label="Management Info (MIS)" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.PFCalculator} icon={Calculator} label="PF ECR Calculator" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                <NavigationItem view={View.AI_Assistant} icon={Bot} label="Compliance AI" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked} />
+                {isSettingsAccessible && <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} />}
              </nav>
              <div className="p-4 border-t border-slate-800 bg-[#0b1120] space-y-1">
                 <button onClick={handleLogoutAction} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-red-400 hover:bg-red-900/20`}><LogOut size={18} /> {isSidebarOpen && <span className="font-bold text-sm">Sign Out</span>}</button>
@@ -635,15 +665,15 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 onMouseEnter={() => isSidebarOpen && activeView !== View.Dashboard && setIsSidebarOpen(false)}
              >
                <div className="p-8 max-w-7xl mx-auto">
-                 {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={setActiveView} />}
-                 {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} />}
+                 {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={safeNavigate} />}
+                 {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} />}
                  {activeView === View.PayProcess && <PayProcess employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} />}
                  {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} />}
                  {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} />}
                  {activeView === View.MIS && <MISDashboard payrollHistory={payrollHistory} employees={employees} companyProfile={companyProfile} showAlert={showAlert} />}
                  {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                  {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} />}
-                 {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={onRefresh} initialTab={settingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); setActiveView(View.Dashboard); }} onNuclearReset={handleNuclearReset} showAlert={showAlert} />}
+                 {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={onRefresh} initialTab={settingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onNuclearReset={handleNuclearReset} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} />}
                  {activeView === View.AI_Assistant && <AIAssistant />}
                </div>
              </main>

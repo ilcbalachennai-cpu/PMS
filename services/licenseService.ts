@@ -356,6 +356,10 @@ export const activateFullLicense = async (
 export const validateLicenseStartup = async (force: boolean = false): Promise<{ valid: boolean; message?: string }> => {
   const stored = getStoredLicense();
   const currentMachineId = await getMachineId();
+  // Ensure the fetched machine ID is persisted for synchronous lookups (getMachineKey)
+  if (currentMachineId && currentMachineId !== 'UNKNOWN-MACHINE-ID') {
+    localStorage.setItem('app_machine_id', currentMachineId);
+  }
 
   // 1. If we have a local license, perform local integrity/expiry checks
   if (stored) {
@@ -382,7 +386,7 @@ export const validateLicenseStartup = async (force: boolean = false): Promise<{ 
   // 2. Online Verification / Developer Rescue Sync
   const lastCheck = localStorage.getItem('app_license_last_check');
   const today = new Date().toISOString().split('T')[0];
-  const isDev = (window as any).process?.env?.NODE_ENV === 'development';
+  const isDev = import.meta.env.DEV;
 
   // Perform online sync if:
   // - No license found yet (Rescue Sync)
@@ -422,7 +426,7 @@ export const validateLicenseStartup = async (force: boolean = false): Promise<{ 
         const devObj = {
           username: cloudData.devUser,
           password: cloudData.devPass,
-          name: String(cloudData.devUser).toUpperCase(),
+          name: `${cloudData.devUser}(Developer)`,
           role: 'Developer',
           email: 'developer@bharatpay.com'
         };
