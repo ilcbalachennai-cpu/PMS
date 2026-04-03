@@ -4,7 +4,7 @@ import {
     Database, Users, KeyRound, ShieldCheck, Mail, Megaphone, Building2, 
     CalendarClock, Phone, Globe, CheckCircle2, AlertCircle, Lock, Plus,
     ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator, 
-    ScrollText, Percent, HandCoins, Wallet, Scale, Trash, RotateCw 
+    ScrollText, Percent, HandCoins, Wallet, Scale, Trash, RotateCw, TrendingUp
 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
@@ -1109,6 +1109,31 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 </div>
                             </div>
                         )}
+                    </div>
+                    
+                    {/* Arrear Salary Module Configuration */}
+                    <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+                        <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <TrendingUp className="text-emerald-400" size={20} />
+                                <h3 className="font-bold uppercase tracking-widest text-xs text-emerald-400">Arrear Salary Module</h3>
+                            </div>
+                            <label className="flex items-center gap-2 cursor-pointer p-1.5 px-3 bg-emerald-900/20 rounded-lg border border-emerald-500/20 hover:bg-emerald-900/30 transition-all">
+                                <input
+                                    type="checkbox"
+                                    className="w-4 h-4 rounded border-slate-700 text-emerald-500 bg-slate-900 accent-emerald-500"
+                                    checked={formData.enableArrearSalary || false}
+                                    onChange={e => setFormData({ ...formData, enableArrearSalary: e.target.checked })}
+                                    title="Enable Arrear Salary Module"
+                                />
+                                <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Enable Arrear Module</span>
+                            </label>
+                        </div>
+                        <div className="p-6 bg-slate-900/30">
+                            <p className="text-[11px] text-slate-400 leading-relaxed italic">
+                                "Enabling this module allows processing of salary arrears for previous months within the current pay cycle. A dedicated 'Arrear Salary' tab will appear in the Pay Process workspace."
+                            </p>
+                        </div>
                     </div>
 
                     {/* PT Matrix */}

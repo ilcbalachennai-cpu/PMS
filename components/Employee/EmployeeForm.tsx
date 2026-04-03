@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
     X, User2, Plus, Edit2, Camera, Upload,
     FileText, Save, Home, MapPinned, Landmark,
@@ -62,6 +62,17 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
     isSeparationUnlocked,
     onUnlockSeparation
 }) => {
+    const nameInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        // Automatically focus the name input when the form opens
+        // Using a small timeout to ensure the modal animation doesn't interfere
+        const timer = setTimeout(() => {
+            nameInputRef.current?.focus();
+        }, 100);
+        return () => clearTimeout(timer);
+    }, []);
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
             <div className="bg-[#1e293b] w-full max-w-6xl max-h-[92vh] overflow-y-auto custom-scrollbar rounded-3xl border border-slate-700 shadow-2xl flex flex-col">
@@ -168,7 +179,16 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 </div>
                                 <div className="space-y-1.5 md:col-span-2">
                                     <label htmlFor="employeeNameInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Full Legal Name*</label>
-                                    <input id="employeeNameInput" required title="Full Legal Name" aria-label="Full Legal Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none" value={newEmpForm.name} onChange={e => setNewEmpForm({ ...newEmpForm, name: e.target.value })} />
+                                    <input 
+                                        ref={nameInputRef}
+                                        id="employeeNameInput" 
+                                        required 
+                                        title="Full Legal Name" 
+                                        aria-label="Full Legal Name" 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                                        value={newEmpForm.name} 
+                                        onChange={e => setNewEmpForm({ ...newEmpForm, name: e.target.value })} 
+                                    />
                                 </div>
 
                                 <div className="space-y-1.5">

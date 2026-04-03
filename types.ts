@@ -149,6 +149,7 @@ export interface StatutoryConfig {
     special2: boolean;
     special3: boolean;
   };
+  enableArrearSalary: boolean;
 }
 
 export interface CompanyProfile {

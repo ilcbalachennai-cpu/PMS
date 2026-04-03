@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp, UploadCloud, AlertCircle } from 'lucide-react';
+import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp, UploadCloud, AlertCircle, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
@@ -273,6 +273,43 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         reader.readAsBinaryString(file);
     };
 
+    const handleMasterReset = () => {
+        if (isLocked) return;
+
+        props.showAlert('confirm', 'MASTER DATA RESET', 'This will CLEAR ALL Attendance, Advances (Current), Fines, and OT data for the current period. Opening balances will be preserved. Proceed?', () => {
+            // 1. Reset Attendance
+            const newAttendances = props.attendances.filter(a => !(a.month === props.month && a.year === props.year));
+            props.setAttendances(newAttendances);
+
+            // 2. Reset Fines
+            const newFines = props.fines.filter(f => !(f.month === props.month && f.year === props.year));
+            props.setFines(newFines);
+
+            // 3. Reset OT
+            const newOT = props.otRecords.filter(r => !(r.month === props.month && r.year === props.year));
+            props.setOTRecords(newOT);
+
+            // 4. Reset Arrears (if applicable)
+            if (props.setArrearHistory) {
+                const newArrears = (props.arrearHistory || []).filter(b => !(b.month === props.month && b.year === props.year));
+                props.setArrearHistory(newArrears);
+            }
+
+            // 5. Reset Advances
+            const newAdvances = props.advanceLedgers.map(adv => ({
+                ...adv,
+                totalAdvance: 0,
+                emiCount: 0,
+                manualPayment: 0,
+                recovery: 0,
+                balance: adv.opening || 0
+            }));
+            props.setAdvanceLedgers(newAdvances);
+
+            setActiveTab('attendance');
+        });
+    };
+
     // GATEWAY VIEW
     if (isGatewayOpen) {
         return (
@@ -343,6 +380,17 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                             <RefreshCw size={12} />
                             Change Period
                         </button>
+
+                        <button
+                            onClick={handleMasterReset}
+                            disabled={isLocked}
+                            title="Reset all input data for this month"
+                            aria-label="Reset all input data for this month"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-900/20 hover:bg-red-900/40 text-red-400 rounded-md border border-red-900/30 transition-all text-[10px] font-bold uppercase disabled:opacity-30 disabled:grayscale"
+                        >
+                            <RotateCw size={12} />
+                            Master Reset
+                        </button>
                     </div>
                 </div>
 
@@ -362,7 +410,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     <TabButton id="ledgers" label="2. Advances" icon={Wallet} />
                     <TabButton id="fines" label="3. Tax & Fines" icon={Gavel} />
                     {props.config.enableOT && <TabButton id="overtime" label="4. Overtime" icon={CalendarClock} />}
-                    <TabButton id="arrears" label="5. Arrear Salary" icon={TrendingUp} />
+                    {props.config.enableArrearSalary && <TabButton id="arrears" label="5. Arrear Salary" icon={TrendingUp} />}
                     <TabButton id="payroll" label="6. Run Payroll" icon={Calculator} />
                 </div>
             </div>
@@ -448,17 +496,33 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 </div>
 
                 <div className={activeTab === 'arrears' ? 'block' : 'hidden'}>
-                    <ArrearManager
-                        employees={props.employees}
-                        setEmployees={props.setEmployees || (() => { })}
-                        currentMonth={props.month}
-                        currentYear={props.year}
-                        companyProfile={props.companyProfile}
-                        arrearHistory={props.arrearHistory}
-                        setArrearHistory={props.setArrearHistory}
-                        savedRecords={props.savedRecords}
-                        showAlert={props.showAlert}
-                    />
+                    {props.config.enableArrearSalary ? (
+                        <ArrearManager
+                            employees={props.employees}
+                            setEmployees={props.setEmployees || (() => { })}
+                            currentMonth={props.month}
+                            currentYear={props.year}
+                            companyProfile={props.companyProfile}
+                            arrearHistory={props.arrearHistory}
+                            setArrearHistory={props.setArrearHistory}
+                            savedRecords={props.savedRecords}
+                            showAlert={props.showAlert}
+                        />
+                    ) : (
+                        <div className="flex flex-col items-center justify-center h-[50vh] bg-[#0f172a]/30 rounded-2xl border border-slate-800/50 backdrop-blur-sm text-center px-6">
+                            <div className="bg-emerald-500/10 p-4 rounded-full mb-6 ring-8 ring-emerald-500/5">
+                                <AlertCircle size={64} className="text-emerald-500" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">Arrear Module Not Activated</h3>
+                            <div className="flex flex-col gap-1 text-slate-400 max-w-md">
+                                <p className="text-sm">
+                                    Go to <span className="text-blue-400 font-bold">Configuration</span> → <span className="text-blue-400 font-bold">Statutory Rule</span> → <span className="text-blue-400 font-bold">Arrear Salary Module</span> to
+                                </p>
+                                <p className="text-sm">activate this module.</p>
+                                <p className="text-sm border-t border-slate-800 mt-4 pt-4 text-[11px] uppercase font-black tracking-widest text-emerald-500 opacity-60">Arrear Salary Management</p>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className={activeTab === 'payroll' ? 'block' : 'hidden'}>

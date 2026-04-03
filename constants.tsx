@@ -163,7 +163,8 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
     special1: false,
     special2: false,
     special3: false
-  }
+  },
+  enableArrearSalary: false
 };
 
 export const DEFAULT_LEAVE_POLICY: LeavePolicy = {
