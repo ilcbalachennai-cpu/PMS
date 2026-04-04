@@ -229,6 +229,46 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             }
         }
         // -----------------------------------
+        
+        // VALIDATION: Check for "Total Days > Days in Month"
+        const daysInMonthTotal = new Date(year, months.indexOf(month) + 1, 0).getDate();
+        const attendanceErrors = activeEmployees.filter(emp => {
+            const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
+            const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0);
+            return total > daysInMonthTotal;
+        });
+
+        if (attendanceErrors.length > 0) {
+            setModalState({
+                isOpen: true,
+                type: 'error',
+                title: 'Attendance Validation Error',
+                message: (
+                    <div className="text-left space-y-3">
+                        <p className="text-xs font-bold text-red-400 uppercase tracking-tight">Total accounted days for the following employees exceed {daysInMonthTotal} days for {month}:</p>
+                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 max-h-48 overflow-y-auto custom-scrollbar shadow-inner">
+                            {attendanceErrors.map(emp => {
+                                const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
+                                const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0);
+                                return (
+                                    <div key={emp.id} className="flex justify-between items-center text-[10px] py-1.5 border-b border-slate-800 last:border-0 animate-in fade-in slide-in-from-left-2 transition-all">
+                                        <div className="flex flex-col">
+                                            <span className="text-white font-black uppercase">{emp.name}</span>
+                                            <span className="text-slate-500 font-mono text-[9px]">{emp.id}</span>
+                                        </div>
+                                        <div className="flex flex-col items-end">
+                                            <span className="text-red-400 font-black py-0.5 px-2 bg-red-950/30 border border-red-900/40 rounded text-[11px] font-mono">Total {total}</span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <p className="text-[9px] text-slate-400 italic text-center font-bold uppercase tracking-wider">* Fix attendance records in 'Attendance Manager' then recalculate.</p>
+                    </div>
+                )
+            });
+            return;
+        }
 
         if (!checkAgeMaturity()) return;
 
@@ -353,6 +393,24 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     const presentCount = results.filter(r => r.payableDays > 0).length;
     const absentCount = activeCount - presentCount;
 
+    // --- AGGREGATE TOTALS FOR TABLE SUMMARY ---
+    const tableTotals = useMemo(() => {
+        return results.reduce((acc, r) => ({
+            days: acc.days + (r.payableDays || 0),
+            basic: acc.basic + (r.earnings.basic || 0),
+            da: acc.da + (r.earnings.da || 0),
+            hra: acc.hra + (r.earnings.hra || 0),
+            others: acc.others + ((r?.earnings?.total || 0) - ((r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.hra || 0))),
+            gross: acc.gross + (r.earnings.total || 0),
+            pf: acc.pf + (r.deductions.epf || 0),
+            esi: acc.esi + (r.deductions.esi || 0),
+            ptTds: acc.ptTds + ((r.deductions.pt || 0) + (r.deductions.it || 0)),
+            advance: acc.advance + (r.deductions.advanceRecovery || 0),
+            dedn: acc.dedn + (r.deductions.total || 0),
+            net: acc.net + (r.netPay || 0)
+        }), { days: 0, basic: 0, da: 0, hra: 0, others: 0, gross: 0, pf: 0, esi: 0, ptTds: 0, advance: 0, dedn: 0, net: 0 });
+    }, [results]);
+
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
             <div className={`bg-[#1e293b] p-3 rounded-xl border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 ${isLocked ? 'opacity-90' : ''}`}>
@@ -437,7 +495,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                     <th className="px-3 py-3 text-right text-blue-400 bg-[#0f172a]">PF</th>
                                     <th className="px-3 py-3 text-right text-pink-400 bg-[#0f172a]">ESI</th>
                                     <th className="px-3 py-3 text-right text-amber-400 bg-[#0f172a]">PT/TDS</th>
-                                    <th className="px-3 py-3 text-right text-red-400 bg-[#0f172a]">Fine</th>
+                                    <th className="px-3 py-3 text-right text-sky-400 bg-[#0f172a]">Advance</th>
                                     <th className="px-3 py-3 text-right text-red-300 bg-[#0f172a]">Dedn</th>
                                     <th className="px-3 py-3 text-right text-emerald-400 bg-[#0f172a]">Net Pay</th>
                                     <th className="px-3 py-3 text-center bg-[#0f172a] sticky right-0 z-20 shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.5)]">View</th>
@@ -447,8 +505,10 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                 {results.filter(r => !isSaved || r.netPay > 0).map(r => {
                                     const emp = employees.find(e => e.id === r.employeeId);
                                     const others = (r?.earnings?.total || 0) - ((r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.hra || 0));
+                                    const isZeroAttendance = r.payableDays === 0;
+
                                     return (
-                                        <tr key={r.employeeId} className="hover:bg-slate-800/50 transition-colors">
+                                        <tr key={r.employeeId} className={`hover:bg-slate-800/50 transition-colors ${isZeroAttendance ? 'opacity-40 grayscale-[0.5] font-medium italic select-none pointer-events-none' : ''}`}>
                                             <td className="px-5 py-2">
                                                 <div className="text-xs font-bold text-white uppercase tracking-normal">{emp?.name}</div>
                                                 <div className="text-[9px] text-slate-500 font-mono uppercase tracking-normal">{r.employeeId}</div>
@@ -462,7 +522,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                             <td className="px-3 py-2 text-right font-mono text-blue-300 text-[11px]">{(r?.deductions?.epf || 0).toLocaleString()}</td>
                                             <td className="px-3 py-2 text-right font-mono text-pink-300 text-[11px]">{(r?.deductions?.esi || 0).toLocaleString()}</td>
                                             <td className="px-3 py-2 text-right font-mono text-amber-300 text-[11px]">{((r?.deductions?.pt || 0) + (r?.deductions?.it || 0)).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-red-500 font-black text-[11px]">{(r?.deductions?.fine || 0).toLocaleString()}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-sky-300 font-black text-[11px]">{(r?.deductions?.advanceRecovery || 0).toLocaleString()}</td>
                                             <td className="px-3 py-2 text-right font-mono text-red-300 text-[11px]">{(r?.deductions?.total || 0).toLocaleString()}</td>
                                             <td className="px-3 py-2 text-right font-mono font-black text-emerald-400 text-xs bg-emerald-900/10">{(r?.netPay || 0).toLocaleString()}</td>
                                             <td className="px-3 py-2 text-center sticky right-0 bg-[#1e293b] shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.5)]">
@@ -474,6 +534,24 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                     );
                                 })}
                             </tbody>
+                            <tfoot className="sticky bottom-0 z-20 bg-[#0f172a]/95 backdrop-blur-md border-t-2 border-slate-700 shadow-[0_-4px_10px_rgba(0,0,0,0.3)]">
+                                <tr className="text-[10px] font-black uppercase tracking-tight">
+                                    <td className="px-5 py-3 text-sky-400">Total Summary</td>
+                                    <td className="px-2 py-3 text-center font-mono text-white bg-white/5">{tableTotals.days.toFixed(1)}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{Math.round(tableTotals.basic).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{Math.round(tableTotals.da).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{Math.round(tableTotals.hra).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-slate-500">{Math.round(tableTotals.others).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-white bg-white/5 font-black">{Math.round(tableTotals.gross).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-blue-400">{Math.round(tableTotals.pf).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-pink-400">{Math.round(tableTotals.esi).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-amber-400">{Math.round(tableTotals.ptTds).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-sky-400">{Math.round(tableTotals.advance).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-red-400 bg-red-950/20">{Math.round(tableTotals.dedn).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-emerald-400 bg-emerald-950/20 font-black">{Math.round(tableTotals.net).toLocaleString()}</td>
+                                    <td className="px-3 py-3 bg-[#0f172a] sticky right-0"></td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
                 </div>

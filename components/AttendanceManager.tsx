@@ -49,7 +49,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     isOpen: boolean;
     type: 'confirm' | 'success' | 'error';
     title: string;
-    message: string;
+    message: string | React.ReactNode;
     onConfirm?: () => void;
   }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
@@ -136,7 +136,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     // VALIDATION 1: Check if at least one employee has non-zero data
     const hasData = activeEmployees.some(emp => {
       const att = getAttendance(emp.id);
-      const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0) + (att.encashedDays || 0);
+      const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0);
       return total > 0;
     });
 
@@ -176,6 +176,40 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
         type: 'error',
         title: 'Balance Exceeded',
         message: `Cannot save: Leave usage exceeds available limit for ${ledgerErrors.length} employee(s).\n\nEnsure usage does not exceed Opening + Eligible credits.`
+      });
+      return;
+    }
+
+    // VALIDATION 3: Check for "Total Days > Days in Month"
+    const attendanceErrors = activeEmployees.filter(emp => {
+      const att = getAttendance(emp.id);
+      const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0);
+      return total > daysInMonth;
+    });
+
+    if (attendanceErrors.length > 0) {
+      setModalState({
+        isOpen: true,
+        type: 'error',
+        title: 'Attendance Validation Error',
+        message: (
+          <div className="text-left space-y-3">
+            <p className="text-xs font-bold text-red-400">Total accounted days for the following employees exceed {daysInMonth} days:</p>
+            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 max-h-40 overflow-y-auto custom-scrollbar">
+              {attendanceErrors.map(emp => {
+                const att = getAttendance(emp.id);
+                const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0);
+                return (
+                  <div key={emp.id} className="flex justify-between items-center text-[11px] py-1.5 border-b border-slate-800 last:border-0 animate-in fade-in slide-in-from-left-2 transition-all">
+                    <span className="text-white font-bold">{emp.name} ({emp.id})</span>
+                    <span className="text-red-400 font-black">Total: {total}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-slate-400 italic text-center">* Adjust present or leave days to match the month total.</p>
+          </div>
+        )
       });
       return;
     }
@@ -628,7 +662,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     <HelpCircle size={24} />}
               </div>
               <h3 className="text-lg font-bold text-white text-center">{modalState.title}</h3>
-              <p className="text-sm text-slate-400 text-center whitespace-pre-line">{modalState.message}</p>
+              <div className="text-sm text-slate-400 text-center whitespace-pre-line">{modalState.message}</div>
             </div>
 
             <div className="flex gap-3 mt-4">

@@ -79,7 +79,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         const headers = [
             "Employee ID", "Name",
             "Present Days", "EL (Availed)", "EL Encash", "SL (Sick)", "CL (Casual)", "LOP",
-            "New Advance", "Monthly EMI", "Adv Manual Pay",
+            "Opening Advance", "New Advance", "Monthly EMI", "Adv Manual Pay",
             "Income Tax", "Fine Amount", "Fine Reason", "OT Days", "OT Hours"
         ];
 
@@ -99,6 +99,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 att?.sickLeave || 0,
                 att?.casualLeave || 0,
                 att?.lopDays || 0,
+                adv?.opening || 0,
                 adv?.totalAdvance || 0,
                 adv?.monthlyInstallment || 0,
                 adv?.paidAmount || 0,
@@ -193,16 +194,21 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
 
                     // 3. ADVANCE PROCESSING
                     const advIdx = newAdvanceLedgers.findIndex(a => a.employeeId === empId);
+                    const opening = Number(row['Opening Advance'] || 0);
                     const totalAdvance = Number(row['New Advance'] || 0);
                     const monthlyEMI = Number(row['Monthly EMI'] || 0);
                     const paidManual = Number(row['Adv Manual Pay'] || 0);
 
                     if (advIdx >= 0) {
                         const ledger = newAdvanceLedgers[advIdx];
+                        ledger.opening = opening;
                         ledger.totalAdvance = totalAdvance;
                         ledger.emiCount = monthlyEMI;
                         ledger.manualPayment = paidManual;
-                        const totalBal = (ledger.opening || 0) + totalAdvance;
+                        ledger.paidAmount = paidManual; // Sync with legacy field
+                        ledger.monthlyInstallment = monthlyEMI; // Sync with legacy field
+
+                        const totalBal = opening + totalAdvance;
                         let recovery = 0;
                         if (paidManual > 0) {
                             recovery = Math.min(paidManual, totalBal);
@@ -211,8 +217,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         }
                         ledger.recovery = recovery;
                         ledger.balance = Math.max(0, totalBal - recovery);
-                    } else if (totalAdvance > 0 || monthlyEMI > 0) {
-                        const totalBal = totalAdvance;
+                    } else if (opening > 0 || totalAdvance > 0 || monthlyEMI > 0) {
+                        const totalBal = opening + totalAdvance;
                         let recovery = 0;
                         if (paidManual > 0) {
                             recovery = Math.min(paidManual, totalBal);
@@ -221,10 +227,12 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         }
                         newAdvanceLedgers.push({
                             employeeId: empId,
-                            opening: 0,
+                            opening: opening,
                             totalAdvance,
                             emiCount: monthlyEMI,
+                            monthlyInstallment: monthlyEMI,
                             manualPayment: paidManual,
+                            paidAmount: paidManual,
                             recovery,
                             balance: Math.max(0, totalBal - recovery)
                         });
@@ -301,6 +309,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 totalAdvance: 0,
                 emiCount: 0,
                 manualPayment: 0,
+                paidAmount: 0,
+                monthlyInstallment: 0,
                 recovery: 0,
                 balance: adv.opening || 0
             }));

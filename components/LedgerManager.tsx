@@ -147,7 +147,11 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
         if (exists) {
             const updated = advanceLedgers.map(a => {
                 if (a.employeeId === empId) {
-                    return computeRecoveryAndBalance({ ...a, [field]: value });
+                    const updatedRec = { ...a, [field]: value };
+                    // Sync legacy fields
+                    if (field === 'manualPayment') updatedRec.paidAmount = value;
+                    if (field === 'emiCount') updatedRec.monthlyInstallment = value;
+                    return computeRecoveryAndBalance(updatedRec);
                 }
                 return a;
             });
@@ -158,11 +162,15 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                 opening: 0,
                 totalAdvance: 0,
                 emiCount: 0,
+                monthlyInstallment: 0,
                 manualPayment: 0,
+                paidAmount: 0,
                 recovery: 0,
                 balance: 0,
                 [field]: value
             };
+            if (field === 'manualPayment') newRecord.paidAmount = value;
+            if (field === 'emiCount') newRecord.monthlyInstallment = value;
             setAdvanceLedgers([...advanceLedgers, computeRecoveryAndBalance(newRecord)]);
         }
     };
@@ -212,7 +220,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
             const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
             XLSX.utils.book_append_sheet(wb, ws, "Leave_Ledger");
         } else {
-            const headers = ["Employee ID", "Name", "Opening", "New Advance", "Manual Payment", "EMI Count", "Recovery"];
+            const headers = ["Employee ID", "Name", "Opening Advance", "New Advance", "Manual Payment", "EMI Count", "Recovery"];
             const data = filteredEmployees.map(e => {
                 const a = advanceLedgers.find(adv => adv.employeeId === e.id);
                 return [
@@ -283,7 +291,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                             const totalAdvance = Number(row['New Advance'] || row['Advance Amount'] || 0);
                             const emiCount = Number(row['EMI Count'] || row['Monthly EMI'] || 0);
                             const manualPayment = Number(row['Manual Payment'] || row['Paid Amount'] || 0);
-                            const opening = Number(row['Opening'] || 0);
+                            const opening = Number(row['Opening Advance'] || row['Opening'] || row['Opening Balance'] || 0);
 
                             const totalBal = opening + totalAdvance;
                             let recovery = 0;
@@ -297,7 +305,9 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                             if (idx >= 0) {
                                 newLedgers[idx].totalAdvance = totalAdvance;
                                 newLedgers[idx].emiCount = emiCount;
+                                newLedgers[idx].monthlyInstallment = emiCount; // Sync
                                 newLedgers[idx].manualPayment = manualPayment;
+                                newLedgers[idx].paidAmount = manualPayment; // Sync
                                 if (opening > 0) newLedgers[idx].opening = opening;
                                 newLedgers[idx].recovery = recovery;
                                 newLedgers[idx].balance = balance;
@@ -307,7 +317,9 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                     opening,
                                     totalAdvance,
                                     emiCount,
+                                    monthlyInstallment: emiCount,
                                     manualPayment,
+                                    paidAmount: manualPayment,
                                     recovery,
                                     balance
                                 });

@@ -135,20 +135,37 @@ const Reports: React.FC<ReportsProps> = ({
         setSelectedEmployeeId('all');
     }, [month, year, reportType]);
 
-    // Initial Jump to Latest Frozen Month
+    // Initial Jump to Latest Relevant Month (Saved Draft or Frozen)
     useEffect(() => {
-        if (!hasInitialJumped.current && latestFrozenPeriod) {
-            // Only jump if the current month is NOT finalized
-            const records = savedRecords.filter(r => r.month === month && r.year === year);
-            const currentIsFinalized = records.length > 0 && records[0].status === 'Finalized';
-            
-            if (!currentIsFinalized) {
+        if (!hasInitialJumped.current) {
+            // Check if current month already has data
+            const currentHasData = savedRecords.some(r => r.month === month && r.year === year);
+
+            if (!currentHasData && savedRecords.length > 0) {
+                // Find the absolute latest saved period (Draft OR Finalized)
+                let latest = savedRecords[0];
+                let maxVal = (latest.year * 12) + months.indexOf(latest.month);
+
+                savedRecords.forEach(r => {
+                    const val = (r.year * 12) + months.indexOf(r.month);
+                    if (val > maxVal) {
+                        maxVal = val;
+                        latest = r;
+                    }
+                });
+
+                if (latest.month !== month || latest.year !== year) {
+                    setMonth(latest.month);
+                    setYear(latest.year);
+                }
+            } else if (!currentHasData && latestFrozenPeriod) {
+                // Fallback to latest frozen if no records are found in history slice
                 setMonth(latestFrozenPeriod.month);
                 setYear(latestFrozenPeriod.year);
             }
             hasInitialJumped.current = true;
         }
-    }, [latestFrozenPeriod, month, year, setMonth, setYear, savedRecords]);
+    }, [savedRecords, month, year, setMonth, setYear, latestFrozenPeriod, months]);
 
     const getPayrollPeriodStart = () => {
         const mIdx = months.indexOf(month);

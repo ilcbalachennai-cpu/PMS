@@ -42,24 +42,30 @@ html, body {
   animation-play-state: paused;
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+/* GLOBAL PREMIUM SCROLLBARS */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: #0f172a;
-  border-radius: 10px;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #3b82f6;
-  border-radius: 10px;
-  border: 1px solid #0f172a;
+::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.4); /* Blue-500 with transparency */
+  border-radius: 20px;
+  border: 1px solid transparent;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #2563eb;
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.8);
+}
+
+/* Firefox Support */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(59, 130, 246, 0.4) transparent;
 }
 
 .progress-shadow-blue {

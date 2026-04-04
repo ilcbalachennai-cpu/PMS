@@ -308,20 +308,27 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 if (!content) throw new Error("Could not read file content");
 
                 const encryptedContent = content as string;
-                setProcessStatus('Decrypting data...');
-                setProcessProgress(40);
+                setProcessStatus('Decrypting secure archive...');
+                setProcessProgress(20);
                 await delay(300);
 
                 let decryptedString = '';
                 try {
                     const bytes = CryptoJS.AES.decrypt(encryptedContent, encryptionKey);
                     decryptedString = bytes.toString(CryptoJS.enc.Utf8);
+                    setProcessProgress(50);
                     if (!decryptedString) throw new Error("Invalid Decryption Result");
                 } catch (cryptoErr) {
                     throw new Error("Wrong Password or Corrupt File");
                 }
 
+                setProcessStatus('Decoding binary structures...');
+                setProcessProgress(60);
+                await delay(200);
                 const data = JSON.parse(decryptedString);
+                setProcessProgress(70);
+
+                setProcessStatus('Migrating local databases...');
                 const dataKeys = ['app_employees', 'app_config', 'app_company_profile', 'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history', 'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo', 'app_users', 'app_ot_records'];
                 dataKeys.forEach(k => localStorage.removeItem(k));
 
@@ -359,8 +366,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 }
 
                 setProcessProgress(100);
-                setProcessStatus('Data Restored Successfully!');
-                await delay(500);
+                setProcessStatus('Restoration Finalized!');
+                await delay(800);
 
                 setIsProcessing(false);
                 setShowBackupModal(false);
@@ -731,36 +738,36 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             title="Save Configuration" 
                             aria-label="Save Configuration"
                         >
-                            {saved ? <CheckCircle2 size={14} /> : isDirty ? <Save size={14} /> : <div className="w-1.5 h-1.5 rounded-full bg-slate-600" />}
-                            {saved ? 'DATA SAVED' : isDirty ? 'SAVE CONFIGURATION' : 'SYSTEM SYNCHRONIZED'}
+                            {saved ? <CheckCircle2 size={14} /> : isDirty ? <Save size={14} /> : <Save size={14} />}
+                            {saved ? 'DATA SAVED' : isDirty ? 'SAVE CONFIGURATION' : 'SAVE CONFIGURATION'}
                         </button>
                     </div>
                 </div>
 
                 {/* Bottom Row: Navigation Tabs */}
-                <div className="flex overflow-x-auto pb-1 custom-scrollbar scroll-smooth px-4 mt-1">
-                    <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
-                        <ShieldCheck size={16} /> STATUTORY RULES
+                <div className="flex overflow-x-auto pb-1 custom-scrollbar scroll-smooth px-4 mt-1 border-b border-white/5">
+                    <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                        <ShieldCheck size={14} /> STATUTORY RULES
                     </button>
-                    <button onClick={() => setActiveTab('COMPANY')} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'COMPANY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
-                        <Building2 size={16} /> COMPANY PROFILE
+                    <button onClick={() => setActiveTab('COMPANY')} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'COMPANY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                        <Building2 size={14} /> COMPANY PROFILE
                     </button>
-                    <button onClick={() => setActiveTab('DATA')} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'DATA' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
-                        <Database size={16} /> DATA MANAGEMENT
+                    <button onClick={() => setActiveTab('DATA')} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'DATA' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                        <Database size={14} /> DATA MANAGEMENT
                     </button>
                     {userRole === 'Developer' && (
-                        <button onClick={() => setActiveTab('DEVELOPER')} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'DEVELOPER' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
-                            <Megaphone size={16} /> DEVELOPER OPTIONS
+                        <button onClick={() => setActiveTab('DEVELOPER')} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'DEVELOPER' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                            <Megaphone size={14} /> DEVELOPER OPTIONS
                         </button>
                     )}
                     {!isSetupMode && (
-                        <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'LICENSE' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
-                            <ShieldCheck size={16} /> LICENSE MANAGEMENT
+                        <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'LICENSE' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                            <ShieldCheck size={14} /> LICENSE MANAGEMENT
                         </button>
                     )}
                     {(licenseInfo || !isSetupMode || appUsers.length > 0) && (
-                        <button onClick={() => setActiveTab('USERS')} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`whitespace-nowrap pb-3 px-5 text-[11px] font-black border-b-[3px] transition-all flex items-center justify-center gap-2.5 ${activeTab === 'USERS' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}>
-                            <Users size={16} /> USER MANAGEMENT
+                        <button onClick={() => setActiveTab('USERS')} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'USERS' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                            <Users size={14} /> USER MANAGEMENT
                         </button>
                     )}
                 </div>
@@ -1700,6 +1707,15 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
                             {processStatus && <p className="text-[10px] text-blue-400 font-bold text-center animate-pulse uppercase tracking-widest">{processStatus}</p>}
                             
+                            {isProcessing && (
+                                <div className="w-full bg-[#0f172a] border border-slate-800 h-2.5 rounded-full overflow-hidden shadow-inner my-2">
+                                    <div 
+                                        className="h-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-all duration-500 ease-out shadow-[0_0_12px_rgba(59,130,246,0.4)]" 
+                                        style={{ width: `${processProgress}%` }}
+                                    ></div>
+                                </div>
+                            )}
+
                             <button 
                                 onClick={backupMode === 'EXPORT' ? handleEncryptedExport : initiateRestore} 
                                 disabled={isProcessing || (backupMode === 'IMPORT' && !selectedBackupFile)} 

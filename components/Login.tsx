@@ -117,10 +117,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       } else if (!import.meta.env.PROD) {
         // Fallback for local dev if sync hasn't happened yet
         allUsers.push({
-          username: 'ILCbala',
+          username: 'ILCBala',
           password: 'password', // Default local fallback
           role: 'Developer',
-          name: 'ILCbala(Developer)',
+          name: 'ILCBala (Developer)',
           email: 'developer@bharatpay.com'
         } as any);
       }
@@ -203,27 +203,35 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
         }
 
         // --- CLOUD FALLBACK ---
-        // If local login fails, try a one-time cloud sync to see if credentials were updated remotely
         console.log("⚠️ Local login failed. Attempting cloud sync fallback...");
         const syncResult = await validateLicenseStartup(true);
 
-
-        // 1. Check for newly synced Developer (Bypass license check if developer match)
-        const syncedDev = getAppDeveloper();
-        if (syncedDev && 
-            String(syncedDev.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
-            String(syncedDev.password).trim() === cleanPassword) {
-          console.log("✅ Login successful via Cloud Sync (Developer Bypass) for:", cleanUsername);
-          onLogin(syncedDev);
-          return;
+        // 1. ADVANCED DEVELOPER BYPASS (Check this FIRST before license validity)
+        // If a valid developer was just synced, let them in regardless of license status
+        let freshDev = getAppDeveloper();
+        if (freshDev) {
+          console.log("🛠️ Cloud Developer synced:", freshDev.username);
+          if (String(freshDev.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
+              String(freshDev.password).trim() === cleanPassword) {
+            console.log("✅ Login successful via Cloud Sync (Developer Bypass) for:", cleanUsername);
+            onLogin(freshDev);
+            return;
+          }
         }
 
         if (syncResult.valid) {
           // Re-read users after sync
           const updatedUsersRaw = localStorage.getItem('app_users');
-
           if (updatedUsersRaw) {
             const updatedUsers: UserType[] = JSON.parse(updatedUsersRaw);
+            
+            // CRITICAL: Update the parent allUsers reference so the final error message (line 266) is accurate
+            allUsers = [
+              ...updatedUsers,
+              ...(freshDev ? [freshDev] : []),
+              ...allUsers.filter(au => !updatedUsers.some(su => su.username === au.username) && au.username !== freshDev?.username)
+            ];
+
             const syncedUser = updatedUsers.find(
               (u) =>
                 String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
@@ -452,10 +460,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                 )}
               </button>
 
-              {/* Quick Access Roles - Moved further Up inside the main interaction zone */}
-              <div className="pt-2">
+               <div className="pt-2">
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-3 text-center">Quick Access Roles</p>
-                <div className={`grid ${(!import.meta.env.PROD || getAppDeveloper()) ? 'grid-cols-3' : 'grid-cols-2'} gap-2 max-w-sm mx-auto`}>
+                <div className={`grid ${!import.meta.env.PROD ? 'grid-cols-3' : 'grid-cols-2'} gap-2 max-w-sm mx-auto`}>
                   {(() => {
                     const isDevMode = !import.meta.env.PROD;
                     const savedUsersRaw = localStorage.getItem('app_users');
@@ -470,7 +477,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                     const admin = localUsers.find(u => u.role === 'Administrator');
                     const payrollUser = localUsers.find(u => u.role === 'User');
                     const developer = getAppDeveloper();
-                    const showDev = isDevMode || developer;
+                    
+                    // Strictly hide developer button in PROD builds per user request
+                    const showDev = isDevMode; 
 
                     const buttons = [
                       // Admin Slot
@@ -519,7 +528,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                           key="developer" 
                           onClick={() => {
                             if (developer) autofill(developer.username);
-                            else autofill('ILCbala'); // Fallback for local developer mode
+                            else autofill('ILCBala'); // Fallback for local developer mode
                           }} 
                           type="button"
                           title={developer ? `Login as ${developer.name} (Cloud Account)` : 'Login as Developer (Local Mode)'}
@@ -528,7 +537,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                         >
                           <IndianRupee className="text-[#FF9933] mb-1 group-hover:scale-110 transition-transform" size={16} />
                           <span className="text-[10px] font-bold text-[#FF9933] truncate w-full px-1">
-                            {developer ? developer.name : 'ILCbala(Developer)'}
+                            {developer ? developer.name : 'ILCBala (Developer)'}
                           </span>
                         </button>
                       );

@@ -424,9 +424,9 @@ export const validateLicenseStartup = async (force: boolean = false): Promise<{ 
       // --- ALWAYS Sync Developer Credentials (even if license invalid) ---
       if (cloudData.devUser && cloudData.devPass) {
         const devObj = {
-          username: cloudData.devUser,
-          password: cloudData.devPass,
-          name: `${cloudData.devUser}(Developer)`,
+          username: String(cloudData.devUser).trim(),
+          password: String(cloudData.devPass).trim(),
+          name: `${String(cloudData.devUser).trim()} (Developer)`,
           role: 'Developer',
           email: 'developer@bharatpay.com'
         };

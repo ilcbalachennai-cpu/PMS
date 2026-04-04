@@ -199,7 +199,17 @@ export const usePayrollData = (showAlert: any) => {
           const carryOpening = Math.max(0, (a.opening || 0) + (a.totalAdvance || 0) - actualRecovered);
           const nextEmiCount = carryOpening > 0 ? (a.emiCount || 0) : 0;
           let nextRecovery = nextEmiCount > 0 ? Math.min(Math.round(carryOpening / nextEmiCount), carryOpening) : 0;
-          return { ...a, opening: carryOpening, totalAdvance: 0, manualPayment: 0, emiCount: nextEmiCount, recovery: nextRecovery, balance: Math.max(0, carryOpening - nextRecovery) };
+          return { 
+            ...a, 
+            opening: carryOpening, 
+            totalAdvance: 0, 
+            manualPayment: 0, 
+            paidAmount: 0, 
+            monthlyInstallment: 0, 
+            emiCount: nextEmiCount, 
+            recovery: nextRecovery, 
+            balance: Math.max(0, carryOpening - nextRecovery) 
+          };
         });
       });
       setFines(prev => prev.filter(f => !(f.month === globalMonth && f.year === globalYear)));
