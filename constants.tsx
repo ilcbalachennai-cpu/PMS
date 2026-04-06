@@ -45,7 +45,8 @@ export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
   flashPopupHeader: 'FLASH ALERT',
   flashPopupPriority: 'REGULAR',
   flashPopupId: '',
-  externalAppUrl: '' // Default empty
+  externalAppUrl: '', // Default empty
+  securityPin: ''
 };
 
 export const NATURE_OF_BUSINESS_OPTIONS = [
@@ -272,6 +273,14 @@ export const LWF_STATE_PRESETS = {
   'Haryana': { cycle: 'Monthly', emp: 25, emplr: 50 },
 };
 
-export const MOCK_USERS: User[] = [];
+export const MOCK_USERS: User[] = [
+  {
+    username: 'admin',
+    password: 'password',
+    name: 'Administrator',
+    role: 'Administrator',
+    email: 'admin@bharatpay.com'
+  }
+];
 
 export const SAMPLE_EMPLOYEES: Employee[] = [];

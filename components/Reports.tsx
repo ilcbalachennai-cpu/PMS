@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, UserX, Save, TrendingUp } from 'lucide-react';
+import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, UserX, Save, TrendingUp, Eye, EyeOff } from 'lucide-react';
 
 // Global OS Detection for UI refinement
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
@@ -97,6 +97,13 @@ const Reports: React.FC<ReportsProps> = ({
     // Zero Wage / Exit Mark Modal State
     const [zeroWageEmployees, setZeroWageEmployees] = useState<PayrollResult[]>([]);
     const [exitData, setExitData] = useState<Record<string, { dol: string, reason: string }>>({});
+    
+    // Security PIN State
+    const [showPinModal, setShowPinModal] = useState(false);
+    const [pinInput, setPinInput] = useState('');
+    const [pinError, setPinError] = useState('');
+    const [pinPurpose, setPinPurpose] = useState<'BEFORE_BACKUP' | 'FINAL_FREEZE'>('BEFORE_BACKUP');
+    const [pinShow, setPinShow] = useState(false);
 
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -220,36 +227,55 @@ const Reports: React.FC<ReportsProps> = ({
         }
     };
 
-    const handleFreeze = async () => {
-        if (currentUser?.role !== 'Developer' && currentUser?.role !== 'Administrator') {
-            setModalState({ isOpen: true, type: 'error', title: 'Access Denied', message: 'Only Administrators can freeze payroll.' });
+    const handleModalClose = () => {
+        const callback = modalState.onClose;
+        setModalState(prev => ({ ...prev, isOpen: false }));
+        if (callback) callback();
+    };
+
+    const handlePinVerify = async () => {
+        setPinError('');
+        const actualPin = companyProfile.securityPin || '';
+        if (pinInput !== actualPin) {
+            setPinError('Invalid Security PIN. Access Denied.');
             return;
         }
 
-        if (hasUnsavedChanges) {
-            setModalState({ isOpen: true, type: 'error', title: 'Unsaved Changes', message: 'There are unsaved payroll calculations in "Process Payroll". Please save them as Draft before freezing.' });
-            return;
+        setShowPinModal(false);
+        setPinInput('');
+        
+        if (pinPurpose === 'BEFORE_BACKUP') {
+            await initiatePreFreezeBackup();
+        } else {
+            // --- COMMIT EXIT DATA (if any) ---
+            if (Object.keys(exitData).length > 0) {
+                const updatedEmployees = employees.map(emp => {
+                    if (exitData[emp.id]) {
+                        const { dol, reason } = exitData[emp.id];
+                        if (reason === 'ON LOP') return { ...emp, dol: '', leavingReason: reason };
+                        return { ...emp, dol, leavingReason: reason };
+                    }
+                    return emp;
+                });
+                setEmployees(updatedEmployees);
+                setZeroWageEmployees([]);
+                setExitData({});
+            }
+            await executeFreeze();
         }
+    };
 
-        if (!hasData) {
-            setModalState({ isOpen: true, type: 'error', title: 'No Draft Found', message: 'Please calculate and "Save Draft" in the Pay Process module before freezing.' });
-            return;
-        }
-
+    const initiatePreFreezeBackup = async () => {
         // --- NEW: AUTOMATIC BACKUP (BC - Before Confirmation) ---
-        // Triggered immediately upon clicking the button to capture state BEFORE any confirmation or exit data entry
-        // We explicitly delay this for 3 seconds so the user can see it and the OS registers a distinct timestamp
         setModalState({
             isOpen: true,
             type: 'loading',
-            title: 'Securing Pre-Freeze Data',
-            message: "Creating 'Before Confirmation' snapshot. Please wait 3 seconds..."
+            title: 'Secured Snapshot',
+            message: "Creating 'Before Confirmation' snapshot. Please wait..."
         });
 
         try {
-            // Wait for 3 seconds to guarantee state separation
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
+            await new Promise(resolve => setTimeout(resolve, 1500));
             const backupFileName = getBackupFileName('BC', companyProfile, month, year);
             // @ts-ignore
             const backupRes = await window.electronAPI.createDataBackup(backupFileName);
@@ -259,25 +285,25 @@ const Reports: React.FC<ReportsProps> = ({
                     isOpen: true,
                     type: 'error',
                     title: 'Backup Failed',
-                    message: `Automatic backup (BC) failed: ${backupRes.error || 'Unknown error'}. For data safety, payroll cannot be locked until a snapshot is created.`,
+                    message: `Automatic backup (BC) failed: ${backupRes.error || 'Unknown error'}.`,
                     onClose: () => setModalState({ ...modalState, isOpen: false })
                 });
                 return;
             }
-            console.log(`[Reports] BC Backup created: ${backupRes.path}`);
-            // Success - Close loading modal to proceed
             setModalState({ ...modalState, isOpen: false });
+            proceedToFreezeConfirmation();
         } catch (backupErr: any) {
             setModalState({
                 isOpen: true,
                 type: 'error',
                 title: 'Backup Error',
-                message: `Could not create 'Before Confirmation' backup: ${backupErr.message}`,
+                message: `Could not create snapshot: ${backupErr.message}`,
                 onClose: () => setModalState({ ...modalState, isOpen: false })
             });
-            return;
         }
+    };
 
+    const proceedToFreezeConfirmation = () => {
         // CHECK FOR ZERO WAGES (NIL)
         const zw = currentResults.filter(r => r.payableDays === 0 || (r.earnings?.total || 0) === 0);
 
@@ -296,7 +322,7 @@ const Reports: React.FC<ReportsProps> = ({
             setExitData(initialExitData);
             setZeroWageEmployees(zw);
         } else {
-            // COMPUTE ADVANCE SHORTFALLS (planned recovery > actual payroll deduction)
+            // COMPUTE ADVANCE SHORTFALLS
             const advShortfalls = currentResults
                 .map(r => {
                     const emp = employees.find(e => e.id === r.employeeId);
@@ -318,8 +344,6 @@ const Reports: React.FC<ReportsProps> = ({
                     const emp = employees.find(e => e.id === r.employeeId);
                     const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
                     if (!emp || !emp.dol || !adv || (adv.balance || 0) <= 0) return null;
-
-                    // Check if DOL is in current month
                     const dolDate = emp.dol;
                     if (dolDate >= periodStart && dolDate <= periodEnd) {
                         return { name: emp.name, balance: adv.balance };
@@ -331,43 +355,36 @@ const Reports: React.FC<ReportsProps> = ({
             const confirmMessage = (advShortfalls.length > 0 || leavingWithAdvance.length > 0) ? (
                 <div className="text-left space-y-3">
                     <p className="text-slate-300 text-sm">Are you sure you want to finalize payroll for <b>{month} {year}</b>?</p>
-
                     {leavingWithAdvance.length > 0 && (
                         <div className="bg-red-900/30 border border-red-600/40 rounded-xl p-3">
                             <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-2">
                                 <AlertTriangle size={14} /> Critical: Pending Advance for Exits
                             </p>
-                            <p className="text-red-300/80 text-[11px] mb-2">The following employees are leaving service but still have an outstanding advance balance:</p>
                             <div className="space-y-1">
                                 {leavingWithAdvance.map((s, idx) => (
                                     <div key={idx} className="flex justify-between items-center text-xs bg-red-950/40 px-2 py-1.5 rounded border border-red-900/30">
                                         <span className="text-white font-semibold">{s.name}</span>
-                                        <span className="text-red-400 font-bold font-mono">Pending ₹{s.balance.toLocaleString()}</span>
+                                        <span className="text-red-400 font-bold font-mono">Pending ₹ {s.balance.toLocaleString()}</span>
                                     </div>
                                 ))}
                             </div>
                         </div>
                     )}
-
                     {advShortfalls.length > 0 && (
                         <div className="bg-amber-900/30 border border-amber-600/40 rounded-xl p-3">
                             <p className="text-amber-400 text-xs font-bold uppercase tracking-widest mb-2">⚠ Advance Recovery Shortfall</p>
-                            <p className="text-amber-300/80 text-[11px] mb-2">Advance could not be fully recovered for these employees due to insufficient salary:</p>
                             <div className="max-h-40 overflow-y-auto space-y-1">
                                 {advShortfalls.map(s => (
                                     <div key={s.id} className="flex justify-between items-center text-xs bg-slate-800/60 px-2 py-1.5 rounded">
                                         <span className="text-white font-semibold">{s.name}</span>
                                         <span className="font-mono text-[10px] flex gap-2">
-                                            <span className="text-slate-400">Planned <span className="text-amber-400">₹{s.planned}</span></span>
-                                            <span className="text-slate-400">Recovered <span className="text-emerald-400">₹{s.actual}</span></span>
-                                            <span className="text-red-400 font-bold">Shortfall ₹{s.shortfall}</span>
+                                            <span className="text-red-400 font-bold">Shortfall ₹ {s.shortfall}</span>
                                         </span>
                                     </div>
                                 ))}
                             </div>
                         </div>
                     )}
-                    {advShortfalls.length > 0 && <p className="text-slate-500 text-[10px] mt-2">Shortfall will carry forward to next month's opening balance.</p>}
                 </div>
             ) : `Are you sure you want to finalize payroll for ${month} ${year}?\n\nThis will lock all attendance, leave, and advance records for this period.`;
 
@@ -376,7 +393,10 @@ const Reports: React.FC<ReportsProps> = ({
                 type: 'confirm',
                 title: 'Confirm Freeze',
                 message: confirmMessage,
-                onConfirm: executeFreeze
+                onConfirm: () => {
+                    setPinPurpose('FINAL_FREEZE');
+                    setShowPinModal(true);
+                }
             });
         }
     };
@@ -414,26 +434,9 @@ const Reports: React.FC<ReportsProps> = ({
             return adv && (adv.balance || 0) > 0;
         });
 
-        const performFreeze = async () => {
-            const updatedEmployees = employees.map(emp => {
-                if (exitData[emp.id]) {
-                    const { dol, reason } = exitData[emp.id];
-                    if (reason === 'ON LOP') {
-                        // ON LOP: only save the reason; clear any previous DOL so the employee stays active
-                        return { ...emp, dol: '', leavingReason: reason };
-                    }
-                    return { ...emp, dol, leavingReason: reason };
-                }
-                return emp;
-            });
-            setEmployees(updatedEmployees);
-            setZeroWageEmployees([]);
-            setExitData({});
-            await executeFreeze();
-        };
+        // Logic branched to handlePinVerify for final authorization
 
         if (employeesWithAdvance.length > 0) {
-            
             setModalState({
                 isOpen: true,
                 type: 'confirm',
@@ -441,21 +444,60 @@ const Reports: React.FC<ReportsProps> = ({
                 message: (
                     <div className="space-y-3">
                         <p className="text-sm">The following employees are being marked as LEFT but still have outstanding advance balances:</p>
-                        <ul className="text-xs text-red-400 font-bold list-disc list-inside">
+                        <ul className="text-xs text-red-100 font-bold list-disc list-inside bg-red-950/40 p-3 rounded-lg border border-red-500/20">
                             {employeesWithAdvance.map(([id]) => {
                                 const emp = employees.find(e => e.id === id);
                                 const adv = advanceLedgers.find(a => a.employeeId === id);
-                                return <li key={id}>{emp?.name}: ₹{adv?.balance.toLocaleString()}</li>;
+                                return <li key={id}>{emp?.name}: ₹ {adv?.balance.toLocaleString()}</li>;
                             })}
                         </ul>
-                        <p className="text-xs text-slate-400">Are you sure you want to finalize their exit and freeze payroll?</p>
+                        <p className="text-xs text-slate-400 italic">Are you sure you want to finalize their exit and freeze payroll?</p>
                     </div>
                 ),
-                onConfirm: performFreeze
+                onConfirm: () => {
+                    setPinPurpose('FINAL_FREEZE');
+                    setShowPinModal(true);
+                }
             });
         } else {
-            await performFreeze();
+            setPinPurpose('FINAL_FREEZE');
+            setShowPinModal(true);
         }
+    };
+
+    const handleFreeze = async () => {
+        if (currentUser?.role !== 'Developer' && currentUser?.role !== 'Administrator') {
+            setModalState({ isOpen: true, type: 'error', title: 'Access Denied', message: 'Only Administrators can freeze payroll.' });
+            return;
+        }
+
+        if (hasUnsavedChanges) {
+            setModalState({ isOpen: true, type: 'error', title: 'Unsaved Changes', message: 'There are unsaved payroll calculations in "Process Payroll". Please save them as Draft before freezing.' });
+            return;
+        }
+
+        if (!hasData) {
+            setModalState({ isOpen: true, type: 'error', title: 'No Draft Found', message: 'Please calculate and "Save Draft" in the Pay Process module before freezing.' });
+            return;
+        }
+
+        if (!companyProfile.securityPin) {
+             setModalState({
+                 isOpen: true,
+                 type: 'error',
+                 title: 'Security PIN Required',
+                 message: (
+                     <div className="space-y-2">
+                         <p>A separate Security PIN must be set before you can freeze payroll.</p>
+                         <p className="text-[10px] text-amber-400 font-bold uppercase">Please go to Settings &gt; Company Profile to configure your PIN.</p>
+                     </div>
+                 )
+             });
+             return;
+        }
+
+        setPinPurpose('BEFORE_BACKUP');
+        setShowPinModal(true);
     };
 
 
@@ -700,13 +742,6 @@ const Reports: React.FC<ReportsProps> = ({
         }
     };
 
-    const handleModalClose = () => {
-        // Execute the onClose callback (Rollover) if defined
-        if (modalState.onClose) {
-            modalState.onClose();
-        }
-        setModalState({ ...modalState, isOpen: false, onClose: undefined });
-    };
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 relative">
@@ -905,6 +940,74 @@ const Reports: React.FC<ReportsProps> = ({
                 </div>
             </div>
 
+            {/* SECURITY PIN VERIFICATION MODAL */}
+            {showPinModal && (
+                <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-500/30 shadow-2xl overflow-hidden flex flex-col p-6 gap-6 transform animate-in zoom-in-95 duration-200">
+                        <div className="flex flex-col items-center text-center gap-3">
+                            <div className="w-16 h-16 bg-amber-900/30 text-amber-500 rounded-full flex items-center justify-center border border-amber-500/20 shadow-xl shadow-amber-900/20">
+                                <Lock size={32} />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black text-white uppercase tracking-tighter">Security Authorization</h3>
+                                <p className="text-xs text-slate-400 font-medium mt-1 px-4 leading-relaxed">
+                                    {pinPurpose === 'BEFORE_BACKUP' ? (
+                                        <>Enter your Security PIN to initiate the <span className="text-white font-black whitespace-nowrap">'Before Confirmation'</span> data backup.</>
+                                    ) : (
+                                        <>Enter your Security PIN to authorize the <span className="text-white font-black whitespace-nowrap">'After Freezing'</span> process and rollover.</>
+                                    )}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="relative">
+                                <label className="text-[10px] font-bold text-amber-500/50 uppercase tracking-widest mb-1.5 block">ENTER SECURITY PIN</label>
+                                <div className="relative">
+                                    <input 
+                                        type={pinShow ? "text" : "password"}
+                                        autoFocus
+                                        className={`w-full bg-slate-950 border ${pinError ? 'border-red-500/50' : 'border-slate-700'} rounded-xl p-4 text-center text-lg font-mono tracking-[0.5em] text-white outline-none focus:border-amber-500 transition-all`}
+                                        value={pinInput}
+                                        onChange={e => { setPinInput(e.target.value); setPinError(''); }}
+                                        onKeyDown={e => e.key === 'Enter' && handlePinVerify()}
+                                        placeholder="••••••"
+                                        title="Enter your Payroll Security PIN"
+                                    />
+                                    <button 
+                                        onClick={() => setPinShow(!pinShow)}
+                                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-amber-500 transition-colors"
+                                        title={pinShow ? "Hide PIN" : "Show PIN"}
+                                    >
+                                        {pinShow ? <EyeOff size={18} /> : <Eye size={18} />}
+                                    </button>
+                                </div>
+                                {pinError && (
+                                    <p className="text-[10px] text-red-400 font-bold mt-2 text-center flex items-center justify-center gap-1">
+                                        <AlertTriangle size={10} /> {pinError}
+                                    </p>
+                                )}
+                            </div>
+
+                            <div className="flex flex-col gap-3">
+                                <button
+                                    onClick={handlePinVerify}
+                                    className="w-full py-3.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-sm rounded-xl shadow-lg shadow-amber-900/30 transition-all uppercase tracking-widest transform hover:scale-[1.02] active:scale-95"
+                                >
+                                    Verify & Proceed
+                                </button>
+                                <button
+                                    onClick={() => { setShowPinModal(false); setPinInput(''); setPinError(''); }}
+                                    className="w-full py-3 text-slate-400 hover:text-slate-200 font-bold text-xs transition-colors uppercase tracking-widest"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ZERO WAGE / EXIT MARKING MODAL */}
             {zeroWageEmployees.length > 0 && (
                 <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -996,7 +1099,7 @@ const Reports: React.FC<ReportsProps> = ({
                                                             const pending = adv ? (adv.balance + (adv.recovery || 0)) : 0;
                                                             return pending > 0 ? 'text-red-400' : 'text-slate-500';
                                                         })()}`}>
-                                                            ₹{(() => {
+                                                            ₹ {(() => {
                                                                 const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
                                                                 const pending = adv ? (adv.balance + (adv.recovery || 0)) : 0;
                                                                 return pending.toLocaleString();

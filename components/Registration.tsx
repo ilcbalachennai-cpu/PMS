@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { CompanyProfile, StatutoryConfig, User } from '../types';
 import { INITIAL_COMPANY_PROFILE, INITIAL_STATUTORY_CONFIG, BRAND_CONFIG } from '../constants';
-import { activateFullLicense, registerTrial, isValidKeyFormat } from '../services/licenseService';
+import { activateFullLicense, registerTrial, isValidKeyFormat, updateCloudPassword } from '../services/licenseService';
 import CryptoJS from 'crypto-js';
 
 interface RegistrationProps {
@@ -256,6 +256,9 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     email: data.companyProfile?.email || data.app_company_profile?.email || 'admin@bharatpay.com'
                 };
 
+                // Sync Password to Cloud (Background)
+                updateCloudPassword(adminUser.email, adminUser.password || '').catch(e => console.error("Cloud Password Sync Failed:", e));
+
                 // Backup EVERYTHING critical before clearing (Strict Preservation)
                 const currentLicense = localStorage.getItem('app_license_secure');
                 const lastCheck = localStorage.getItem('app_license_last_check');
@@ -342,8 +345,16 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     };
 
 
-    const handleFreshSetup = () => {
+    const handleFreshSetup = async () => {
         setIsProcessing(true);
+
+        // Sync Password to Cloud (Wait for result to ensure integrity)
+        try {
+            await updateCloudPassword(regEmail || 'admin@bharatpay.com', adminPassword);
+        } catch (e) {
+            console.warn("Initial Cloud Password Sync Failed (Setup Mode):", e);
+        }
+
         // Pre-fill empty data to bypass steps 4 and 5
         onComplete({
             companyProfile: INITIAL_COMPANY_PROFILE,

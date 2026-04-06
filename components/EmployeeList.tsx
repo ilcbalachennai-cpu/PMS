@@ -120,14 +120,18 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     const filteredEmployees = useMemo(() =>
         activeEmployees.filter(emp =>
             emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            emp.id.toLowerCase().includes(searchTerm.toLowerCase())
+            emp.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (emp.uanc && emp.uanc.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (emp.esiNumber && emp.esiNumber.toLowerCase().includes(searchTerm.toLowerCase()))
         ), [activeEmployees, searchTerm]
     );
 
     const filteredExEmployees = useMemo(() =>
         exEmployees.filter(emp =>
             emp.name.toLowerCase().includes(rejoinSearch.toLowerCase()) ||
-            emp.id.toLowerCase().includes(rejoinSearch.toLowerCase())
+            emp.id.toLowerCase().includes(rejoinSearch.toLowerCase()) ||
+            (emp.uanc && emp.uanc.toLowerCase().includes(rejoinSearch.toLowerCase())) ||
+            (emp.esiNumber && emp.esiNumber.toLowerCase().includes(rejoinSearch.toLowerCase()))
         ), [exEmployees, rejoinSearch]
     );
 

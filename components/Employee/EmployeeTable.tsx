@@ -30,11 +30,12 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
             <table className="w-full text-left table-fixed">
                 <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-[0.2em] font-black sticky top-0 z-10 border-b border-slate-800">
                     <tr>
-                        <th className="px-4 py-3 bg-[#0f172a] w-[25%]">Identity</th>
-                        <th className="px-4 py-3 bg-[#0f172a] w-[30%]">Designation & Location</th>
-                        <th className="px-2 py-3 bg-[#0f172a] w-[15%] text-center">Join Date</th>
-                        <th className="px-2 py-3 bg-[#0f172a] w-[15%] text-center">Gross Wages</th>
-                        <th className="px-4 py-3 text-right bg-[#0f172a] w-[15%]">Actions</th>
+                        <th className="px-4 py-3 bg-[#0f172a] w-[24%] uppercase text-left">Identity</th>
+                        <th className="px-4 py-3 bg-[#0f172a] w-[28%] uppercase text-left pl-12">Designation</th>
+                        <th className="px-4 py-3 bg-[#0f172a] w-[13%] uppercase text-left">Location</th>
+                        <th className="px-2 py-3 bg-[#0f172a] w-[12%] uppercase text-center">Join Date</th>
+                        <th className="px-2 py-3 bg-[#0f172a] w-[11%] uppercase text-right">Gross Wages</th>
+                        <th className="px-4 py-3 bg-[#0f172a] w-[12%] uppercase text-right">Actions</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -64,16 +65,18 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                                 </button>
                             </td>
                             <td className="px-4 py-2.5 overflow-hidden">
-                                <div className="text-[10px] text-sky-400 font-black uppercase tracking-wider truncate">{emp.designation}</div>
-                                <div className="text-[9px] text-slate-500 font-bold uppercase truncate opacity-80">{emp.branch || emp.site || 'Main Office'}</div>
+                                <div className="text-[10px] text-sky-400 font-black uppercase tracking-wider truncate text-left pl-12">{emp.designation}</div>
+                            </td>
+                            <td className="px-4 py-2.5 overflow-hidden">
+                                <div className="text-[9px] text-amber-200/80 font-bold uppercase truncate tracking-wide">{emp.branch || emp.site || 'Main Office'}</div>
                             </td>
                             <td className="px-2 py-2.5 text-center">
                                 <div className="text-[10px] font-bold font-mono text-slate-300 whitespace-nowrap">{formatDateInd(emp.doj)}</div>
                             </td>
-                            <td className="px-2 py-2.5 text-center">
-                                <div className="font-mono text-emerald-400 font-black text-[12px] tracking-tighter shadow-emerald-400/10">₹{calculateGrossWage(emp).toLocaleString()}</div>
+                            <td className="px-2 py-2.5 text-right">
+                                <div className="font-mono text-emerald-400 font-black text-[12px] tracking-tighter shadow-emerald-400/10 whitespace-nowrap">₹ {calculateGrossWage(emp).toLocaleString()}</div>
                             </td>
-                            <td className="px-4 py-2.5 text-right">
+                            <td className="px-4 py-2.5 text-right space-x-1">
                                 <div className="flex justify-end gap-1">
                                     <button
                                         onClick={(e) => { e.stopPropagation(); onEdit(emp); }}

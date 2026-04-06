@@ -14,7 +14,7 @@ namespace BharatPayLauncher
         private const string APP_ID = "com.ilcbala.bharatpaypro";
         private const string APP_NAME = "BPP_APP";
         private const string EXE_NAME = "BPP_APP.exe";
-        private const string CURRENT_VERSION = "02.02.07";
+        private const string CURRENT_VERSION = "02.02.08";
 
         static void Main(string[] args)
         {

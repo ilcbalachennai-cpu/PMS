@@ -137,6 +137,28 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   // --- Specialized Effects ---
   
+  // --- V02.02.08: MASTER DATABASE REPAIR ---
+  // Ensure 'admin' is permanently renamed to Registered ID (Sbobby12)
+  useEffect(() => {
+    const license = getStoredLicense();
+    if (license && license.userID && license.userID.toUpperCase() !== 'TRIAL' && license.userID.toUpperCase() !== 'RESCUE') {
+      const usersRaw = localStorage.getItem('app_users');
+      if (usersRaw) {
+        try {
+          const users = JSON.parse(usersRaw);
+          const adminIndex = users.findIndex((u: any) => u.role === 'Administrator');
+          if (adminIndex !== -1 && users[adminIndex].username !== license.userID) {
+            console.log(`🛡️ Repair: Renaming internal admin -> ${license.userID}`);
+            users[adminIndex].username = license.userID;
+            localStorage.setItem('app_users', JSON.stringify(users));
+            // @ts-ignore
+            if (window.electronAPI) window.electronAPI.dbSet('app_users', users);
+          }
+        } catch (err) { console.error("Database Repair Failed", err); }
+      }
+    }
+  }, []);
+  
   // Handle New Update Detected
   useEffect(() => {
     if (showUpdateNotice && !updateDownloaded && !isUpdateDownloading && latestAppVersion) {
@@ -320,6 +342,17 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const handleAuthLogin = (user: User) => {
     handleLogin(user);
     
+    // 1. Mandatory Security Check: Forced Reset Detection
+    const isForcedReset = sessionStorage.getItem('app_forced_reset') === 'true';
+    if (isForcedReset && user.role === 'Administrator') {
+      setActiveView(View.Settings);
+      setSettingsTab('LICENSE');
+      setTimeout(() => {
+        showAlert('warning', 'Mandatory Password Reset', 'You are using a temporary access code. For security reasons, you must set a new permanent password now.');
+      }, 800);
+      return; // Skip other notices
+    }
+
     // Daily Trial Notice
     const license = getStoredLicense();
     if (license?.isTrial) {
@@ -347,6 +380,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       setTimeout(() => { showAlert('success', 'System Secured', `Welcome back, ${user.name || user.username}. Connected to local database successfully.`); }, 500);
     }
   };
+
 
   const handleRegistrationComplete = async (data: { companyProfile: CompanyProfile; statutoryConfig: StatutoryConfig; adminUser: User; }) => {
     setCompanyProfile(data.companyProfile);
@@ -617,7 +651,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                  <div className="flex items-center gap-4 shrink-0 mr-4">
                     <img src={logoUrl} alt="Logo" className="w-10 h-10 rounded-full border border-slate-700 shadow-xl object-cover" />
                     <div className="flex flex-col">
-                       <span className="text-sm font-black text-white tracking-tight">{companyProfile.establishmentName || BRAND_CONFIG.companyName}</span>
+                       <span className="text-sm font-black text-white tracking-tight">{companyProfile.establishmentName || (BRAND_CONFIG.appName + " " + BRAND_CONFIG.appNameSuffix)}</span>
                        <span className="text-[8px] font-black text-[#FFD700] tracking-widest mt-0.5">
                           {licenseInfo?.isTrial ? "Trial Valid Upto : " : "License Valid Upto : "}{formatExpiryDate(licenseInfo?.expiryDate)}
                        </span>

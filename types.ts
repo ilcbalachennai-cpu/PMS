@@ -198,6 +198,7 @@ export interface CompanyProfile {
   smtpPassword?: string;
   senderName?: string;
   senderEmail?: string;
+  securityPin?: string; // PIN for payroll freeze operations
 }
 
 export interface Employee {

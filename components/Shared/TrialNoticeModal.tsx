@@ -25,7 +25,7 @@ const FALLBACK_ROWS: SheetRow[] = [
 
 const fmt = (v: string | number) => {
   if (v === 'NA' || v === '') return <span className="text-slate-600 text-[10px] italic">N/A</span>;
-  if (typeof v === 'number') return `₹${v.toLocaleString('en-IN')}`;
+  if (typeof v === 'number') return `₹ ${v.toLocaleString('en-IN')}`;
   return v;
 };
 

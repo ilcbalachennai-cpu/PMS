@@ -171,7 +171,7 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
                         <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 shadow-lg relative overflow-hidden group">
                             <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><IndianRupee size={64} /></div>
                             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Total Remittance</p>
-                            <h3 className="text-3xl font-black text-emerald-400">₹{challan.totalRemittance.toLocaleString()}</h3>
+                            <h3 className="text-3xl font-black text-emerald-400">₹ {challan.totalRemittance.toLocaleString()}</h3>
                             <div className="mt-4 flex items-center gap-2 text-[10px] text-emerald-300 bg-emerald-900/20 px-2 py-1 rounded w-fit"><span>A/c 1 + 2 + 10 + 21 + 22</span></div>
                         </div>
                         <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 shadow-lg relative overflow-hidden group">
@@ -183,8 +183,8 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
                         <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 shadow-lg relative overflow-hidden group">
                             <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Building2 size={64} /></div>
                             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Total EPF Wages</p>
-                            <h3 className="text-3xl font-black text-amber-400">₹{challan.totalEPFWages.toLocaleString()}</h3>
-                            <div className="mt-4 text-[10px] text-slate-400">EPS Wages: <span className="font-bold text-white">₹{challan.totalEPSWages.toLocaleString()}</span></div>
+                            <h3 className="text-3xl font-black text-amber-400">₹ {challan.totalEPFWages.toLocaleString()}</h3>
+                            <div className="mt-4 text-[10px] text-slate-400">EPS Wages: <span className="font-bold text-white">₹ {challan.totalEPSWages.toLocaleString()}</span></div>
                         </div>
                     </div>
 
@@ -206,7 +206,7 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
                                     <tr><td className="px-6 py-3"><span className="font-bold text-white">A/c No. 10</span> <span className="text-xs text-slate-500 ml-2">Pension Fund (8.33%)</span></td><td className="px-6 py-3 text-right font-mono text-white">{challan.ac10.toLocaleString()}</td></tr>
                                     <tr><td className="px-6 py-3"><span className="font-bold text-white">A/c No. 21</span> <span className="text-xs text-slate-500 ml-2">EDLI Contribution (0.5%)</span></td><td className="px-6 py-3 text-right font-mono text-white">{challan.ac21.toLocaleString()}</td></tr>
                                     <tr><td className="px-6 py-3"><span className="font-bold text-white">A/c No. 22</span> <span className="text-xs text-slate-500 ml-2">EDLI Admin Charges</span></td><td className="px-6 py-3 text-right font-mono text-slate-500">{challan.ac22.toLocaleString()}</td></tr>
-                                    <tr className="bg-slate-900/80"><td className="px-6 py-4 font-black text-emerald-400 uppercase tracking-widest text-xs">Total Remittance</td><td className="px-6 py-4 text-right font-black text-emerald-400 font-mono text-lg">₹{challan.totalRemittance.toLocaleString()}</td></tr>
+                                    <tr className="bg-slate-900/80"><td className="px-6 py-4 font-black text-emerald-400 uppercase tracking-widest text-xs">Total Remittance</td><td className="px-6 py-4 text-right font-black text-emerald-400 font-mono text-lg">₹ {challan.totalRemittance.toLocaleString()}</td></tr>
                                 </tbody>
                             </table>
                         </div>

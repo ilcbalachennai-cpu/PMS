@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, ShieldCheck, Maximize, Minimize, Power } from 'lucide-react';
 import { User as UserType } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
-import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper } from '../services/licenseService';
+import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense } from '../services/licenseService';
 
 interface LoginProps {
   onLogin: (user: UserType) => void;
@@ -68,11 +68,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       const isSetupComplete = localStorage.getItem('app_setup_complete') === 'true';
       
       // If we think setup is done but have no admin, something is wrong
-      if (isSetupComplete && !hasLocalAdmin) {
-         console.warn("🚫 LOCKOUT DETECTED ON MOUNT: Setup marked complete but no Admin found. Resetting...");
-         localStorage.removeItem('app_setup_complete');
-         window.location.reload();
-      }
+       if (isSetupComplete && !hasLocalAdmin) {
+          console.warn("🚫 LOCKOUT DETECTED: Setup marked complete but no local Admin found. Attempting Cloud Recovery...");
+          // Skip reload, let them try cloud sync or register
+       }
     };
 
     checkAdminLockout();
@@ -148,11 +147,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
         console.log("👥 Local User DB:", allUsers.map(u => ({ username: u.username, role: u.role })));
       }
 
-      const user = allUsers.find(
-        (u) =>
-          String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
-          String(u.password).trim() === cleanPassword
-      );
+      // --- V02.02.07: IDENTITY-AWARE LOOKUP ---
+      const license = getStoredLicense();
+      const user = allUsers.find((u) => {
+        const uNameStr = String(u.username).trim().toLowerCase();
+        const inputUNameStr = cleanUsername.toLowerCase();
+        
+        // Match 1: Direct username match
+        const isDirectMatch = uNameStr === inputUNameStr;
+        
+        // Match 2: Registered Identity Alias (For Admin)
+        const isIdentityAlias = (u.role === 'Administrator' && 
+                                license && license.userID && 
+                                String(license.userID).trim().toLowerCase() === inputUNameStr);
+        
+        return (isDirectMatch || isIdentityAlias) && String(u.password).trim() === cleanPassword;
+      });
 
       if (user) {
         console.log("✅ Login successful for:", cleanUsername);
@@ -160,32 +170,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
         // --- V01.0.11: CLOUD LOGIN TRACKING ---
         try {
           const machineId = localStorage.getItem('app_machine_id');
-          if (machineId) {
-            // To track accurately we need the registered Email from the license
-            const rawLicense = localStorage.getItem('app_license_secure');
-            if (rawLicense) {
-              // Quick unscramble to get email without importing the whole unscramble logic
-              // We can just rely on getStoredLicense if we import it, let's just do that in a cleaner way:
-              // Since getStoredLicense is not exported/imported directly here, let's just use the known structure 
-              // or better yet, we can export getStoredLicense from licenseService.
-
-              // Actually, let's just use what we have. We know the email is the 'registeredTo' field.
-              const btoaDecoded = atob(rawLicense);
-              const SECRET_PEPPER = "BPP_PRO_2026_SECURE_VAL";
-
-              // Decode payload
-              const unsalted = btoaDecoded.split('').map((c, i) =>
-                String.fromCharCode(c.charCodeAt(0) ^ (SECRET_PEPPER.charCodeAt(i % SECRET_PEPPER.length)))
-              ).join('');
-
-              const parts = unsalted.split('|');
-              const jsonPayload = parts.slice(0, -1).join('|');
-              const licenseObj = JSON.parse(jsonPayload);
-
-              if (licenseObj && licenseObj.registeredTo) {
-                trackCloudLogin(licenseObj.registeredTo, machineId);
-              }
-            }
+          const license = getStoredLicense();
+          if (machineId && license?.registeredTo) {
+            trackCloudLogin(license.registeredTo, machineId);
           }
         } catch (e) {
           console.warn("Could not fire cloud tracking:", e);
@@ -195,8 +182,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       } else {
         // --- EMERGENCY REDIRECT IF NO ADMINS ---
         const hasAdmin = allUsers.some(u => u.role === 'Administrator');
-        if (!hasAdmin) {
-            console.warn("🚫 NO ADMINISTRATOR FOUND: System requires local admin character. Resetting to initialization.");
+        if (!hasAdmin && !import.meta.env.PROD) {
+            console.warn("🚫 NO ADMINISTRATOR FOUND: System requires local admin character. Resetting...");
             localStorage.removeItem('app_setup_complete');
             window.location.reload();
             return;
@@ -204,7 +191,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
 
         // --- CLOUD FALLBACK ---
         console.log("⚠️ Local login failed. Attempting cloud sync fallback...");
-        const syncResult = await validateLicenseStartup(true);
+        const syncResult = await validateLicenseStartup(true, cleanUsername);
 
         // 1. ADVANCED DEVELOPER BYPASS (Check this FIRST before license validity)
         // If a valid developer was just synced, let them in regardless of license status
@@ -244,21 +231,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
               // --- V01.0.11: CLOUD LOGIN TRACKING ---
               try {
                 const machineId = localStorage.getItem('app_machine_id');
-                if (machineId) {
-                  const rawLicense = localStorage.getItem('app_license_secure');
-                  if (rawLicense) {
-                    const btoaDecoded = atob(rawLicense);
-                    const SECRET_PEPPER = "BPP_PRO_2026_SECURE_VAL";
-                    const unsalted = btoaDecoded.split('').map((c, i) =>
-                      String.fromCharCode(c.charCodeAt(0) ^ (SECRET_PEPPER.charCodeAt(i % SECRET_PEPPER.length)))
-                    ).join('');
-                    const parts = unsalted.split('|');
-                    const jsonPayload = parts.slice(0, -1).join('|');
-                    const licenseObj = JSON.parse(jsonPayload);
-                    if (licenseObj && licenseObj.registeredTo) {
-                      trackCloudLogin(licenseObj.registeredTo, machineId);
-                    }
-                  }
+                const license = getStoredLicense();
+                if (machineId && license?.registeredTo) {
+                  trackCloudLogin(license.registeredTo, machineId);
                 }
               } catch (e) {
                 console.warn("Could not fire cloud tracking on fallback:", e);
@@ -287,7 +262,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
   };
 
   const autofill = (u: string) => {
-    setUsername(u);
+    let finalUsername = u;
+
+    // --- V02.02.07: SMART IDENTITY MAPPING ---
+    // If the shortcut is trying to fill 'admin', check if we have a 
+    // real registered Identity from the license to use instead.
+    if (u.toLowerCase() === 'admin') {
+      const license = getStoredLicense();
+      if (license && license.userID && license.userID.toUpperCase() !== 'TRIAL' && license.userID.toUpperCase() !== 'RESCUE') {
+        finalUsername = license.userID;
+      }
+    }
+
+    setUsername(finalUsername);
     setPassword('');
     // Auto-focus password field after filling username
     const passInput = document.querySelector('input[type="password"]') as HTMLInputElement;
@@ -460,93 +447,109 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                 )}
               </button>
 
-               <div className="pt-2">
-                <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-3 text-center">Quick Access Roles</p>
-                <div className={`grid ${!import.meta.env.PROD ? 'grid-cols-3' : 'grid-cols-2'} gap-2 max-w-sm mx-auto`}>
-                  {(() => {
-                    const isDevMode = !import.meta.env.PROD;
-                    const savedUsersRaw = localStorage.getItem('app_users');
-                    let localUsers: UserType[] = [];
-                    
-                    if (savedUsersRaw) {
-                      try {
-                        localUsers = JSON.parse(savedUsersRaw);
-                      } catch (e) { }
-                    }
+                 <div className="pt-2">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-3 text-center">Quick Access Roles</p>
+                  <div className={`grid grid-cols-3 gap-2 max-w-sm mx-auto`}>
+                    {(() => {
+                      const savedUsersRaw = localStorage.getItem('app_users');
+                      let localUsers: UserType[] = [];
+                      
+                      if (savedUsersRaw) {
+                        try {
+                          localUsers = JSON.parse(savedUsersRaw);
+                        } catch (e) { }
+                      }
 
-                    const admin = localUsers.find(u => u.role === 'Administrator');
-                    const payrollUser = localUsers.find(u => u.role === 'User');
-                    const developer = getAppDeveloper();
-                    
-                    // Strictly hide developer button in PROD builds per user request
-                    const showDev = isDevMode; 
-
-                    const buttons = [
-                      // Admin Slot
-                      <button 
-                        key="admin" 
-                        onClick={() => admin && autofill(admin.username)} 
-                        disabled={!admin}
-                        type="button"
-                        title={admin ? `Login as ${admin.name}` : 'Admin user not active'}
-                        aria-label={admin ? `Login as ${admin.name}` : 'Admin user not active'}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
-                          admin 
-                            ? 'bg-blue-900/10 hover:bg-blue-900/20 border border-blue-900/30' 
-                            : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
-                        }`}
-                      >
-                        <ShieldCheck className={`${admin ? 'text-blue-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
-                        <span className={`text-[10px] font-bold ${admin ? 'text-blue-500' : 'text-slate-500'} truncate w-full px-1`}>
-                          {admin ? admin.name : 'ADMIN INACTIVE'}
-                        </span>
-                      </button>,
-                      // User Slot (Payroll Executive)
-                      <button 
-                        key="user" 
-                        onClick={() => payrollUser && autofill(payrollUser.username)} 
-                        disabled={!payrollUser}
-                        type="button"
-                        title={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
-                        aria-label={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
-                          payrollUser 
-                            ? 'bg-emerald-900/10 hover:bg-emerald-900/20 border border-emerald-900/30' 
-                            : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
-                        }`}
-                      >
-                        <UserIcon className={`${payrollUser ? 'text-emerald-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
-                        <span className={`text-[10px] font-bold ${payrollUser ? 'text-emerald-500' : 'text-slate-500'} truncate w-full px-1`}>
-                          {payrollUser ? payrollUser.name : 'PAYROLL INACTIVE'}
-                        </span>
-                      </button>
-                    ];
-
-                    if (showDev) {
-                      buttons.push(
+                      const admin = localUsers.find(u => u.role === 'Administrator');
+                      const payrollUser = localUsers.find(u => u.role === 'User');
+                      const developer = getAppDeveloper();
+                      
+                      const buttons = [
+                        // Admin Slot
                         <button 
-                          key="developer" 
+                          key="admin" 
                           onClick={() => {
-                            if (developer) autofill(developer.username);
-                            else autofill('ILCBala'); // Fallback for local developer mode
+                            if (admin) {
+                              const license = getStoredLicense();
+                              const bestID = (license && license.userID && 
+                                             license.userID.toUpperCase() !== 'TRIAL' && 
+                                             license.userID.toUpperCase() !== 'RESCUE') 
+                                ? license.userID 
+                                : admin.username;
+                              autofill(bestID);
+                            }
                           }} 
+                          disabled={!admin}
                           type="button"
-                          title={developer ? `Login as ${developer.name} (Cloud Account)` : 'Login as Developer (Local Mode)'}
-                          aria-label={developer ? `Login as ${developer.name}` : 'Login as Developer'}
-                          className="flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30"
+                          title={admin ? `Login as ${admin.name}` : 'Admin user not active'}
+                          aria-label={admin ? `Login as ${admin.name}` : 'Admin user not active'}
+                          className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
+                            admin 
+                              ? 'bg-blue-900/10 hover:bg-blue-900/20 border border-blue-900/30' 
+                              : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
+                          }`}
                         >
-                          <IndianRupee className="text-[#FF9933] mb-1 group-hover:scale-110 transition-transform" size={16} />
-                          <span className="text-[10px] font-bold text-[#FF9933] truncate w-full px-1">
-                            {developer ? developer.name : 'ILCBala (Developer)'}
+                          <ShieldCheck className={`${admin ? 'text-blue-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
+                          <span className={`text-[10px] font-bold ${admin ? 'text-blue-500' : 'text-slate-500'} truncate w-full px-1`}>
+                            {admin ? admin.name : 'ADMIN INACTIVE'}
+                          </span>
+                        </button>,
+                        // User Slot (Payroll Executive)
+                        <button 
+                          key="user" 
+                          onClick={() => payrollUser && autofill(payrollUser.username)} 
+                          disabled={!payrollUser}
+                          type="button"
+                          title={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
+                          aria-label={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
+                          className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group ${
+                            payrollUser 
+                              ? 'bg-emerald-900/10 hover:bg-emerald-900/20 border border-emerald-900/30' 
+                              : 'bg-slate-900/10 border border-slate-800/30 opacity-50 cursor-not-allowed'
+                          }`}
+                        >
+                          <UserIcon className={`${payrollUser ? 'text-emerald-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
+                          <span className={`text-[10px] font-bold ${payrollUser ? 'text-emerald-500' : 'text-slate-500'} truncate w-full px-1`}>
+                            {payrollUser ? payrollUser.name : 'PAYROLL INACTIVE'}
                           </span>
                         </button>
-                      );
-                    }
+                      ];
 
-                    return buttons;
-                  })()}
-                </div>
-              </div>
+                      // Developer Slot (Only show if NOT PROD)
+                      if (!import.meta.env.PROD) {
+                        buttons.push(
+                          developer ? (
+                            <button 
+                              key="developer"
+                              onClick={() => autofill(developer.username)} 
+                              className="bg-slate-800/80 hover:bg-amber-900/40 border border-amber-500/30 rounded-lg p-2 transition-all group flex flex-col items-center gap-1"
+                              title={`Access ${developer.name}`}
+                            >
+                              <ShieldCheck className="text-amber-500 group-hover:scale-110 transition-transform" size={16} />
+                              <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest truncate w-full text-center">Developer</span>
+                            </button>
+                          ) : (
+                            <button 
+                              key="developer"
+                              onClick={() => autofill('ILCBala')} 
+                              type="button"
+                              title="Login as Developer (Local Mode)"
+                              aria-label="Login as Developer"
+                              className="flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30"
+                            >
+                              <IndianRupee className="text-[#FF9933] mb-1 group-hover:scale-110 transition-transform" size={16} />
+                              <span className="text-[10px] font-bold text-[#FF9933] truncate w-full px-1">
+                                Developer
+                              </span>
+                            </button>
+                          )
+                        );
+                      }
+
+                      return buttons;
+                    })()}
+                  </div>
+                 </div>
             </form>
           </div>
         </div>

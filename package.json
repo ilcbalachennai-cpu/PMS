@@ -1,7 +1,7 @@
 {
   "name": "bharatpay-pro",
   "private": true,
-  "version": "02.02.07",
+  "version": "02.02.08",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -12,8 +12,8 @@
     "dev:electron": "concurrently \"npm run dev\" \"npm run electron:serve\"",
     "electron:serve": "wait-on tcp:3000 && node electron/check-version.cjs && npx tsc -p electron/tsconfig.json && node -e \"const fs=require('fs'); if(!fs.existsSync('dist-electron')) fs.mkdirSync('dist-electron'); fs.writeFileSync('dist-electron/package.json', '{\\\"type\\\": \\\"commonjs\\\"}')\" && cross-env NODE_ENV=development electron .",
     "build:electron": "npm run build && node electron/build.cjs && electron-builder",
-    "build:win10": "npm install electron@31.0.0 electron-builder@24.13.3 @types/node@22.14.0 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.02.07_Win10.exe && npm run build:restore",
-    "build:win7": "npm install electron@22.3.27 electron-builder@23.6.0 @types/node@18.11.18 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.02.07_Win7.exe && npm run build:restore",
+    "build:win10": "npm install electron@31.0.0 electron-builder@24.13.3 @types/node@22.14.0 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.02.08_Win10.exe && npm run build:restore",
+    "build:win7": "npm install electron@22.3.27 electron-builder@23.6.0 @types/node@18.11.18 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.02.08_Win7.exe && npm run build:restore",
     "build:all": "npm run build:win10 && npm run build:win7 && npm run build:restore",
     "build:restore": "npm install electron@31.0.0 electron-builder@24.13.3 @types/node@22.14.0 --no-save",
     "generate:exe": "node scripts/build_all.cjs",
@@ -35,7 +35,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "BPP_APP_V02.02.07_Win10.exe"
+      "artifactName": "BPP_APP_V02.02.08_Win10.exe"
     },
     "files": [
       "dist",
@@ -77,12 +77,18 @@
     "cross-env": "^7.0.3",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3",
+    "inquirer": "^13.3.2",
     "javascript-obfuscator": "^5.3.0",
     "postcss": "^8.5.6",
     "rollup-plugin-javascript-obfuscator": "^1.0.4",
     "tailwindcss": "^4.2.1",
+    "tmp": "^0.2.5",
     "typescript": "~5.8.2",
+    "undici": "^8.0.1",
     "vite": "^6.2.0",
     "wait-on": "^7.2.0"
+  },
+  "overrides": {
+    "validator": "13.15.35"
   }
 }

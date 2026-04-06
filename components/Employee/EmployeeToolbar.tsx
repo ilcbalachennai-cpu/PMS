@@ -92,7 +92,7 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-500 transition-colors" size={16} />
                     <input
                         type="text"
-                        placeholder="Search Master Records..."
+                        placeholder="Search by Name, ID, UAN or ESI..."
                         className="w-full pl-10 pr-4 py-2 bg-[#0f172a] border border-slate-800 rounded-full text-white placeholder-slate-500 outline-none focus:ring-1 focus:ring-blue-500/50 transition-all shadow-lg text-[13px] font-medium"
                         value={searchTerm}
                         onChange={(e) => onSearchChange(e.target.value)}

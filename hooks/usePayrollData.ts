@@ -212,6 +212,52 @@ export const usePayrollData = (showAlert: any) => {
           };
         });
       });
+      setLeaveLedgers(prev => {
+        const currentHistory = updatedHistory || payrollHistory;
+        const finalizedResults = currentHistory.filter(r => r.month === globalMonth && r.year === globalYear && r.status === 'Finalized');
+        
+        return prev.map(l => {
+          const payrollResult = finalizedResults.find(r => r.employeeId === l.employeeId);
+          // If we had a finalized result, we carry forward its calculated leave snapshot
+          // Otherwise, we take the current live ledger balance as the new opening
+          
+          let prevELBal = l.el.balance;
+          let prevSLBal = l.sl.balance;
+          let prevCLBal = l.cl.balance;
+
+          if (payrollResult && payrollResult.leaveSnapshot) {
+            prevELBal = payrollResult.leaveSnapshot.el.balance;
+            prevSLBal = payrollResult.leaveSnapshot.sl.balance;
+            prevCLBal = payrollResult.leaveSnapshot.cl.balance;
+          }
+
+          // Monthly Credits based on Policy
+          const elCredit = (leavePolicy?.el?.maxPerYear || 18) / 12;
+          const slCredit = (leavePolicy?.sl?.maxPerYear || 12) / 12;
+          const clCredit = (leavePolicy?.cl?.maxPerYear || 12) / 12;
+
+          return {
+            ...l,
+            el: { 
+              opening: prevELBal, 
+              eligible: elCredit, 
+              encashed: 0, 
+              availed: 0, 
+              balance: prevELBal + elCredit 
+            },
+            sl: { 
+              eligible: slCredit, 
+              availed: 0, 
+              balance: prevSLBal + slCredit 
+            },
+            cl: { 
+              availed: 0, 
+              accumulation: prevCLBal, 
+              balance: prevCLBal + clCredit 
+            }
+          };
+        });
+      });
       setFines(prev => prev.filter(f => !(f.month === globalMonth && f.year === globalYear)));
       setOTRecords(prev => prev.filter(f => !(f.month === globalMonth && f.year === globalYear)));
       

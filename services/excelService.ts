@@ -70,6 +70,24 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
 };
 
 /**
+ * Security: Sanitizes data to prevent Prototype Pollution attacks
+ * Strips dangerous keys like __proto__, constructor, and prototype.
+ */
+const sanitizeData = (data: any): any => {
+    if (Array.isArray(data)) {
+        return data.map(sanitizeData);
+    } else if (data !== null && typeof data === 'object') {
+        const sanitized: any = {};
+        for (const key in data) {
+            if (['__proto__', 'constructor', 'prototype'].includes(key.toLowerCase())) continue;
+            sanitized[key] = sanitizeData(data[key]);
+        }
+        return sanitized;
+    }
+    return data;
+};
+
+/**
  * Parses Employee XLSX data and validates against existing employees
  */
 export const parseEmployeeXLSX = async (
@@ -89,7 +107,10 @@ export const parseEmployeeXLSX = async (
                 const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
                 const wsname = wb.SheetNames[0];
                 const ws = wb.Sheets[wsname];
-                const data = XLSX.utils.sheet_to_json(ws);
+                
+                // Security: Sanitize the raw data produced by XLSX to prevent Prototype Pollution
+                const rawData = XLSX.utils.sheet_to_json(ws);
+                const data = sanitizeData(rawData);
 
                 if (data.length === 0) {
                     alert("No data found in the Excel sheet.");

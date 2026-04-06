@@ -55,16 +55,24 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         return props.savedRecords.some(r => r.month === props.month && r.year === props.year && r.status === 'Finalized');
     }, [props.savedRecords, props.month, props.year]);
 
-    const TabButton = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
+    const hasAnyAttendance = useMemo(() => {
+        return props.attendances.some(a => 
+            a.month === props.month && 
+            a.year === props.year && 
+            ((a.presentDays || 0) + (a.earnedLeave || 0) + (a.sickLeave || 0) + (a.casualLeave || 0) + (a.lopDays || 0)) > 0
+        );
+    }, [props.attendances, props.month, props.year]);
+
+    const TabButton = ({ id, label, icon: Icon, disabled = false }: { id: typeof activeTab, label: string, icon: any, disabled?: boolean }) => (
         <button
-            onClick={() => setActiveTab(id)}
-            title={`Switch to ${label} tab`}
-            aria-label={`Switch to ${label} tab`}
+            onClick={() => !disabled && setActiveTab(id)}
+            title={disabled ? "Complete attendance data entry first" : `Switch to ${label} tab`}
+            aria-label={disabled ? "Tab Disabled: Attendance Required" : `Switch to ${label} tab`}
             className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black transition-all text-xs whitespace-nowrap relative group ${activeTab === id
                 ? (isWin7 
                     ? 'bg-blue-600/50 text-white shadow-[0_0_20px_rgba(37,99,235,0.25)] border border-blue-400/50' 
                     : 'bg-blue-600 text-white shadow-lg')
-                : 'text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent'
+                : (disabled ? 'text-slate-600 cursor-not-allowed grayscale' : 'text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent')
                 }`}
         >
             {activeTab === id && isWin7 && (
@@ -421,7 +429,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     <TabButton id="fines" label="3. Tax & Fines" icon={Gavel} />
                     {props.config.enableOT && <TabButton id="overtime" label="4. Overtime" icon={CalendarClock} />}
                     {props.config.enableArrearSalary && <TabButton id="arrears" label="5. Arrear Salary" icon={TrendingUp} />}
-                    <TabButton id="payroll" label="6. Run Payroll" icon={Calculator} />
+                    <TabButton id="payroll" label="6. Run Payroll" icon={Calculator} disabled={!hasAnyAttendance && !isLocked} />
                 </div>
             </div>
 

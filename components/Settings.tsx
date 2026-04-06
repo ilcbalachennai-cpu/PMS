@@ -4,14 +4,23 @@ import {
     Database, Users, KeyRound, ShieldCheck, Mail, Megaphone, Building2, 
     CalendarClock, Phone, Globe, CheckCircle2, AlertCircle, Lock, Plus,
     ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator, 
-    ScrollText, Percent, HandCoins, Wallet, Scale, Trash, RotateCw, TrendingUp,
-    ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff
+    ScrollText, Percent, HandCoins, Wallet, Scale, RotateCw, TrendingUp,
+    ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert
 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
 import CryptoJS from 'crypto-js';
-import { fetchLatestMessages, updateDeveloperMessages, activateFullLicense, getStoredLicense, isValidKeyFormat } from '../services/licenseService';
+import { 
+    fetchLatestMessages, updateDeveloperMessages, activateFullLicense, 
+    getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup 
+} from '../services/licenseService';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
+
+declare global {
+  interface Window {
+    electronAPI: any;
+  }
+}
 
 interface SettingsProps {
     config: StatutoryConfig;
@@ -30,7 +39,7 @@ interface SettingsProps {
     isSetupMode?: boolean;
     onSkipSetupRedirect?: () => void;
     onDirtyChange?: (isDirty: boolean) => void;
-    showAlert: (type: 'success' | 'warning' | 'danger' | 'info' | 'confirm' | 'error', title: string, message: string | JSX.Element, onConfirm?: () => void, onCancel?: () => void, confirmLabel?: string, cancelLabel?: string, cancel2Label?: string) => void;
+    showAlert: (type: 'success' | 'warning' | 'danger' | 'info' | 'confirm' | 'error', title: string, message: string | React.ReactNode, onConfirm?: () => void, onCancel?: () => void, confirmLabel?: string, cancelLabel?: string, cancel2Label?: string) => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange, showAlert }) => {
@@ -130,6 +139,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [isActivating, setIsActivating] = useState(false);
 
     const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT'>('EXPORT');
+    const [currentPass, setCurrentPass] = useState('');
+    const [newPass, setNewPass] = useState('');
+    const [confirmPass, setConfirmPass] = useState('');
+    const [isUpdatingPass, setIsUpdatingPass] = useState(false);
+    const [showPassRules, setShowPassRules] = useState(false);
+    const [showPin, setShowPin] = useState(false);
     const backupFileRef = useRef<HTMLInputElement>(null);
 
     const progressRef = useRef<HTMLDivElement>(null);
@@ -223,6 +238,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             setLicenseInfo(updated);
             if (result.valid) {
                 showAlert?.('success', 'Sync Successful', 'License credentials and limits refreshed from cloud.');
+                // Trigger global refresh to update Header UI
+                onRestore();
             } else {
                 showAlert?.('warning', 'Sync Issue', result.message || 'Could not verify license status.');
             }
@@ -1361,6 +1378,48 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <div className="space-y-1 flex flex-col justify-end md:col-span-2 xl:col-span-3"><label htmlFor="smtp-sender-email" className="text-[10px] font-bold text-slate-400 uppercase">REPLY-TO EMAIL (IF DIFFERENT)</label><input id="smtp-sender-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="hr@yourcompany.com" value={profileData.senderEmail || ''} onChange={e => setProfileData({ ...profileData, senderEmail: e.target.value })} /></div>
                                 </div>
                             </div>
+
+                            {/* Payroll Security PIN Section */}
+                            <div className="md:col-span-3">
+                                <div className="flex items-center gap-3 border-b border-slate-800 pb-2 mb-4 mt-4">
+                                    <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest flex items-center gap-2">
+                                        <Lock size={12} /> PAYROLL SECURITY PIN (MANDATORY FOR FREEZE)
+                                    </h4>
+                                </div>
+                                <div className="bg-amber-900/10 border border-amber-700/20 p-6 rounded-xl space-y-4">
+                                    <div className="flex flex-col md:flex-row gap-6 items-start md:items-center">
+                                        <div className="flex-1 space-y-2">
+                                            <p className="text-[11px] text-amber-200/70 leading-relaxed">
+                                                This separate PIN is required whenever you **Freeze Attendance** or **Finalize Payroll**. 
+                                                It ensures that critical data backups cannot be initiated without explicit authorization.
+                                            </p>
+                                        </div>
+                                        <div className="w-full md:w-64 relative">
+                                            <label htmlFor="security-pin-input" className="text-[9px] font-black text-amber-500/50 uppercase tracking-widest mb-1.5 block">SECURITY PIN / PASSWORD</label>
+                                            <div className="relative">
+                                                <input 
+                                                    id="security-pin-input"
+                                                    type={showPin ? "text" : "password"} 
+                                                    className="w-full bg-slate-950 border border-amber-900/30 rounded-lg p-3 text-sm text-white font-mono outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-700"
+                                                    placeholder="Enter Security PIN"
+                                                    value={profileData.securityPin || ''}
+                                                    onChange={e => setProfileData({ ...profileData, securityPin: e.target.value })}
+                                                    title="Set Security PIN for Payroll Operations"
+                                                    aria-label="Set Security PIN for Payroll Operations"
+                                                />
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => setShowPin(!showPin)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-amber-400 transition-colors"
+                                                    title={showPin ? "Hide PIN" : "Show PIN"}
+                                                >
+                                                    {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1895,6 +1954,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     if (result.success) {
                                         showAlert?.('success', 'Activation Successful', result.message);
                                         setLicenseInfo(getStoredLicense());
+                                        // Trigger global refresh to update Header UI (Trial -> License)
+                                        setTimeout(() => onRestore(), 500);
                                     } else {
                                         showAlert?.('danger', 'Activation Failed', result.message);
                                     }
@@ -1905,6 +1966,154 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 {isActivating ? <Loader2 size={20} className="animate-spin" /> : <Shield size={20} />}
                                 {isActivating ? 'Activating...' : 'Re-Activate System'}
                             </button>
+                        </div>
+                    </div>
+
+                    {/* NEW SECTION: Security & Credentials */}
+                    <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col gap-8">
+                        <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                            <div className="flex items-center gap-3">
+                                <KeyRound size={24} className="text-pink-500" />
+                                <div>
+                                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">Security & Credentials</h3>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Update Login Credentials & Cloud Sync</p>
+                                </div>
+                            </div>
+                            
+                            {sessionStorage.getItem('app_forced_reset') === 'true' && (
+                                <div className="px-3 py-1 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-500 text-[9px] font-black uppercase animate-pulse">
+                                    Action Required: Forced Reset Active
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Current Password</label>
+                                <input 
+                                    type="password" 
+                                    placeholder="Verify identity"
+                                    className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                    value={currentPass}
+                                    onChange={e => setCurrentPass(e.target.value)}
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">New Secure Password</label>
+                                <div className="relative group">
+                                    <input 
+                                        type="password" 
+                                        placeholder="Set new credentials"
+                                        onFocus={() => setShowPassRules(true)}
+                                        onBlur={() => setShowPassRules(false)}
+                                        className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                        value={newPass}
+                                        onChange={e => setNewPass(e.target.value)}
+                                    />
+                                    {showPassRules && (
+                                        <div className="absolute top-14 left-0 right-0 z-50 bg-[#1e293b] border border-slate-700 rounded-xl p-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                                            <div className="flex items-center gap-2 text-pink-400 mb-3 border-b border-white/5 pb-2">
+                                                <ShieldAlert size={16} />
+                                                <span className="text-[10px] font-black uppercase tracking-widest">Complexity Requirements</span>
+                                            </div>
+                                            <ul className="grid grid-cols-1 gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-tight">
+                                                <li className={`flex items-center gap-2 ${newPass.length >= 9 ? 'text-emerald-500' : ''}`}>
+                                                    <CheckCircle2 size={12} /> Minimum 9 Characters
+                                                </li>
+                                                <li className={`flex items-center gap-2 ${/[A-Z]/.test(newPass) ? 'text-emerald-500' : ''}`}>
+                                                    <CheckCircle2 size={12} /> One Capital (A-Z)
+                                                </li>
+                                                <li className={`flex items-center gap-2 ${/[a-z]/.test(newPass) ? 'text-emerald-500' : ''}`}>
+                                                    <CheckCircle2 size={12} /> One Small (a-z)
+                                                </li>
+                                                <li className={`flex items-center gap-2 ${/[0-9]/.test(newPass) ? 'text-emerald-500' : ''}`}>
+                                                    <CheckCircle2 size={12} /> One Numeric (0-9)
+                                                </li>
+                                                <li className={`flex items-center gap-2 ${/[^A-Za-z0-9]/.test(newPass) ? 'text-emerald-500' : ''}`}>
+                                                    <CheckCircle2 size={12} /> One Special Char
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Confirm New Password</label>
+                                <input 
+                                    type="password" 
+                                    placeholder="Match new password"
+                                    className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                    value={confirmPass}
+                                    onChange={e => setConfirmPass(e.target.value)}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-4 bg-rose-500/5 border border-rose-500/10 p-4 rounded-2xl">
+                             <div className="p-2 bg-rose-500/10 text-rose-500 rounded-lg">
+                                <ShieldAlert size={20} />
+                             </div>
+                             <div className="flex-1">
+                                <h4 className="text-[11px] font-black text-white uppercase tracking-tighter">Production Safeguard</h4>
+                                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">Updating your login password will trigger an immediate Cloud Sync. Ensure you have an active internet connection to keep your account safe across all distributed machines.</p>
+                             </div>
+                             <button 
+                                onClick={async () => {
+                                    if (!currentPass || !newPass || !confirmPass) {
+                                        showAlert('warning', 'Incomplete Form', 'Please fill in all password fields.');
+                                        return;
+                                    }
+                                    if (newPass !== confirmPass) {
+                                        showAlert('warning', 'Mismatch', 'New passwords do not match.');
+                                        return;
+                                    }
+                                    // Severity check
+                                    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{9,}$/;
+                                    if (!regex.test(newPass)) {
+                                        showAlert('warning', 'Complexity Failed', 'New password must meet all security requirements.');
+                                        return;
+                                    }
+
+                                    setIsUpdatingPass(true);
+                                    try {
+                                        const usersRaw = localStorage.getItem('app_users');
+                                        const users: User[] = usersRaw ? JSON.parse(usersRaw) : [];
+                                        const adminIndex = users.findIndex(u => u.role === 'Administrator');
+                                        
+                                        if (adminIndex === -1 || users[adminIndex].password !== currentPass) {
+                                            showAlert('danger', 'Verification Failed', 'The current password you entered is incorrect.');
+                                            return;
+                                        }
+
+                                        // 1. Update Cloud
+                                        const syncResult = await updateCloudPassword(licenseInfo?.registeredTo || '', newPass);
+                                        if (!syncResult.success) {
+                                            showAlert('warning', 'Cloud Sync Warning', 'Local password updated, but cloud sync failed. Ensure your internet is active for full security.');
+                                        }
+
+                                        // 2. Update Local
+                                        users[adminIndex].password = newPass;
+                                        localStorage.setItem('app_users', JSON.stringify(users));
+                                        // @ts-ignore
+                                        if (window.electronAPI) await window.electronAPI.dbSet('app_users', users);
+
+                                        showAlert('success', 'Security Updated', 'Your main login password has been rotated successfully. Use this new password for next login.');
+                                        
+                                        // Clear forced reset state
+                                        sessionStorage.removeItem('app_forced_reset');
+                                        setCurrentPass('');
+                                        setNewPass('');
+                                        setConfirmPass('');
+                                    } finally {
+                                        setIsUpdatingPass(false);
+                                    }
+                                }}
+                                disabled={isUpdatingPass}
+                                className="px-8 py-3.5 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white text-xs font-black uppercase tracking-widest rounded-xl shadow-xl shadow-pink-900/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                             >
+                                {isUpdatingPass ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                                Rotate Password
+                             </button>
                         </div>
                     </div>
                 </div>

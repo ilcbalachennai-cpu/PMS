@@ -1,10 +1,9 @@
-
 import CryptoJS from 'crypto-js';
-import { LicenseData } from '../types';
+import { LicenseData, User } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.07";
+export const APP_VERSION = "02.02.08";
 
 export interface ActivationResult {
   success: boolean;
@@ -353,7 +352,7 @@ export const activateFullLicense = async (
  * Startup validation.
  * Includes a daily online verification sync.
  */
-export const validateLicenseStartup = async (force: boolean = false): Promise<{ valid: boolean; message?: string }> => {
+export const validateLicenseStartup = async (force: boolean = false, attemptedID?: string): Promise<{ valid: boolean; message?: string; data?: any }> => {
   const stored = getStoredLicense();
   const currentMachineId = await getMachineId();
   // Ensure the fetched machine ID is persisted for synchronous lookups (getMachineKey)
@@ -380,6 +379,24 @@ export const validateLicenseStartup = async (force: boolean = false): Promise<{ 
         valid: false,
         message: 'License Expired to renew Contact ilcbala.BharatPayRoll@gmail.com'
       };
+    }
+
+    // --- V02.02.07: GLOBAL IDENTITY ALIGNMENT ---
+    // Ensure local admin username matches the registered License ID (e.g. Sbobby12 instead of admin)
+    try {
+      const usersRaw = localStorage.getItem('app_users');
+      if (usersRaw && stored.userID && stored.userID.toUpperCase() !== 'TRIAL' && stored.userID.toUpperCase() !== 'RESCUE') {
+        const localUsers = JSON.parse(usersRaw);
+        const adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
+        if (adminIndex !== -1 && localUsers[adminIndex].username !== stored.userID) {
+          console.log(`🛠️ Repairing Identity: Changing internal username ${localUsers[adminIndex].username} -> ${stored.userID}`);
+          localUsers[adminIndex].username = stored.userID;
+          localStorage.setItem('app_users', JSON.stringify(localUsers));
+          if ((window as any).electronAPI) (window as any).electronAPI.dbSet('app_users', localUsers);
+        }
+      }
+    } catch (e) {
+      console.warn("Identity alignment failed:", e);
     }
   }
 
@@ -412,82 +429,96 @@ export const validateLicenseStartup = async (force: boolean = false): Promise<{ 
             email: stored?.registeredTo || 'RESCUE',
             mobile: stored?.registeredMobile || 'RESCUE',
             machineId: currentMachineId,
-            userID: stored?.userID || 'RESCUE',
+            userID: attemptedID || (stored?.userID || 'RESCUE'),
             appPassword: adminUser?.password 
           })
         });
 
         console.log("📥 Sync Response:", result);
 
-      const cloudData = result.data || {};
+        const cloudData = result.data || {};
 
-      // --- ALWAYS Sync Developer Credentials (even if license invalid) ---
-      if (cloudData.devUser && cloudData.devPass) {
-        const devObj = {
-          username: String(cloudData.devUser).trim(),
-          password: String(cloudData.devPass).trim(),
-          name: `${String(cloudData.devUser).trim()} (Developer)`,
-          role: 'Developer',
-          email: 'developer@bharatpay.com'
-        };
-        // Encrypt with Machine Specific Key
-        const scrambledDev = scramble(JSON.stringify(devObj), getMachineKey());
-        localStorage.setItem('app_developer_secure', scrambledDev);
-        // @ts-ignore
-        if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambledDev);
-        console.log("✅ Developer access synced from cloud (Hardware Locked).");
-      }
+        // --- ALWAYS Sync Developer Credentials (even if license invalid) ---
+        if (cloudData.devUser && cloudData.devPass) {
+          const devObj = {
+            username: String(cloudData.devUser).trim(),
+            password: String(cloudData.devPass).trim(),
+            name: `${String(cloudData.devUser).trim()} (Developer)`,
+            role: 'Developer',
+            email: 'developer@bharatpay.com'
+          };
+          // Encrypt with Machine Specific Key
+          const scrambledDev = scramble(JSON.stringify(devObj), getMachineKey());
+          localStorage.setItem('app_developer_secure', scrambledDev);
+          // @ts-ignore
+          if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambledDev);
+          console.log("✅ Developer access synced from cloud (Hardware Locked).");
+        }
 
-      if (!result.success) {
-        return { valid: false, message: result.message };
-      }
+        if (!result.success) {
+          return { valid: false, message: result.message };
+        }
 
         if (result.success) {
           let activeLicense = stored;
 
-          // 1. IDENTITY RESTORATION (Rescue/Restoration Sync)
-          // If local license is missing but Cloud recognizes the identity, re-create it locally!
-          if (!activeLicense && cloudData.userName && cloudData.status) {
-            console.log("🛠️ Restoring Identity from Cloud Sync...");
-            const restoredLicense: any = {
-               key: cloudData.licenseKey || (cloudData.isTrial ? "TRIAL" : "RESCUE"),
+          // 1. IDENTITY RESTORATION / SYNC (Hard Fidelity Fix)
+          // If local license is missing OR is a trial and cloud says it's a full license
+          const cloudIsTrial = cloudData.isTrial === true;
+          const localIsTrial = activeLicense?.isTrial === true;
+          
+          if ((!activeLicense || (localIsTrial && !cloudIsTrial)) && cloudData.userName) {
+            console.log("🛠️ Syncing/Restoring Identity from Cloud (FORCE UPGRADE)...");
+            const cloudKey = cloudData.licenseKey || cloudData.key;
+            
+            const restoredLicense: LicenseData = {
+               key: cloudKey || (cloudIsTrial ? "TRIAL" : "ACTIVATED"),
                userName: cloudData.userName,
                userID: cloudData.userID || "RESCUE",
-               registeredTo: cloudData.registeredTo,
-               registeredMobile: cloudData.registeredMobile,
-               startDate: cloudData.startDate,
-               expiryDate: cloudData.expiryDate,
+               registeredTo: cloudData.registeredTo || cloudData.email || "",
+               registeredMobile: cloudData.registeredMobile || cloudData.mobile || "",
+               startDate: cloudData.startDate || "",
+               expiryDate: cloudData.expiryDate || "",
                machineId: currentMachineId,
-               status: cloudData.status,
-               dataSize: Number(cloudData.dataSize) || 50,
-               isTrial: cloudData.isTrial === true
+               status: cloudData.status || (cloudIsTrial ? "REGISTERED" : "ACTIVATED"),
+               dataSize: Number(cloudData.dataSize) || (cloudIsTrial ? 50 : 5000),
+               isTrial: cloudIsTrial,
+               checksum: ""
             };
             
-            // Checksum & persistence
             restoredLicense.checksum = generateChecksum(restoredLicense);
             const scrambled = scramble(JSON.stringify(restoredLicense));
             localStorage.setItem('app_license_secure', scrambled);
             localStorage.setItem('app_data_size', String(restoredLicense.dataSize));
-            // @ts-ignore
-            if (window.electronAPI) {
-              // @ts-ignore
-              window.electronAPI.dbSet('app_license_secure', scrambled);
-              // @ts-ignore
-              window.electronAPI.dbSet('app_data_size', String(restoredLicense.dataSize));
+
+            if ((window as any).electronAPI) {
+              await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
+              await (window as any).electronAPI.dbSet('app_data_size', String(restoredLicense.dataSize));
             }
             activeLicense = restoredLicense;
-            console.log("✅ Identity Restored Successfully.");
+            console.log("✅ Identity Forced to Enterprise successfully.");
           }
 
           if (activeLicense) {
-            // 3. Sync Expiry Date & Key
+            // 3. Sync Expiry Date & Key (Incremental Updates)
             let storageUpdated = false;
+            const incomingKey = cloudData.licenseKey || cloudData.key;
+
             if (cloudData.expiryDate && cloudData.expiryDate !== activeLicense.expiryDate) {
               activeLicense.expiryDate = cloudData.expiryDate;
               storageUpdated = true;
             }
-            if (cloudData.licenseKey && cloudData.licenseKey !== activeLicense.key) {
-              activeLicense.key = cloudData.licenseKey;
+            if (incomingKey && incomingKey !== activeLicense.key) {
+              console.log(`🔑 Key Update: ${activeLicense.key} -> ${incomingKey}`);
+              activeLicense.key = incomingKey;
+              storageUpdated = true;
+            }
+            if (cloudData.isTrial !== undefined && cloudData.isTrial !== activeLicense.isTrial) {
+              activeLicense.isTrial = cloudData.isTrial === true;
+              storageUpdated = true;
+            }
+            if (cloudData.status && cloudData.status !== activeLicense.status) {
+              activeLicense.status = cloudData.status;
               storageUpdated = true;
             }
 
@@ -497,7 +528,7 @@ export const validateLicenseStartup = async (force: boolean = false): Promise<{ 
               localStorage.setItem('app_license_secure', scrambled);
               // @ts-ignore
               if (window.electronAPI) window.electronAPI.dbSet('app_license_secure', scrambled);
-              console.log("✅ License Key/Expiry synced from cloud.");
+              console.log("✅ License successfully sync-updated from cloud.");
             }
 
             // 4. Version Check
@@ -518,17 +549,27 @@ export const validateLicenseStartup = async (force: boolean = false): Promise<{ 
               const adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
 
               if (adminIndex !== -1) {
-                // Update existing if changed in cloud
+                // Update existing username & password strictly from Cloud
                 if (localUsers[adminIndex].username !== cloudAdminUser || localUsers[adminIndex].password !== cloudAdminPass) {
+                  console.log("♻️  Updating Local Administrator (Suganthi) credentials from Cloud...");
+                  const oldPass = localUsers[adminIndex].password;
+                  
+                  // FORCE: Use registered ID for username, removing 'admin'
                   localUsers[adminIndex].username = cloudAdminUser;
                   localUsers[adminIndex].password = cloudAdminPass;
+                  
+                  // Flag for forced reset if cloud has a temp code and we just synced it
+                  if (cloudAdminPass && cloudAdminPass.length <= 8 && cloudAdminPass !== oldPass) {
+                    sessionStorage.setItem('app_forced_reset', 'true');
+                  }
+
                   localStorage.setItem('app_users', JSON.stringify(localUsers));
                   // @ts-ignore
                   if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
                 }
               } else if (localUsers.length === 0 && cloudAdminUser) {
-                // Recover missing admin using restored identity info (NO defaults!)
-                const recoveredAdmin = {
+                // Recover missing admin using restored identity info (Registered ID only!)
+                const recoveredAdmin: User = {
                   username: cloudAdminUser,
                   password: cloudAdminPass,
                   name: activeLicense ? activeLicense.userName : 'System Administrator',
@@ -545,6 +586,7 @@ export const validateLicenseStartup = async (force: boolean = false): Promise<{ 
 
           localStorage.setItem('app_license_last_check', today);
           console.log("✅ Daily License/Trial Sync Complete (Database IDs Only).");
+          return { valid: true, data: cloudData };
         }
 
       } catch (e) {
@@ -555,6 +597,28 @@ export const validateLicenseStartup = async (force: boolean = false): Promise<{ 
 
   return { valid: true };
 };
+
+/**
+ * Updates the user's password in the Google Sheet for cloud sync integrity.
+ */
+export const updateCloudPassword = async (email: string, newPassword: string): Promise<ActivationResult> => {
+    const machineId = await getMachineId();
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'UPDATE_PASSWORD',
+                email,
+                machineId,
+                newPassword
+            })
+        });
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `Cloud Sync Error: ${error.message || "Unknown Failure"}` };
+    }
+};
+
 
 /**
  * Sends a background ping to the cloud to increment the user's total login count

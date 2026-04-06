@@ -161,9 +161,9 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
   }, 0);
 
   const stats = [
-    { label: 'Total Payroll Cost', value: totalGross > 0 ? `₹${(totalGross / 100000).toFixed(2)}L` : '—', icon: IndianRupee, color: 'text-blue-400', bg: 'bg-blue-900/30' },
+    { label: 'Total Payroll Cost', value: totalGross > 0 ? `₹ ${(totalGross / 100000).toFixed(2)}L` : '—', icon: IndianRupee, color: 'text-blue-400', bg: 'bg-blue-900/30' },
     { label: 'Active Employees', value: activeCount || employees.length, icon: Users, color: 'text-emerald-400', bg: 'bg-emerald-900/30' },
-    { label: 'EPF Pool', value: totalEPF > 0 ? `₹${totalEPF.toLocaleString()}` : '—', icon: Building, color: 'text-amber-400', bg: 'bg-amber-900/30' },
+    { label: 'EPF Pool', value: totalEPF > 0 ? `₹ ${totalEPF.toLocaleString()}` : '—', icon: Building, color: 'text-amber-400', bg: 'bg-amber-900/30' },
     { label: 'Total LOP Days', value: totalLOP, icon: TrendingUp, color: 'text-red-400', bg: 'bg-red-900/30' },
   ];
 
@@ -304,7 +304,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
                   <div className={`w-2 h-2 rounded-full bg-stat-${i}`}></div>
                   <span className="text-slate-400 font-medium">{d.name}</span>
                 </div>
-                <span className="font-bold text-white">₹{d.value.toLocaleString()}</span>
+                <span className="font-bold text-white">₹ {d.value.toLocaleString()}</span>
               </div>
             ))}
           </div>
