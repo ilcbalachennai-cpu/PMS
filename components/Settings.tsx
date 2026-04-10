@@ -1,25 +1,28 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { 
-    X, Save, RefreshCw, Loader2, Download, Upload, Trash2, AlertTriangle, 
-    Database, Users, KeyRound, ShieldCheck, Mail, Megaphone, Building2, 
+import {
+    X, Save, RefreshCw, Loader2, Download, Upload, Trash2, AlertTriangle,
+    Database, Users, KeyRound, ShieldCheck, Mail, Megaphone, Building2,
     CalendarClock, Phone, Globe, CheckCircle2, AlertCircle, Lock, Plus,
-    ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator, 
+    ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator,
     ScrollText, Percent, HandCoins, Wallet, Scale, RotateCw, TrendingUp,
-    ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert
+    ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
+    FolderOpen, FolderSearch
 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
 import CryptoJS from 'crypto-js';
-import { 
-    fetchLatestMessages, updateDeveloperMessages, activateFullLicense, 
-    getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup 
+import {
+    fetchLatestMessages, updateDeveloperMessages, activateFullLicense,
+    getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
+    requestResetOTP
 } from '../services/licenseService';
+import { formatExpiryDate } from '../utils/formatters';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 
 declare global {
-  interface Window {
-    electronAPI: any;
-  }
+    interface Window {
+        electronAPI: any;
+    }
 }
 
 interface SettingsProps {
@@ -40,9 +43,10 @@ interface SettingsProps {
     onSkipSetupRedirect?: () => void;
     onDirtyChange?: (isDirty: boolean) => void;
     showAlert: (type: 'success' | 'warning' | 'danger' | 'info' | 'confirm' | 'error', title: string, message: string | React.ReactNode, onConfirm?: () => void, onCancel?: () => void, confirmLabel?: string, cancelLabel?: string, cancel2Label?: string) => void;
+    verifyLicense?: () => Promise<void>;
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange, showAlert }) => {
+const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange, showAlert, verifyLicense }) => {
     const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(isSetupMode ? 'COMPANY' : initialTab);
 
     const [formData, setFormData] = useState<StatutoryConfig>(() => {
@@ -145,9 +149,22 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [isUpdatingPass, setIsUpdatingPass] = useState(false);
     const [showPassRules, setShowPassRules] = useState(false);
     const [showPin, setShowPin] = useState(false);
+    const [resetStep, setResetStep] = useState<'IDENTIFY' | 'OTP'>('IDENTIFY');
+    const [resetOTP, setResetOTP] = useState('');
+    const [appDirectory, setAppDirectory] = useState<string>('');
     const backupFileRef = useRef<HTMLInputElement>(null);
 
     const progressRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const fetchDir = async () => {
+            if (window.electronAPI && window.electronAPI.getAppDirectory) {
+                const dir = await window.electronAPI.getAppDirectory();
+                setAppDirectory(dir || '');
+            }
+        };
+        fetchDir();
+    }, []);
 
     useEffect(() => {
         if (progressRef.current) {
@@ -170,12 +187,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         }
     };
 
-
-    useEffect(() => {
-        if (progressRef.current) {
-            progressRef.current.style.width = `${processProgress}%`;
-        }
-    }, [processProgress]);
 
     const [appUsers, setAppUsers] = useState<User[]>(() => {
         try { return JSON.parse(localStorage.getItem('app_users') || '[]'); } catch { return []; }
@@ -240,12 +251,13 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         setIsSyncing(true);
         try {
             const result = await validateLicenseStartup(true); // Force sync
-            const updated = getStoredLicense();
-            setLicenseInfo(updated);
             if (result.valid) {
+                // Ensure the global App state reflects the new license (for the Header)
+                if (verifyLicense) await verifyLicense();
+
+                const updated = getStoredLicense();
+                setLicenseInfo(updated); // Update Local Settings UI
                 showAlert?.('success', 'Sync Successful', 'License credentials and limits refreshed from cloud.');
-                // Trigger global refresh to update Header UI
-                onRestore();
             } else {
                 showAlert?.('warning', 'Sync Issue', result.message || 'Could not verify license status.');
             }
@@ -693,6 +705,18 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         }
     };
 
+    const handleChangeDirectory = async () => {
+        if (!window.electronAPI) return;
+        const result = await window.electronAPI.selectAppDirectory();
+        if (result.success && result.path) {
+            await window.electronAPI.initializeAppDirectory(result.path);
+            setAppDirectory(result.path);
+            showAlert?.('success', 'Storage Path Updated', 'Application data path has been updated. The app will now reload to synchronize with the new location.', () => {
+                window.location.reload();
+            });
+        }
+    };
+
     return (
         <div className="max-w-4xl space-y-8 text-white relative">
             <input
@@ -741,7 +765,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Establishment Compliance & Advanced Settings</p>
                         </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-3">
                         {isDirty && (
                             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-xl animate-pulse">
@@ -749,16 +773,15 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Unsaved Changes</span>
                             </div>
                         )}
-                        <button 
-                            onClick={handleSave} 
-                            className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-[11px] font-black transition-all shadow-xl active:scale-95 ${
-                                saved 
-                                ? 'bg-emerald-600 text-white shadow-emerald-900/40 ring-2 ring-emerald-500/50' 
-                                : isDirty 
-                                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/40 ring-2 ring-white/20' 
+                        <button
+                            onClick={handleSave}
+                            className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-[11px] font-black transition-all shadow-xl active:scale-95 ${saved
+                                ? 'bg-emerald-600 text-white shadow-emerald-900/40 ring-2 ring-emerald-500/50'
+                                : isDirty
+                                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/40 ring-2 ring-white/20'
                                     : 'bg-slate-800 text-slate-400 cursor-default opacity-80'
-                            }`} 
-                            title="Save Configuration" 
+                                }`}
+                            title="Save Configuration"
                             aria-label="Save Configuration"
                         >
                             {saved ? <CheckCircle2 size={14} /> : isDirty ? <Save size={14} /> : <Save size={14} />}
@@ -906,9 +929,9 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         const components = formData.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
                                         const isActive = components[comp.key as keyof typeof components];
                                         return (
-                                            <button 
-                                                key={comp.key} 
-                                                onClick={() => handlePFOriginalWagesToggle(comp.key as any)} 
+                                            <button
+                                                key={comp.key}
+                                                onClick={() => handlePFOriginalWagesToggle(comp.key as any)}
                                                 className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-blue-600 border-blue-400 text-white shadow-blue-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700'}`}
                                                 title={`Toggle ${comp.label} for PF Base`}
                                             >
@@ -943,9 +966,9 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         const components = formData.esiOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents;
                                         const isActive = components[comp.key as keyof typeof components];
                                         return (
-                                            <button 
-                                                key={comp.key} 
-                                                onClick={() => handleESIOriginalWagesToggle(comp.key as any)} 
+                                            <button
+                                                key={comp.key}
+                                                onClick={() => handleESIOriginalWagesToggle(comp.key as any)}
                                                 className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-pink-600 border-pink-400 text-white shadow-pink-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-pink-900/20 hover:border-pink-500/30'}`}
                                                 title={`Toggle ${comp.label} for ESI Base`}
                                             >
@@ -988,13 +1011,13 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                                     Statutory (12%)
                                                 </button>
                                                 <button
-                                                     onClick={() => handlePFTypeChange('Voluntary')}
-                                                     title="Set PF Compliance to Voluntary (10%)"
-                                                     aria-label="Set PF Compliance to Voluntary (10%)"
-                                                     className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Voluntary' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
-                                                 >
-                                                     Voluntary (10%)
-                                                 </button>
+                                                    onClick={() => handlePFTypeChange('Voluntary')}
+                                                    title="Set PF Compliance to Voluntary (10%)"
+                                                    aria-label="Set PF Compliance to Voluntary (10%)"
+                                                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Voluntary' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
+                                                >
+                                                    Voluntary (10%)
+                                                </button>
                                             </div>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
@@ -1203,7 +1226,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             </div>
                         )}
                     </div>
-                    
+
                     {/* Arrear Salary Module Configuration */}
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
                         <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
@@ -1292,13 +1315,13 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 </ul>
                             </div>
                             <div className="flex gap-4">
-                                 <button onClick={() => setFormData({ ...formData, incomeTaxCalculationType: 'Manual' })} title="Set Income Tax Calculation to Manual" aria-label="Set Income Tax Calculation to Manual" className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Manual' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
-                                     {formData.incomeTaxCalculationType === 'Manual' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Manual (As per Import)
-                                 </button>
-                                 <button onClick={() => setFormData({ ...formData, incomeTaxCalculationType: 'Auto' })} title="Set Income Tax Calculation to Auto" aria-label="Set Income Tax Calculation to Auto" className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Auto' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
-                                     {formData.incomeTaxCalculationType === 'Auto' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Auto (Taxable Salary)
-                                 </button>
-                             </div>
+                                <button onClick={() => setFormData({ ...formData, incomeTaxCalculationType: 'Manual' })} title="Set Income Tax Calculation to Manual" aria-label="Set Income Tax Calculation to Manual" className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Manual' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
+                                    {formData.incomeTaxCalculationType === 'Manual' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Manual (As per Import)
+                                </button>
+                                <button onClick={() => setFormData({ ...formData, incomeTaxCalculationType: 'Auto' })} title="Set Income Tax Calculation to Auto" aria-label="Set Income Tax Calculation to Auto" className={`flex-1 py-3 px-4 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${formData.incomeTaxCalculationType === 'Auto' ? 'bg-sky-600 border-sky-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
+                                    {formData.incomeTaxCalculationType === 'Auto' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border border-slate-600" />} Auto (Taxable Salary)
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1396,16 +1419,16 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <div className="flex flex-col md:flex-row gap-6 items-start md:items-center">
                                         <div className="flex-1 space-y-2">
                                             <p className="text-[11px] text-amber-200/70 leading-relaxed">
-                                                This separate PIN is required whenever you **Freeze Attendance** or **Finalize Payroll**. 
+                                                This separate PIN is required whenever you **Freeze Attendance** or **Finalize Payroll**.
                                                 It ensures that critical data backups cannot be initiated without explicit authorization.
                                             </p>
                                         </div>
                                         <div className="w-full md:w-64 relative">
                                             <label htmlFor="security-pin-input" className="text-[9px] font-black text-amber-500/50 uppercase tracking-widest mb-1.5 block">SECURITY PIN / PASSWORD</label>
                                             <div className="relative">
-                                                <input 
+                                                <input
                                                     id="security-pin-input"
-                                                    type={showPin ? "text" : "password"} 
+                                                    type={showPin ? "text" : "password"}
                                                     className="w-full bg-slate-950 border border-amber-900/30 rounded-lg p-3 text-sm text-white font-mono outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-700"
                                                     placeholder="Enter Security PIN"
                                                     value={profileData.securityPin || ''}
@@ -1413,7 +1436,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                                     title="Set Security PIN for Payroll Operations"
                                                     aria-label="Set Security PIN for Payroll Operations"
                                                 />
-                                                <button 
+                                                <button
                                                     type="button"
                                                     onClick={() => setShowPin(!showPin)}
                                                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-amber-400 transition-colors"
@@ -1459,7 +1482,9 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             flashPopupMessage: result.flashPopupMessage || prev.flashPopupMessage,
                                             flashPopupHeader: result.flashPopupHeader || prev.flashPopupHeader,
                                             flashPopupPriority: (result.flashPopupPriority as any) || prev.flashPopupPriority,
-                                            flashPopupId: result.flashPopupId || prev.flashPopupId
+                                            flashPopupId: result.flashPopupId || prev.flashPopupId,
+                                            loginAlertMessage: result.loginAlertMessage || prev.loginAlertMessage,
+                                            loginAlertEnabled: result.loginAlertEnabled !== undefined ? result.loginAlertEnabled : prev.loginAlertEnabled
                                         }));
                                         showAlert?.('success', 'Full Sync Complete', 'Developer messages refreshed from cloud.');
                                     }
@@ -1474,43 +1499,43 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <div className="bg-[#0f172a] rounded-2xl border border-slate-800 p-6 flex flex-col space-y-4">
                                 <div className="flex items-center justify-between border-b border-white/5 pb-3">
                                     <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest">Main Message Broadcast</h3>
-                                    <button 
-                                        onClick={async () => { 
-                                            setIsSyncing(true); 
-                                            const res = await updateDeveloperMessages(profileData.postLoginMessage || '', 'MESSAGE', profileData.postLoginHeader, profileData.postLoginAlignment, profileData.postLoginKey); 
-                                            setIsSyncing(false); 
-                                            if (res.success) showAlert?.('success', 'Published', 'Main Message updated globally.'); 
-                                        }} 
+                                    <button
+                                        onClick={async () => {
+                                            setIsSyncing(true);
+                                            const res = await updateDeveloperMessages(profileData.postLoginMessage || '', 'MESSAGE', profileData.postLoginHeader, profileData.postLoginAlignment, profileData.postLoginKey);
+                                            setIsSyncing(false);
+                                            if (res.success) showAlert?.('success', 'Published', 'Main Message updated globally.');
+                                        }}
                                         className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black rounded-lg transition-all"
                                     >
                                         PUSH TO CLOUD
                                     </button>
                                 </div>
                                 <div className="space-y-4">
-                                    <input type="text" title="Header" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white" placeholder="Message Header" value={profileData.postLoginHeader || ''} onChange={e => setProfileData({...profileData, postLoginHeader: e.target.value})} />
+                                    <input type="text" title="Header" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white" placeholder="Message Header" value={profileData.postLoginHeader || ''} onChange={e => setProfileData({ ...profileData, postLoginHeader: e.target.value })} />
                                     <div className="grid grid-cols-2 gap-3">
                                         <div className="space-y-1">
                                             <label className="text-[9px] text-slate-500 font-bold uppercase">Alignment</label>
-                                            <select title="Alignment" className="w-full bg-slate-950 border border-slate-800 text-white text-[10px] p-2 rounded-lg" value={profileData.postLoginAlignment || 'LEFT'} onChange={e => setProfileData({...profileData, postLoginAlignment: e.target.value as any})}><option value="LEFT">LEFT</option><option value="CENTER">CENTER</option></select>
+                                            <select title="Alignment" className="w-full bg-slate-950 border border-slate-800 text-white text-[10px] p-2 rounded-lg" value={profileData.postLoginAlignment || 'LEFT'} onChange={e => setProfileData({ ...profileData, postLoginAlignment: e.target.value as any })}><option value="LEFT">LEFT</option><option value="CENTER">CENTER</option></select>
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-[9px] text-slate-500 font-bold uppercase">Priority</label>
-                                            <select title="Priority" className="w-full bg-slate-100 border border-slate-800 text-black text-[10px] p-2 rounded-lg font-bold" value={profileData.postLoginKey || 'REGULAR'} onChange={e => setProfileData({...profileData, postLoginKey: e.target.value as any})}><option value="REGULAR">Regular</option><option value="IMMEDIATE">Immediate</option></select>
+                                            <select title="Priority" className="w-full bg-slate-100 border border-slate-800 text-black text-[10px] p-2 rounded-lg font-bold" value={profileData.postLoginKey || 'REGULAR'} onChange={e => setProfileData({ ...profileData, postLoginKey: e.target.value as any })}><option value="REGULAR">Regular</option><option value="IMMEDIATE">Immediate</option></select>
                                         </div>
                                     </div>
-                                    <textarea title="Message Content" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-slate-300 min-h-[160px] leading-relaxed" value={profileData.postLoginMessage || ''} onChange={e => setProfileData({...profileData, postLoginMessage: e.target.value})} />
+                                    <textarea title="Message Content" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-slate-300 min-h-[160px] leading-relaxed" value={profileData.postLoginMessage || ''} onChange={e => setProfileData({ ...profileData, postLoginMessage: e.target.value })} />
                                 </div>
                             </div>
                             <div className="bg-[#0f172a] rounded-2xl border border-slate-800 p-6 flex flex-col space-y-4">
                                 <div className="flex items-center justify-between border-b border-white/5 pb-3">
                                     <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest">News Ticker broadcast</h3>
-                                    <button 
-                                        onClick={async () => { 
-                                            setIsSyncing(true); 
-                                            const res = await updateDeveloperMessages(profileData.flashNews || '', 'NEWS', 'MARQUEE', 'LEFT', profileData.flashNewsKey); 
-                                            setIsSyncing(false); 
-                                            if (res.success) showAlert?.('success', 'Published', 'Ticker updated globally.'); 
-                                        }} 
+                                    <button
+                                        onClick={async () => {
+                                            setIsSyncing(true);
+                                            const res = await updateDeveloperMessages(profileData.flashNews || '', 'NEWS', 'MARQUEE', 'LEFT', profileData.flashNewsKey);
+                                            setIsSyncing(false);
+                                            if (res.success) showAlert?.('success', 'Published', 'Ticker updated globally.');
+                                        }}
                                         className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black rounded-lg transition-all"
                                     >
                                         PUSH TO CLOUD
@@ -1519,21 +1544,21 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <div className="flex flex-col h-full space-y-4">
                                     <div className="space-y-1">
                                         <label className="text-[9px] text-slate-500 font-bold uppercase">Ticker Mode</label>
-                                        <select title="Ticker Mode" className="w-full bg-slate-950 border border-slate-800 text-white text-[10px] p-2 rounded-lg" value={profileData.flashNewsKey || 'REGULAR'} onChange={e => setProfileData({...profileData, flashNewsKey: e.target.value})}><option value="REGULAR">Regular Scroll</option><option value="IMMEDIATE">Urgent Priority</option></select>
+                                        <select title="Ticker Mode" className="w-full bg-slate-950 border border-slate-800 text-white text-[10px] p-2 rounded-lg" value={profileData.flashNewsKey || 'REGULAR'} onChange={e => setProfileData({ ...profileData, flashNewsKey: e.target.value })}><option value="REGULAR">Regular Scroll</option><option value="IMMEDIATE">Urgent Priority</option></select>
                                     </div>
-                                    <textarea title="Ticker Content" className="w-full flex-grow bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-emerald-400 min-h-[120px] leading-relaxed" value={profileData.flashNews || ''} onChange={e => setProfileData({...profileData, flashNews: e.target.value})} />
+                                    <textarea title="Ticker Content" className="w-full flex-grow bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-emerald-400 min-h-[120px] leading-relaxed" value={profileData.flashNews || ''} onChange={e => setProfileData({ ...profileData, flashNews: e.target.value })} />
                                 </div>
                             </div>
                             <div className="bg-[#0f172a] rounded-2xl border border-slate-800 p-6 flex flex-col space-y-4 md:col-span-2">
                                 <div className="flex items-center justify-between border-b border-white/5 pb-3">
                                     <h3 className="text-xs font-black text-amber-400 uppercase tracking-widest">Flash Popup Alert (3rd Tier)</h3>
-                                    <button 
-                                        onClick={async () => { 
-                                            setIsSyncing(true); 
-                                            const res = await updateDeveloperMessages(profileData.flashPopupMessage || '', 'FLASH', profileData.flashPopupHeader, 'CENTER', profileData.flashPopupPriority); 
-                                            setIsSyncing(false); 
-                                            if (res.success) showAlert?.('success', 'Published', 'Flash Alert updated globally.'); 
-                                        }} 
+                                    <button
+                                        onClick={async () => {
+                                            setIsSyncing(true);
+                                            const res = await updateDeveloperMessages(profileData.flashPopupMessage || '', 'FLASH', profileData.flashPopupHeader, 'CENTER', profileData.flashPopupPriority);
+                                            setIsSyncing(false);
+                                            if (res.success) showAlert?.('success', 'Published', 'Flash Alert updated globally.');
+                                        }}
                                         className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black rounded-lg transition-all"
                                     >
                                         PUSH TO CLOUD
@@ -1543,17 +1568,64 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <div className="lg:col-span-1 space-y-4">
                                         <div className="space-y-1">
                                             <label className="text-[9px] text-slate-500 font-bold uppercase">Alert Header</label>
-                                            <input type="text" title="Flash Header" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white" placeholder="FLASH ALERT" value={profileData.flashPopupHeader || ''} onChange={e => setProfileData({...profileData, flashPopupHeader: e.target.value})} />
+                                            <input type="text" title="Flash Header" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white" placeholder="FLASH ALERT" value={profileData.flashPopupHeader || ''} onChange={e => setProfileData({ ...profileData, flashPopupHeader: e.target.value })} />
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-[9px] text-slate-500 font-bold uppercase">Priority</label>
-                                            <select title="Flash Priority" className="w-full bg-slate-950 border border-slate-800 text-white text-[10px] p-2 rounded-lg" value={profileData.flashPopupPriority || 'REGULAR'} onChange={e => setProfileData({...profileData, flashPopupPriority: e.target.value as any})}><option value="REGULAR">Standard</option><option value="IMMEDIATE">System Critical (Auto-Show)</option></select>
+                                            <select title="Flash Priority" className="w-full bg-slate-950 border border-slate-800 text-white text-[10px] p-2 rounded-lg" value={profileData.flashPopupPriority || 'REGULAR'} onChange={e => setProfileData({ ...profileData, flashPopupPriority: e.target.value as any })}><option value="REGULAR">Standard</option><option value="IMMEDIATE">System Critical (Auto-Show)</option></select>
                                         </div>
                                         <p className="text-[9px] text-slate-500 italic">Flash alerts appear as a persistent floating notice until cleared by the user.</p>
                                     </div>
                                     <div className="lg:col-span-2">
-                                        <textarea title="Flash Content" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-amber-200 min-h-[140px] leading-relaxed" value={profileData.flashPopupMessage || ''} onChange={e => setProfileData({...profileData, flashPopupMessage: e.target.value})} />
+                                        <textarea title="Flash Content" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-amber-200 min-h-[140px] leading-relaxed" value={profileData.flashPopupMessage || ''} onChange={e => setProfileData({ ...profileData, flashPopupMessage: e.target.value })} />
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* PRE-LOGIN SCREEN ALERT */}
+                            <div className="bg-[#0f172a] rounded-2xl border border-slate-800 p-6 flex flex-col space-y-4 md:col-span-2">
+                                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="text-xs font-black text-rose-400 uppercase tracking-widest">Login Screen Alert Board (Legal/News)</h3>
+                                        <label className="flex items-center gap-2 cursor-pointer ml-4">
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 rounded border-slate-800 bg-slate-950 accent-rose-500"
+                                                checked={profileData.loginAlertEnabled || false}
+                                                onChange={e => setProfileData({ ...profileData, loginAlertEnabled: e.target.checked })}
+                                            />
+                                            <span className="text-[10px] font-bold text-slate-500 uppercase">Visible on Login</span>
+                                        </label>
+                                    </div>
+                                    <button
+                                        onClick={async () => {
+                                            setIsSyncing(true);
+                                            const res = await updateDeveloperMessages(
+                                                profileData.loginAlertMessage || '', 
+                                                'ALERT', 
+                                                'LEGAL_NOTICE', 
+                                                'CENTER', 
+                                                profileData.loginAlertEnabled ? 'ENABLED' : 'DISABLED'
+                                            );
+                                            setIsSyncing(false);
+                                            if (res.success) showAlert?.('success', 'Published', 'Login Alert Board updated globally.');
+                                        }}
+                                        className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black rounded-lg transition-all"
+                                    >
+                                        PUSH TO CLOUD
+                                    </button>
+                                </div>
+                                <div className="space-y-4">
+                                    <p className="text-[9px] text-slate-500 leading-relaxed">
+                                        This alert appears prominently on the login screen. Use it for legal ownership notices, version change-logs, or urgent news for users BEFORE they log in.
+                                    </p>
+                                    <textarea
+                                        title="Login Alert Content"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-rose-200 min-h-[120px] font-medium leading-relaxed"
+                                        placeholder="Enter the alert message to show on the login screen..."
+                                        value={profileData.loginAlertMessage || ''}
+                                        onChange={e => setProfileData({ ...profileData, loginAlertMessage: e.target.value })}
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -1570,6 +1642,33 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         <div>
                             <h3 className="font-black text-white text-lg uppercase tracking-tighter">Data Management Center</h3>
                             <p className="text-xs text-slate-400">Secure Backup, Restoration & System Maintenance</p>
+                        </div>
+                    </div>
+
+                    {/* Application Storage Section - MOVED TO TOP */}
+                    <div className="bg-[#0f172a] p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/30 transition-all group shadow-lg mb-8">
+                        <div className="flex items-center gap-4 mb-4">
+                            <div className="p-3 bg-indigo-900/20 text-indigo-400 rounded-xl group-hover:scale-110 transition-transform">
+                                <FolderOpen size={24} />
+                            </div>
+                            <div>
+                                <h4 className="font-black text-white uppercase tracking-tighter">Application Storage Location</h4>
+                                <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded">Root Path</span>
+                            </div>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-slate-400 break-all leading-relaxed">
+                                {appDirectory || 'Scanning for configured path...'}
+                            </div>
+                            <button
+                                onClick={() => requireAuth(handleChangeDirectory)}
+                                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-700 shadow-lg active:scale-95"
+                            >
+                                <Lock size={14} className="text-indigo-400" /> Secure Change Directory
+                            </button>
+                            <p className="text-[9px] text-slate-500 italic text-center">
+                                * Requires Administrator Authorization to modify system storage path.
+                            </p>
                         </div>
                     </div>
 
@@ -1607,8 +1706,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         </div>
                                     </div>
                                     <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Create a secure, portable snapshot of your entire payroll database (Employees, Attendance, Settings) for archival or migration."</p>
-                                    <button 
-                                        onClick={() => requireAuth(() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); })} 
+                                    <button
+                                        onClick={() => requireAuth(() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); })}
                                         className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
                                     >
                                         <Lock size={14} /> Authorize & Backup
@@ -1626,8 +1725,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         </div>
                                     </div>
                                     <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Reverse previous exports or recover from database files directly. Atomic restoration ensures system integrity on failure."</p>
-                                    <button 
-                                        onClick={() => backupFileRef.current?.click()} 
+                                    <button
+                                        onClick={() => backupFileRef.current?.click()}
                                         className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
                                     >
                                         <Upload size={14} /> Select & Restore
@@ -1654,7 +1753,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             </div>
                                             <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Clear all <span className="text-amber-400 font-bold underline underline-offset-2">Transactional Records</span> (Employees, Attendance, PayHistory) while keeping Company Profile and Master Config intact.</p>
                                         </div>
-                                        <button 
+                                        <button
                                             onClick={() => requireAuth(() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); })}
                                             className="mt-4 py-2.5 px-4 bg-amber-900/20 hover:bg-amber-600 text-amber-500 hover:text-white border border-amber-900/50 hover:border-amber-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                         >
@@ -1673,7 +1772,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             </div>
                                             <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Perform a full <span className="text-red-500 font-bold underline underline-offset-2">Wipe-Out</span>. Clears all data including License Identity and User Accounts. Used for system decommissioning.</p>
                                         </div>
-                                        <button 
+                                        <button
                                             onClick={() => requireAuth(() => { setShowResetModal(true); setResetPassword(''); setResetError(''); })}
                                             className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                         >
@@ -1685,654 +1784,687 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </>
                     )}
                 </div>
-            )}
+            )
+            }
 
 
 
-            {showResetModal && (
-                <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Factory Reset Modal"><X size={20} /></button>}
-                        <div className="flex flex-col items-center gap-2">
-                            <div className="p-4 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><AlertTriangle size={32} /></div>
-                            <h3 className="text-xl font-black text-white text-center">FACTORY RESET</h3>
-                            <p className="text-xs text-red-300 text-center leading-relaxed">CRITICAL WARNING: This action is IRREVERSIBLE.</p>
+            {
+                showResetModal && (
+                    <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                            {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Factory Reset Modal"><X size={20} /></button>}
+                            <div className="flex flex-col items-center gap-2">
+                                <div className="p-4 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><AlertTriangle size={32} /></div>
+                                <h3 className="text-xl font-black text-white text-center">FACTORY RESET</h3>
+                                <p className="text-xs text-red-300 text-center leading-relaxed">CRITICAL WARNING: This action is IRREVERSIBLE.</p>
+                            </div>
+                            <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                                <input type="password" placeholder="Enter Login Password" title="Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executeFactoryReset()} />
+                                {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
+                            </div>
+                            <button onClick={executeFactoryReset} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                                {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />} {isProcessing ? 'ERASING...' : 'CONFIRM DELETE ALL'}
+                            </button>
                         </div>
-                        <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <input type="password" placeholder="Enter Login Password" title="Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executeFactoryReset()} />
-                            {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
-                        </div>
-                        <button onClick={executeFactoryReset} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
-                            {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />} {isProcessing ? 'ERASING...' : 'CONFIRM DELETE ALL'}
-                        </button>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {showPayrollResetModal && (
-                <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowPayrollResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Payroll Reset Modal"><X size={20} /></button>
-                        <div className="flex flex-col items-center gap-2">
-                            <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full border border-amber-900/50 mb-2"><Trash2 size={32} /></div>
-                            <h3 className="text-xl font-black text-white text-center">PAYROLL RESET</h3>
-                            <p className="text-xs text-amber-300 text-center leading-relaxed">This will erase all employees but preserve company settings.</p>
+            {
+                showPayrollResetModal && (
+                    <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                            <button onClick={() => setShowPayrollResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Payroll Reset Modal"><X size={20} /></button>
+                            <div className="flex flex-col items-center gap-2">
+                                <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full border border-amber-900/50 mb-2"><Trash2 size={32} /></div>
+                                <h3 className="text-xl font-black text-white text-center">PAYROLL RESET</h3>
+                                <p className="text-xs text-amber-300 text-center leading-relaxed">This will erase all employees but preserve company settings.</p>
+                            </div>
+                            <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                                <input type="password" placeholder="Enter Login Password" title="Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
+                                {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
+                            </div>
+                            <button onClick={executePayrollReset} disabled={isProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                                {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />} {isProcessing ? 'CLEARING...' : 'CONFIRM RESET'}
+                            </button>
                         </div>
-                        <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <input type="password" placeholder="Enter Login Password" title="Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
-                            {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
-                        </div>
-                        <button onClick={executePayrollReset} disabled={isProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
-                             {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />} {isProcessing ? 'CLEARING...' : 'CONFIRM RESET'}
-                        </button>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {showBackupModal && (
-                <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        {!isProcessing && <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Backup Modal"><X size={20} /></button>}
-                        <div className="flex flex-col items-center gap-2">
-                            <div className="p-4 bg-blue-900/20 text-blue-400 rounded-full border border-blue-900/50 mb-2">{backupMode === 'EXPORT' ? <Lock size={32} /> : <Database size={32} />}</div>
-                            <h3 className="text-xl font-black text-white text-center uppercase tracking-widest">{backupMode === 'EXPORT' ? 'SECURE EXPORT' : 'Secure Restore'}</h3>
-                        </div>
-                        
-                        <div className="space-y-4 mt-2">
-                            {backupMode === 'IMPORT' && (
+            {
+                showBackupModal && (
+                    <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
+                            {!isProcessing && <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Backup Modal"><X size={20} /></button>}
+                            <div className="flex flex-col items-center gap-2">
+                                <div className="p-4 bg-blue-900/20 text-blue-400 rounded-full border border-blue-900/50 mb-2">{backupMode === 'EXPORT' ? <Lock size={32} /> : <Database size={32} />}</div>
+                                <h3 className="text-xl font-black text-white text-center uppercase tracking-widest">{backupMode === 'EXPORT' ? 'SECURE EXPORT' : 'Secure Restore'}</h3>
+                            </div>
+
+                            <div className="space-y-4 mt-2">
+                                {backupMode === 'IMPORT' && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">SELECT BACKUP FILE</label>
+                                        <div className="flex items-center gap-3 p-3 bg-slate-900/50 border border-slate-700 rounded-xl">
+                                            <button
+                                                onClick={() => backupFileRef.current?.click()}
+                                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg border border-slate-700 transition-colors uppercase"
+                                            >
+                                                Choose File
+                                            </button>
+                                            <span className="text-[10px] text-slate-400 font-medium truncate flex-1">
+                                                {selectedBackupFile ? selectedBackupFile.name : 'No file chosen'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">SELECT BACKUP FILE</label>
-                                    <div className="flex items-center gap-3 p-3 bg-slate-900/50 border border-slate-700 rounded-xl">
-                                        <button 
-                                            onClick={() => backupFileRef.current?.click()}
-                                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg border border-slate-700 transition-colors uppercase"
-                                        >
-                                            Choose File
-                                        </button>
-                                        <span className="text-[10px] text-slate-400 font-medium truncate flex-1">
-                                            {selectedBackupFile ? selectedBackupFile.name : 'No file chosen'}
-                                        </span>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="space-y-2">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
-                                    {backupMode === 'EXPORT' ? 'SET ENCRYPTION PASSWORD' : 'ENTER DECRYPTION PASSWORD'}
-                                </label>
-                                <input 
-                                    type="password" 
-                                    placeholder="Enter Password" 
-                                    title="Password" 
-                                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
-                                    value={encryptionKey} 
-                                    onChange={(e) => setEncryptionKey(e.target.value)} 
-                                />
-                            </div>
-
-                            {processStatus && <p className="text-[10px] text-blue-400 font-bold text-center animate-pulse uppercase tracking-widest">{processStatus}</p>}
-                            
-                            {isProcessing && (
-                                <div className="w-full bg-[#0f172a] border border-slate-800 h-2.5 rounded-full overflow-hidden shadow-inner my-2">
-                                    <div 
-                                        ref={progressRef}
-                                        className="h-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-all duration-500 ease-out shadow-[0_0_12px_rgba(59,130,246,0.4)]" 
-                                    ></div>
-                                </div>
-                            )}
-
-                            <button 
-                                onClick={backupMode === 'EXPORT' ? handleEncryptedExport : initiateRestore} 
-                                disabled={isProcessing || (backupMode === 'IMPORT' && !selectedBackupFile)} 
-                                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
-                            >
-                                {isProcessing ? <Loader2 size={16} className="animate-spin" /> : (backupMode === 'EXPORT' ? <Download size={16} /> : <RefreshCw size={16} />)}
-                                {backupMode === 'EXPORT' ? 'DOWNLOAD ENCRYPTED BACKUP' : 'RESTORE DATA'}
-                            </button>
-                            
-                            {backupMode === 'IMPORT' && !selectedBackupFile && (
-                                <p className="text-[9px] text-slate-500 text-center italic font-medium">
-                                    * Please select a valid .enc or .sqlite file to proceed
-                                </p>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {activeTab === 'LICENSE' && (
-                <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                    {/* Header with Global Save Action */}
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-6">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2.5 bg-pink-900/30 text-pink-400 rounded-xl border border-pink-500/20 shadow-lg">
-                                <ShieldCheck size={28} />
-                            </div>
-                            <div>
-                                <h2 className="text-2xl font-black text-white uppercase tracking-tighter">License Management</h2>
-                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">System Activation & Machine Lock Status</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        {/* Left Column: Current License Details */}
-                        <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col justify-between">
-                            <div className="space-y-6">
-                                <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                        <Lock size={14} className="text-pink-500" /> Current License Info
-                                    </h3>
-                                    <button 
-                                        onClick={handleCloudSync}
-                                        disabled={isSyncing}
-                                        className="px-4 py-1.5 bg-sky-900/20 hover:bg-sky-900/40 text-sky-400 text-[10px] font-black rounded-lg border border-sky-500/20 transition-all flex items-center gap-2 uppercase tracking-widest"
-                                    >
-                                        {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                                        Sync Cloud
-                                    </button>
-                                </div>
-
-                                <div className="space-y-4">
-                                    <div className="flex justify-between items-center py-1.5">
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">License Key</span>
-                                        <span className="text-xs font-mono text-rose-500 font-black tracking-widest bg-rose-500/10 px-3 py-1 rounded-lg border border-rose-500/20">
-                                            {licenseInfo?.key || 'N/A'}
-                                        </span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status</span>
-                                        <span className="text-xs font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-3 py-1 rounded-lg border border-amber-500/20">
-                                            {licenseInfo?.status || 'UNREGISTERED'}
-                                        </span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">User ID</span>
-                                        <span className="text-xs font-black text-slate-300">{licenseInfo?.userID || 'N/A'}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Email ID</span>
-                                        <span className="text-xs font-bold text-slate-400 lowercase">{licenseInfo?.registeredTo || 'N/A'}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mobile No</span>
-                                        <span className="text-xs font-mono text-slate-300">{licenseInfo?.registeredMobile || 'N/A'}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Employee Data Limit</span>
-                                        <span className="text-sm font-black text-emerald-500 font-mono bg-emerald-500/10 px-4 py-1 rounded-lg border border-emerald-500/20">
-                                            {licenseInfo?.dataSize || 0}
-                                        </span>
-                                    </div>
-                                    <div className="flex justify-between items-center py-1.5 border-t border-white/5">
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Expiry Date</span>
-                                        <span className="text-xs font-bold text-pink-400 italic">
-                                            {licenseInfo?.expiryDate ? new Date(licenseInfo.expiryDate.split('-').reverse().join('-')).toDateString() : 'N/A'}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="mt-8 p-4 bg-sky-900/10 rounded-2xl border border-sky-500/20 flex gap-3">
-                                <Info size={18} className="text-sky-400 shrink-0" />
-                                <p className="text-[10px] text-sky-300/80 leading-relaxed font-medium italic">
-                                    * License is locked to this Machine ID. To move BharatPay Pro to another computer, please contact support for a license reset.
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* Right Column: Re-Activation Form */}
-                        <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col gap-6">
-                            <div className="flex items-center gap-3">
-                                <ChevronRight size={20} className="text-pink-500" />
-                                <div>
-                                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">Re-Activate System</h3>
-                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Update credentials to restore full access</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Full Name / Authorized Person</label>
-                                    <input 
-                                        type="text" 
-                                        placeholder="Enter Full Name"
-                                        className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
-                                        value={newUserName}
-                                        onChange={e => setNewUserName(e.target.value)}
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
+                                        {backupMode === 'EXPORT' ? 'SET ENCRYPTION PASSWORD' : 'ENTER DECRYPTION PASSWORD'}
+                                    </label>
+                                    <input
+                                        type="password"
+                                        placeholder="Enter Password"
+                                        title="Password"
+                                        className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                        value={encryptionKey}
+                                        onChange={(e) => setEncryptionKey(e.target.value)}
                                     />
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">User ID</label>
-                                        <input 
-                                            type="text" 
-                                            placeholder="Sbobby12"
-                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
-                                            value={newUserID}
-                                            onChange={e => setNewUserID(e.target.value)}
-                                        />
+
+                                {processStatus && <p className="text-[10px] text-blue-400 font-bold text-center animate-pulse uppercase tracking-widest">{processStatus}</p>}
+
+                                {isProcessing && (
+                                    <div className="w-full bg-[#0f172a] border border-slate-800 h-2.5 rounded-full overflow-hidden shadow-inner my-2">
+                                        <div
+                                            ref={progressRef}
+                                            className="h-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-all duration-500 ease-out shadow-[0_0_12px_rgba(59,130,246,0.4)]"
+                                        ></div>
                                     </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">License Key (16-Digit)</label>
-                                        <input 
-                                            type="text" 
-                                            placeholder="XXXX-XXXX-XXXX-XXXX"
-                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono uppercase outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
-                                            value={newLicenseKey}
-                                            onChange={e => setNewLicenseKey(e.target.value.toUpperCase())}
-                                        />
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Email ID</label>
-                                        <input 
-                                            type="email" 
-                                            placeholder="bala.saipra@gmail.com"
-                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
-                                            value={newRegEmail}
-                                            onChange={e => setNewRegEmail(e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Mobile No</label>
-                                        <input 
-                                            type="text" 
-                                            placeholder="9962520292"
-                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
-                                            value={newRegMobile}
-                                            onChange={e => setNewRegMobile(e.target.value)}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
+                                )}
 
-                            <button 
-                                onClick={async () => {
-                                    if (!isValidKeyFormat(newLicenseKey)) {
-                                        showAlert?.('warning', 'Invalid Key', 'Please enter a valid 16-digit license key.');
-                                        return;
-                                    }
-                                    setIsActivating(true);
-                                    const result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile);
-                                    setIsActivating(false);
-                                    if (result.success) {
-                                        showAlert?.('success', 'Activation Successful', result.message);
-                                        setLicenseInfo(getStoredLicense());
-                                        // Trigger global refresh to update Header UI (Trial -> License)
-                                        setTimeout(() => onRestore(), 500);
-                                    } else {
-                                        showAlert?.('danger', 'Activation Failed', result.message);
-                                    }
-                                }}
-                                disabled={isActivating}
-                                className="mt-4 w-full py-4 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white font-black uppercase text-sm rounded-xl shadow-xl shadow-pink-900/20 transition-all flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50"
-                            >
-                                {isActivating ? <Loader2 size={20} className="animate-spin" /> : <Shield size={20} />}
-                                {isActivating ? 'Activating...' : 'Re-Activate System'}
-                            </button>
-                        </div>
-                    </div>
+                                <button
+                                    onClick={backupMode === 'EXPORT' ? handleEncryptedExport : initiateRestore}
+                                    disabled={isProcessing || (backupMode === 'IMPORT' && !selectedBackupFile)}
+                                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
+                                >
+                                    {isProcessing ? <Loader2 size={16} className="animate-spin" /> : (backupMode === 'EXPORT' ? <Download size={16} /> : <RefreshCw size={16} />)}
+                                    {backupMode === 'EXPORT' ? 'DOWNLOAD ENCRYPTED BACKUP' : 'RESTORE DATA'}
+                                </button>
 
-                    {/* NEW SECTION: Security & Credentials */}
-                    <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col gap-8">
-                        <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                            <div className="flex items-center gap-3">
-                                <KeyRound size={24} className="text-pink-500" />
-                                <div>
-                                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">Security & Credentials</h3>
-                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Update Login Credentials & Cloud Sync</p>
-                                </div>
-                            </div>
-                            
-                            {sessionStorage.getItem('app_forced_reset') === 'true' && (
-                                <div className="px-3 py-1 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-500 text-[9px] font-black uppercase animate-pulse">
-                                    Action Required: Forced Reset Active
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div className="space-y-1.5">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Current Password</label>
-                                <input 
-                                    type="password" 
-                                    placeholder="Verify identity"
-                                    className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
-                                    value={currentPass}
-                                    onChange={e => setCurrentPass(e.target.value)}
-                                />
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">New Secure Password</label>
-                                <div className="relative group">
-                                    <input 
-                                        type="password" 
-                                        placeholder="Set new credentials"
-                                        onFocus={() => setShowPassRules(true)}
-                                        onBlur={() => setShowPassRules(false)}
-                                        className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
-                                        value={newPass}
-                                        onChange={e => setNewPass(e.target.value)}
-                                    />
-                                    {showPassRules && (
-                                        <div className="absolute top-14 left-0 right-0 z-50 bg-[#1e293b] border border-slate-700 rounded-xl p-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-                                            <div className="flex items-center gap-2 text-pink-400 mb-3 border-b border-white/5 pb-2">
-                                                <ShieldAlert size={16} />
-                                                <span className="text-[10px] font-black uppercase tracking-widest">Complexity Requirements</span>
-                                            </div>
-                                            <ul className="grid grid-cols-1 gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-tight">
-                                                <li className={`flex items-center gap-2 ${newPass.length >= 9 ? 'text-emerald-500' : ''}`}>
-                                                    <CheckCircle2 size={12} /> Minimum 9 Characters
-                                                </li>
-                                                <li className={`flex items-center gap-2 ${/[A-Z]/.test(newPass) ? 'text-emerald-500' : ''}`}>
-                                                    <CheckCircle2 size={12} /> One Capital (A-Z)
-                                                </li>
-                                                <li className={`flex items-center gap-2 ${/[a-z]/.test(newPass) ? 'text-emerald-500' : ''}`}>
-                                                    <CheckCircle2 size={12} /> One Small (a-z)
-                                                </li>
-                                                <li className={`flex items-center gap-2 ${/[0-9]/.test(newPass) ? 'text-emerald-500' : ''}`}>
-                                                    <CheckCircle2 size={12} /> One Numeric (0-9)
-                                                </li>
-                                                <li className={`flex items-center gap-2 ${/[^A-Za-z0-9]/.test(newPass) ? 'text-emerald-500' : ''}`}>
-                                                    <CheckCircle2 size={12} /> One Special Char
-                                                </li>
-                                            </ul>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Confirm New Password</label>
-                                <input 
-                                    type="password" 
-                                    placeholder="Match new password"
-                                    className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
-                                    value={confirmPass}
-                                    onChange={e => setConfirmPass(e.target.value)}
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex items-center gap-4 bg-rose-500/5 border border-rose-500/10 p-4 rounded-2xl">
-                             <div className="p-2 bg-rose-500/10 text-rose-500 rounded-lg">
-                                <ShieldAlert size={20} />
-                             </div>
-                             <div className="flex-1">
-                                <h4 className="text-[11px] font-black text-white uppercase tracking-tighter">Production Safeguard</h4>
-                                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">Updating your login password will trigger an immediate Cloud Sync. Ensure you have an active internet connection to keep your account safe across all distributed machines.</p>
-                             </div>
-                             <button 
-                                onClick={async () => {
-                                    if (!currentPass || !newPass || !confirmPass) {
-                                        showAlert('warning', 'Incomplete Form', 'Please fill in all password fields.');
-                                        return;
-                                    }
-                                    if (newPass !== confirmPass) {
-                                        showAlert('warning', 'Mismatch', 'New passwords do not match.');
-                                        return;
-                                    }
-                                    // Severity check
-                                    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{9,}$/;
-                                    if (!regex.test(newPass)) {
-                                        showAlert('warning', 'Complexity Failed', 'New password must meet all security requirements.');
-                                        return;
-                                    }
-
-                                    setIsUpdatingPass(true);
-                                    try {
-                                        const usersRaw = localStorage.getItem('app_users');
-                                        const users: User[] = usersRaw ? JSON.parse(usersRaw) : [];
-                                        const adminIndex = users.findIndex(u => u.role === 'Administrator');
-                                        
-                                        if (adminIndex === -1 || users[adminIndex].password !== currentPass) {
-                                            showAlert('danger', 'Verification Failed', 'The current password you entered is incorrect.');
-                                            return;
-                                        }
-
-                                        // 1. Update Cloud
-                                        const syncResult = await updateCloudPassword(licenseInfo?.registeredTo || '', newPass);
-                                        if (!syncResult.success) {
-                                            showAlert('warning', 'Cloud Sync Warning', 'Local password updated, but cloud sync failed. Ensure your internet is active for full security.');
-                                        }
-
-                                        // 2. Update Local
-                                        users[adminIndex].password = newPass;
-                                        localStorage.setItem('app_users', JSON.stringify(users));
-                                        // @ts-ignore
-                                        if (window.electronAPI) await window.electronAPI.dbSet('app_users', users);
-
-                                        showAlert('success', 'Security Updated', 'Your main login password has been rotated successfully. Use this new password for next login.');
-                                        
-                                        // Clear forced reset state
-                                        sessionStorage.removeItem('app_forced_reset');
-                                        setCurrentPass('');
-                                        setNewPass('');
-                                        setConfirmPass('');
-                                    } finally {
-                                        setIsUpdatingPass(false);
-                                    }
-                                }}
-                                disabled={isUpdatingPass}
-                                className="px-8 py-3.5 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white text-xs font-black uppercase tracking-widest rounded-xl shadow-xl shadow-pink-900/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
-                             >
-                                {isUpdatingPass ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                                Rotate Password
-                             </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {activeTab === 'USERS' && (
-                <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                    {/* Header with Global Save Action */}
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-6">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2.5 bg-sky-900/30 text-sky-400 rounded-xl border border-sky-500/20 shadow-lg">
-                                <Users size={28} />
-                            </div>
-                            <div>
-                                <h2 className="text-2xl font-black text-white uppercase tracking-tighter">User Management</h2>
-                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Account Control & Access Permissions</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        {/* Left Column: Existing Users */}
-                        <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col h-full">
-                            <div className="flex items-center justify-between border-b border-white/5 pb-4 mb-6">
-                                <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
-                                    <Users size={14} className="text-sky-500" /> Existing Users ({appUsers.length})
-                                </h3>
-                            </div>
-
-                            <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2 min-h-[400px]">
-                                {appUsers.length === 0 ? (
-                                    <div className="h-full flex flex-col items-center justify-center text-slate-500 py-20">
-                                        <Users size={48} className="opacity-10 mb-4" />
-                                        <p className="text-sm font-bold uppercase tracking-widest italic opacity-40">No users created yet.</p>
-                                    </div>
-                                ) : (
-                                    appUsers.map(u => (
-                                        <div key={u.username} className="group p-4 bg-[#0a0f1d] border border-white/5 hover:border-sky-500/30 rounded-2xl transition-all flex items-center justify-between shadow-lg">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center border border-sky-500/20 text-sky-400 font-black">
-                                                    {u.name.charAt(0).toUpperCase()}
-                                                </div>
-                                                <div>
-                                                    <div className="text-xs font-black text-white uppercase tracking-tight">{u.name}</div>
-                                                    <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
-                                                        @{u.username} • <span className="text-sky-500/80">{u.role}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button 
-                                                    onClick={() => handleUmEdit(u)}
-                                                    className="p-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-lg border border-sky-500/20 transition-all shadow-inner"
-                                                    title="Edit User"
-                                                >
-                                                    <RotateCw size={14} />
-                                                </button>
-                                                {/* Delete restricted: Cannot delete self, and Admins can only be deleted by Developers */}
-                                                {u.username !== currentUser?.username && (u.role !== 'Administrator' || userRole === 'Developer') && (
-                                                    <button 
-                                                        onClick={() => handleUmDelete(u.username)}
-                                                        className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-rose-500/20 transition-all shadow-inner"
-                                                        title="Delete User"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))
+                                {backupMode === 'IMPORT' && !selectedBackupFile && (
+                                    <p className="text-[9px] text-slate-500 text-center italic font-medium">
+                                        * Please select a valid .enc or .sqlite file to proceed
+                                    </p>
                                 )}
                             </div>
                         </div>
+                    </div>
+                )
+            }
 
-                        {/* Right Column: User Creation Form */}
-                        <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col gap-8 h-full">
-                            <div className="flex items-center gap-3 pb-2 border-b border-white/5">
-                                <Plus size={20} className="text-sky-500" />
+            {
+                activeTab === 'LICENSE' && (
+                    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                        {/* Header with Global Save Action */}
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-6">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 bg-pink-900/30 text-pink-400 rounded-xl border border-pink-500/20 shadow-lg">
+                                    <ShieldCheck size={28} />
+                                </div>
                                 <div>
-                                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">{umEditId ? 'Modify Account' : 'Create New Account'}</h3>
-                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{umEditId ? 'Update user credentials and roles' : 'Initialize a fresh secure login'}</p>
+                                    <h2 className="text-2xl font-black text-white uppercase tracking-tighter">License Management</h2>
+                                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">System Activation & Machine Lock Status</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            {/* Left Column: Current License Details */}
+                            <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col justify-between">
+                                <div className="space-y-6">
+                                    <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                                        <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                            <Lock size={14} className="text-pink-500" /> Current License Info
+                                        </h3>
+                                        <button
+                                            onClick={handleCloudSync}
+                                            disabled={isSyncing}
+                                            className="px-4 py-1.5 bg-sky-900/20 hover:bg-sky-900/40 text-sky-400 text-[10px] font-black rounded-lg border border-sky-500/20 transition-all flex items-center gap-2 uppercase tracking-widest"
+                                        >
+                                            {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                                            Sync Cloud
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center py-1.5">
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">License Key</span>
+                                            <span className="text-xs font-mono text-sky-400 font-black tracking-widest bg-sky-500/10 px-3 py-1 rounded-lg border border-sky-500/20">
+                                                {licenseInfo?.key || 'N/A'}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status</span>
+                                            <span className="text-xs font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-3 py-1 rounded-lg border border-amber-500/20">
+                                                {licenseInfo?.status || 'UNREGISTERED'}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">User ID</span>
+                                            <span className="text-xs font-black text-slate-300">{licenseInfo?.userID || 'N/A'}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Email ID</span>
+                                            <span className="text-xs font-bold text-slate-400 lowercase">{licenseInfo?.registeredTo || 'N/A'}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mobile No</span>
+                                            <span className="text-xs font-mono text-slate-300">{licenseInfo?.registeredMobile || 'N/A'}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Employee Data Limit</span>
+                                            <span className="text-sm font-black text-emerald-500 font-mono bg-emerald-500/10 px-4 py-1 rounded-lg border border-emerald-500/20">
+                                                {licenseInfo?.dataSize || 0}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Expiry Date</span>
+                                            <span className="text-xs font-bold text-pink-400 italic">
+                                                {formatExpiryDate(licenseInfo?.expiryDate)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-8 p-4 bg-sky-900/10 rounded-2xl border border-sky-500/20 flex gap-3">
+                                    <Info size={18} className="text-sky-400 shrink-0" />
+                                    <p className="text-[10px] text-sky-300/80 leading-relaxed font-medium italic">
+                                        * License is locked to this Machine ID. To move BharatPay Pro to another computer, please contact support for a license reset.
+                                    </p>
                                 </div>
                             </div>
 
-                            <div className="space-y-6">
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Full Name</label>
-                                    <input 
-                                        ref={umNameRef}
-                                        type="text" 
-                                        placeholder="Enter user's full name"
-                                        className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-sky-500/10 placeholder-gray-600"
-                                        value={umForm.name}
-                                        onChange={e => setUmForm({...umForm, name: e.target.value})}
-                                    />
+                            {/* Right Column: Re-Activation Form */}
+                            <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col gap-6">
+                                <div className="flex items-center gap-3">
+                                    <ChevronRight size={20} className="text-pink-500" />
+                                    <div>
+                                        <h3 className="text-lg font-black text-white uppercase tracking-tighter">Re-Activate System</h3>
+                                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Update credentials to restore full access</p>
+                                    </div>
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Username / ID</label>
-                                    <input 
-                                        type="text" 
-                                        placeholder="Pick a unique login id"
-                                        disabled={!!umEditId}
-                                        className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono lowercase outline-none transition-all focus:ring-4 focus:ring-sky-500/10 ${!!umEditId ? 'opacity-50 grayscale cursor-not-allowed' : ''} placeholder-gray-600`}
-                                        value={umForm.username}
-                                        onChange={e => setUmForm({...umForm, username: e.target.value.toLowerCase()})}
-                                    />
-                                </div>
-
-                                <div className="space-y-1.5 relative">
-                                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Login Password</label>
-                                    <div className="relative group">
-                                        <input 
-                                            type={umShowPwd ? "text" : "password"} 
-                                            placeholder="Enter secure password"
-                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-sky-500/10 pr-12 placeholder-gray-600"
-                                            value={umForm.password}
-                                            onChange={e => setUmForm({...umForm, password: e.target.value})}
+                                <div className="space-y-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Full Name / Authorized Person</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Enter Full Name"
+                                            className="w-full bg-[#0a0f1d] opacity-60 cursor-not-allowed border border-white/5 rounded-xl p-3 text-white text-xs font-bold outline-none"
+                                            value={newUserName}
+                                            readOnly
+                                            tabIndex={-1}
                                         />
-                                        <button 
-                                            onClick={() => setUmShowPwd(!umShowPwd)}
-                                            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-sky-400 transition-colors bg-white/5 p-1 rounded-lg"
-                                            title={umShowPwd ? "Hide Password" : "Show Password"}
-                                        >
-                                            {umShowPwd ? <EyeOff size={16} /> : <Eye size={16} />}
-                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">User ID</label>
+                                            <input
+                                                type="text"
+                                                placeholder="Sbobby12"
+                                                className="w-full bg-[#0a0f1d] opacity-60 cursor-not-allowed border border-white/5 rounded-xl p-3 text-white text-xs font-mono outline-none"
+                                                value={newUserID}
+                                                readOnly
+                                                tabIndex={-1}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">License Key (16-Digit)</label>
+                                            <input
+                                                type="text"
+                                                placeholder="XXXX-XXXX-XXXX-XXXX"
+                                                className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono uppercase outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                                value={newLicenseKey}
+                                                onChange={e => setNewLicenseKey(e.target.value.toUpperCase())}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Email ID</label>
+                                            <input
+                                                type="email"
+                                                placeholder="bala.saipra@gmail.com"
+                                                className="w-full bg-[#0a0f1d] opacity-60 cursor-not-allowed border border-white/5 rounded-xl p-3 text-white text-xs font-bold outline-none"
+                                                value={newRegEmail}
+                                                readOnly
+                                                tabIndex={-1}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Mobile No</label>
+                                            <input
+                                                type="text"
+                                                placeholder="9962520292"
+                                                className="w-full bg-[#0a0f1d] opacity-60 cursor-not-allowed border border-white/5 rounded-xl p-3 text-white text-xs font-mono outline-none"
+                                                value={newRegMobile}
+                                                readOnly
+                                                tabIndex={-1}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div className="space-y-3">
-                                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">System Role</label>
-                                    <div className="grid grid-cols-2 gap-2 bg-[#0a0f1d] p-1.5 rounded-2xl border border-white/5">
-                                        <button 
-                                            onClick={() => setUmForm({...umForm, role: 'Administrator'})}
-                                            className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'Administrator' ? 'bg-sky-600/20 text-sky-400 ring-2 ring-sky-500/30 shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                                        >
-                                            Administrator
-                                        </button>
-                                        <button 
-                                            onClick={() => setUmForm({...umForm, role: 'User'})}
-                                            className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'User' ? 'bg-sky-600 text-white shadow-xl shadow-sky-900/40 ring-2 ring-white/20' : 'text-slate-500 hover:text-slate-300'}`}
-                                        >
-                                            User
-                                        </button>
-                                    </div>
+                                <button
+                                    onClick={async () => {
+                                        if (!isValidKeyFormat(newLicenseKey)) {
+                                            showAlert?.('warning', 'Invalid Key', 'Please enter a valid 16-digit license key.');
+                                            return;
+                                        }
+                                        setIsActivating(true);
+                                        const result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile);
+                                        setIsActivating(false);
+                                        if (result.success) {
+                                            showAlert?.('success', 'Activation Successful', result.message);
+                                            setLicenseInfo(getStoredLicense());
+                                            // Trigger global refresh to update Header UI (Trial -> License)
+                                            setTimeout(() => onRestore(), 500);
+                                        } else {
+                                            showAlert?.('danger', 'Activation Failed', result.message);
+                                        }
+                                    }}
+                                    disabled={isActivating}
+                                    className="mt-4 w-full py-4 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white font-black uppercase text-sm rounded-xl shadow-xl shadow-pink-900/20 transition-all flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50"
+                                >
+                                    {isActivating ? <Loader2 size={20} className="animate-spin" /> : <Shield size={20} />}
+                                    {isActivating ? 'Activating...' : 'Re-Activate System'}
+                                </button>
+                            </div>
+                        </div>
+
+                    </div>
+                )
+            }
+
+            {
+                activeTab === 'USERS' && (
+                    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                        {/* Header with Global Save Action */}
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-6">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 bg-sky-900/30 text-sky-400 rounded-xl border border-sky-500/20 shadow-lg">
+                                    <Users size={28} />
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-black text-white uppercase tracking-tighter">User Management</h2>
+                                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Account Control & Access Permissions</p>
                                 </div>
                             </div>
+                        </div>
 
-                            <div className="mt-auto pt-6 border-t border-white/5 flex flex-col gap-3">
-                                {umError && <div className="px-4 py-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-500 text-[10px] font-bold text-center animate-pulse uppercase tracking-widest">{umError}</div>}
-                                <div className="flex gap-3">
-                                    {umEditId && (
-                                        <button 
-                                            onClick={() => { setUmEditId(null); setUmForm({ name: '', username: '', password: '', role: 'User', email: '' }); }}
-                                            className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black uppercase text-xs rounded-xl transition-all active:scale-[0.98]"
-                                        >
-                                            Cancel
-                                        </button>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            {/* Left Column: Existing Users */}
+                            <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col h-full">
+                                <div className="flex items-center justify-between border-b border-white/5 pb-4 mb-6">
+                                    <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                                        <Users size={14} className="text-sky-500" /> Existing Users ({appUsers.length})
+                                    </h3>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2 min-h-[400px]">
+                                    {appUsers.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-slate-500 py-20">
+                                            <Users size={48} className="opacity-10 mb-4" />
+                                            <p className="text-sm font-bold uppercase tracking-widest italic opacity-40">No users created yet.</p>
+                                        </div>
+                                    ) : (
+                                        appUsers.map(u => (
+                                            <div key={u.username} className="group p-4 bg-[#0a0f1d] border border-white/5 hover:border-sky-500/30 rounded-2xl transition-all flex items-center justify-between shadow-lg">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center border border-sky-500/20 text-sky-400 font-black">
+                                                        {u.name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xs font-black text-white uppercase tracking-tight">{u.name}</div>
+                                                        <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
+                                                            @{u.username} • <span className="text-sky-500/80">{u.role}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={() => handleUmEdit(u)}
+                                                        className="p-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-lg border border-sky-500/20 transition-all shadow-inner"
+                                                        title="Edit User"
+                                                    >
+                                                        <RotateCw size={14} />
+                                                    </button>
+                                                    {/* Delete restricted: Cannot delete self, and Admins can only be deleted by Developers */}
+                                                    {u.username !== currentUser?.username && (u.role !== 'Administrator' || userRole === 'Developer') && (
+                                                        <button
+                                                            onClick={() => handleUmDelete(u.username)}
+                                                            className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-rose-500/20 transition-all shadow-inner"
+                                                            title="Delete User"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))
                                     )}
-                                    <button 
-                                        onClick={handleUmSave}
-                                        className="flex-[2] py-4 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white font-black uppercase text-xs rounded-xl shadow-xl shadow-sky-900/30 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                                    >
-                                        <Save size={16} />
-                                        {umEditId ? 'Update Identity' : 'Save User Account'}
-                                    </button>
+                                </div>
+
+                                {/* RELOCATED SECURITY SECTION: Now dynamic based on list length */}
+                                <div className="mt-8 pt-8 border-t border-white/5 space-y-6">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <KeyRound size={20} className="text-pink-500" />
+                                            <div>
+                                                <h3 className="text-sm font-black text-pink-500 uppercase tracking-tighter">Security & Credentials</h3>
+                                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Update Cloud Password via OTP</p>
+                                            </div>
+                                        </div>
+                                        {sessionStorage.getItem('app_forced_reset') === 'true' && (
+                                            <div className="px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 rounded-md text-rose-500 text-[8px] font-black uppercase animate-pulse">
+                                                Forced Reset
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="p-4 bg-pink-500/5 border border-pink-500/10 rounded-2xl flex gap-3">
+                                        <Info size={16} className="text-pink-500 shrink-0" />
+                                        <p className="text-[9px] text-slate-400 leading-relaxed font-bold uppercase tracking-wider">
+                                            <span className="text-pink-500">Note:</span> Cloud password resets affect the master identity on all machines. Ensure your recovery email is secure.
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        {resetStep === 'IDENTIFY' ? (
+                                            <div className="space-y-4 animate-in fade-in duration-300">
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div className="space-y-1">
+                                                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">Current Password</label>
+                                                        <input
+                                                            type="password"
+                                                            placeholder="Verify Identity"
+                                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-lg p-2.5 text-white text-xs font-mono outline-none transition-all"
+                                                            value={currentPass}
+                                                            onChange={e => setCurrentPass(e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">Registered ID</label>
+                                                        <div className="w-full bg-[#0a0f1d]/50 border border-white/5 rounded-lg p-2.5 text-slate-500 text-xs font-mono">
+                                                            {licenseInfo?.userID || 'N/A'}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div className="space-y-1 relative">
+                                                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">New Password</label>
+                                                        <input
+                                                            type="password"
+                                                            placeholder="New Credentials"
+                                                            onFocus={() => setShowPassRules(true)}
+                                                            onBlur={() => setShowPassRules(false)}
+                                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-lg p-2.5 text-white text-xs font-mono outline-none transition-all"
+                                                            value={newPass}
+                                                            onChange={e => setNewPass(e.target.value)}
+                                                        />
+                                                        {showPassRules && (
+                                                            <div className="absolute bottom-12 left-0 right-0 z-50 bg-[#1e293b] border border-slate-700 rounded-xl p-4 shadow-2xl animate-in fade-in slide-in-from-bottom-2">
+                                                                <div className="flex items-center gap-2 text-sky-400 mb-2 border-b border-white/5 pb-1">
+                                                                    <ShieldAlert size={12} />
+                                                                    <span className="text-[9px] font-black uppercase tracking-widest">Rules</span>
+                                                                </div>
+                                                                <ul className="text-[9px] text-slate-400 font-bold uppercase space-y-1">
+                                                                    <li className={newPass.length >= 9 ? 'text-emerald-500' : ''}>• Min 9 Chars</li>
+                                                                    <li className={/[A-Z]/.test(newPass) ? 'text-emerald-500' : ''}>• One Capital</li>
+                                                                    <li className={/[0-9]/.test(newPass) ? 'text-emerald-500' : ''}>• One Numeric</li>
+                                                                    <li className={/[^A-Za-z0-9]/.test(newPass) ? 'text-emerald-500' : ''}>• One Special</li>
+                                                                </ul>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">Confirm New</label>
+                                                        <input
+                                                            type="password"
+                                                            placeholder="Match Above"
+                                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-lg p-2.5 text-white text-xs font-mono outline-none transition-all"
+                                                            value={confirmPass}
+                                                            onChange={e => setConfirmPass(e.target.value)}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={async () => {
+                                                        if (!currentPass || !newPass || !confirmPass) {
+                                                            showAlert('warning', 'Input Required', 'Provide all password fields.'); return;
+                                                        }
+                                                        if (newPass !== confirmPass) {
+                                                            showAlert('warning', 'Mismatch', 'New passwords do not match.'); return;
+                                                        }
+                                                        const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{9,}$/;
+                                                        if (!regex.test(newPass)) {
+                                                            showAlert('warning', 'Insecure', 'Password lacks complexity.'); return;
+                                                        }
+                                                        const users: User[] = JSON.parse(localStorage.getItem('app_users') || '[]');
+                                                        const admin = users.find(u => u.role === 'Administrator');
+                                                        if (!admin || admin.password !== currentPass) {
+                                                            showAlert('danger', 'Access Denied', 'Incorrect current password.'); return;
+                                                        }
+                                                        setIsUpdatingPass(true);
+                                                        try {
+                                                            const res = await requestResetOTP(licenseInfo?.registeredTo || '', licenseInfo?.userID || '');
+                                                            if (res.success) setResetStep('OTP');
+                                                            else showAlert('danger', 'Gateway Error', res.message);
+                                                        } finally { setIsUpdatingPass(false); }
+                                                    }}
+                                                    disabled={isUpdatingPass}
+                                                    className="w-full py-3 bg-sky-600 hover:bg-sky-500 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                                                >
+                                                    {isUpdatingPass ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
+                                                    Request Reset OTP
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4 animate-in fade-in zoom-in-95 duration-300">
+                                                <div className="bg-emerald-500/5 border border-emerald-500/20 p-4 rounded-xl flex flex-col items-center gap-2 text-center">
+                                                    <ShieldCheck className="text-emerald-400" size={24} />
+                                                    <p className="text-[10px] text-slate-300 font-medium">OTP Sent to <b>{licenseInfo?.registeredTo}</b></p>
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    maxLength={6}
+                                                    placeholder="000000"
+                                                    className="w-full bg-[#0a0f1d] border border-sky-500/30 rounded-xl p-3 text-white text-2xl font-black text-center tracking-[0.5em] font-mono outline-none"
+                                                    value={resetOTP}
+                                                    onChange={e => setResetOTP(e.target.value.replace(/[^0-9]/g, ''))}
+                                                />
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => setResetStep('IDENTIFY')} className="px-4 py-3 bg-slate-800 text-slate-400 text-[9px] font-black uppercase tracking-widest rounded-xl">Back</button>
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (resetOTP.length !== 6) { showAlert('warning', 'Invalid OTP', 'Enter 6-digit code.'); return; }
+                                                            setIsUpdatingPass(true);
+                                                            try {
+                                                                const res = await updateCloudPassword(licenseInfo?.registeredTo || '', newPass, resetOTP);
+                                                                if (res.success) {
+                                                                    const users: User[] = JSON.parse(localStorage.getItem('app_users') || '[]');
+                                                                    const adminIdx = users.findIndex(u => u.role === 'Administrator');
+                                                                    if (adminIdx !== -1) {
+                                                                        users[adminIdx].password = newPass;
+                                                                        localStorage.setItem('app_users', JSON.stringify(users));
+                                                                        if (window.electronAPI) await window.electronAPI.dbSet('app_users', users);
+                                                                    }
+                                                                    showAlert('success', 'Identity Restored', 'Password reset successful via cloud sync.');
+                                                                    setCurrentPass(''); setNewPass(''); setConfirmPass(''); setResetOTP(''); setResetStep('IDENTIFY');
+                                                                } else showAlert('danger', 'Reset Failed', res.message);
+                                                            } finally { setIsUpdatingPass(false); }
+                                                        }}
+                                                        disabled={isUpdatingPass}
+                                                        className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl shadow-lg transition-all"
+                                                    >
+                                                        {isUpdatingPass ? <Loader2 size={14} className="animate-spin" /> : 'Confirm Reset'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Right Column: User Creation Form */}
+                            <div className="bg-[#0f172a] rounded-3xl p-8 border border-white/5 shadow-2xl flex flex-col gap-8 h-full">
+                                <div className="flex items-center gap-3 pb-2 border-b border-white/5">
+                                    <Plus size={20} className="text-sky-500" />
+                                    <div>
+                                        <h3 className="text-lg font-black text-white uppercase tracking-tighter">{umEditId ? 'Modify Account' : 'Create New Account'}</h3>
+                                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{umEditId ? 'Update user credentials and roles' : 'Initialize a fresh secure login'}</p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-6">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Full Name</label>
+                                        <input
+                                            ref={umNameRef}
+                                            type="text"
+                                            placeholder="Enter user's full name"
+                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-sky-500/10 placeholder-gray-600"
+                                            value={umForm.name}
+                                            onChange={e => setUmForm({ ...umForm, name: e.target.value })}
+                                        />
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Username / ID</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Pick a unique login id"
+                                            disabled={!!umEditId}
+                                            className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono lowercase outline-none transition-all focus:ring-4 focus:ring-sky-500/10 ${!!umEditId ? 'opacity-50 grayscale cursor-not-allowed' : ''} placeholder-gray-600`}
+                                            value={umForm.username}
+                                            onChange={e => setUmForm({ ...umForm, username: e.target.value.toLowerCase() })}
+                                        />
+                                    </div>
+
+                                    <div className="space-y-1.5 relative">
+                                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Login Password</label>
+                                        <div className="relative group">
+                                            <input
+                                                type={umShowPwd ? "text" : "password"}
+                                                placeholder="Enter secure password"
+                                                className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-sky-500/10 pr-12 placeholder-gray-600"
+                                                value={umForm.password}
+                                                onChange={e => setUmForm({ ...umForm, password: e.target.value })}
+                                            />
+                                            <button
+                                                onClick={() => setUmShowPwd(!umShowPwd)}
+                                                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-sky-400 transition-colors bg-white/5 p-1 rounded-lg"
+                                                title={umShowPwd ? "Hide Password" : "Show Password"}
+                                            >
+                                                {umShowPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">System Role</label>
+                                        <div className="grid grid-cols-2 gap-2 bg-[#0a0f1d] p-1.5 rounded-2xl border border-white/5">
+                                            <button
+                                                onClick={() => setUmForm({ ...umForm, role: 'Administrator' })}
+                                                className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'Administrator' ? 'bg-sky-600/20 text-sky-400 ring-2 ring-sky-500/30 shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                                            >
+                                                Administrator
+                                            </button>
+                                            <button
+                                                onClick={() => setUmForm({ ...umForm, role: 'User' })}
+                                                className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'User' ? 'bg-sky-600 text-white shadow-xl shadow-sky-900/40 ring-2 ring-white/20' : 'text-slate-500 hover:text-slate-300'}`}
+                                            >
+                                                User
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-auto pt-6 border-t border-white/5 flex flex-col gap-3">
+                                    {umError && <div className="px-4 py-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-500 text-[10px] font-bold text-center animate-pulse uppercase tracking-widest">{umError}</div>}
+                                    <div className="flex gap-3">
+                                        {umEditId && (
+                                            <button
+                                                onClick={() => { setUmEditId(null); setUmForm({ name: '', username: '', password: '', role: 'User', email: '' }); }}
+                                                className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black uppercase text-xs rounded-xl transition-all active:scale-[0.98]"
+                                            >
+                                                Cancel
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={handleUmSave}
+                                            className="flex-[2] py-4 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white font-black uppercase text-xs rounded-xl shadow-xl shadow-sky-900/30 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                        >
+                                            <Save size={16} />
+                                            {umEditId ? 'Update Identity' : 'Save User Account'}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {showOverwriteConfirm && (
-                <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowOverwriteConfirm(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Overwrite Confirmation"><X size={20} /></button>
-                        <div className="flex flex-col items-center gap-2">
-                            <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><AlertTriangle size={32} /></div>
-                            <h3 className="text-xl font-black text-white text-center">Overwrite Data?</h3>
-                            <p className="text-xs text-slate-300 text-center">Restoring a backup will <span className="text-red-400 font-bold">REPLACE ALL CURRENT RECORDS</span>.</p>
-                        </div>
-                        <div className="flex gap-3 mt-4">
-                            <button onClick={() => setShowOverwriteConfirm(false)} className="flex-1 py-3 border border-slate-600 rounded-xl text-slate-300 font-bold">Cancel</button>
-                            <button onClick={() => { setShowOverwriteConfirm(false); executeImport(); }} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold">Overwrite</button>
+            {
+                showOverwriteConfirm && (
+                    <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-red-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                            <button onClick={() => setShowOverwriteConfirm(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Overwrite Confirmation"><X size={20} /></button>
+                            <div className="flex flex-col items-center gap-2">
+                                <div className="p-3 bg-red-900/20 text-red-500 rounded-full border border-red-900/50 mb-2"><AlertTriangle size={32} /></div>
+                                <h3 className="text-xl font-black text-white text-center">Overwrite Data?</h3>
+                                <p className="text-xs text-slate-300 text-center">Restoring a backup will <span className="text-red-400 font-bold">REPLACE ALL CURRENT RECORDS</span>.</p>
+                            </div>
+                            <div className="flex gap-3 mt-4">
+                                <button onClick={() => setShowOverwriteConfirm(false)} className="flex-1 py-3 border border-slate-600 rounded-xl text-slate-300 font-bold">Cancel</button>
+                                <button onClick={() => { setShowOverwriteConfirm(false); executeImport(); }} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold">Overwrite</button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {showAuthModal && (
-                <div className="fixed inset-0 z-[800] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-indigo-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Authorization Modal"><X size={20} /></button>
-                        <div className="flex flex-col items-center gap-2">
-                            <div className="p-4 bg-indigo-900/20 text-indigo-500 rounded-full border border-indigo-900/50 mb-2"><KeyRound size={32} /></div>
-                            <h3 className="text-xl font-black text-white text-center uppercase tracking-widest">Authorize Action</h3>
+            {
+                showAuthModal && (
+                    <div className="fixed inset-0 z-[800] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+                        <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-indigo-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                            <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Authorization Modal"><X size={20} /></button>
+                            <div className="flex flex-col items-center gap-2">
+                                <div className="p-4 bg-indigo-900/20 text-indigo-500 rounded-full border border-indigo-900/50 mb-2"><KeyRound size={32} /></div>
+                                <h3 className="text-xl font-black text-white text-center uppercase tracking-widest">Authorize Action</h3>
+                            </div>
+                            <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                                <input type="password" placeholder="Login Password" autoFocus className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-mono" value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }} onKeyDown={(e) => e.key === 'Enter' && handleAuthSubmit()} />
+                                {authError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{authError}</p>}
+                            </div>
+                            <button onClick={handleAuthSubmit} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                                <CheckCircle2 size={18} /> VERIFY & PROCEED
+                            </button>
                         </div>
-                        <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <input type="password" placeholder="Login Password" autoFocus className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-mono" value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }} onKeyDown={(e) => e.key === 'Enter' && handleAuthSubmit()} />
-                            {authError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{authError}</p>}
-                        </div>
-                        <button onClick={handleAuthSubmit} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
-                            <CheckCircle2 size={18} /> VERIFY & PROCEED
-                        </button>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {showSMTPModal && (
-                <SMTPConfigModal onClose={() => setShowSMTPModal(false)} />
-            )}
-        </div>
+            {
+                showSMTPModal && (
+                    <SMTPConfigModal onClose={() => setShowSMTPModal(false)} />
+                )
+            }
+        </div >
     );
 };
 

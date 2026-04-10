@@ -4,7 +4,8 @@ import { Save, RefreshCw, Lock, FileText, Eye, AlertCircle, AlertTriangle, X, Ch
 import * as XLSX from 'xlsx';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, FineRecord, OTRecord } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
-import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName } from '../services/reportService';
+import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName, openSavedReport } from '../services/reportService';
+import { ModalType } from './Shared/CustomModal';
 
 interface PayrollProcessorProps {
     employees: Employee[];
@@ -25,6 +26,7 @@ interface PayrollProcessorProps {
     currentUser?: User;
     fines?: FineRecord[];
     otRecords?: OTRecord[];
+    showAlert?: (type: ModalType, title: string, message: string, onConfirm?: () => void, onSecondary?: () => void, confirmLabel?: string, secondaryLabel?: string, cancelLabel?: string, autoCloseSecs?: number) => void;
 }
 
 const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
@@ -39,7 +41,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     month,
     year,
     fines = [],
-    otRecords = []
+    otRecords = [],
+    showAlert
 }) => {
     const [results, setResults] = useState<PayrollResult[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -390,7 +393,23 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Draft Payroll");
         const fileName = getStandardFileName('Draft_Payroll', companyProfile, month, year);
-        await generateExcelWorkbook(wb, fileName);
+        const savedPath = await generateExcelWorkbook(wb, fileName);
+
+        if (savedPath && showAlert) {
+            showAlert(
+                'success',
+                'Draft Generated',
+                `Draft Payroll sheet for ${month} ${year} has been exported to your Report files folder.`,
+                () => openSavedReport(savedPath),
+                undefined,
+                'Open Report & Folder',
+                undefined,
+                undefined,
+                2
+            );
+        } else if (!savedPath && showAlert) {
+            showAlert('error', 'Export Failed', 'An unexpected error occurred while saving the draft report. Please check if the file is open elsewhere.');
+        }
     };
 
     const totalNet = results.reduce((acc, curr) => acc + (curr?.netPay || 0), 0);

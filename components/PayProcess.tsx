@@ -3,7 +3,6 @@ import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, File
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
-import { ModalType } from './Shared/CustomModal';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
 import PayrollProcessor from './PayrollProcessor';
@@ -37,7 +36,7 @@ interface PayProcessProps {
     setArrearHistory?: React.Dispatch<React.SetStateAction<ArrearBatch[]>>;
     otRecords: OTRecord[];
     setOTRecords: React.Dispatch<React.SetStateAction<OTRecord[]>>;
-    showAlert: (type: ModalType, title: string, message: string, onConfirm?: () => void) => void;
+    showAlert: any;
 }
 
 // Global OS Detection for UI refinement
@@ -563,6 +562,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         currentUser={props.currentUser}
                         fines={props.fines}
                         otRecords={props.otRecords}
+                        showAlert={props.showAlert}
                     />
                 </div>
             </div>

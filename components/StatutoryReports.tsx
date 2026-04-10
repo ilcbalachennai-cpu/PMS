@@ -1,34 +1,30 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { ShieldCheck, Download, ScrollText, Landmark, Lock, HandCoins, Calendar, X, BookOpen, ReceiptText, Info, AlertTriangle, CheckCircle } from 'lucide-react';
-import { PayrollResult, Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, CompanyProfile, ArrearBatch } from '../types';
+import React, { useMemo, useState } from 'react';
+import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, Table, Download, BookOpen, ScrollText, HandCoins, ReceiptText } from 'lucide-react';
+import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
 import { INDIAN_STATES } from '../constants';
 import {
     generatePFECR,
+    generateArrearECRText,
+    generateArrearECRExcel,
+    generatePFForm12A,
     generateESIReturn,
+    generateESIForm5,
+    generateESIExitReport,
     generatePTReport,
     generateTDSReport,
-    generatePFForm12A,
+    generateGratuityReport,
+    generateBonusReport,
     generateFormB,
     generateFormC,
     generateStateWageRegister,
     generateStatePaySlip,
     generateStateAdvanceRegister,
-    generatePFForm3A,
-    generatePFForm6A,
-    generateESIExitReport,
-    generateESICodeWagesReport,
-    generateGratuityReport,
-    generateBonusReport,
-    generateEPFCodeImpactReport,
-    generateESIForm5,
-    generateArrearECRText,
-    generateArrearECRExcel,
-    generateForm16PartBPDF,
     getStandardFileName,
-    openSavedReport
+    openSavedReport,
+    generatePFForm3A,
+    generatePFForm6A
 } from '../services/reportService';
 
-// Global OS Detection for UI refinement
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
 
 interface StatutoryReportsProps {
@@ -48,43 +44,14 @@ interface StatutoryReportsProps {
     showAlert: any;
 }
 
-// Configuration for State Specific Forms
 const STATE_FORM_MAPPINGS: Record<string, { wage: string; slip: string; advance: string }> = {
-    'Tamil Nadu': {
-        wage: 'Form R (Wage Register)',
-        slip: 'Form T (Wage Slip)',
-        advance: 'Form P (Advances)'
-    },
-    'Karnataka': {
-        wage: 'Form T (Wage Register)',
-        slip: 'Form V (Wage Slip)',
-        advance: 'Form XXII (Advances)' // Common in Karnataka S&E
-    },
-    'Maharashtra': {
-        wage: 'Form II (Wage Register)',
-        slip: 'Form III (Wage Slip)',
-        advance: 'Form IV (Advances)'
-    },
-    'Andhra Pradesh': {
-        wage: 'Form XXIII (Wage Register)',
-        slip: 'Form XXIV (Wage Slip)',
-        advance: 'Form XXII (Advances)'
-    },
-    'Telangana': {
-        wage: 'Form XXIII (Wage Register)',
-        slip: 'Form XXIV (Wage Slip)',
-        advance: 'Form XXII (Advances)'
-    },
-    'West Bengal': {
-        wage: 'Form J (Register of Wages)',
-        slip: 'Form H (Pay Slip)',
-        advance: 'Form M (Advances)'
-    },
-    'Default': {
-        wage: 'Wage Register',
-        slip: 'Pay Slip',
-        advance: 'Advance Register'
-    }
+    'Tamil Nadu': { wage: 'Form R (Wage Register)', slip: 'Form T (Wage Slip)', advance: 'Form P (Advances)' },
+    'Karnataka': { wage: 'Form T (Wage Register)', slip: 'Form V (Wage Slip)', advance: 'Form XXII (Advances)' },
+    'Maharashtra': { wage: 'Form II (Wage Register)', slip: 'Form III (Wage Slip)', advance: 'Form IV (Advances)' },
+    'Andhra Pradesh': { wage: 'Form XXIII (Wage Register)', slip: 'Form XXIV (Wage Slip)', advance: 'Form XXII (Advances)' },
+    'Telangana': { wage: 'Form XXIII (Wage Register)', slip: 'Form XXIV (Wage Slip)', advance: 'Form XXII (Advances)' },
+    'West Bengal': { wage: 'Form J (Register of Wages)', slip: 'Form H (Pay Slip)', advance: 'Form M (Advances)' },
+    'Default': { wage: 'Wage Register', slip: 'Pay Slip', advance: 'Advance Register' }
 };
 
 const StatutoryReports: React.FC<StatutoryReportsProps> = ({
@@ -97,513 +64,225 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     globalYear,
     setGlobalYear,
     attendances = [],
-    leaveLedgers: _leaveLedgers = [],
+    leaveLedgers = [],
     advanceLedgers = [],
     arrearHistory = [],
     latestFrozenPeriod,
     showAlert: _showAlert
 }) => {
+    const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const currentYear = new Date().getFullYear();
     const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-    const [selectedState, setSelectedState] = useState<string>('Tamil Nadu');
-    const hasInitialJumped = useRef(false);
+    const [selectedState, setSelectedState] = useState<string>(companyProfile.state || 'Tamil Nadu');
+    const [rangeModal, setRangeModal] = useState({ isOpen: false, reportType: '', fromMonth: globalMonth, fromYear: globalYear, toMonth: globalMonth, toYear: globalYear });
+    const [msgModal, setMsgModal] = useState({ isOpen: false, title: '', message: '', type: 'error' as 'error' | 'success', onConfirm: null as any });
 
-    const currentForms = useMemo(() => {
-        return STATE_FORM_MAPPINGS[selectedState] || STATE_FORM_MAPPINGS['Default'];
-    }, [selectedState]);
-
-    const isFinalized = useMemo(() => {
-        const records = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
-        return records.length > 0 && records[0].status === 'Finalized';
-    }, [payrollHistory, globalMonth, globalYear]);
-
-    // Initial Jump to Latest Frozen Month
-    useEffect(() => {
-        if (!hasInitialJumped.current && latestFrozenPeriod) {
-            if (!isFinalized) {
-                setGlobalMonth(latestFrozenPeriod.month);
-                setGlobalYear(latestFrozenPeriod.year);
-            }
-            hasInitialJumped.current = true;
-        }
-    }, [latestFrozenPeriod, isFinalized, setGlobalMonth, setGlobalYear]);
-
-    const [rangeModal, setRangeModal] = useState({
-        isOpen: false,
-        reportType: '',
-        startMonth: 'April',
-        startYear: globalYear,
-        endMonth: 'March',
-        endYear: globalYear + 1,
-        selectedEmployee: 'ALL',
-        format: 'PDF' as 'PDF' | 'Excel',
-        halfYearPeriod: 'Apr-Sep' as 'Apr-Sep' | 'Oct-Mar',
-        periodYear: globalYear
-    });
-
-    const [msgModal, setMsgModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'error' | 'success'; onConfirm?: () => void }>({
-        isOpen: false,
-        title: '',
-        message: '',
-        type: 'error'
-    });
-    const [showLegalModal, setShowLegalModal] = useState(false);
+    const currentForms = useMemo(() => STATE_FORM_MAPPINGS[selectedState] || STATE_FORM_MAPPINGS['Default'], [selectedState]);
 
     const openRangeModal = (reportType: string) => {
         const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
-        const fyStartYear = isJanToMar ? globalYear - 1 : globalYear;
-
-        let defaultHalfYear: 'Apr-Sep' | 'Oct-Mar' = 'Apr-Sep';
-        if (months.indexOf(globalMonth) >= 9 || months.indexOf(globalMonth) <= 2) {
-            defaultHalfYear = 'Oct-Mar';
-        }
-
-        setRangeModal({
-            isOpen: true,
-            reportType,
-            startMonth: 'April',
-            startYear: fyStartYear,
-            endMonth: 'March',
-            endYear: fyStartYear + 1,
-            selectedEmployee: 'ALL',
-            format: 'PDF',
-            halfYearPeriod: defaultHalfYear,
-            periodYear: fyStartYear
-        });
+        const startYear = isJanToMar ? globalYear - 1 : globalYear;
+        setRangeModal({ isOpen: true, reportType, fromMonth: 'April', fromYear: startYear, toMonth: globalMonth, toYear: globalYear });
     };
 
-    const handleGenerateRange = async () => {
-        setRangeModal({ ...rangeModal, isOpen: false });
-        let savedPath: string | null = null;
-        try {
-            if (rangeModal.reportType === 'Form 3A') {
-                savedPath = await generatePFForm3A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
-            } else if (rangeModal.reportType === 'Form 6A') {
-                savedPath = await generatePFForm6A(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile);
-            } else if (rangeModal.reportType === 'Bonus Statement') {
-                savedPath = await generateBonusReport(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, companyProfile, rangeModal.format);
-            } else if (rangeModal.reportType === 'Form 16 (Part B)') {
-                savedPath = await generateForm16PartBPDF(payrollHistory, employees, config, rangeModal.startMonth, rangeModal.startYear, rangeModal.endMonth, rangeModal.endYear, rangeModal.selectedEmployee === 'ALL' ? undefined : rangeModal.selectedEmployee, companyProfile);
-            } else if (rangeModal.reportType === 'Form 5') {
-                savedPath = await generateESIForm5(payrollHistory, employees, rangeModal.halfYearPeriod, rangeModal.periodYear, companyProfile);
-            }
-
-            if (savedPath) {
-                _showAlert(
-                    'success',
-                    'Report Generated Successfully',
-                    `The ${rangeModal.reportType} has been saved to your reports folder.`,
-                    () => openSavedReport(savedPath),
-                    undefined,
-                    'Open Report & Folder',
-                    undefined,
-                    undefined,
-                    2
-                );
-            } else {
-                _showAlert('error', 'Generation Failed', 'An unexpected error occurred while saving the report. Please try again.');
-            }
-        } catch (e: any) {
-            _showAlert('error', 'Error', e.message);
-        }
-    };
-
-    const handleDownload = async (reportName: string, format: string) => {
+    const handleDownload = async (reportName: string, format: 'PDF' | 'Excel' | 'Text') => {
         const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
+        if (currentData.length === 0) {
+            setMsgModal({ isOpen: true, title: 'No Data Found', message: `No final records found for ${globalMonth} ${globalYear}. Please finalize payroll first.`, type: 'error', onConfirm: null });
+            return;
+        }
         const fileName = getStandardFileName(reportName, companyProfile, globalMonth, globalYear);
         let savedPath: string | null = null;
 
         try {
-            if (reportName === 'PF ECR Arrears') {
+            if (reportName.includes('PF ECR')) {
+                savedPath = await generatePFECR(currentData, employees, config, format as 'Excel' | 'Text', fileName);
+            } else if (reportName === 'PF ECR Arrears') {
                 const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
-                if (!batch) throw new Error(`No arrears processed for the period ${globalMonth} ${globalYear}`);
-                if (format === 'Excel') {
-                    savedPath = await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName);
-                } else {
-                    savedPath = await generateArrearECRText(batch, payrollHistory, employees, config, fileName);
-                }
-            } else if (reportName.includes('PF ECR')) {
-                savedPath = await generatePFECR(currentData, employees, config, format as any, fileName);
-            } else if (reportName.includes('ESI Code Wages')) {
-                savedPath = await generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
-            } else if (reportName.includes('ESI Exit')) {
-                savedPath = await generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
-            } else if (reportName.includes('ESI')) {
-                savedPath = await generateESIReturn(currentData, employees, format as any, fileName, companyProfile);
-            } else if (reportName.includes('PT')) {
-                savedPath = await generatePTReport(currentData, employees, fileName, companyProfile);
-            } else if (reportName.includes('TDS')) {
-                savedPath = await generateTDSReport(currentData, employees, fileName, companyProfile);
-            } else if (reportName.includes('Gratuity')) {
-                savedPath = await generateGratuityReport(employees, companyProfile);
-            } else if (reportName.includes('Social Security')) {
-                savedPath = await generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
-            } else if (reportName.includes('EPF Code Impact')) {
-                savedPath = await generateEPFCodeImpactReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
+                if (!batch) throw new Error(`No arrears processed for ${globalMonth} ${globalYear}`);
+                savedPath = format === 'Excel' ? await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName) : await generateArrearECRText(batch, payrollHistory, employees, config, fileName);
+            } else if (reportName.includes('ESI Monthly')) {
+                savedPath = await generateESIReturn(currentData, employees, 'Excel', fileName, companyProfile);
             } else if (reportName.includes('Form 12A')) {
                 savedPath = await generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
+            } else if (reportName.includes('Gratuity')) {
+                savedPath = await generateGratuityReport(employees, companyProfile);
+            } else if (reportName.includes('Bonus')) {
+                savedPath = await generateBonusReport(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, companyProfile, format as 'PDF' | 'Excel');
+            } else if (reportName.includes('PT Report')) {
+                savedPath = await generatePTReport(currentData, employees, fileName, companyProfile);
+            } else if (reportName.includes('TDS Report')) {
+                savedPath = await generateTDSReport(currentData, employees, fileName, companyProfile);
+            } else if (reportName.includes('ESI Exit')) {
+                savedPath = await generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
             } else if (reportName.includes('Form B')) {
                 savedPath = await generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
             } else if (reportName.includes('Form C')) {
                 savedPath = await generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
-            }
-            // STATE SPECIFIC LOGIC
-            else if (reportName === 'Wage Register') {
+            } else if (reportName === 'Wage Register') {
                 savedPath = await generateStateWageRegister(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.wage);
-            } else if (reportName === 'Pay Slip') {
+            } else if (reportName === 'Wage Slip') {
                 savedPath = await generateStatePaySlip(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.slip);
             } else if (reportName === 'Advance Register') {
                 savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
             }
 
-            if (savedPath) {
-                _showAlert(
-                    'success',
-                    'Report Generated Successfully',
-                    `The ${reportName} has been saved to your reports folder.`,
-                    () => openSavedReport(savedPath),
-                    undefined,
-                    'Open Report & Folder',
-                    undefined,
-                    undefined,
-                    2
-                );
-            } else {
-                _showAlert('error', 'Generation Failed', 'An unexpected error occurred while saving the report. Please try again or check if the file is open elsewhere.');
-            }
-        } catch (e: any) {
-            _showAlert('error', 'Report Generation Failed', e.message);
-        }
+            if (savedPath) _showAlert('success', 'Report Generated', `Saved as ${fileName}`, () => openSavedReport(savedPath), undefined, 'Open Report', undefined, undefined, 2);
+        } catch (e: any) { setMsgModal({ isOpen: true, title: 'Error', message: e.message, type: 'error', onConfirm: null }); }
     };
 
-    const ReportCard = ({ title, icon: Icon, color, reports, headerAction }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string, textColor?: string, infoAction?: () => void }[], headerAction?: React.ReactNode }) => (
-        <div className={`bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group transition-all h-full ${isWin7 ? `hover:border-${color}-500/50 hover:shadow-[0_0_30px_rgba(0,0,0,0.3)]` : 'hover:border-slate-700'}`}>
+    const handleGenerateRange = async () => {
+        setRangeModal(p => ({ ...p, isOpen: false }));
+        let savedPath: string | null = null;
+        try {
+            if (rangeModal.reportType === 'Form 5') {
+                const season = rangeModal.fromMonth === 'April' ? 'Apr-Sep' : 'Oct-Mar';
+                savedPath = await generateESIForm5(payrollHistory, employees, season as any, rangeModal.fromYear, companyProfile);
+            } else if (rangeModal.reportType === 'Form 3A') {
+                savedPath = await generatePFForm3A(payrollHistory, employees, config, rangeModal.fromMonth, rangeModal.fromYear, rangeModal.toMonth, rangeModal.toYear, undefined, companyProfile);
+            } else if (rangeModal.reportType === 'Form 6A') {
+                savedPath = await generatePFForm6A(payrollHistory, employees, config, rangeModal.fromMonth, rangeModal.fromYear, rangeModal.toMonth, rangeModal.toYear, companyProfile);
+            }
+            if (savedPath) _showAlert('success', 'Range Report Generated', 'Saved to your reports folder.', () => openSavedReport(savedPath));
+        } catch (err: any) { setMsgModal({ isOpen: true, title: 'Error', message: err.message, type: 'error', onConfirm: null }); }
+    };
+
+    const ReportCard = ({ title, icon: Icon, color, reports, headerAction }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string, textColor?: string }[], headerAction?: React.ReactNode }) => (
+        <div className={`bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group transition-all h-full ${isWin7 ? `hover:border-${color}-500/50` : 'hover:border-slate-700'}`}>
             <div className={`p-4 flex items-center justify-between border-b border-slate-800 ${isWin7 ? `bg-gradient-to-r from-[#0f172a] to-[#1e293b]` : 'bg-[#0f172a]'}`}>
                 <div className="flex items-center gap-3">
-                    <div className={`rounded-xl border shadow-[inset_0_0_10px_rgba(0,0,0,0.2)] ${isWin7 ? `p-2.5 bg-${color}-900/30 text-${color}-400 border-${color}-400/20` : `p-2 bg-${color}-900/20 text-${color}-400 border-${color}-900/30`}`}>
-                        <Icon size={20} className={`${isWin7 ? `drop-shadow-[0_0_8px_currentColor]` : ''}`} />
-                    </div>
-                    <h3 className={`uppercase ${isWin7 ? `font-black text-${color}-400 text-xs tracking-[0.15em]` : `font-bold text-${color}-400 text-sm tracking-widest`}`}>{title}</h3>
+                    <div className={`rounded-lg p-2 ${isWin7 ? `bg-${color}-900/30 text-${color}-400 border border-${color}-400/20` : `bg-${color}-900/20 text-${color}-400`}`}><Icon size={18} /></div>
+                    <h3 className={`uppercase font-bold text-xs tracking-widest text-${color}-400`}>{title}</h3>
                 </div>
                 {headerAction}
             </div>
-            <div className="p-4 grid grid-cols-1 gap-2">
+            <div className="p-3 grid grid-cols-1 gap-2">
                 {reports.map((r, i) => (
-                    <div key={i} className="flex gap-2">
-                        <button onClick={r.action} className="flex-1 flex items-center justify-between p-3 rounded-lg bg-slate-900/50 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all group/btn text-left">
-                            <span className={`text-xs font-bold ${r.textColor || 'text-slate-300'} group-hover/btn:text-white`}>{r.label}</span>
-                            <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{r.format || 'PDF'}</span>
-                        </button>
-                        {r.infoAction && (
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); r.infoAction?.(); }}
-                                className="px-3 rounded-lg bg-indigo-900/20 text-indigo-400 hover:bg-indigo-900/40 border border-indigo-900/30 transition-all"
-                                title="Legal Definition / Info"
-                            >
-                                <Info size={16} />
-                            </button>
-                        )}
-                    </div>
+                    <button key={i} onClick={r.action} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900/40 hover:bg-slate-800 border border-slate-800/50 transition-all text-left group/btn">
+                        <span className={`text-[11px] font-bold ${r.textColor || 'text-slate-300'} group-hover/btn:text-white`}>{r.label}</span>
+                        <span className="text-[9px] font-black text-slate-500 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">{r.format || 'PDF'}</span>
+                    </button>
                 ))}
             </div>
         </div>
     );
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 relative">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#1e293b] p-6 rounded-xl border border-slate-800 shadow-xl">
+        <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 pb-20">
+            {/* Header / Filter Section */}
+            <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl">
                 <div>
-                    <h2 className="text-2xl font-black text-white">Statutory Returns & Registers</h2>
-                    <p className="text-slate-400 text-sm">Lawful compliance reporting for EPF, ESI, PT, and State Acts.</p>
+                    <h2 className="text-2xl font-black text-white flex items-center gap-3 uppercase italic tracking-tighter">
+                        <ShieldCheck className="text-blue-400" size={28} /> Statutory Compliance
+                    </h2>
+                    <p className="text-slate-400 text-xs mt-1 font-medium">Official PF, ESI, and Labour Law Returns.</p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <select aria-label="Select global month" value={globalMonth} onChange={e => setGlobalMonth(e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
-                        {months.map(m => (<option key={m} value={m}>{m}</option>))}
+                    <select title="Select Month" value={globalMonth} onChange={e => setGlobalMonth(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500">
+                        {monthsArr.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
-                    <select aria-label="Select global year" value={globalYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500">
+                    <select title="Select Year" value={globalYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500">
                         {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
                     </select>
                 </div>
             </div>
 
-            {!isFinalized ? (
-                <div className="flex flex-col items-center justify-center p-12 bg-[#1e293b] rounded-2xl border border-slate-800 text-center space-y-4">
-                    <div className="p-4 bg-slate-900 rounded-full text-slate-500"><Lock size={48} /></div>
-                    <h3 className="text-xl font-bold text-white">Compliance View Locked</h3>
-                    <p className="text-slate-400">Payroll for {globalMonth} {globalYear} must be frozen to generate official reports.</p>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pb-10">
+            {/* Main Compliance Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <ReportCard title="EPF & MP Act, 1952" icon={Landmark} color="blue" reports={[
+                    { label: 'PF ECR (Electronic Challan Return)', action: () => handleDownload('PF ECR', 'Text'), format: 'TXT' },
+                    { label: 'PF ECR (Excel Backup)', action: () => handleDownload('PF ECR', 'Excel'), format: 'XLSX' },
+                    { label: 'PF ECR Arrear (Text Format)', action: () => handleDownload('PF ECR Arrears', 'Text'), format: 'TXT', textColor: 'text-amber-400' },
+                    { label: 'PF ECR Arear ( Excel Backup)', action: () => handleDownload('PF ECR Arrears', 'Excel'), format: 'XLSX', textColor: 'text-amber-400' },
+                    { label: 'Form 12A', action: () => handleDownload('Form 12A', 'PDF') },
+                    { label: 'Form 3A', action: () => openRangeModal('Form 3A'), format: 'PDF' },
+                    { label: 'Form 6A', action: () => openRangeModal('Form 6A'), format: 'PDF' }
+                ]} />
 
-                    {/* CLAUSE 88 NOTE */}
-                    <div className="lg:col-span-2 bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-xl flex items-start gap-3">
-                        <Info className="text-indigo-400 shrink-0 mt-1" size={20} />
-                        <div>
-                            <h4 className="text-sm font-bold text-indigo-300">Code on Social Security, 2020 (Clause 88) Impact</h4>
-                            <p className="text-xs text-indigo-200/70 mt-1 leading-relaxed">
-                                Per Section 142 of the Code on Social Security 2020 (Clause 88), if the aggregate of specified exclusions (allowances) exceeds 50% of the total remuneration, the excess amount shall be deemed as wages.
-                                The system has automatically adjusted the PF & ESI calculations in the reports below where applicable.
-                            </p>
-                        </div>
-                    </div>
+                <ReportCard title="ESI Act, 1948" icon={ShieldCheck} color="pink" reports={[
+                    { label: 'ESI Monthly Return', action: () => handleDownload('ESI Monthly', 'Excel'), format: 'XLSX' },
+                    { label: 'Form 5 (Contribution)', action: () => openRangeModal('Form 5'), format: 'PDF' },
+                    { label: 'ESI Exit/OoC IP', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' }
+                ]} />
 
-                    {/* EPF Reports */}
-                    <ReportCard
-                        title="EPF & MP Act, 1952"
-                        icon={Landmark}
-                        color="blue"
-                        reports={[
-                            { label: 'PF ECR (Electronic Challan Return)', action: () => handleDownload('PF ECR', 'Text'), format: 'TXT' },
-                            { label: 'PF ECR (Excel Backup)', action: () => handleDownload('PF ECR', 'Excel'), format: 'XLSX' },
-                            { label: 'PF ECR Arrears (Text format)', action: () => handleDownload('PF ECR Arrears', 'Text'), format: 'TXT', textColor: 'text-amber-400' },
-                            { label: 'PF ECR Arrears (Excel Backup)', action: () => handleDownload('PF ECR Arrears', 'Excel'), format: 'XLSX', textColor: 'text-amber-400' },
-                            { label: 'Form 12A (Revised)', action: () => handleDownload('Form 12A', 'PDF') },
-                            { label: 'Form 3A (Member Annual Card)', action: () => openRangeModal('Form 3A'), format: 'PDF' },
-                            { label: 'Form 6A (Consolidated Annual)', action: () => openRangeModal('Form 6A'), format: 'PDF' },
-                            { label: 'Code 2020 Impact Analysis', action: () => handleDownload('EPF Code Impact', 'PDF'), format: 'PDF', infoAction: () => setShowLegalModal(true) }
-                        ]}
-                    />
+                <ReportCard title="Taxes & Benefits" icon={FileText} color="amber" reports={[
+                    { label: 'Professional Tax Report', action: () => handleDownload('PT Report', 'Excel'), format: 'XLSX' },
+                    { label: 'TDS (Income Tax) Report', action: () => handleDownload('TDS Report', 'Excel'), format: 'XLSX' },
+                    { label: 'Gratuity Valuation', action: () => handleDownload('Gratuity', 'PDF') },
+                    { label: 'Bonus Statement', action: () => handleDownload('Bonus', 'PDF') }
+                ]} />
+            </div>
 
-                    {/* ESI Reports */}
-                    <ReportCard
-                        title="ESI Act, 1948"
-                        icon={ShieldCheck}
-                        color="pink"
-                        reports={[
-                            { label: 'ESI Monthly Return (Excel)', action: () => handleDownload('ESI', 'Excel'), format: 'XLSX' },
-                            { label: 'Form 5 (Return of Contribution)', action: () => openRangeModal('Form 5'), format: 'PDF' },
-                            { label: 'ESI Code Wages Analysis', action: () => handleDownload('ESI Code Wages', 'PDF'), format: 'PDF', infoAction: () => setShowLegalModal(true) },
-                            { label: 'ESI IP Going out of coverage', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' }
-                        ]}
-                    />
+            {/* Registers Row */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <ReportCard title="Central Labour Registers" icon={BookOpen} color="emerald" reports={[
+                    { label: 'Register of Wages (Form B)', action: () => handleDownload('Form B', 'PDF') },
+                    { label: 'Muster Roll (Form C)', action: () => handleDownload('Form C', 'PDF') }
+                ]} />
 
-                    {/* Central Labour Law Registers */}
-                    <ReportCard
-                        title="Central Labour Law Registers"
-                        icon={BookOpen}
-                        color="emerald"
-                        reports={[
-                            { label: 'Form B (Register of Wages)', action: () => handleDownload('Form B', 'PDF') },
-                            { label: 'Form C (Muster Roll)', action: () => handleDownload('Form C', 'PDF') },
-                        ]}
-                    />
+                <ReportCard
+                    title="State Labour Registers"
+                    icon={ScrollText}
+                    color="teal"
+                    headerAction={
+                        <select
+                            title="Filter by State"
+                            value={selectedState}
+                            onChange={e => setSelectedState(e.target.value)}
+                            className="bg-slate-900 border border-teal-500/30 text-teal-400 text-[10px] font-bold rounded px-1.5 py-0.5 outline-none"
+                        >
+                            {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                    }
+                    reports={[
+                        { label: currentForms.wage, action: () => handleDownload('Wage Register', 'PDF') },
+                        { label: currentForms.slip, action: () => handleDownload('Wage Slip', 'PDF') },
+                        { label: currentForms.advance, action: () => handleDownload('Advance Register', 'PDF') }
+                    ]}
+                />
+            </div>
 
-                    {/* State Labour Law Registers (Dynamic) */}
-                    <ReportCard
-                        title="State Labour Law Registers"
-                        icon={ScrollText}
-                        color="teal"
-                        headerAction={
-                            <select
-                                aria-label="Select state"
-                                value={selectedState}
-                                onChange={e => setSelectedState(e.target.value)}
-                                className="bg-[#1e293b] border border-teal-500/30 text-teal-400 text-[10px] font-bold rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-teal-500"
-                            >
-                                {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                        }
-                        reports={[
-                            { label: currentForms.wage, action: () => handleDownload('Wage Register', 'PDF') },
-                            { label: currentForms.slip, action: () => handleDownload('Pay Slip', 'PDF') },
-                            { label: currentForms.advance, action: () => handleDownload('Advance Register', 'PDF') },
-                        ]}
-                    />
-
-                    {/* Finance & Benefits (Bonus & Gratuity) */}
-                    <ReportCard
-                        title="Finance & Benefits"
-                        icon={HandCoins}
-                        color="amber"
-                        reports={[
-                            { label: 'Bonus Payment Statement', action: () => openRangeModal('Bonus Statement'), format: 'PDF' },
-                            { label: 'Gratuity Liability (Estimated)', action: () => handleDownload('Gratuity', 'PDF') }
-                        ]}
-                    />
-
-                    {/* Taxes & Liabilities */}
-                    <ReportCard
-                        title="Taxes & Liabilities"
-                        icon={ReceiptText}
-                        color="purple"
-                        reports={[
-                            { label: 'Professional Tax (PT) Report', action: () => handleDownload('PT', 'Excel'), format: 'XLSX' },
-                            { label: 'TDS / Income Tax Report', action: () => handleDownload('TDS', 'Excel'), format: 'XLSX' },
-                            { label: 'Form 16 (Part B) Preview', action: () => openRangeModal('Form 16 (Part B)'), format: 'PDF' }
-                        ]}
-                    />
-
-                </div>
-            )}
-
-            {/* Range Selection Modal */}
             {rangeModal.isOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-[#1e293b] w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button type="button" aria-label="Close" onClick={() => setRangeModal({ ...rangeModal, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
-                        <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-                            <Calendar size={24} className="text-blue-400" />
-                            <div>
-                                <h3 className="text-lg font-bold text-white">{rangeModal.reportType}</h3>
-                                <p className="text-xs text-slate-400">Select reporting period</p>
-                            </div>
-                        </div>
-
+                <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 p-8 shadow-2xl relative">
+                        <button title="Close" onClick={() => setRangeModal(p => ({ ...p, isOpen: false }))} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <h3 className="text-lg font-black text-white italic uppercase tracking-tighter mb-6 flex items-center gap-2">
+                            <ReceiptText className="text-blue-500" size={24} /> Range: {rangeModal.reportType}
+                        </h3>
                         <div className="space-y-4">
-                            {rangeModal.reportType === 'Form 5' ? (
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Contribution Period</label>
-                                    <div className="flex gap-2">
-                                        <select aria-label="Select half year period" className="flex-1 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.halfYearPeriod} onChange={e => setRangeModal({ ...rangeModal, halfYearPeriod: e.target.value as any })}>
-                                            <option value="Apr-Sep">Apr - Sep</option>
-                                            <option value="Oct-Mar">Oct - Mar</option>
-                                        </select>
-                                        <select aria-label="Select period year" className="w-24 bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.periodYear} onChange={e => setRangeModal({ ...rangeModal, periodYear: +e.target.value })}>
-                                            {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
-                                        </select>
-                                    </div>
-                                </div>
-                            ) : (
-                                <>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase">Start</label>
-                                            <div className="flex gap-1">
-                                                <select aria-label="Select start month" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.startMonth} onChange={e => setRangeModal({ ...rangeModal, startMonth: e.target.value })}>{months.map(m => <option key={m} value={m}>{m.slice(0, 3)}</option>)}</select>
-                                                <select aria-label="Select start year" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.startYear} onChange={e => setRangeModal({ ...rangeModal, startYear: +e.target.value })}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
-                                            </div>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase">End</label>
-                                            <div className="flex gap-1">
-                                                <select aria-label="Select end month" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white w-full" value={rangeModal.endMonth} onChange={e => setRangeModal({ ...rangeModal, endMonth: e.target.value })}>{months.map(m => <option key={m} value={m}>{m.slice(0, 3)}</option>)}</select>
-                                                <select aria-label="Select end year" className="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs text-white" value={rangeModal.endYear} onChange={e => setRangeModal({ ...rangeModal, endYear: +e.target.value })}>{yearOptions.map(y => <option key={y} value={y}>{y}</option>)}</select>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {['Form 3A', 'Form 16 (Part B)'].includes(rangeModal.reportType) && (
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase">Employee</label>
-                                            <select aria-label="Select employee" className="w-full bg-[#0f172a] border border-slate-700 rounded-lg p-2.5 text-sm text-white" value={rangeModal.selectedEmployee} onChange={e => setRangeModal({ ...rangeModal, selectedEmployee: e.target.value })}>
-                                                <option value="ALL">All Employees</option>
-                                                {employees.map(e => <option key={e.id} value={e.id}>{e.name} ({e.id})</option>)}
-                                            </select>
-                                        </div>
-                                    )}
-                                </>
-                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                                <select title="From Month" value={rangeModal.fromMonth} onChange={e => setRangeModal(p => ({ ...p, fromMonth: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
+                                    {monthsArr.map(m => (<option key={m} value={m}>{m}</option>))}
+                                </select>
+                                <select title="From Year" value={rangeModal.fromYear} onChange={e => setRangeModal(p => ({ ...p, fromYear: +e.target.value }))} className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
+                                    {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
+                                </select>
+                            </div>
+                            <div className="text-center text-[10px] font-black text-slate-600 uppercase tracking-widest">To</div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <select title="To Month" value={rangeModal.toMonth} onChange={e => setRangeModal(p => ({ ...p, toMonth: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
+                                    {monthsArr.map(m => (<option key={m} value={m}>{m}</option>))}
+                                </select>
+                                <select title="To Year" value={rangeModal.toYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
+                                    {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
+                                </select>
+                            </div>
                         </div>
-
-                        <button onClick={handleGenerateRange} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl mt-4 transition-all shadow-lg flex items-center justify-center gap-2">
-                            <Download size={18} /> Generate Report
-                        </button>
+                        <button onClick={handleGenerateRange} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl mt-6">Generate</button>
                     </div>
                 </div>
             )}
 
-            {/* Legal Definition Modal */}
-            {showLegalModal && (
-                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
-                    <div className="bg-[#1e293b] w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-3xl border border-indigo-500/30 shadow-[0_0_50px_rgba(79,70,229,0.2)] flex flex-col relative animate-in zoom-in-95 duration-300">
-                        {/* Header */}
-                        <div className="bg-gradient-to-r from-indigo-600 to-blue-700 p-6 flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div className="p-3 bg-white/10 rounded-2xl backdrop-blur-sm">
-                                    <BookOpen className="text-white" size={28} />
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-black text-white tracking-wide uppercase">Legal Definition: "Wages"</h3>
-                                    <p className="text-indigo-100 text-xs font-bold opacity-80">Social Security Code, 2020</p>
-                                </div>
-                            </div>
-                            <button 
-                                onClick={() => setShowLegalModal(false)}
-                                className="p-2 hover:bg-white/10 rounded-full text-white/70 hover:text-white transition-all"
-                                title="Close"
-                                aria-label="Close Reference Modal"
-                            >
-                                <X size={24} />
-                            </button>
-                        </div>
-
-                        {/* Content */}
-                        <div className="p-8 overflow-y-auto space-y-6 custom-scrollbar">
-                            <div className="p-4 bg-indigo-950/40 border border-indigo-500/20 rounded-xl">
-                                <p className="text-[11px] text-indigo-300 italic flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                                    Note: This definition governs the calculation for the 50% threshold limit under the Code on Social Security, 2020.
-                                </p>
-                            </div>
-
-                            <div className="space-y-4 text-slate-300 leading-relaxed text-sm">
-                                <p>
-                                    <span className="font-bold text-white text-base">Social Security Code Sec 2 (88)</span> "wages" means all remuneration, whether by way of salaries, allowances or otherwise, expressed in terms of money or capable of being so expressed which would, if the terms of employment, express or implied, were fulfilled, be payable to a person employed in respect of his employment or of work done in such employment, and <span className="text-indigo-400 font-bold">includes—</span>
-                                </p>
-                                
-                                <ul className="space-y-2 pl-4 border-l-2 border-indigo-500/30">
-                                    <li className="flex gap-2"><span className="text-indigo-400 font-mono">(a)</span> basic pay;</li>
-                                    <li className="flex gap-2"><span className="text-indigo-400 font-mono">(b)</span> dearness allowance; and</li>
-                                    <li className="flex gap-2"><span className="text-indigo-400 font-mono">(c)</span> retaining allowance, if any,</li>
-                                </ul>
-
-                                <p className="pt-2 font-bold text-white uppercase text-xs tracking-widest text-indigo-400">but does not include—</p>
-                                
-                                <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 pl-4 text-[13px] opacity-80">
-                                    <li className="flex gap-2"><span className="text-slate-500">(a)</span> bonus payable under any law;</li>
-                                    <li className="flex gap-2"><span className="text-slate-500">(b)</span> value of house-accommodation;</li>
-                                    <li className="flex gap-2"><span className="text-slate-500">(c)</span> employer PF/pension contributions;</li>
-                                    <li className="flex gap-2"><span className="text-slate-500">(d)</span> conveyance allowance;</li>
-                                    <li className="flex gap-2"><span className="text-slate-500">(e)</span> special nature-of-employment expenses;</li>
-                                    <li className="flex gap-2"><span className="text-slate-500">(f)</span> house rent allowance (HRA);</li>
-                                    <li className="flex gap-2"><span className="text-slate-500">(g)</span> award/settlement remuneration;</li>
-                                    <li className="flex gap-2"><span className="text-slate-500">(h)</span> overtime allowance;</li>
-                                    <li className="flex gap-2"><span className="text-slate-500">(i)</span> commission payable to the employee;</li>
-                                    <li className="flex gap-2"><span className="text-slate-500">(j)</span> gratuity payable on termination;</li>
-                                </ul>
-
-                                <div className="p-5 bg-blue-900/10 border-l-4 border-blue-500 rounded-r-xl mt-6">
-                                    <h4 className="text-xs font-black text-blue-400 uppercase tracking-tighter mb-2 italic">The 50% Proviso:</h4>
-                                    <p className="text-[13px] text-blue-100 font-medium">
-                                        "Provided that... if payments made to an employee under clauses <span className="font-bold">(a) to (i) exceeds one-half (50%)</span> of the total remuneration, the amount which exceeds such one-half shall be deemed as remuneration and <span className="text-blue-400 font-bold underline decoration-wavy decoration-1 underline-offset-4 font-black">shall be considered as wages.</span>"
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Footer */}
-                        <div className="p-6 bg-[#0f172a] border-t border-slate-800 flex justify-end">
-                            <button 
-                                onClick={() => setShowLegalModal(false)}
-                                className="px-8 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl transition-all shadow-lg hover:shadow-indigo-500/20 active:scale-95"
-                            >
-                                Understood
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Message Modal */}
             {msgModal.isOpen && (
-                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button type="button" aria-label="Close" onClick={() => {
-                            if (msgModal.onConfirm) msgModal.onConfirm();
-                            setMsgModal({ ...msgModal, isOpen: false });
-                        }} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
-                        <div className="flex flex-col items-center gap-2">
-                            <div className={`p-3 rounded-full border ${msgModal.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50'}`}>
-                                {msgModal.type === 'error' ? <AlertTriangle size={24} /> : <CheckCircle size={24} />}
-                            </div>
-                            <h3 className="text-lg font-bold text-white text-center">{msgModal.title}</h3>
-                            <p className="text-sm text-slate-400 text-center">{msgModal.message}</p>
+                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4">
+                    <div className="bg-[#1e293b] max-w-sm w-full rounded-2xl border border-slate-700 p-8 text-center space-y-4 shadow-2xl">
+                        <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${msgModal.type === 'error' ? 'bg-red-950 text-red-500' : 'bg-emerald-950 text-emerald-500'}`}>
+                            {msgModal.type === 'error' ? <AlertTriangle size={32} /> : <CheckCircle size={32} />}
                         </div>
-                        <button type="button" onClick={() => {
-                            if (msgModal.onConfirm) msgModal.onConfirm();
-                            setMsgModal({ ...msgModal, isOpen: false });
-                        }} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
+                        <h3 className="text-lg font-bold text-white uppercase">{msgModal.title}</h3>
+                        <p className="text-slate-400 text-sm">{msgModal.message}</p>
+                        <button onClick={() => setMsgModal(p => ({ ...p, isOpen: false }))} className="w-full py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition-all">Dismiss</button>
                     </div>
                 </div>
             )}

@@ -14,7 +14,6 @@ namespace BharatPayLauncher
         private const string APP_ID = "com.ilcbala.bharatpaypro";
         private const string APP_NAME = "BPP_APP";
         private const string EXE_NAME = "BPP_APP.exe";
-        private const string CURRENT_VERSION = "02.02.08";
 
         static void Main(string[] args)
         {
@@ -45,10 +44,10 @@ namespace BharatPayLauncher
                 else { return; }
             }
 
-            Console.WriteLine("=====================================");
-            Console.WriteLine("   BharatPay Pro Intelligent Launcher");
-            Console.WriteLine("          Version: " + CURRENT_VERSION);
-            Console.WriteLine("=====================================");
+            Console.WriteLine("==================================================");
+            Console.WriteLine("    BharatPay Pro — Intelligent Bootstrapper");
+            Console.WriteLine("        [ Status: Cloud Sync Enabled ]");
+            Console.WriteLine("==================================================");
             
             try 
             {
@@ -56,7 +55,8 @@ namespace BharatPayLauncher
                 
                 if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
                 {
-                    Console.WriteLine("✅ BharatPay Pro found. Launching...");
+                    Console.WriteLine("✅ BharatPay Pro found. Checking for updates...");
+                    // even if found, we logic check update if needed, but for now we launch
                     Process.Start(exePath);
                 }
                 else
@@ -117,7 +117,7 @@ namespace BharatPayLauncher
 
         static void InstallApplication()
         {
-            Console.WriteLine("\n🌐 Fetching latest version info from Cloud...");
+            Console.WriteLine("\n🌐 Synchronizing with BharatPay Cloud...");
             
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; // TLS 1.2
             
@@ -126,18 +126,16 @@ namespace BharatPayLauncher
                 string json = client.DownloadString(GOOGLE_SCRIPT_URL);
                 
                 // Extract version and URLs. 
-                // Using ExtractJsonValue to find keys regardless of position.
                 string downloadUrl = ExtractJsonValue(json, "downloadUrl");
                 string downloadUrlWin7 = ExtractJsonValue(json, "downloadUrlWin7");
                 string version = ExtractJsonValue(json, "latestVersion");
 
                 if (string.IsNullOrEmpty(version))
                 {
-                    // Fallback search if the object is nested in 'messages'
                     version = ExtractJsonValue(json, "version"); 
                 }
 
-                Console.WriteLine("📦 Remote Version Found: " + (string.IsNullOrEmpty(version) ? "Checking..." : version));
+                Console.WriteLine("📦 Target Release Identified: " + (string.IsNullOrEmpty(version) ? "v02.xx.xx" : "v" + version));
                 
                 bool isLegacy = Environment.OSVersion.Version.Major == 6 && Environment.OSVersion.Version.Minor == 1; // Exactly Win 7
                 string targetUrl = isLegacy ? downloadUrlWin7 : downloadUrl;
@@ -147,25 +145,23 @@ namespace BharatPayLauncher
                     string errMsg = "Could not retrieve download URL from server.\n\n" +
                                    "V: " + version + ", OS7: " + isLegacy + "\n" +
                                    "W10URL: " + (string.IsNullOrEmpty(downloadUrl) ? "Empty" : "Valid") + "\n" +
-                                   "W7URL: " + (string.IsNullOrEmpty(downloadUrlWin7) ? "Empty" : "Valid") + "\n\n" +
-                                   "Raw Response: " + (json.Length > 200 ? json.Substring(0, 200) + "..." : json);
+                                   "W7URL: " + (string.IsNullOrEmpty(downloadUrlWin7) ? "Empty" : "Valid") + "\n\n";
                     throw new Exception(errMsg);
                 }
 
-                Console.WriteLine("💻 Target Environment: " + (isLegacy ? "Windows 7 (Legacy)" : "Windows 10+ (Modern)"));
-                Console.WriteLine("🚀 Initiating Secure Download...");
+                Console.WriteLine("💻 System Detected: " + (isLegacy ? "Windows 7 (Legacy)" : "Windows 10+ (Modern)"));
+                Console.WriteLine("🚀 Initiating Secure Background Download...");
 
-                string tempFile = Path.Combine(Path.GetTempPath(), "BPP_Setup_" + (string.IsNullOrEmpty(version) ? "v5" : version) + ".exe");
+                string tempFile = Path.Combine(Path.GetTempPath(), "BPP_Setup_Latest.exe");
                 client.DownloadFile(targetUrl, tempFile);
                 
-                Console.WriteLine("✅ Download Complete. Executing Installer...");
+                Console.WriteLine("✅ Download Complete. Executing Setup...");
                 Process.Start(tempFile);
             }
         }
 
         static string ExtractJsonValue(string json, string key)
         {
-            // Improved regex to handle optional spaces around quotes and colon
             string pattern = "\"" + key + "\"\\s*:\\s*\"([^\"]*)\"";
             Match match = Regex.Match(json, pattern);
             return match.Success ? match.Groups[1].Value : "";

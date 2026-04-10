@@ -62,9 +62,17 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
         const monthIdx = months.indexOf(month);
         const periodStart = new Date(year, monthIdx, 1);
         periodStart.setHours(0, 0, 0, 0);
+        const periodEnd = new Date(year, monthIdx + 1, 0);
+        periodEnd.setHours(23, 59, 59, 999);
 
         return employees.filter(emp => {
-            // 1. Determine if Active
+            // 1. Determine if Active (Joined before or in period AND not left before period)
+            const empDOJ = new Date(emp.doj);
+            empDOJ.setHours(0, 0, 0, 0);
+
+            // Join Check: Must have joined by the end of this period
+            if (empDOJ > periodEnd) return false;
+
             let isActive = true;
             if (emp.dol) {
                 const [y, m, d] = emp.dol.split('-').map(Number);

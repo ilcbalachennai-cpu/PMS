@@ -4,7 +4,7 @@ import { StatutoryConfig, Employee, User, LeavePolicy, CompanyProfile } from './
 // Branding Configuration
 export const BRAND_CONFIG = {
   appName: 'BharatPay',
-  appNameSuffix: 'Pro',
+  appNameSuffix: ' Pro',
   companyName: 'ILCBala',
   tagline: 'Decoding Indian Labour Laws',
   logoUrl: './logo.png',

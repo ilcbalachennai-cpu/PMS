@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import {
     X, User2, Plus, Edit2, Camera, Upload,
     FileText, Save, Home, MapPinned, Landmark,
-    Briefcase, ShieldCheck, ShieldAlert, UserMinus, Lock
+    Briefcase, ShieldCheck, ShieldAlert, UserMinus, Lock, BookOpen
 } from 'lucide-react';
 import { Employee } from '../../types';
 import { INDIAN_STATES } from '../../constants';
@@ -512,12 +512,66 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                         </div>
                     </div>
 
+                    <div>
+                        <FormSectionHeader icon={BookOpen} title="8. Initial Leave Balances (Opening)" color="text-teal-400" />
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-teal-900/5 p-6 rounded-xl border border-teal-500/20">
+                            <div className="space-y-1.5">
+                                <label htmlFor="initEL" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Earned Leave (EL)</label>
+                                <input id="initEL" type="number" step="0.1" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-teal-500" 
+                                    value={newEmpForm?.initialOpeningBalances?.el ?? 0} 
+                                    onChange={e => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setNewEmpForm(prev => ({ 
+                                            ...prev, 
+                                            initialOpeningBalances: { 
+                                                ...(prev.initialOpeningBalances || { el: 0, sl: 0, cl: 0 }), 
+                                                el: val 
+                                            } 
+                                        }));
+                                    }} 
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label htmlFor="initSL" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sick Leave (SL)</label>
+                                <input id="initSL" type="number" step="0.1" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-teal-500" 
+                                    value={newEmpForm?.initialOpeningBalances?.sl ?? 0} 
+                                    onChange={e => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setNewEmpForm(prev => ({ 
+                                            ...prev, 
+                                            initialOpeningBalances: { 
+                                                ...(prev.initialOpeningBalances || { el: 0, sl: 0, cl: 0 }), 
+                                                sl: val 
+                                            } 
+                                        }));
+                                    }} 
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label htmlFor="initCL" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Casual Leave (CL)</label>
+                                <input id="initCL" type="number" step="0.1" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-teal-500" 
+                                    value={newEmpForm?.initialOpeningBalances?.cl ?? 0} 
+                                    onChange={e => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setNewEmpForm(prev => ({ 
+                                            ...prev, 
+                                            initialOpeningBalances: { 
+                                                ...(prev.initialOpeningBalances || { el: 0, sl: 0, cl: 0 }), 
+                                                cl: val 
+                                            } 
+                                        }));
+                                    }} 
+                                />
+                            </div>
+                        </div>
+                    </div>
+
                     {editingId && (
                         <div>
                             <div className="flex items-center justify-between mb-6 border-b border-red-900/30 pb-2">
                                 <div className="flex items-center gap-3">
                                     <UserMinus size={18} className="text-red-400" />
-                                    <h3 className="text-xs font-black uppercase tracking-widest text-red-400">8. Separation & Final Settlement</h3>
+                                    <h3 className="text-xs font-black uppercase tracking-widest text-red-400">9. Separation & Final Settlement</h3>
                                 </div>
                                 {!isSeparationUnlocked && (
                                     <button type="button" onClick={onUnlockSeparation} title="Unlock Restricted Separation Fields" aria-label="Unlock Restricted Separation Fields" className="flex items-center gap-2 text-[10px] font-bold bg-red-900/20 text-red-400 px-3 py-1.5 rounded-lg border border-red-900/30 hover:bg-red-900/40 transition-colors">

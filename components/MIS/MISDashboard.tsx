@@ -213,6 +213,371 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHist
       }
   }, [availablePeriods]);
 
+  // ═══════════════════════════════════════════════
+  // MIS REPORT STATE
+  // ═══════════════════════════════════════════════
+  type MisReportType = 'EMP_DATA' | 'PAY_DATA';
+
+  interface MisEmpColumn { id: string; heading: string; source: 'Auto' | 'Employee Master'; field: string; }
+  interface MisPayColumn { id: string; heading: string; source: 'Auto' | 'Employee Profile' | 'Pay Data'; field: string; }
+
+  const [misReportType, setMisReportType] = useState<MisReportType>('EMP_DATA');
+
+  // ── Employee Data Analysis ──
+  const [misEmpReportName, setMisEmpReportName] = useState('Employee Master Register');
+  const [misEmpMonth] = useState(months[new Date().getMonth()]);
+  const [misEmpYear] = useState(new Date().getFullYear());
+  const [misEmpOrientation, setMisEmpOrientation] = useState('Portrait (Standard)');
+  const [misEmpColumns, setMisEmpColumns] = useState<MisEmpColumn[]>([]);
+
+  const handleMisEmpAddColumn = () => {
+    const newId = Date.now().toString();
+    setMisEmpColumns(prev => [...prev, { id: newId, heading: '', source: 'Employee Master', field: '' }]);
+  };
+  const updateMisEmpColumn = (id: string, updates: Partial<MisEmpColumn>) => {
+    setMisEmpColumns(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+  };
+  const removeMisEmpColumn = (id: string) => {
+    setMisEmpColumns(prev => prev.filter(c => c.id !== id));
+  };
+  const moveMisEmpColumn = (index: number, dir: 'up' | 'down') => {
+    setMisEmpColumns(prev => {
+      const arr = [...prev];
+      if (dir === 'up' && index > 0) { [arr[index], arr[index - 1]] = [arr[index - 1], arr[index]]; }
+      else if (dir === 'down' && index < arr.length - 1) { [arr[index], arr[index + 1]] = [arr[index + 1], arr[index]]; }
+      return arr;
+    });
+  };
+
+  // Quick Presets — Employee Data Analysis
+  const loadMisEmpPresetBasic = () => {
+    setMisEmpReportName('Employee Basic Information Register');
+    setMisEmpColumns([
+      { id: '1', heading: 'Sl No', source: 'Auto', field: '' },
+      { id: '2', heading: 'Employee ID', source: 'Employee Master', field: 'id' },
+      { id: '3', heading: 'Name', source: 'Employee Master', field: 'name' },
+      { id: '4', heading: 'Gender', source: 'Employee Master', field: 'gender' },
+      { id: '5', heading: 'Designation', source: 'Employee Master', field: 'designation' },
+      { id: '6', heading: 'Division', source: 'Employee Master', field: 'division' },
+      { id: '7', heading: 'Branch', source: 'Employee Master', field: 'branch' },
+      { id: '8', heading: 'Date of Join', source: 'Employee Master', field: 'doj' },
+      { id: '9', heading: 'Date of Leave', source: 'Employee Master', field: 'dol' },
+      { id: '10', heading: 'Mobile', source: 'Employee Master', field: 'mobile' },
+    ]);
+  };
+  const loadMisEmpPresetStatutory = () => {
+    setMisEmpReportName('Employee Statutory Details Register');
+    setMisEmpColumns([
+      { id: '1', heading: 'Sl No', source: 'Auto', field: '' },
+      { id: '2', heading: 'Employee ID', source: 'Employee Master', field: 'id' },
+      { id: '3', heading: 'Name', source: 'Employee Master', field: 'name' },
+      { id: '4', heading: 'PAN No', source: 'Employee Master', field: 'pan' },
+      { id: '5', heading: 'Aadhaar No', source: 'Employee Master', field: 'aadhaarNumber' },
+      { id: '6', heading: 'UAN No', source: 'Employee Master', field: 'uanc' },
+      { id: '7', heading: 'PF No', source: 'Employee Master', field: 'pfNumber' },
+      { id: '8', heading: 'ESI No', source: 'Employee Master', field: 'esiNumber' },
+    ]);
+  };
+  const loadMisEmpPresetBank = () => {
+    setMisEmpReportName('Employee Bank Details Register');
+    setMisEmpColumns([
+      { id: '1', heading: 'Sl No', source: 'Auto', field: '' },
+      { id: '2', heading: 'Employee ID', source: 'Employee Master', field: 'id' },
+      { id: '3', heading: 'Name', source: 'Employee Master', field: 'name' },
+      { id: '4', heading: 'Bank Account No', source: 'Employee Master', field: 'bankAccount' },
+      { id: '5', heading: 'Bank Name', source: 'Employee Master', field: 'bankName' },
+      { id: '6', heading: 'Bank Branch', source: 'Employee Master', field: 'bankBranch' },
+      { id: '7', heading: 'IFSC Code', source: 'Employee Master', field: 'ifsc' },
+    ]);
+  };
+
+  // Resolve Employee field value (handles nested/numeric)
+  const resolveEmpField = (emp: Employee, field: string): string | number => {
+    if (!field) return '';
+    const val = (emp as any)[field];
+    if (val === undefined || val === null) return '';
+    return val;
+  };
+
+  const handleGenerateMisEmpReport = async () => {
+    try {
+      if (misEmpColumns.length === 0) { showAlert('warning', 'No Columns', 'Please add at least one column before generating the report.'); return; }
+      if (!misEmpReportName.trim()) { showAlert('warning', 'Report Name Missing', 'Please enter a name for the report.'); return; }
+
+      const headers = misEmpColumns.map(c => c.heading || '(No Header)');
+      let serialNo = 1;
+
+      const dataRows: any[][] = employees.map(emp => {
+        const row: any[] = [];
+        for (const col of misEmpColumns) {
+          if (col.source === 'Auto') {
+            row.push(serialNo++);
+          } else {
+            row.push(resolveEmpField(emp, col.field));
+          }
+        }
+        return row;
+      });
+
+      if (dataRows.length === 0) { showAlert('warning', 'No Employees', 'No employee records found in the master database.'); return; }
+
+      const period = `${misEmpMonth} ${misEmpYear}`;
+      const fileName = `${misEmpReportName.replace(/\s+/g, '_')}_${misEmpMonth}_${misEmpYear}`;
+
+      const savedPath = await generateDynamicReportPDF(
+        misEmpReportName,
+        companyProfile.establishmentName,
+        `As on ${period} | Total Employees: ${dataRows.length}`,
+        headers,
+        dataRows,
+        fileName,
+        misEmpOrientation.includes('Landscape') ? 'l' : 'p',
+        companyProfile,
+        period,
+        period
+      );
+
+      if (savedPath) {
+        showAlert('success', 'Report Generated', `Employee Data Analysis report saved successfully.`, () => openSavedReport(savedPath), undefined, 'Open Report & Folder', undefined, undefined, 2);
+      } else {
+        showAlert('error', 'Generation Failed', 'An error occurred while saving the report.');
+      }
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'An unexpected error occurred.');
+    }
+  };
+
+  // ── Pay Data Analysis ──
+  const [misPayReportName, setMisPayReportName] = useState('Monthly Pay Register');
+  const [misPayFromPeriod, setMisPayFromPeriod] = useState('');
+  const [misPayToPeriod, setMisPayToPeriod] = useState('');
+  const [misPayOrientation, setMisPayOrientation] = useState('Landscape (Wide)');
+  const [misPayColumns, setMisPayColumns] = useState<MisPayColumn[]>([]);
+
+  // Sync misPayFromPeriod / misPayToPeriod when available periods load
+  React.useEffect(() => {
+    if (availablePeriods.length >= 2) {
+      if (!misPayFromPeriod) setMisPayFromPeriod(availablePeriods[availablePeriods.length - 1]);
+      if (!misPayToPeriod) setMisPayToPeriod(availablePeriods[0]);
+    } else if (availablePeriods.length === 1) {
+      if (!misPayFromPeriod) setMisPayFromPeriod(availablePeriods[0]);
+      if (!misPayToPeriod) setMisPayToPeriod(availablePeriods[0]);
+    }
+  }, [availablePeriods]);
+
+  const handleMisPayAddColumn = () => {
+    const newId = Date.now().toString();
+    setMisPayColumns(prev => [...prev, { id: newId, heading: '', source: 'Pay Data', field: '' }]);
+  };
+  const updateMisPayColumn = (id: string, updates: Partial<MisPayColumn>) => {
+    setMisPayColumns(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+  };
+  const removeMisPayColumn = (id: string) => {
+    setMisPayColumns(prev => prev.filter(c => c.id !== id));
+  };
+  const moveMisPayColumn = (index: number, dir: 'up' | 'down') => {
+    setMisPayColumns(prev => {
+      const arr = [...prev];
+      if (dir === 'up' && index > 0) { [arr[index], arr[index - 1]] = [arr[index - 1], arr[index]]; }
+      else if (dir === 'down' && index < arr.length - 1) { [arr[index], arr[index + 1]] = [arr[index + 1], arr[index]]; }
+      return arr;
+    });
+  };
+
+
+  // Quick Presets — Pay Data Analysis
+  const loadMisPayPresetFull = () => {
+    setMisPayReportName('Full Pay Register');
+    setMisPayOrientation('Landscape (Wide)');
+    setMisPayColumns([
+      { id: '1', heading: 'Sl No', source: 'Auto', field: '' },
+      { id: '2', heading: 'Employee ID', source: 'Employee Profile', field: 'id' },
+      { id: '3', heading: 'Name', source: 'Employee Profile', field: 'name' },
+      { id: '4', heading: 'Days', source: 'Pay Data', field: 'payableDays' },
+      { id: '5', heading: 'Basic', source: 'Pay Data', field: 'basic' },
+      { id: '6', heading: 'HRA', source: 'Pay Data', field: 'hra' },
+      { id: '7', heading: 'Gross', source: 'Pay Data', field: 'gross' },
+      { id: '8', heading: 'PF', source: 'Pay Data', field: 'pf' },
+      { id: '9', heading: 'ESI', source: 'Pay Data', field: 'esi' },
+      { id: '10', heading: 'Total Deductions', source: 'Pay Data', field: 'totalDeductions' },
+      { id: '11', heading: 'Net Pay', source: 'Pay Data', field: 'net' },
+    ]);
+  };
+  const loadMisPayPresetDeductions = () => {
+    setMisPayReportName('Deduction Summary Register');
+    setMisPayOrientation('Landscape (Wide)');
+    setMisPayColumns([
+      { id: '1', heading: 'Sl No', source: 'Auto', field: '' },
+      { id: '2', heading: 'Employee ID', source: 'Employee Profile', field: 'id' },
+      { id: '3', heading: 'Name', source: 'Employee Profile', field: 'name' },
+      { id: '4', heading: 'Gross', source: 'Pay Data', field: 'gross' },
+      { id: '5', heading: 'PF (Emp)', source: 'Pay Data', field: 'pf' },
+      { id: '6', heading: 'ESI (Emp)', source: 'Pay Data', field: 'esi' },
+      { id: '7', heading: 'PT', source: 'Pay Data', field: 'pt' },
+      { id: '8', heading: 'TDS', source: 'Pay Data', field: 'it' },
+      { id: '9', heading: 'LWF', source: 'Pay Data', field: 'lwf' },
+      { id: '10', heading: 'Advance', source: 'Pay Data', field: 'advanceRecovery' },
+      { id: '11', heading: 'Fine', source: 'Pay Data', field: 'fine' },
+      { id: '12', heading: 'Total Deductions', source: 'Pay Data', field: 'totalDeductions' },
+      { id: '13', heading: 'Net Pay', source: 'Pay Data', field: 'net' },
+    ]);
+  };
+  const loadMisPayPresetStatutory = () => {
+    setMisPayReportName('Statutory Compliance Register');
+    setMisPayOrientation('Landscape (Wide)');
+    setMisPayColumns([
+      { id: '1', heading: 'Sl No', source: 'Auto', field: '' },
+      { id: '2', heading: 'Employee ID', source: 'Employee Profile', field: 'id' },
+      { id: '3', heading: 'Name', source: 'Employee Profile', field: 'name' },
+      { id: '4', heading: 'UAN No', source: 'Employee Profile', field: 'uanc' },
+      { id: '5', heading: 'ESI No', source: 'Employee Profile', field: 'esiNumber' },
+      { id: '6', heading: 'Gross', source: 'Pay Data', field: 'gross' },
+      { id: '7', heading: 'Days', source: 'Pay Data', field: 'payableDays' },
+      { id: '8', heading: 'Emp PF', source: 'Pay Data', field: 'pf' },
+      { id: '9', heading: 'Emp ESI', source: 'Pay Data', field: 'esi' },
+      { id: '10', heading: 'Employer PF', source: 'Pay Data', field: 'empPF' },
+      { id: '11', heading: 'Employer ESI', source: 'Pay Data', field: 'empESI' },
+      { id: '12', heading: 'CtC', source: 'Pay Data', field: 'ctc' },
+    ]);
+  };
+
+  // Resolve pay field from a PayrollResult record
+  const resolvePayField = (field: string, rec: PayrollResult, emp: Employee, period: string): any => {
+    switch (field) {
+      case 'gross': return Math.round(rec.earnings.total);
+      case 'net': return Math.round(rec.netPay);
+      case 'basic': return Math.round(rec.earnings.basic);
+      case 'da': return Math.round(rec.earnings.da);
+      case 'hra': return Math.round(rec.earnings.hra);
+      case 'conveyance': return Math.round(rec.earnings.conveyance);
+      case 'otAmount': return Math.round(rec.earnings.otAmount || 0);
+      case 'bonus': return Math.round(rec.earnings.bonus || 0);
+      case 'leaveEncashment': return Math.round(rec.earnings.leaveEncashment || 0);
+      case 'pf': return Math.round((rec.deductions.epf || 0) + (rec.deductions.vpf || 0));
+      case 'esi': return Math.round(rec.deductions.esi || 0);
+      case 'pt': return Math.round(rec.deductions.pt || 0);
+      case 'it': return Math.round(rec.deductions.it || 0);
+      case 'lwf': return Math.round(rec.deductions.lwf || 0);
+      case 'advanceRecovery': return Math.round(rec.deductions.advanceRecovery || 0);
+      case 'fine': return Math.round(rec.deductions.fine || 0);
+      case 'totalDeductions': return Math.round(rec.deductions.total || 0);
+      case 'empPF': return Math.round((rec.employerContributions?.epf || 0) + (rec.employerContributions?.eps || 0));
+      case 'empESI': return Math.round(rec.employerContributions?.esi || 0);
+      case 'ctc': return Math.round(rec.earnings.total + (rec.employerContributions?.epf || 0) + (rec.employerContributions?.eps || 0) + (rec.employerContributions?.esi || 0));
+      case 'payableDays': return rec.payableDays;
+      case 'daysInMonth': return rec.daysInMonth;
+      case 'period': return period;
+      // Employee Profile fields used in Pay Data tab
+      case 'id': return emp.id;
+      case 'name': return emp.name;
+      case 'designation': return emp.designation;
+      case 'division': return emp.division || emp.department || '';
+      case 'branch': return emp.branch || '';
+      case 'doj': return emp.doj || '';
+      case 'basicPay': return emp.basicPay;
+      case 'bankAccount': return emp.bankAccount || '';
+      case 'uanc': return emp.uanc || '';
+      case 'esiNumber': return emp.esiNumber || '';
+      default: return '';
+    }
+  };
+
+  const handleGenerateMisPayReport = async () => {
+    try {
+      if (misPayColumns.length === 0) { showAlert('warning', 'No Columns', 'Please add at least one column before generating the report.'); return; }
+      if (!misPayReportName.trim()) { showAlert('warning', 'Report Name Missing', 'Please enter a name for the report.'); return; }
+      if (availablePeriods.length === 0) { showAlert('warning', 'No Pay Data', 'No finalized payroll records found. Please finalize payroll in the Pay Process tab first.'); return; }
+
+      const fromP = misPayFromPeriod || availablePeriods[availablePeriods.length - 1];
+      const toP = misPayToPeriod || availablePeriods[0];
+
+      // Collect all payroll records in the selected period range
+      const monthsInRange = getMonthsInRange(fromP, toP, availablePeriods);
+      const rangeSet = new Set(monthsInRange);
+
+      // Filter finalized records in range
+      const rangeRecords = payrollHistory.filter(r => r.status === 'Finalized' && rangeSet.has(`${r.month} ${r.year}`));
+
+      if (rangeRecords.length === 0) {
+        showAlert('error', 'No Data Found', `No finalized payroll records found for the period ${fromP} to ${toP}.`);
+        return;
+      }
+
+      const headers = misPayColumns.map(c => c.heading || '(No Header)');
+      const dataRows: any[][] = [];
+      let serialNo = 1;
+
+      // Group records by Employee
+      const empRecordsMap = new Map<string, PayrollResult[]>();
+      for (const rec of rangeRecords) {
+        if (!empRecordsMap.has(rec.employeeId)) empRecordsMap.set(rec.employeeId, []);
+        empRecordsMap.get(rec.employeeId)!.push(rec);
+      }
+
+      // Generate one row per employee with summed values
+      for (const [empId, recs] of empRecordsMap.entries()) {
+        const emp = employees.find(e => e.id === empId);
+        if (!emp) continue;
+        
+        // --- WAGE FILTER: EXCLUDE IF TOTAL GROSS FOR PERIOD IS 0 ---
+        const totalGrossForPeriod = recs.reduce((sum, r) => sum + (r.earnings?.total || 0), 0);
+        if (totalGrossForPeriod === 0) continue;
+
+        const row: any[] = [];
+        for (const col of misPayColumns) {
+          if (col.source === 'Auto') {
+            row.push(serialNo);
+          } else if (col.source === 'Employee Profile') {
+            // Profile details don't need summing
+            row.push(resolvePayField(col.field, recs[0], emp, `${fromP} to ${toP}`));
+          } else {
+            // Pay Data: Sum the numeric values across all records for this employee
+            if (col.field === 'period') {
+              row.push(`${fromP} - ${toP}`);
+            } else {
+               let sum = 0;
+               let isNumeric = false;
+               for (const r of recs) {
+                 const val = resolvePayField(col.field, r, emp, `${fromP} to ${toP}`);
+                 if (typeof val === 'number' && !isNaN(val)) {
+                    sum += val;
+                    isNumeric = true;
+                 }
+               }
+               // If it's a numeric field, push the sum. If not, fallback to the value from the first record.
+               row.push(isNumeric ? sum : resolvePayField(col.field, recs[0], emp, `${fromP} to ${toP}`));
+            }
+          }
+        }
+        dataRows.push(row);
+        serialNo++;
+      }
+
+      const fileName = `${misPayReportName.replace(/\s+/g, '_')}_${fromP.replace(/\s+/g, '')}_to_${toP.replace(/\s+/g, '')}`;
+
+      const savedPath = await generateDynamicReportPDF(
+        misPayReportName,
+        companyProfile.establishmentName,
+        `Period: ${fromP} to ${toP} | Records: ${dataRows.length}`,
+        headers,
+        dataRows,
+        fileName,
+        misPayOrientation.includes('Landscape') ? 'l' : 'p',
+        companyProfile,
+        fromP,
+        toP
+      );
+
+      if (savedPath) {
+        showAlert('success', 'Report Generated', `Pay Data Analysis report saved successfully.`, () => openSavedReport(savedPath), undefined, 'Open Report & Folder', undefined, undefined, 2);
+      } else {
+        showAlert('error', 'Generation Failed', 'An error occurred while saving the report.');
+      }
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'An unexpected error occurred.');
+    }
+  };
+
   // Load Saved Templates from DB on mount
   React.useEffect(() => {
     const loadTemplates = async () => {
@@ -573,13 +938,13 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHist
             onClick={() => setActiveTab('DYNAMIC_REPORT')}
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${activeTab === 'DYNAMIC_REPORT' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
           >
-            <Layers size={16} /> Dynamic Report
+            <Layers size={16} /> Increment Analysis
           </button>
           <button 
             onClick={() => setActiveTab('MIS_REPORT')}
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${activeTab === 'MIS_REPORT' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
           >
-            <PieChart size={16} /> MIS Report
+            <PieChart size={16} /> Dynamic Report
           </button>
         </div>
         
@@ -1123,15 +1488,501 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHist
             )}
             
             {activeTab === 'MIS_REPORT' && (
-                <div className="flex flex-col items-center justify-center p-12 text-center h-full animate-in fade-in">
-                    <div className="w-24 h-24 bg-blue-500/10 rounded-full flex items-center justify-center mb-6 border border-blue-500/20">
-                        <PieChart size={48} className="text-blue-400" />
+                <div className="flex flex-col h-full animate-in fade-in duration-300">
+                    {/* MIS Report Sub-Tab Bar */}
+                    <div className="flex gap-2 mb-6 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800 shadow-inner max-w-lg">
+                        <button
+                            onClick={() => setMisReportType('EMP_DATA')}
+                            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${misReportType === 'EMP_DATA' ? 'bg-teal-600 text-white shadow-lg shadow-teal-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                        >
+                            <span>👤</span> Employee Data Analysis
+                        </button>
+                        <button
+                            onClick={() => setMisReportType('PAY_DATA')}
+                            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${misReportType === 'PAY_DATA' ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                        >
+                            <span>💰</span> Pay Data Analysis
+                        </button>
                     </div>
-                    <h3 className="text-2xl font-bold text-white mb-3 tracking-tight">Management Information Center</h3>
-                    <p className="text-slate-400 max-w-md mb-8 leading-relaxed">Executive dashboards and synthesized analytical reports for top-level review and business intelligence.</p>
-                    <button className="px-8 py-3 bg-slate-800 text-slate-400 text-xs font-black uppercase tracking-widest rounded-xl flex items-center gap-2 cursor-not-allowed border border-slate-700">
-                        Module Coming Soon
-                    </button>
+
+                    {/* ───── EMPLOYEE DATA ANALYSIS ───── */}
+                    {misReportType === 'EMP_DATA' && (
+                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-6 pb-10 animate-in fade-in slide-in-from-left-4 duration-300">
+
+                            {/* Step 1: Report Name */}
+                            <div className="bg-[#1e293b]/30 rounded-3xl p-7 border border-slate-800 shadow-xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-teal-500" />
+                                <h4 className="flex items-center gap-3 text-sm font-black text-slate-300 mb-5 uppercase tracking-[0.2em]">
+                                    <span className="text-teal-400">①</span> Report Name &amp; Database
+                                </h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Report Name / Title</label>
+                                        <input
+                                            type="text"
+                                            value={misEmpReportName}
+                                            onChange={e => setMisEmpReportName(e.target.value)}
+                                            placeholder="e.g. Employee Master Register"
+                                            className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-teal-500/50 outline-none"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Page Orientation</label>
+                                        <select
+                                            value={misEmpOrientation}
+                                            onChange={e => setMisEmpOrientation(e.target.value)}
+                                            className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-teal-500/50 outline-none cursor-pointer"
+                                            title="Page Orientation"
+                                        >
+                                            <option>Portrait (Standard)</option>
+                                            <option>Landscape (Wide)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="mt-4 p-3 bg-teal-500/5 border border-teal-500/20 rounded-xl text-teal-300 text-xs flex items-start gap-2 max-w-2xl">
+                                    <Info size={16} className="shrink-0 mt-0.5" />
+                                    <span>Database: <strong>Employee Master</strong> — includes ALL employees (Active, Left, and all registered employees)</span>
+                                </div>
+                            </div>
+
+                            {/* Step 2: Report Info Bar (replaces period form) */}
+                            <div className="bg-[#1e293b]/30 rounded-2xl px-6 py-4 border border-slate-800 shadow flex items-center justify-between gap-6 relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-teal-500" />
+                                <div className="flex items-center gap-2 text-slate-400 text-sm">
+                                    <Calendar size={15} className="text-teal-400 shrink-0" />
+                                    <span className="font-semibold text-slate-500">Report Dated:</span>
+                                    <span className="font-black text-teal-300 tracking-wide">{new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
+                                </div>
+                                <div className="h-5 w-px bg-slate-700" />
+                                <div className="flex items-center gap-2 text-slate-400 text-sm">
+                                    <span className="font-semibold text-slate-500">Total Records:</span>
+                                    <span className="font-black text-teal-300 text-lg">{employees.length}</span>
+                                    <span className="text-slate-600 text-xs">employees</span>
+                                </div>
+                            </div>
+
+                            {/* Step 3: Column Builder */}
+                            <div className="bg-[#0f172a] rounded-3xl border border-slate-800 shadow-xl overflow-hidden flex flex-col">
+                                <div className="bg-slate-900 border-b border-slate-800 px-7 py-5 flex items-center justify-between">
+                                    <h4 className="text-sm font-black text-slate-300 uppercase tracking-[0.2em]">
+                                        <span className="text-teal-400">③</span> &nbsp;Define Report Columns
+                                    </h4>
+                                    <button
+                                        onClick={handleMisEmpAddColumn}
+                                        className="flex items-center gap-2 px-5 py-2 bg-teal-700 hover:bg-teal-600 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all"
+                                    >
+                                        <Plus size={14} /> Add Column
+                                    </button>
+                                </div>
+
+                                {/* Column Band Row Header */}
+                                {misEmpColumns.length > 0 && (
+                                    <div className="grid grid-cols-[40px_1fr_1fr_80px_40px] gap-3 px-7 py-3 bg-slate-900/50 border-b border-slate-800/50">
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest text-center">#</span>
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest pl-1">Column Header</span>
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest pl-1">Row Data (Field)</span>
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest text-center">Order</span>
+                                        <span />
+                                    </div>
+                                )}
+
+                                <div className="p-6 space-y-3 min-h-[180px]">
+                                    {misEmpColumns.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center h-32 text-center bg-slate-900/40 rounded-2xl border border-dashed border-slate-800">
+                                            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-3">No columns defined yet</p>
+                                            <button onClick={handleMisEmpAddColumn} className="px-5 py-2 bg-teal-800/50 hover:bg-teal-700 text-teal-300 text-xs font-bold rounded-lg border border-teal-700/40 transition-all">Add First Column</button>
+                                        </div>
+                                    ) : (
+                                        misEmpColumns.map((col, idx) => (
+                                            <div key={col.id} className="grid grid-cols-[40px_1fr_1fr_80px_40px] gap-3 items-center bg-[#1e293b] border border-slate-800 rounded-xl px-4 py-3 hover:border-teal-500/30 transition-all group">
+                                                {/* Order # */}
+                                                <div className="text-center">
+                                                    <span className="text-xs font-mono font-bold text-slate-500">{idx + 1}</span>
+                                                </div>
+                                                {/* Header */}
+                                                <input
+                                                    type="text"
+                                                    value={col.heading}
+                                                    onChange={e => updateMisEmpColumn(col.id, { heading: e.target.value })}
+                                                    placeholder="Column Header"
+                                                    className="bg-[#0f172a] border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:border-teal-500/50 outline-none w-full"
+                                                />
+                                                {/* Field */}
+                                                {col.source === 'Auto' ? (
+                                                    <div className="bg-teal-500/10 border border-teal-500/20 rounded-lg px-3 py-2 text-sm text-teal-400 font-bold">
+                                                        🔢 Auto Serial Number
+                                                    </div>
+                                                ) : (
+                                                    <select
+                                                        value={col.field}
+                                                        onChange={e => updateMisEmpColumn(col.id, { field: e.target.value })}
+                                                        className="bg-[#0f172a] border border-slate-800 rounded-lg px-3 py-2 text-sm text-white cursor-pointer outline-none focus:border-teal-500/50 w-full"
+                                                        title="Select Employee Field"
+                                                    >
+                                                        <option value="">— Select Field —</option>
+                                                        <optgroup label="Identification">
+                                                            <option value="id">Employee ID</option>
+                                                            <option value="name">Full Name</option>
+                                                            <option value="gender">Gender</option>
+                                                            <option value="dob">Date of Birth</option>
+                                                            <option value="pan">PAN No</option>
+                                                            <option value="aadhaarNumber">Aadhaar No</option>
+                                                        </optgroup>
+                                                        <optgroup label="Organisation">
+                                                            <option value="designation">Designation</option>
+                                                            <option value="department">Department</option>
+                                                            <option value="division">Division</option>
+                                                            <option value="branch">Branch</option>
+                                                            <option value="site">Site</option>
+                                                            <option value="doj">Date of Joining</option>
+                                                            <option value="dol">Date of Leaving</option>
+                                                            <option value="leavingReason">Leaving Reason</option>
+                                                        </optgroup>
+                                                        <optgroup label="Statutory Numbers">
+                                                            <option value="uanc">UAN No</option>
+                                                            <option value="pfNumber">PF No</option>
+                                                            <option value="esiNumber">ESI No</option>
+                                                            <option value="insuranceNo">Insurance No</option>
+                                                        </optgroup>
+                                                        <optgroup label="Bank Details">
+                                                            <option value="bankAccount">Bank Account No</option>
+                                                            <option value="bankName">Bank Name</option>
+                                                            <option value="bankBranch">Bank Branch</option>
+                                                            <option value="ifsc">IFSC Code</option>
+                                                        </optgroup>
+                                                        <optgroup label="Contact">
+                                                            <option value="mobile">Mobile No</option>
+                                                            <option value="email">Email</option>
+                                                        </optgroup>
+                                                        <optgroup label="Salary Components">
+                                                            <option value="basicPay">Basic Pay</option>
+                                                            <option value="da">DA</option>
+                                                            <option value="retainingAllowance">Retaining Allowance</option>
+                                                            <option value="hra">HRA</option>
+                                                            <option value="conveyance">Conveyance</option>
+                                                            <option value="washing">Washing</option>
+                                                            <option value="attire">Attire</option>
+                                                            <option value="specialAllowance1">Special Allow 1</option>
+                                                            <option value="specialAllowance2">Special Allow 2</option>
+                                                            <option value="specialAllowance3">Special Allow 3</option>
+                                                        </optgroup>
+                                                        <optgroup label="Address">
+                                                            <option value="city">City</option>
+                                                            <option value="state">State</option>
+                                                            <option value="pincode">Pincode</option>
+                                                        </optgroup>
+                                                    </select>
+                                                )}
+                                                {/* Move Up / Down */}
+                                                <div className="flex flex-col gap-1">
+                                                    <button
+                                                        onClick={() => moveMisEmpColumn(idx, 'up')}
+                                                        disabled={idx === 0}
+                                                        className="flex-1 flex items-center justify-center p-1 rounded bg-slate-800 hover:bg-teal-700 disabled:opacity-20 disabled:cursor-not-allowed transition-all text-slate-400 hover:text-white"
+                                                        title="Move Up"
+                                                    >
+                                                        <ChevronUp size={13} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => moveMisEmpColumn(idx, 'down')}
+                                                        disabled={idx === misEmpColumns.length - 1}
+                                                        className="flex-1 flex items-center justify-center p-1 rounded bg-slate-800 hover:bg-teal-700 disabled:opacity-20 disabled:cursor-not-allowed transition-all text-slate-400 hover:text-white"
+                                                        title="Move Down"
+                                                    >
+                                                        <ChevronDown size={13} />
+                                                    </button>
+                                                </div>
+                                                {/* Remove */}
+                                                <button
+                                                    onClick={() => removeMisEmpColumn(col.id)}
+                                                    className="p-1.5 text-slate-600 hover:text-red-400 group-hover:bg-red-400/10 rounded-lg transition-all"
+                                                    title="Remove Column"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                {/* Quick Presets */}
+                                <div className="border-t border-slate-800 px-7 py-4 bg-slate-900/30 flex flex-wrap items-center gap-3">
+                                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Quick Presets:</span>
+                                    <button onClick={loadMisEmpPresetBasic} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-teal-700 hover:border-teal-600 hover:text-white transition-all">Basic Info</button>
+                                    <button onClick={loadMisEmpPresetStatutory} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-teal-700 hover:border-teal-600 hover:text-white transition-all">Statutory Details</button>
+                                    <button onClick={loadMisEmpPresetBank} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-teal-700 hover:border-teal-600 hover:text-white transition-all">Bank Details</button>
+                                </div>
+                            </div>
+
+                            {/* Generate Button */}
+                            <div className="flex justify-end pt-2">
+                                <button
+                                    onClick={handleGenerateMisEmpReport}
+                                    disabled={misEmpColumns.length === 0 || !misEmpReportName.trim()}
+                                    className="px-10 py-4 bg-teal-600 hover:bg-teal-500 text-white rounded-3xl text-sm font-black uppercase tracking-widest shadow-xl shadow-teal-900/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center gap-3"
+                                >
+                                    <FileText size={18} /> GENERATE EMPLOYEE REPORT
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ───── PAY DATA ANALYSIS ───── */}
+                    {misReportType === 'PAY_DATA' && (
+                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-6 pb-10 animate-in fade-in slide-in-from-right-4 duration-300">
+
+                            {/* Step 1: Report Name */}
+                            <div className="bg-[#1e293b]/30 rounded-3xl p-7 border border-slate-800 shadow-xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-violet-500" />
+                                <h4 className="flex items-center gap-3 text-sm font-black text-slate-300 mb-5 uppercase tracking-[0.2em]">
+                                    <span className="text-violet-400">①</span> Report Name &amp; Database
+                                </h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Report Name / Title</label>
+                                        <input
+                                            type="text"
+                                            value={misPayReportName}
+                                            onChange={e => setMisPayReportName(e.target.value)}
+                                            placeholder="e.g. Monthly Pay Register"
+                                            className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-violet-500/50 outline-none"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Page Orientation</label>
+                                        <select
+                                            value={misPayOrientation}
+                                            onChange={e => setMisPayOrientation(e.target.value)}
+                                            className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-violet-500/50 outline-none cursor-pointer"
+                                            title="Page Orientation"
+                                        >
+                                            <option>Portrait (Standard)</option>
+                                            <option>Landscape (Wide)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="mt-4 p-3 bg-violet-500/5 border border-violet-500/20 rounded-xl text-violet-300 text-xs flex items-start gap-2 max-w-2xl">
+                                    <Info size={16} className="shrink-0 mt-0.5" />
+                                    <span>Database: <strong>Finalized Payroll Records</strong> — data drawn from the selected pay period range</span>
+                                </div>
+                            </div>
+
+                            {/* Step 2: Period Range */}
+                            <div className="bg-[#1e293b]/30 rounded-3xl p-7 border border-slate-800 shadow-xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-violet-500" />
+                                <h4 className="flex items-center gap-3 text-sm font-black text-slate-300 mb-5 uppercase tracking-[0.2em]">
+                                    <Calendar size={18} className="text-violet-400" /> <span className="text-violet-400">②</span> Pay Period Range
+                                </h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-2xl">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">From Period</label>
+                                        <select
+                                            value={misPayFromPeriod}
+                                            onChange={e => setMisPayFromPeriod(e.target.value)}
+                                            className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 text-base font-bold text-white focus:ring-4 focus:ring-violet-500/20 outline-none cursor-pointer"
+                                            disabled={availablePeriods.length === 0}
+                                            title="From Period"
+                                        >
+                                            {displayPeriods.map(p => <option key={p}>{p}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">To Period</label>
+                                        <select
+                                            value={misPayToPeriod}
+                                            onChange={e => setMisPayToPeriod(e.target.value)}
+                                            className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 text-base font-bold text-white focus:ring-4 focus:ring-violet-500/20 outline-none cursor-pointer"
+                                            disabled={availablePeriods.length === 0}
+                                            title="To Period"
+                                        >
+                                            {displayPeriods.map(p => <option key={p}>{p}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                                {availablePeriods.length === 0 && (
+                                    <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-xs flex items-center gap-2 max-w-2xl">
+                                        <Info size={16} className="shrink-0" />
+                                        No finalized payroll periods found. Please finalize payroll first in the Pay Process tab.
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Step 3: Column Builder */}
+                            <div className="bg-[#0f172a] rounded-3xl border border-slate-800 shadow-xl overflow-hidden flex flex-col">
+                                <div className="bg-slate-900 border-b border-slate-800 px-7 py-5 flex items-center justify-between">
+                                    <h4 className="text-sm font-black text-slate-300 uppercase tracking-[0.2em]">
+                                        <span className="text-violet-400">③</span> &nbsp;Define Report Columns
+                                    </h4>
+                                    <button
+                                        onClick={handleMisPayAddColumn}
+                                        className="flex items-center gap-2 px-5 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all"
+                                    >
+                                        <Plus size={14} /> Add Column
+                                    </button>
+                                </div>
+
+                                {/* Band Header */}
+                                {misPayColumns.length > 0 && (
+                                    <div className="grid grid-cols-[40px_1fr_1fr_1fr_80px_40px] gap-3 px-7 py-3 bg-slate-900/50 border-b border-slate-800/50">
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest text-center">#</span>
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest pl-1">Column Header</span>
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest pl-1">Category</span>
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest pl-1">Field</span>
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest text-center">Order</span>
+                                        <span />
+                                    </div>
+                                )}
+
+                                <div className="p-6 space-y-3 min-h-[180px]">
+                                    {misPayColumns.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center h-32 text-center bg-slate-900/40 rounded-2xl border border-dashed border-slate-800">
+                                            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-3">No columns defined yet</p>
+                                            <button onClick={handleMisPayAddColumn} className="px-5 py-2 bg-violet-800/50 hover:bg-violet-700 text-violet-300 text-xs font-bold rounded-lg border border-violet-700/40 transition-all">Add First Column</button>
+                                        </div>
+                                    ) : (
+                                        misPayColumns.map((col, idx) => (
+                                            <div key={col.id} className="grid grid-cols-[40px_1fr_1fr_1fr_80px_40px] gap-3 items-center bg-[#1e293b] border border-slate-800 rounded-xl px-4 py-3 hover:border-violet-500/30 transition-all group">
+                                                <div className="text-center">
+                                                    <span className="text-xs font-mono font-bold text-slate-500">{idx + 1}</span>
+                                                </div>
+                                                {/* Header text */}
+                                                <input
+                                                    type="text"
+                                                    value={col.heading}
+                                                    onChange={e => updateMisPayColumn(col.id, { heading: e.target.value })}
+                                                    placeholder="Column Header"
+                                                    className="bg-[#0f172a] border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:border-violet-500/50 outline-none w-full"
+                                                />
+                                                {/* Source Category */}
+                                                <select
+                                                    value={col.source}
+                                                    onChange={e => updateMisPayColumn(col.id, { source: e.target.value as any, field: '' })}
+                                                    className="bg-[#0f172a] border border-slate-800 rounded-lg px-3 py-2 text-sm text-white cursor-pointer outline-none focus:border-violet-500/50 w-full"
+                                                    title="Data Category"
+                                                >
+                                                    <option value="Auto">Auto (Serial No)</option>
+                                                    <option value="Employee Profile">Employee Profile</option>
+                                                    <option value="Pay Data">Pay Data</option>
+                                                </select>
+                                                {/* Field picker */}
+                                                {col.source === 'Auto' ? (
+                                                    <div className="bg-violet-500/10 border border-violet-500/20 rounded-lg px-3 py-2 text-sm text-violet-400 font-bold">
+                                                        🔢 Auto Serial Number
+                                                    </div>
+                                                ) : col.source === 'Employee Profile' ? (
+                                                    <select
+                                                        value={col.field}
+                                                        onChange={e => updateMisPayColumn(col.id, { field: e.target.value })}
+                                                        className="bg-[#0f172a] border border-slate-800 rounded-lg px-3 py-2 text-sm text-white cursor-pointer outline-none focus:border-violet-500/50 w-full"
+                                                        title="Employee Field"
+                                                    >
+                                                        <option value="">— Select Field —</option>
+                                                        <option value="id">Employee ID</option>
+                                                        <option value="name">Name</option>
+                                                        <option value="designation">Designation</option>
+                                                        <option value="division">Division / Dept</option>
+                                                        <option value="branch">Branch</option>
+                                                        <option value="doj">Date of Joining</option>
+                                                        <option value="basicPay">Basic Pay (Profile)</option>
+                                                        <option value="bankAccount">Bank Account</option>
+                                                        <option value="uanc">UAN No</option>
+                                                        <option value="esiNumber">ESI No</option>
+                                                    </select>
+                                                ) : (
+                                                    <select
+                                                        value={col.field}
+                                                        onChange={e => updateMisPayColumn(col.id, { field: e.target.value })}
+                                                        className="bg-[#0f172a] border border-slate-800 rounded-lg px-3 py-2 text-sm text-white cursor-pointer outline-none focus:border-violet-500/50 w-full"
+                                                        title="Pay Data Field"
+                                                    >
+                                                        <option value="">— Select Field —</option>
+                                                        <optgroup label="Earnings">
+                                                            <option value="gross">Gross Pay</option>
+                                                            <option value="net">Net Pay</option>
+                                                            <option value="basic">Basic</option>
+                                                            <option value="da">DA</option>
+                                                            <option value="hra">HRA</option>
+                                                            <option value="conveyance">Conveyance</option>
+                                                            <option value="otAmount">OT Amount</option>
+                                                            <option value="bonus">Bonus</option>
+                                                            <option value="leaveEncashment">Leave Encashment</option>
+                                                        </optgroup>
+                                                        <optgroup label="Deductions">
+                                                            <option value="pf">PF (EPF + VPF)</option>
+                                                            <option value="esi">ESI</option>
+                                                            <option value="pt">Professional Tax</option>
+                                                            <option value="it">Income Tax</option>
+                                                            <option value="lwf">LWF</option>
+                                                            <option value="advanceRecovery">Advance Recovery</option>
+                                                            <option value="fine">Fine</option>
+                                                            <option value="totalDeductions">Total Deductions</option>
+                                                        </optgroup>
+                                                        <optgroup label="Employer Contributions">
+                                                            <option value="empPF">Employer PF</option>
+                                                            <option value="empESI">Employer ESI</option>
+                                                            <option value="ctc">CtC (Gross+Emp.PF+Emp.ESI)</option>
+                                                        </optgroup>
+                                                        <optgroup label="Attendance">
+                                                            <option value="payableDays">Days Worked</option>
+                                                            <option value="daysInMonth">Days in Month</option>
+                                                        </optgroup>
+                                                        <optgroup label="Period">
+                                                            <option value="period">Pay Period</option>
+                                                        </optgroup>
+                                                    </select>
+                                                )}
+                                                {/* Move Up / Down */}
+                                                <div className="flex flex-col gap-1">
+                                                    <button
+                                                        onClick={() => moveMisPayColumn(idx, 'up')}
+                                                        disabled={idx === 0}
+                                                        className="flex-1 flex items-center justify-center p-1 rounded bg-slate-800 hover:bg-violet-700 disabled:opacity-20 disabled:cursor-not-allowed transition-all text-slate-400 hover:text-white"
+                                                        title="Move Up"
+                                                    >
+                                                        <ChevronUp size={13} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => moveMisPayColumn(idx, 'down')}
+                                                        disabled={idx === misPayColumns.length - 1}
+                                                        className="flex-1 flex items-center justify-center p-1 rounded bg-slate-800 hover:bg-violet-700 disabled:opacity-20 disabled:cursor-not-allowed transition-all text-slate-400 hover:text-white"
+                                                        title="Move Down"
+                                                    >
+                                                        <ChevronDown size={13} />
+                                                    </button>
+                                                </div>
+                                                <button
+                                                    onClick={() => removeMisPayColumn(col.id)}
+                                                    className="p-1.5 text-slate-600 hover:text-red-400 group-hover:bg-red-400/10 rounded-lg transition-all"
+                                                    title="Remove Column"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                {/* Quick Presets for Pay Data */}
+                                <div className="border-t border-slate-800 px-7 py-4 bg-slate-900/30 flex flex-wrap items-center gap-3">
+                                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Quick Presets:</span>
+                                    <button onClick={loadMisPayPresetFull} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-violet-700 hover:border-violet-600 hover:text-white transition-all">Full Pay Register</button>
+                                    <button onClick={loadMisPayPresetDeductions} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-violet-700 hover:border-violet-600 hover:text-white transition-all">Deduction Summary</button>
+                                    <button onClick={loadMisPayPresetStatutory} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-violet-700 hover:border-violet-600 hover:text-white transition-all">Statutory Compliance</button>
+                                </div>
+                            </div>
+
+                            {/* Generate Button */}
+                            <div className="flex justify-end pt-2">
+                                <button
+                                    onClick={handleGenerateMisPayReport}
+                                    disabled={misPayColumns.length === 0 || !misPayReportName.trim() || availablePeriods.length === 0}
+                                    className="px-10 py-4 bg-violet-600 hover:bg-violet-500 text-white rounded-3xl text-sm font-black uppercase tracking-widest shadow-xl shadow-violet-900/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center gap-3"
+                                >
+                                    <FileText size={18} /> GENERATE PAY DATA REPORT
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -1141,3 +1992,4 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHist
 };
 
 export default MISDashboard;
+

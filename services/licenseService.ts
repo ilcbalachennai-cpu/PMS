@@ -3,7 +3,7 @@ import { LicenseData, User } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.08";
+export const APP_VERSION = "02.02.13";
 
 export interface ActivationResult {
   success: boolean;
@@ -36,6 +36,19 @@ export const getMachineId = async (): Promise<string> => {
     localStorage.setItem('app_machine_id', mid);
   }
   return mid;
+};
+
+/**
+ * Checks if the application has internet access.
+ */
+export const checkOnlineStatus = async (): Promise<{ isOnline: boolean }> => {
+  if (!navigator.onLine) return { isOnline: false };
+  try {
+    const response = await fetch("https://www.google.com/favicon.ico", { mode: 'no-cors', cache: 'no-store' });
+    return { isOnline: !!response };
+  } catch (e) {
+    return { isOnline: false };
+  }
 };
 
 /**
@@ -84,6 +97,64 @@ const generateChecksum = (data: any): string => {
     hash |= 0;
   }
   return hash.toString(36);
+};
+
+// --- OFFLINE PROTECTION HELPERS ---
+
+/**
+ * Checks if a date string (dd-MM-yyyy) is in the past compared to system time
+ */
+export const isExpiredOffline = (expiryStr: string | undefined): boolean => {
+  if (!expiryStr) return false;
+  const [day, month, year] = expiryStr.split('-').map(Number);
+  const expiryDate = new Date(year, month - 1, day, 23, 59, 59);
+  return expiryDate.getTime() < Date.now();
+};
+
+/**
+ * Anti-Tamper: Tracks activity and detects if clock was wound back
+ */
+export const trackActivityTime = () => {
+  const secureTime = localStorage.getItem('app_time_sync');
+  const now = Date.now();
+  
+  if (secureTime) {
+    try {
+      const lastKnown = Number(unscramble(secureTime));
+      if (now < lastKnown) {
+        console.error("🛑 SECURITY VIOLATION: System clock tampering detected.");
+        return { tampered: true };
+      }
+    } catch (e) {
+      console.warn("⚠️ Time sync data corrupted, forcing re-sync.");
+      localStorage.removeItem('app_time_sync');
+    }
+  }
+  
+  localStorage.setItem('app_time_sync', scramble(String(now)));
+  return { tampered: false };
+};
+
+/**
+ * Checks if a mandatory internet sync is required (Day 2 Warning, Day 3 Block)
+ */
+export const checkSyncRequirement = () => {
+  const lastSyncRaw = localStorage.getItem('app_license_last_check');
+  const secureTime = localStorage.getItem('app_time_sync');
+  
+  // If baseline time sync is missing, force immediate internet sync
+  if (!secureTime) return { required: true, blocked: true, message: "Initialization Sync Required" };
+  
+  if (!lastSyncRaw) return { required: true, blocked: false };
+  
+  const lastSync = new Date(lastSyncRaw.split('-').reverse().join('-')).getTime();
+  const now = Date.now();
+  const diffDays = Math.floor((now - lastSync) / (1000 * 60 * 60 * 24));
+  
+  if (diffDays >= 3) return { required: true, blocked: true, message: "Connection Required (Access Suspended)" };
+  if (diffDays >= 2) return { required: true, blocked: false, message: "Internet connection required for uninterrupted use" };
+  
+  return { required: false, blocked: false };
 };
 
 export const getStoredLicense = (): LicenseData | null => {
@@ -353,8 +424,42 @@ export const activateFullLicense = async (
  * Includes a daily online verification sync.
  */
 export const validateLicenseStartup = async (force: boolean = false, attemptedID?: string): Promise<{ valid: boolean; message?: string; data?: any }> => {
-  const stored = getStoredLicense();
-  const currentMachineId = await getMachineId();
+    // --- V02.02.12: FORCE INITIALIZATION OF SECURITY MARKERS ---
+    // This ensures app_time_sync and other local markers are set BEFORE any blocking checks
+    const timeCheck = trackActivityTime();
+    
+    const stored = getStoredLicense();
+    
+    // 1. OFFLINE ENFORCEMENT (Strict)
+    if (stored) {
+      if (isExpiredOffline(stored.expiryDate)) {
+        return { valid: false, message: 'LICENSE EXPIRED', data: { isExpired: true } };
+      }
+      
+      if (timeCheck.tampered) {
+        return { valid: false, message: 'SECURITY VIOLATION', data: { isTampered: true } };
+      }
+      
+      const syncCheck = checkSyncRequirement();
+      // Only block if NOT forcing a sync
+      if (syncCheck.blocked && !force) {
+        return { valid: false, message: syncCheck.message, data: { isSyncBlocked: true } };
+      }
+    } else {
+      // No license: Still perform a sync check for baseline security
+      const syncCheck = checkSyncRequirement();
+      if (syncCheck.blocked && !force) {
+        return { valid: false, message: syncCheck.message, data: { isSyncBlocked: true } };
+      }
+    }
+
+    const { isOnline } = await checkOnlineStatus();
+    if (!isOnline && !stored) {
+       // Cannot initialize for the first time without internet
+       return { valid: false, message: 'Initial Internet Connection Required', data: { isSyncBlocked: true } };
+    }
+
+    const currentMachineId = await getMachineId();
   // Ensure the fetched machine ID is persisted for synchronous lookups (getMachineKey)
   if (currentMachineId && currentMachineId !== 'UNKNOWN-MACHINE-ID') {
     localStorage.setItem('app_machine_id', currentMachineId);
@@ -499,7 +604,7 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
             console.log("✅ Identity Forced to Enterprise successfully.");
           }
 
-          if (activeLicense) {
+            if (activeLicense) {
             // 3. Sync Expiry Date & Key (Incremental Updates)
             let storageUpdated = false;
             const incomingKey = cloudData.licenseKey || cloudData.key;
@@ -514,11 +619,22 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
               storageUpdated = true;
             }
             if (cloudData.isTrial !== undefined && cloudData.isTrial !== activeLicense.isTrial) {
+              console.log(`🏷️ Trial Status Sync: ${activeLicense.isTrial} -> ${cloudData.isTrial}`);
               activeLicense.isTrial = cloudData.isTrial === true;
               storageUpdated = true;
             }
             if (cloudData.status && cloudData.status !== activeLicense.status) {
               activeLicense.status = cloudData.status;
+              storageUpdated = true;
+            }
+            // ✅ FIX: Sync dataSize (Employee Data Limit) from cloud
+            const incomingDataSize = cloudData.dataSize ? Number(cloudData.dataSize) : 0;
+            if (incomingDataSize > 0 && incomingDataSize !== activeLicense.dataSize) {
+              console.log(`📊 Data Limit Update: ${activeLicense.dataSize} -> ${incomingDataSize}`);
+              activeLicense.dataSize = incomingDataSize;
+              localStorage.setItem('app_data_size', String(incomingDataSize));
+              // @ts-ignore
+              if (window.electronAPI) window.electronAPI.dbSet('app_data_size', String(incomingDataSize));
               storageUpdated = true;
             }
 
@@ -595,13 +711,90 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
     }
   }
 
-  return { valid: true };
+  // --- FINAL FALLBACK: LOCAL IDENTITY RECOVERY ---
+  // If we still don't have a valid license after sync, but the attemptedID exists in local users,
+  // we might be able to proceed locally (offline mode).
+  return { valid: !!stored };
 };
 
 /**
- * Updates the user's password in the Google Sheet for cloud sync integrity.
+ * NEW: Requests a password reset OTP from the cloud.
  */
-export const updateCloudPassword = async (email: string, newPassword: string): Promise<ActivationResult> => {
+export const requestResetOTP = async (email: string, userID: string): Promise<ActivationResult> => {
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'REQUEST_OTP_RESET',
+                email,
+                userID
+            })
+        });
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `OTP Request Error: ${error.message || "Unknown Failure"}` };
+    }
+};
+
+/**
+ * NEW: Request a secure developer bypass OTP.
+ */
+export const requestDeveloperOTP = async (username: string, password?: string): Promise<ActivationResult> => {
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'REQUEST_DEV_OTP',
+                username,
+                password
+            })
+        });
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `Developer Auth Error: ${error.message || "Unknown Failure"}` };
+    }
+};
+
+/**
+ * NEW: Verifies the Developer OTP and syncs credentials locally.
+ */
+export const verifyDeveloperOTP = async (username: string, otp: string): Promise<ActivationResult> => {
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'VERIFY_DEV_OTP',
+                otp,
+                username
+            })
+        });
+
+        if (result.success && result.data) {
+          const devObj = {
+            username: result.data.devUser,
+            password: result.data.devPass,
+            name: result.data.name,
+            role: 'Developer',
+            email: 'developer@bharatpay.com'
+          };
+          // Hard-lock creds to this hardware
+          const machineKey = localStorage.getItem('app_machine_id') || 'INITIAL_PMS_KEY';
+          const scrambled = CryptoJS.AES.encrypt(JSON.stringify(devObj), machineKey).toString();
+          localStorage.setItem('app_developer_secure', scrambled);
+          // @ts-ignore
+          if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambled);
+        }
+
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
+    }
+};
+
+/**
+ * Updates the user's password in the Google Sheet for cloud sync integrity via OTP.
+ */
+export const updateCloudPassword = async (email: string, newPassword: string, otp: string): Promise<ActivationResult> => {
     const machineId = await getMachineId();
     try {
         const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
@@ -610,7 +803,8 @@ export const updateCloudPassword = async (email: string, newPassword: string): P
                 action: 'UPDATE_PASSWORD',
                 email,
                 machineId,
-                newPassword
+                newPassword,
+                otp
             })
         });
         return result;
@@ -697,13 +891,14 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
         updated = true;
       }
 
-      // 3. Update FLASH (Popup Alert)
-      if (flash?.date && (flash.date !== lastFlashId || force)) {
-        storedProfile.flashPopupMessage = flash.message;
-        storedProfile.flashPopupHeader = flash.header || "FLASH ALERT";
-        storedProfile.flashPopupPriority = flash.key || 'REGULAR';
-        storedProfile.flashPopupId = flash.date;
-        localStorage.setItem('app_last_flash_id', flash.date);
+      const alert = result.alert; // { message, enabled, date }
+      const lastAlertDate = localStorage.getItem('app_last_alert_date') || '';
+
+      // 4. Update LOGIN ALERT (Legal Notice)
+      if (alert?.date && (alert.date !== lastAlertDate || force)) {
+        storedProfile.loginAlertMessage = alert.message;
+        storedProfile.loginAlertEnabled = alert.enabled !== false;
+        localStorage.setItem('app_last_alert_date', alert.date);
         updated = true;
       }
 
@@ -731,6 +926,8 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
           flashPopupHeader: storedProfile.flashPopupHeader,
           flashPopupPriority: storedProfile.flashPopupPriority as any,
           flashPopupId: storedProfile.flashPopupId,
+          loginAlertMessage: storedProfile.loginAlertMessage,
+          loginAlertEnabled: storedProfile.loginAlertEnabled,
           ...versionInfo
         };
       }
@@ -747,7 +944,7 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
  */
 export const updateDeveloperMessages = async (
   message: string, 
-  type: 'MESSAGE' | 'NEWS' | 'FLASH', 
+  type: 'MESSAGE' | 'NEWS' | 'FLASH' | 'ALERT', 
   header?: string, 
   alignment?: string, 
   key?: string
@@ -770,3 +967,44 @@ export const updateDeveloperMessages = async (
   }
 };
 
+/**
+ * Sends a background heartbeat ping to the cloud to track "LIVE" users.
+ */
+export const trackHeartbeat = async (email: string, machineId: string, userID: string, sessionStart: string, status: string = "LIVE") => {
+  if (!navigator.onLine) return;
+
+  try {
+    // Attempt multi-provider location detection
+    let location = "Auto-Detecting...";
+    try {
+      const locRes = await Promise.any([
+        fetch('https://ipapi.co/json/').then(r => r.json()),
+        fetch('http://ip-api.com/json').then(r => r.json())
+      ]);
+      
+      if (locRes.city && (locRes.country_name || locRes.country)) {
+        location = `${locRes.city}, ${locRes.country_name || locRes.country}`;
+      } else if (locRes.region) {
+        location = `${locRes.region}, ${locRes.country || 'India'}`;
+      }
+    } catch (e) {
+      console.warn("Location detection failed:", e);
+      location = "Auto-Detected";
+    }
+
+    fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'HEARTBEAT',
+        email: email,
+        machineId: machineId,
+        userID: userID,
+        sessionStart: sessionStart,
+        location: location,
+        status: status
+      })
+    }).catch(e => console.error("Heartbeat Tracking Warning:", e));
+  } catch (e) {
+    console.warn("Heartbeat Tracking Error:", e);
+  }
+};

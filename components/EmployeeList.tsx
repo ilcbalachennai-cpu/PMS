@@ -196,6 +196,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
             onAddEmployee(data);
         }
         setIsAdding(false);
+        showAlert('success', 'Employee Saved', `${data.id} ${data.name} Saved Successfully`, undefined, undefined, 'OK', undefined, undefined, 0.7);
     };
 
     const handleImport = async () => {

@@ -10,9 +10,10 @@ export const parseExpiryDate = (dateStr: string | undefined | null): Date | null
   if (!dateStr) return null;
 
   // 1. Try DD-MM-YYYY format (common in this app)
-  if (dateStr.includes('-')) {
+  // Ensure it operates ONLY on DD-MM-YYYY by checking that parts[2] looks like a 4 digit year.
+  if (dateStr.includes('-') && !dateStr.includes('T')) {
     const parts = dateStr.split('-');
-    if (parts.length === 3) {
+    if (parts.length === 3 && parts[2].length === 4) {
       const day = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const year = parseInt(parts[2], 10);

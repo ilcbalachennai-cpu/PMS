@@ -218,9 +218,16 @@ export const usePayrollData = (showAlert: any) => {
         
         return prev.map(l => {
           const payrollResult = finalizedResults.find(r => r.employeeId === l.employeeId);
-          // If we had a finalized result, we carry forward its calculated leave snapshot
-          // Otherwise, we take the current live ledger balance as the new opening
+          const emp = employees.find(e => e.id === l.employeeId);
           
+          // Determine if employee has joined by the end of the next month
+          const dojDate = emp ? new Date(emp.doj) : new Date(0);
+          dojDate.setHours(0, 0, 0, 0);
+          const nextPeriodEnd = new Date(nextYear, monthsArr.indexOf(nextMonth) + 1, 0);
+          nextPeriodEnd.setHours(23, 59, 59, 999);
+          
+          const isEligible = dojDate <= nextPeriodEnd;
+
           let prevELBal = l.el.balance;
           let prevSLBal = l.sl.balance;
           let prevCLBal = l.cl.balance;
@@ -231,30 +238,38 @@ export const usePayrollData = (showAlert: any) => {
             prevCLBal = payrollResult.leaveSnapshot.cl.balance;
           }
 
-          // Monthly Credits based on Policy
-          const elCredit = (leavePolicy?.el?.maxPerYear || 18) / 12;
-          const slCredit = (leavePolicy?.sl?.maxPerYear || 12) / 12;
-          const clCredit = (leavePolicy?.cl?.maxPerYear || 12) / 12;
+          // Case: If employee hasn't joined by the end of NEXT month, they stay at 0
+          // Case: If they JOIN in the next month, their opening is 0, but they get credit
+          const elCredit = isEligible ? (leavePolicy?.el?.maxPerYear || 18) / 12 : 0;
+          const slCredit = isEligible ? (leavePolicy?.sl?.maxPerYear || 12) / 12 : 0;
+          const clCredit = isEligible ? (leavePolicy?.cl?.maxPerYear || 12) / 12 : 0;
 
-          return {
-            ...l,
-            el: { 
-              opening: prevELBal, 
-              eligible: elCredit, 
-              encashed: 0, 
-              availed: 0, 
-              balance: prevELBal + elCredit 
-            },
-            sl: { 
-              eligible: slCredit, 
-              availed: 0, 
-              balance: prevSLBal + slCredit 
-            },
-            cl: { 
-              availed: 0, 
-              accumulation: prevCLBal, 
-              balance: prevCLBal + clCredit 
-            }
+          const isAprilReset = nextMonth === 'April';
+
+           // Capped Carry Forward Logic based on Annual Leave Policy
+           const carryEL = isEligible ? Math.min(prevELBal, isAprilReset ? (leavePolicy?.el?.maxCarryForward || 30) : 999) : 0;
+           const carrySL = isEligible ? (isAprilReset ? Math.min(prevSLBal, leavePolicy?.sl?.maxCarryForward || 0) : prevSLBal) : 0;
+           const carryCL = isEligible ? (isAprilReset ? Math.min(prevCLBal, leavePolicy?.cl?.maxCarryForward || 0) : prevCLBal) : 0;
+
+           return {
+             ...l,
+             el: { 
+               opening: carryEL, 
+               eligible: elCredit, 
+               encashed: 0, 
+               availed: 0, 
+               balance: carryEL + elCredit 
+             },
+             sl: { 
+               eligible: slCredit, 
+               availed: 0, 
+               balance: carrySL + slCredit 
+             },
+             cl: { 
+               availed: 0, 
+               accumulation: carryCL, 
+               balance: carryCL + clCredit 
+             }
           };
         });
       });

@@ -38,7 +38,23 @@ let appBasePath = appConfig.appBasePath || '';
 
 // Helper to get structured paths
 const getAppPaths = (base: string) => {
-    const root = path.join(base, 'BharatPP');
+    // 🔍 SMART PATH RESOLUTION
+    // If the base folder already has 'Data' or 'BharatPP/Data', use it correctly.
+    let root = base;
+    const directDataPath = path.join(base, 'Data');
+    const nestedDataPath = path.join(base, 'BharatPP', 'Data');
+
+    if (fs.existsSync(nestedDataPath)) {
+        // Case: User selected the PARENT of BharatPP
+        root = path.join(base, 'BharatPP');
+    } else if (fs.existsSync(directDataPath)) {
+        // Case: User selected the 'BharatPP' folder itself
+        root = base;
+    } else {
+        // Case: New installation or empty folder, default to appending BharatPP
+        root = path.join(base, 'BharatPP');
+    }
+
     return {
         root,
         data: path.join(root, 'Data'),
@@ -55,7 +71,12 @@ function initializeDatabase(basePath: string) {
     const paths = getAppPaths(basePath);
     // Ensure directories exist
     [paths.data, paths.reports, paths.backups, paths.templates].forEach((dir: string) => {
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        try {
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        } catch (err: any) {
+            console.error(`❌ Permission Error: Failed to create directory: ${dir}`, err);
+            throw new Error(`Permission Denied: Cannot create folder at ${dir}. Please ensure you have write access.`);
+        }
     });
 
     const DB_PATH = path.join(paths.data, 'active_db.sqlite');
@@ -376,7 +397,18 @@ ipcMain.handle('run-backup', async (_, encryptedData) => {
 // 5. Automatic Data Backup (triggered by payroll confirmation/rollover)
 ipcMain.handle('create-data-backup', async (_, fileName) => {
     try {
-        if (!appBasePath || !db) throw new Error("App storage or database not initialized");
+        // Self-Healing Logic: Detect if DB was never initialized despite having a path
+        if (!db && appBasePath) {
+            console.log("🔄 Self-Healing: Re-initializing database connection before backup...");
+            initializeDatabase(appBasePath);
+        }
+
+        if (!appBasePath) {
+            throw new Error("App storage context is missing. Please select a storage location in Settings.");
+        }
+        if (!db) {
+            throw new Error("Database engine failed to initialize. Check if another instance is running or if the Data folder is read-only.");
+        }
         const paths = getAppPaths(appBasePath);
 
         // Ensure backups directory exists

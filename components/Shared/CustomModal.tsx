@@ -128,7 +128,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
     const styles = getTypeStyles();
 
     return (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/90 animate-in fade-in duration-300">
             <div className={`bg-[#1e293b] w-full max-w-sm rounded-2xl border ${styles.border} shadow-2xl p-0 flex flex-col relative overflow-hidden animate-in zoom-in-95 duration-200`}>
                 <div className={`${styles.bg} p-6 pb-4 border-b ${styles.border} flex flex-col items-center text-center gap-4`}>
                     <div className="p-3 rounded-full bg-slate-900/50 border border-slate-800 shadow-inner">

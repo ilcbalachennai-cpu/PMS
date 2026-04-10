@@ -41,6 +41,7 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
             "HP: EE Contrib (Regular/Higher)",
             "HP: ER Contrib (Regular/Higher)",
             "HP: Joint Option (Yes/No)",
+            "EL Opening Balance", "SL Opening Balance", "CL Opening Balance",
             "Date of Leaving (DD-MM-YYYY)", "Reason for Leaving"
         ];
 
@@ -56,6 +57,7 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
             "0", "0", "0", "0", "0",
             "No", "No",
             "No", "No", "", "Regular", "Regular", "No",
+            "0", "0", "0",
             "", ""
         ];
 
@@ -290,6 +292,11 @@ export const parseEmployeeXLSX = async (
 
                         dol: parseIndDate(getVal(['Date of Leaving', 'Date of Leaving (DD-MM-YYYY)', 'DOL'])),
                         leavingReason: String(getVal(['Reason for Leaving', 'Reason']) || ''),
+                        initialOpeningBalances: {
+                            el: Number(getVal(['EL Opening Balance', 'EL Opening', 'EL Balance']) || 0),
+                            sl: Number(getVal(['SL Opening Balance', 'SL Opening', 'SL Balance']) || 0),
+                            cl: Number(getVal(['CL Opening Balance', 'CL Opening', 'CL Balance']) || 0)
+                        },
                         serviceRecords: [{ date: parseIndDate(getVal(['Date of Joining', 'DOJ'])) || new Date().toISOString().split('T')[0], type: 'Appointment', description: 'Imported from Excel' }]
                     };
 

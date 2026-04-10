@@ -3,25 +3,25 @@ import { validateLicenseStartup, getStoredLicense, fetchLatestMessages } from '.
 import { LicenseData } from '../types';
 
 export const useLicense = () => {
-  const [licenseStatus, setLicenseStatus] = useState<{ checked: boolean; valid: boolean; message: string }>({ checked: false, valid: false, message: '' });
+  const [licenseStatus, setLicenseStatus] = useState<{ checked: boolean; valid: boolean; message: string; data?: any }>({ checked: false, valid: false, message: '', data: null });
   const [licenseInfo, setLicenseInfo] = useState<LicenseData | null>(getStoredLicense());
   const [dataSizeLimit, setDataSizeLimit] = useState<number>(() => {
     const license = getStoredLicense();
     return license?.dataSize || 50;
   });
 
-  const verifyLicense = useCallback(async () => {
-    const result = await validateLicenseStartup();
+  const verifyLicense = useCallback(async (force: boolean = false) => {
+    const result = await validateLicenseStartup(force);
     const license = getStoredLicense();
     setLicenseInfo(license);
     
     if (!result.valid) {
-      setLicenseStatus({ checked: true, valid: false, message: result.message || 'License Verification Failed' });
+      setLicenseStatus({ checked: true, valid: false, message: result.message || 'License Verification Failed', data: result.data });
     } else {
       if (license?.dataSize) {
         setDataSizeLimit(license.dataSize);
       }
-      setLicenseStatus({ checked: true, valid: true, message: '' });
+      setLicenseStatus({ checked: true, valid: true, message: '', data: result.data });
     }
   }, []);
 

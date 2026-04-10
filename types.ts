@@ -189,7 +189,9 @@ export interface CompanyProfile {
   flashPopupPriority?: 'REGULAR' | 'IMMEDIATE'; // Flash Popup Mode
   flashPopupId?: string; // Flash Date Sync Key
   externalAppUrl?: string; // New field for External App Link
-  
+  loginAlertMessage?: string; // New field for Dynamic Login Screen Alert
+  loginAlertEnabled?: boolean; // New field to Toggle Login Alert
+
   // SMTP Configuration
   smtpHost?: string;
   smtpPort?: number;
@@ -294,6 +296,12 @@ export interface Employee {
     esiForm1?: string;
     pfForm2?: string;
     pfForm11?: string;
+  };
+
+  initialOpeningBalances?: {
+    el: number;
+    sl: number;
+    cl: number;
   };
 
   serviceRecords: ServiceRecord[];
@@ -427,6 +435,7 @@ export enum View {
   Reports = 'reports',
   PFCalculator = 'pf_calculator', // New Module
   MIS = 'mis', // Management Info System
+  SSCode = 'ss_code', // New Module for Social Security Code Analysis
   Utilities = 'utilities',
   Settings = 'settings',
   AI_Assistant = 'ai_assistant'

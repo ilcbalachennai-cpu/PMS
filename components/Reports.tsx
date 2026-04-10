@@ -17,7 +17,8 @@ import {
     getStandardFileName,
     getBackupFileName,
     openSavedReport,
-    generateTemplateWorkbook
+    generateTemplateWorkbook,
+    getMonthAbbr
 } from '../services/reportService';
 
 
@@ -73,6 +74,10 @@ const Reports: React.FC<ReportsProps> = ({
     // New State for Arrear Report Generation Batch Selection
     const [arrearSelectedPeriod, setArrearSelectedPeriod] = useState<string>('');
 
+    // New State for Pay Sheet Filtering (Site/Division)
+    const [paySheetFilter, setPaySheetFilter] = useState<'all' | 'site' | 'division'>('all');
+    const [paySheetFilterValue, setPaySheetFilterValue] = useState<string>('');
+
     useEffect(() => {
         if (arrearHistory && arrearHistory.length > 0) {
             const currentValid = arrearHistory.find(b => `${b.month}-${b.year}` === arrearSelectedPeriod);
@@ -97,7 +102,7 @@ const Reports: React.FC<ReportsProps> = ({
     // Zero Wage / Exit Mark Modal State
     const [zeroWageEmployees, setZeroWageEmployees] = useState<PayrollResult[]>([]);
     const [exitData, setExitData] = useState<Record<string, { dol: string, reason: string }>>({});
-    
+
     // Security PIN State
     const [showPinModal, setShowPinModal] = useState(false);
     const [pinInput, setPinInput] = useState('');
@@ -121,6 +126,10 @@ const Reports: React.FC<ReportsProps> = ({
     const hasData = useMemo(() => {
         return currentResults.length > 0;
     }, [currentResults]);
+
+    const hasArrearData = useMemo(() => {
+        return arrearHistory?.some(b => b.month === month && b.year === year) || false;
+    }, [arrearHistory, month, year]);
 
     // Check for unsaved changes in Process Payroll (Temp Storage)
     useEffect(() => {
@@ -243,7 +252,7 @@ const Reports: React.FC<ReportsProps> = ({
 
         setShowPinModal(false);
         setPinInput('');
-        
+
         if (pinPurpose === 'BEFORE_BACKUP') {
             await initiatePreFreezeBackup();
         } else {
@@ -482,18 +491,18 @@ const Reports: React.FC<ReportsProps> = ({
         }
 
         if (!companyProfile.securityPin) {
-             setModalState({
-                 isOpen: true,
-                 type: 'error',
-                 title: 'Security PIN Required',
-                 message: (
-                     <div className="space-y-2">
-                         <p>A separate Security PIN must be set before you can freeze payroll.</p>
-                         <p className="text-[10px] text-amber-400 font-bold uppercase">Please go to Settings &gt; Company Profile to configure your PIN.</p>
-                     </div>
-                 )
-             });
-             return;
+            setModalState({
+                isOpen: true,
+                type: 'error',
+                title: 'Security PIN Required',
+                message: (
+                    <div className="space-y-2">
+                        <p>A separate Security PIN must be set before you can freeze payroll.</p>
+                        <p className="text-[10px] text-amber-400 font-bold uppercase">Please go to Settings &gt; Company Profile to configure your PIN.</p>
+                    </div>
+                )
+            });
+            return;
         }
 
         setPinPurpose('BEFORE_BACKUP');
@@ -525,12 +534,25 @@ const Reports: React.FC<ReportsProps> = ({
                 if (validResults.length === 0) throw new Error("No employees with wages found. Check if payroll has been processed with attendance.");
 
                 if (format === 'Excel') {
-                    const excelData = validResults.map(r => {
+                    const validToExport = validResults.filter(r => {
+                        if (paySheetFilter === 'all') return true;
+                        const emp = employees.find(e => e.id === r.employeeId);
+                        if (!emp) return false;
+                        if (paySheetFilter === 'site') return emp.site === paySheetFilterValue;
+                        if (paySheetFilter === 'division') return emp.division === paySheetFilterValue;
+                        return true;
+                    });
+
+                    if (validToExport.length === 0) throw new Error(`No data found for the selected ${paySheetFilter}: ${paySheetFilterValue}`);
+
+                    const excelData = validToExport.map(r => {
                         const emp = employees.find(e => e.id === r.employeeId);
                         return {
                             'ID': r.employeeId,
                             'Name': emp?.name,
                             'Designation': emp?.designation,
+                            'Site': emp?.site || '-',
+                            'Division': emp?.division || '-',
                             'Days Paid': r.payableDays,
                             'Basic': Math.round(r.earnings?.basic || 0),
                             'DA': Math.round(r.earnings?.da || 0),
@@ -567,6 +589,8 @@ const Reports: React.FC<ReportsProps> = ({
                         'ID': '',
                         'Name': 'GRAND TOTAL',
                         'Designation': '',
+                        'Site': '',
+                        'Division': '',
                         'Days Paid': sum('Days Paid'),
                         'Basic': sum('Basic'),
                         'DA': sum('DA'),
@@ -595,10 +619,35 @@ const Reports: React.FC<ReportsProps> = ({
                     };
                     excelData.push(grandTotal);
 
-                    const fileName = getStandardFileName('PaySheet', companyProfile, month, year);
+                    let customExcelFilename = undefined;
+                    if (paySheetFilter !== 'all') {
+                        const monthAbbr = getMonthAbbr(month);
+                        customExcelFilename = `${paySheetFilterValue} PaySheet ${monthAbbr} ${year}`;
+                    }
+
+                    const fileName = customExcelFilename || getStandardFileName('PaySheet', companyProfile, month, year);
                     savedPath = await generateExcelReport(excelData, 'Pay Sheet', fileName);
                 } else {
-                    savedPath = await generateSimplePaySheetPDF(validResults, employees, month, year, companyProfile);
+                    const validToExport = validResults.filter(r => {
+                        if (paySheetFilter === 'all') return true;
+                        const emp = employees.find(e => e.id === r.employeeId);
+                        if (!emp) return false;
+                        if (paySheetFilter === 'site') return emp.site === paySheetFilterValue;
+                        if (paySheetFilter === 'division') return emp.division === paySheetFilterValue;
+                        return true;
+                    });
+
+                    if (validToExport.length === 0) throw new Error(`No data found for the selected ${paySheetFilter}: ${paySheetFilterValue}`);
+
+                    let subtitle = undefined;
+                    let customPDFFileName = undefined;
+                    if (paySheetFilter !== 'all') {
+                        subtitle = `${paySheetFilter === 'site' ? 'Site' : 'Division'}: ${paySheetFilterValue}`;
+                        const monthAbbr = getMonthAbbr(month);
+                        customPDFFileName = `${paySheetFilterValue} PaySheet ${monthAbbr} ${year}`;
+                    }
+
+                    savedPath = await generateSimplePaySheetPDF(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName);
                 }
             } else if (reportType === 'Pay Slips') {
                 let slipRecords = currentResults.filter(r => r.netPay > 0);
@@ -791,17 +840,16 @@ const Reports: React.FC<ReportsProps> = ({
                         disabled={!hasData || hasUnsavedChanges}
                         title="Confirm & Freeze Data"
                         aria-label="Confirm & Freeze Data"
-                        className={`px-6 py-2.5 rounded-lg font-bold text-sm shadow-lg transition-all ${
-                            (hasData && !hasUnsavedChanges)
-                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                                : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                        className={`px-6 py-2.5 rounded-lg font-bold text-sm shadow-lg transition-all ${(hasData && !hasUnsavedChanges)
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            : 'bg-slate-700 text-slate-500 cursor-not-allowed'
                             }`}
                     >
                         {hasUnsavedChanges
-                                ? 'Save in Process Payroll to Freeze'
-                                : hasData
-                                    ? 'Confirm & Freeze Data'
-                                    : 'No Data to Freeze'}
+                            ? 'Save in Process Payroll to Freeze'
+                            : hasData
+                                ? 'Confirm & Freeze Data'
+                                : 'No Data to Freeze'}
                     </button>
                 )}
             </div>
@@ -820,23 +868,29 @@ const Reports: React.FC<ReportsProps> = ({
                             { id: 'Leave Ledger', icon: ClipboardList, label: 'Leave Ledger' },
                             { id: 'Advance Shortfall', icon: Wallet, label: 'Advance Shortfall' },
                             { id: 'Arrear Report', icon: TrendingUp, label: 'Arrear Salary Report' },
-                        ].map(item => (
-                            <button
-                                key={item.id}
-                                onClick={() => handleReportTypeChange(item.id)}
-                                title={`Select ${item.label}`}
-                                aria-label={`Select ${item.label}`}
-                                className={`flex flex-col items-center justify-center gap-3 p-4 rounded-xl border transition-all ${reportType === item.id
-                                    ? (isWin7 
-                                        ? 'bg-blue-600 border-white/50 text-white shadow-[0_0_30px_rgba(37,99,235,0.5)] scale-105 ring-2 ring-white/30' 
-                                        : 'bg-blue-600 border-blue-500 text-white shadow-lg scale-105')
-                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-800'
-                                    }`}
-                            >
-                                <item.icon size={24} />
-                                <span className="text-xs font-bold text-center">{item.label}</span>
-                            </button>
-                        ))}
+                        ].map(item => {
+                            const isDisabled = item.id === 'Arrear Report' && !hasArrearData;
+                            return (
+                                <button
+                                    key={item.id}
+                                    onClick={() => !isDisabled && handleReportTypeChange(item.id)}
+                                    disabled={isDisabled}
+                                    title={isDisabled ? "No arrear data for selected month" : `Select ${item.label}`}
+                                    aria-label={isDisabled ? "No arrear data" : `Select ${item.label}`}
+                                    className={`flex flex-col items-center justify-center gap-3 p-4 rounded-xl border transition-all ${reportType === item.id
+                                        ? (isWin7
+                                            ? 'bg-blue-600 border-white/50 text-white shadow-[0_0_30px_rgba(37,99,235,0.5)] scale-105 ring-2 ring-white/30'
+                                            : 'bg-blue-600 border-blue-500 text-white shadow-lg scale-105')
+                                        : isDisabled
+                                            ? 'bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed grayscale'
+                                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-800'
+                                        }`}
+                                >
+                                    <item.icon size={24} />
+                                    <span className="text-xs font-bold text-center">{item.label}</span>
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
@@ -856,6 +910,54 @@ const Reports: React.FC<ReportsProps> = ({
                             ) : (
                                 <div className="p-3 bg-blue-900/20 border border-blue-500/30 rounded-lg text-xs text-blue-300">
                                     Format locked to <b>PDF</b> for Pay Slips.
+                                </div>
+                            )}
+
+                            {reportType === 'Pay Sheet' && currentResults.length > 0 && (
+                                <div className="space-y-3 mt-2 animate-in fade-in slide-in-from-top-2 border-t border-slate-800 pt-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Filter Report By</label>
+                                        <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+                                            {(['all', 'site', 'division'] as const).map(f => (
+                                                <button
+                                                    key={f}
+                                                    onClick={() => { setPaySheetFilter(f); setPaySheetFilterValue(''); }}
+                                                    title={`Filter by ${f}`}
+                                                    aria-label={`Filter by ${f}`}
+                                                    className={`flex-1 py-1.5 text-[10px] uppercase font-black rounded-md transition-all ${paySheetFilter === f ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}
+                                                >
+                                                    {f}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {paySheetFilter !== 'all' && (
+                                        <div className="space-y-2 animate-in fade-in zoom-in-95">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                                Select {paySheetFilter === 'site' ? 'Site' : 'Division'}
+                                            </label>
+                                            <select
+                                                value={paySheetFilterValue}
+                                                onChange={e => setPaySheetFilterValue(e.target.value)}
+                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors"
+                                                title={`Select ${paySheetFilter}`}
+                                                aria-label={`Select ${paySheetFilter}`}
+                                            >
+                                                <option value="">-- Select {paySheetFilter === 'site' ? 'Site' : 'Division'} --</option>
+                                                {Array.from(new Set(
+                                                    currentResults.map(r => {
+                                                        const emp = employees.find(e => e.id === r.employeeId);
+                                                        return paySheetFilter === 'site' ? emp?.site : emp?.division;
+                                                    }).filter(Boolean)
+                                                ))
+                                                    .sort()
+                                                    .map(val => (
+                                                        <option key={val} value={val!}>{val}</option>
+                                                    ))}
+                                            </select>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -920,8 +1022,8 @@ const Reports: React.FC<ReportsProps> = ({
                         aria-label={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
                         className={`w-full py-4 font-black rounded-xl shadow-lg flex items-center justify-center gap-3 transition-all mt-6 ${(reportType !== 'Arrear Report' && !isLocked)
                             ? 'bg-slate-800 hover:bg-slate-700 text-amber-500 border border-slate-600'
-                            : (isWin7 
-                                ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl border border-white/20' 
+                            : (isWin7
+                                ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl border border-white/20'
                                 : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20')
                             }`}
                     >
@@ -964,7 +1066,7 @@ const Reports: React.FC<ReportsProps> = ({
                             <div className="relative">
                                 <label className="text-[10px] font-bold text-amber-500/50 uppercase tracking-widest mb-1.5 block">ENTER SECURITY PIN</label>
                                 <div className="relative">
-                                    <input 
+                                    <input
                                         type={pinShow ? "text" : "password"}
                                         autoFocus
                                         className={`w-full bg-slate-950 border ${pinError ? 'border-red-500/50' : 'border-slate-700'} rounded-xl p-4 text-center text-lg font-mono tracking-[0.5em] text-white outline-none focus:border-amber-500 transition-all`}
@@ -974,7 +1076,7 @@ const Reports: React.FC<ReportsProps> = ({
                                         placeholder="••••••"
                                         title="Enter your Payroll Security PIN"
                                     />
-                                    <button 
+                                    <button
                                         onClick={() => setPinShow(!pinShow)}
                                         className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-amber-500 transition-colors"
                                         title={pinShow ? "Hide PIN" : "Show PIN"}

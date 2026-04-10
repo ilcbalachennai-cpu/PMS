@@ -91,26 +91,35 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
     return { success: false, error: 'Electron API not found' };
 };
 
+/**
+ * Utility to automatically adjust column widths based on the content of the worksheet.
+ */
+export const autoSizeSheet = (ws: XLSX.WorkSheet) => {
+    if (!ws['!ref']) return;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const cols: { wch: number }[] = [];
+
+    for (let c = range.s.c; c <= range.e.c; c++) {
+        let maxLen = 10; // Default minimum width
+        for (let r = range.s.r; r <= range.e.r; r++) {
+            const cell = ws[XLSX.utils.encode_cell({ r, c })];
+            if (cell && cell.v !== undefined && cell.v !== null) {
+                const len = String(cell.v).length;
+                if (len > maxLen) maxLen = len;
+            }
+        }
+        // Cap width at 50 chars for sanity, add 2 for padding
+        cols.push({ wch: Math.min(maxLen + 2, 50) });
+    }
+    ws['!cols'] = cols;
+};
+
 export const generateExcelReport = async (data: any[], sheetName: string, fileName: string): Promise<string | null> => {
     if (!data || data.length === 0) {
         throw new Error('No Data Available to Generate Report');
     }
-
     const ws = XLSX.utils.json_to_sheet(data);
-
-    // Auto-size columns
-    const objectMaxLength: { wch: number }[] = [];
-    const keys = Object.keys(data[0]);
-    for (let i = 0; i < keys.length; i++) {
-        const minWch = keys[i].length;
-        const wch = data.reduce((w: number, r: any) => {
-            const val = r[keys[i]];
-            const valLen = val ? val.toString().length : 0;
-            return Math.max(w, valLen);
-        }, minWch);
-        objectMaxLength.push({ wch: Math.min(Math.max(wch + 2, 10), 50) });
-    }
-    ws['!cols'] = objectMaxLength;
+    autoSizeSheet(ws);
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheetName.substring(0, 31));
@@ -127,6 +136,14 @@ export const generateExcelReport = async (data: any[], sheetName: string, fileNa
 };
 
 export const generateExcelWorkbook = async (wb: XLSX.WorkBook, fileName: string): Promise<string | null> => {
+    // Apply auto-sizing to all sheets that don't already have explicit column widths
+    wb.SheetNames.forEach(name => {
+        const ws = wb.Sheets[name];
+        if (ws && !ws['!cols']) {
+            autoSizeSheet(ws);
+        }
+    });
+
     const u8 = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     const res = await electronSaveReport(fileName, u8, 'xlsx');
 
@@ -167,6 +184,14 @@ const electronSaveTemplate = async (fileName: string, data: Uint8Array, type: st
  * Use this for all "Download Template" actions instead of generateExcelWorkbook.
  */
 export const generateTemplateWorkbook = async (wb: XLSX.WorkBook, fileName: string): Promise<string | null> => {
+    // Apply auto-sizing to all sheets that don't already have explicit column widths
+    wb.SheetNames.forEach(name => {
+        const ws = wb.Sheets[name];
+        if (ws && !ws['!cols']) {
+            autoSizeSheet(ws);
+        }
+    });
+
     const u8 = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     const res = await electronSaveTemplate(fileName, u8, 'xlsx');
 
@@ -236,13 +261,13 @@ export const generateDynamicReportPDF = async (
     if (!data || data.length === 0) {
         throw new Error('No Data Available to Generate Report');
     }
-    
+
     // Choose landscape or portrait based on column length or explicit request
     // If over 7 columns, force landscape unless specified
     const pageOrientation = (orientation === 'p' && headers.length <= 7) ? 'p' : 'l';
     const doc = new jsPDF(pageOrientation);
     const pageW = doc.internal.pageSize.getWidth();
-    
+
     let y = 15;
 
     // Report Headers
@@ -272,23 +297,32 @@ export const generateDynamicReportPDF = async (
     // Draw the "Establishment" and "Wage Period" header bar
     doc.setDrawColor(0);
     doc.setLineWidth(0.2);
-    // Draw outer box
-    doc.rect(14, y, pageW - 28, 8);
-    // Draw separator line
-    doc.line(pageW - 80, y, pageW - 80, y + 8);
+    // Draw outer box (height increased to 10 for text breathing room)
+    doc.rect(14, y, pageW - 28, 10);
+    // Draw separator line — give wage period a generous 95mm wide column
+    doc.line(pageW - 95, y, pageW - 95, y + 10);
 
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setFont('helvetica', 'bold');
-    doc.text(`Name of the Establishment: `, 16, y + 5);
+    doc.text(`Name of the Establishment: `, 16, y + 6);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${company.establishmentName || 'Unknown'}`, 60, y + 5);
+    // Clip establishment name if too long
+    const estName = company.establishmentName || 'Unknown';
+    const maxEstW = (pageW - 95) - 68; // available width after label
+    const clippedEst = doc.splitTextToSize(estName, maxEstW)[0] || estName;
+    doc.text(clippedEst, 64, y + 6);
 
     doc.setFont('helvetica', 'bold');
-    doc.text(`Wage Period: `, pageW - 76, y + 5);
+    doc.text(`Wage Period: `, pageW - 93, y + 6);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${fromPeriod} - ${toPeriod}`, pageW - 55, y + 5);
+    // Truncate/wrap the period text within the box
+    const periodText = `${fromPeriod}  –  ${toPeriod}`;
+    const maxPeriodW = 75; // mm available for period value
+    const clippedPeriod = doc.splitTextToSize(periodText, maxPeriodW)[0] || periodText;
+    doc.text(clippedPeriod, pageW - 93 + 27, y + 6);
 
-    y += 12;
+    y += 14;
+
 
     // Setup auto-table styles dynamically
     // Left align text, right align numbers
@@ -316,7 +350,7 @@ export const generateDynamicReportPDF = async (
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const safeTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
     const cleanFileName = fileName || getStandardFileName(safeTitle, company, toPeriod.split(' ')[0], toPeriod.split(' ')[1] || new Date().getFullYear());
-    
+
     const res = await electronSaveReport(cleanFileName, u8, 'pdf');
     if (res.success) {
 
@@ -550,7 +584,7 @@ export const generateStateAdvanceRegister = async (results: PayrollResult[], emp
     return await generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile, { 3: { halign: 'right' }, 5: { halign: 'center' }, 6: { halign: 'right' }, 7: { halign: 'right' } });
 };
 
-export const generateSimplePaySheetPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateSimplePaySheetPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, subtitle?: string, customFilename?: string): Promise<string | null> => {
     const headers = ['ID', 'Name', 'Basic', 'DA', 'HRA', 'Conv', 'OT', 'Spl/Oth', 'GROSS', 'PF', 'ESI', 'PT', 'TDS', 'Adv', 'Fine', 'NET PAY'];
     const data = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
@@ -579,10 +613,20 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
     const cityState = [companyProfile.city, companyProfile.state].filter(Boolean).join(', ');
     if (cityState) doc.text(cityState.toUpperCase(), 14, 20);
     doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.text(`Consolidated Pay Sheet - ${month} ${year}`, 14, 28);
+
+    let tableStartY = 32;
+    if (subtitle) {
+        doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+        doc.setTextColor(79, 70, 229); // Indigo color for visibility
+        doc.text(subtitle, 14, 34);
+        doc.setTextColor(0);
+        tableStartY = 38;
+    }
+
     autoTable(doc, {
         head: [headers],
         body: [...data, grandTotal],
-        startY: 32,
+        startY: tableStartY,
         theme: 'grid',
         styles: { fontSize: 8, cellPadding: 2 },
         headStyles: { fillColor: [26, 188, 156], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
@@ -600,7 +644,7 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
     doc.setFontSize(8); doc.setTextColor(220, 53, 69); doc.text('* PF calculated on Code Wages (Social Security Code 2020)', 14, finalY);
     doc.setTextColor(150); doc.text('Generated by BharatPay Pro', 14, finalY + 5);
     const u8 = new Uint8Array(doc.output('arraybuffer'));
-    const fileName = getStandardFileName('PaySheet', companyProfile, month, year);
+    const fileName = customFilename || getStandardFileName('PaySheet', companyProfile, month, year);
     const res = await electronSaveReport(fileName, u8, 'pdf');
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
@@ -730,7 +774,7 @@ export const generateSinglePayslipU8 = async (
     const splitAddr = doc.splitTextToSize(address, 160); doc.text(splitAddr, 105, y, { align: 'center' }); y += (splitAddr.length * 4) + 6;
     doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 0, 0); doc.text(`Pay Slip - ${month} ${year}`, 105, y, { align: 'center' });
     doc.setLineWidth(0.5); doc.line(80, y + 2, 130, y + 2); y += 10;
-    
+
     const col1X = 14; const col2X = 110; const labelWidth = 35;
     doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.text("Employee Name", col1X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.name, col1X + labelWidth, y);
     doc.setFont('helvetica', 'bold'); doc.text("Designation", col2X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.designation, col2X + labelWidth, y); y += 6;
@@ -742,7 +786,7 @@ export const generateSinglePayslipU8 = async (
     doc.setFont('helvetica', 'bold'); doc.text("PF No", col2X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.pfNumber || '-', col2X + labelWidth, y); y += 6;
     doc.setFont('helvetica', 'bold'); doc.text("ESI No", col1X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.esiNumber || '-', col1X + labelWidth, y);
     doc.setFont('helvetica', 'bold'); doc.text("PAN No", col2X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.pan || '-', col2X + labelWidth, y); y += 10;
-    
+
     const specialAllw = (result.earnings.special1 || 0) + (result.earnings.special2 || 0) + (result.earnings.special3 || 0);
     const otherAllw = (result.earnings.washing || 0) + (result.earnings.attire || 0) + (result.earnings.bonus || 0);
     const earningsData = [
@@ -756,7 +800,7 @@ export const generateSinglePayslipU8 = async (
         ['Other Allw', otherAllw.toFixed(2)],
         ['Leave Encash', (result.earnings.leaveEncashment || 0).toFixed(2)]
     ];
-    
+
     let isPropPFCapped = result.isProportionatePFCapped;
     const deductionsData = [
         [isPropPFCapped ? 'Provident Fund #' : 'Provident Fund', result.deductions.epf.toFixed(2)],
@@ -769,43 +813,43 @@ export const generateSinglePayslipU8 = async (
         ['Fine / Damages', result.deductions.fine.toFixed(2)],
         ['', '']
     ];
-    
+
     const tableBody = earningsData.map((e, i) => [e[0], e[1], deductionsData[i][0], deductionsData[i][1]]);
     tableBody.push(['Gross Earnings', result.earnings.total.toFixed(2), 'Total Deductions', result.deductions.total.toFixed(2)]);
-    
-    autoTable(doc, { 
-        head: [['Earnings', 'Amount', 'Deductions', 'Amount']], 
-        body: tableBody, 
-        startY: y, 
-        theme: 'grid', 
-        headStyles: { fillColor: [20, 20, 20], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' }, 
-        columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 40, halign: 'right' }, 2: { cellWidth: 50 }, 3: { cellWidth: 40, halign: 'right' } } as any, 
-        styles: { fontSize: 9, cellPadding: 3, lineColor: [200, 200, 200] }, 
-        didParseCell: function (data) { 
-            if (data.row.index === tableBody.length - 1) { data.cell.styles.fontStyle = 'bold'; } 
-            if (data.section === 'body' && data.column.index === 2 && data.cell.text && data.cell.text.length > 0 && data.cell.text[0] === 'Provident Fund #') { 
-                data.cell.styles.textColor = [0, 0, 128]; 
-            } 
-        } 
+
+    autoTable(doc, {
+        head: [['Earnings', 'Amount', 'Deductions', 'Amount']],
+        body: tableBody,
+        startY: y,
+        theme: 'grid',
+        headStyles: { fillColor: [20, 20, 20], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+        columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 40, halign: 'right' }, 2: { cellWidth: 50 }, 3: { cellWidth: 40, halign: 'right' } } as any,
+        styles: { fontSize: 9, cellPadding: 3, lineColor: [200, 200, 200] },
+        didParseCell: function (data) {
+            if (data.row.index === tableBody.length - 1) { data.cell.styles.fontStyle = 'bold'; }
+            if (data.section === 'body' && data.column.index === 2 && data.cell.text && data.cell.text.length > 0 && data.cell.text[0] === 'Provident Fund #') {
+                data.cell.styles.textColor = [0, 0, 128];
+            }
+        }
     });
-    
+
     const finalY = (doc as any).lastAutoTable.finalY + 5;
-    doc.setDrawColor(100, 149, 237); doc.setLineWidth(0.5); doc.roundedRect(14, finalY, 180, 25, 3, 3, 'S'); 
+    doc.setDrawColor(100, 149, 237); doc.setLineWidth(0.5); doc.roundedRect(14, finalY, 180, 25, 3, 3, 'S');
     doc.setFillColor(240, 248, 255); doc.roundedRect(14.5, finalY + 0.5, 179, 24, 3, 3, 'F');
     doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text("NET SALARY PAYABLE", 20, finalY + 8);
     doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(50, 100, 200);
     const amountInWords = numberToWords(Math.round(result.netPay)) + " Rupees Only";
     doc.text(amountInWords, 20, finalY + 18);
     doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text(`Rs. ${Math.round(result.netPay).toLocaleString('en-IN')}`, 185, finalY + 15, { align: 'right' });
-    
-    const footerY = finalY + 40; 
-    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100); 
+
+    const footerY = finalY + 40;
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
     doc.text("This is a computer-generated document and does not require a signature.", 105, footerY, { align: 'center' });
     if (isPropPFCapped) {
         doc.setTextColor(0, 0, 128); doc.setFontSize(7.5); doc.setFont('helvetica', 'bolditalic');
         doc.text("# Proportionate Wages considered for PF Calculation due to NCP Days", 14, footerY + 6);
     }
-    
+
     return new Uint8Array(doc.output('arraybuffer'));
 };
 
@@ -2424,7 +2468,7 @@ export const generateESICodeWagesReport = async (results: PayrollResult[], emplo
     return res.path || null;
 };
 
-export const generateEPFCodeImpactReport = async (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile, month: string, year: number): Promise<string | null> => {
+export const generateEPFCodeImpactReport = async (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile, month: string, year: number, prevResults?: PayrollResult[], prevPeriodLabel?: string): Promise<string | null> => {
 
     // ── Build per-employee rows ─────────────────────────────────────────────
     let totOld = 0, totNew = 0, totDiff = 0;
@@ -2439,15 +2483,43 @@ export const generateEPFCodeImpactReport = async (results: PayrollResult[], empl
         .filter(r => !employees.find(e => e.id === r.employeeId)?.isPFExempt && r.payableDays > 0)
         .map(r => {
             const emp = employees.find(e => e.id === r.employeeId);
+            const prevR = prevResults?.find(pr => pr.employeeId === r.employeeId);
+
+            const isHigherPF = emp?.isPFHigherWages || false;
+            const ceiling = 15000;
+
             const gross = Math.round(r.earnings.total);
-            const baseWage = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0));
-            const codeWage = baseWage;   // Code Wage = Base Wage (EPF qualifying wages)
-            const oldValue = Math.round(baseWage * 0.12);    // Uncapped theoretical 12%
-            const newValue = Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0)); // Actual deduction
+
+            // 1. Determine "Old Basis" (Base Wage & Values)
+            let baseWage: number;
+            let oldValue: number;
+
+            if (prevR) {
+                // If we have previous month data, use actual wages/deductions from that period
+                const prevStatutory = Math.round((prevR.earnings.basic || 0) + (prevR.earnings.da || 0) + (prevR.earnings.retainingAllowance || 0));
+                baseWage = isHigherPF ? prevStatutory : Math.min(prevStatutory, ceiling);
+                oldValue = Math.round((prevR.deductions.epf || 0) + (prevR.deductions.vpf || 0));
+            } else {
+                // Fallback to Theoretical Calculation using current components
+                const statutoryBasics = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0));
+                baseWage = isHigherPF ? statutoryBasics : Math.min(statutoryBasics, ceiling);
+                oldValue = Math.round(baseWage * 0.12);
+            }
+
+            // 2. Determine "Code Basis" (New Projected Logic)
+            const currentStatutory = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0));
+            const fiftyPercentGross = Math.round(gross / 2);
+            const rawCodeWage = Math.max(currentStatutory, fiftyPercentGross);
+            const codeWage = isHigherPF ? rawCodeWage : Math.min(rawCodeWage, ceiling);
+
+            // 3. Projected New Value
+            const newValue = Math.round(codeWage * 0.12);
+
             const diff = oldValue - newValue;
             const impact = diff > 0 ? 'Positive Impact (Savings)'
                 : diff < 0 ? 'Adverse Impact'
                     : 'Neutral';
+
             totOld += oldValue;
             totNew += newValue;
             totDiff += diff;
@@ -2486,6 +2558,16 @@ export const generateEPFCodeImpactReport = async (results: PayrollResult[], empl
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(80);
     doc.text(`For the Month of: ${month} ${year}`, pageW - 14, y, { align: 'right' });
     y += 7;
+
+    if (prevPeriodLabel) {
+        doc.setFontSize(8); doc.setFont('helvetica', 'italic'); doc.setTextColor(100);
+        doc.text(`Comparison Basis: Actual Data from ${prevPeriodLabel} vs Projected Code Wages`, 14, y);
+        y += 5;
+    } else {
+        doc.setFontSize(8); doc.setFont('helvetica', 'italic'); doc.setTextColor(100);
+        doc.text(`Comparison Basis: Theoretical Old Rates (Current Components) vs Projected Code Wages`, 14, y);
+        y += 5;
+    }
 
     // Table
     const tableHead = [['ID', 'Name', 'Gross', 'Base Wage', 'Code Wage', 'Old Value', 'New Value', 'Diff', 'Impact']];

@@ -60,9 +60,10 @@ export const useAppUpdate = (showAlert: any) => {
           }, 10000)
         );
 
+        let res;
         try {
           // @ts-ignore
-          await Promise.race([
+          res = await Promise.race([
             (window as any).electronAPI.startUpdateDownload(finalUrl),
             timeoutPromise
           ]);
@@ -77,6 +78,13 @@ export const useAppUpdate = (showAlert: any) => {
             return;
           }
         }
+        
+        if (res && res.success === false) {
+           setIsUpdateDownloading(false);
+           showAlert('error', 'Download Failed', `Update failed: ${res.error || 'Network error'}. Please check your connection.`);
+           return;
+        }
+
       }
 
       // Pre-install persistence
