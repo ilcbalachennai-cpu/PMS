@@ -148,6 +148,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const backupFileRef = useRef<HTMLInputElement>(null);
 
     const progressRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (progressRef.current) {
+            progressRef.current.style.width = `${processProgress}%`;
+        }
+    }, [processProgress]);
     const logoInputRef = useRef<HTMLInputElement>(null);
 
     const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1769,8 +1775,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             {isProcessing && (
                                 <div className="w-full bg-[#0f172a] border border-slate-800 h-2.5 rounded-full overflow-hidden shadow-inner my-2">
                                     <div 
+                                        ref={progressRef}
                                         className="h-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-all duration-500 ease-out shadow-[0_0_12px_rgba(59,130,246,0.4)]" 
-                                        style={{ width: `${processProgress}%` }}
                                     ></div>
                                 </div>
                             )}
