@@ -77,6 +77,8 @@ const Reports: React.FC<ReportsProps> = ({
     // New State for Pay Sheet Filtering (Site/Division)
     const [paySheetFilter, setPaySheetFilter] = useState<'all' | 'site' | 'division'>('all');
     const [paySheetFilterValue, setPaySheetFilterValue] = useState<string>('');
+    const [paySlipFilter, setPaySlipFilter] = useState<'all' | 'site' | 'division'>('all');
+    const [paySlipFilterValue, setPaySlipFilterValue] = useState<string>('');
 
     useEffect(() => {
         if (arrearHistory && arrearHistory.length > 0) {
@@ -651,11 +653,35 @@ const Reports: React.FC<ReportsProps> = ({
                 }
             } else if (reportType === 'Pay Slips') {
                 let slipRecords = currentResults.filter(r => r.netPay > 0);
-                if (selectedEmployeeId !== 'all') {
-                    slipRecords = slipRecords.filter(r => r.employeeId === selectedEmployeeId);
+                let customSlipFilename = undefined;
+                let customSlipTitle = undefined;
+
+                if (paySlipFilter === 'all') {
+                    if (selectedEmployeeId !== 'all') {
+                        slipRecords = slipRecords.filter(r => r.employeeId === selectedEmployeeId);
+                    }
+                } else if (paySlipFilter === 'site') {
+                    if (!paySlipFilterValue) throw new Error("Please select a Site first.");
+                    slipRecords = slipRecords.filter(r => {
+                        const emp = employees.find(e => e.id === r.employeeId);
+                        return emp?.site === paySlipFilterValue;
+                    });
+                    const monthAbbr = getMonthAbbr(month);
+                    customSlipFilename = `${paySlipFilterValue} PaySlips ${monthAbbr} ${year}`;
+                    customSlipTitle = `Pay Slips - ${paySlipFilterValue} - ${month} ${year}`;
+                } else if (paySlipFilter === 'division') {
+                    if (!paySlipFilterValue) throw new Error("Please select a Division first.");
+                    slipRecords = slipRecords.filter(r => {
+                        const emp = employees.find(e => e.id === r.employeeId);
+                        return emp?.division === paySlipFilterValue;
+                    });
+                    const monthAbbr = getMonthAbbr(month);
+                    customSlipFilename = `${paySlipFilterValue} PaySlips ${monthAbbr} ${year}`;
+                    customSlipTitle = `Pay Slips - ${paySlipFilterValue} - ${month} ${year}`;
                 }
-                if (slipRecords.length === 0) throw new Error(selectedEmployeeId === 'all' ? "No employees with positive Net Pay found for Pay Slips." : "No matching payroll record found for selected employee.");
-                savedPath = await generatePaySlipsPDF(slipRecords, employees, month, year, companyProfile);
+
+                if (slipRecords.length === 0) throw new Error("No matching payroll records found for the selected filter.");
+                savedPath = await generatePaySlipsPDF(slipRecords, employees, month, year, companyProfile, customSlipTitle, customSlipFilename);
             } else if (reportType === 'Bank Statement') {
                 const bankRecords = currentResults.filter(r => r.netPay > 0);
                 if (bankRecords.length === 0) throw new Error("No employees with positive Net Pay found for Bank Statement.");
@@ -962,25 +988,73 @@ const Reports: React.FC<ReportsProps> = ({
                             )}
 
                             {reportType === 'Pay Slips' && currentResults.length > 0 && (
-                                <div className="space-y-2 mt-2 animate-in fade-in slide-in-from-top-2">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Select Employee</label>
-                                    <select
-                                        value={selectedEmployeeId}
-                                        onChange={e => setSelectedEmployeeId(e.target.value)}
-                                        className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors custom-scrollbar"
-                                        title="Select Employee for Pay Slip"
-                                        aria-label="Select Employee for Pay Slip"
-                                    >
-                                        <option value="all">All Employees</option>
-                                        {currentResults
-                                            .filter(r => r.netPay > 0)
-                                            .map(r => ({ id: r.employeeId, name: employees.find(e => e.id === r.employeeId)?.name || r.employeeId }))
-                                            .sort((a, b) => a.name.localeCompare(b.name))
-                                            .map(emp => (
-                                                <option key={emp.id} value={emp.id}>{emp.name}</option>
-                                            ))
-                                        }
-                                    </select>
+                                <div className="space-y-3 mt-2 animate-in fade-in slide-in-from-top-2 border-t border-slate-800 pt-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Filter Slips By</label>
+                                        <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+                                            {(['all', 'site', 'division'] as const).map(f => (
+                                                <button
+                                                    key={f}
+                                                    onClick={() => { setPaySlipFilter(f); setPaySlipFilterValue(''); setSelectedEmployeeId('all'); }}
+                                                    title={`Filter Slips by ${f}`}
+                                                    aria-label={`Filter Slips by ${f}`}
+                                                    className={`flex-1 py-1.5 text-[10px] uppercase font-black rounded-md transition-all ${paySlipFilter === f ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}
+                                                >
+                                                    {f}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {paySlipFilter === 'all' && (
+                                        <div className="space-y-2 animate-in fade-in zoom-in-95">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Select Employee</label>
+                                            <select
+                                                value={selectedEmployeeId}
+                                                onChange={e => setSelectedEmployeeId(e.target.value)}
+                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors custom-scrollbar"
+                                                title="Select Employee for Pay Slip"
+                                                aria-label="Select Employee for Pay Slip"
+                                            >
+                                                <option value="all">All Employees</option>
+                                                {currentResults
+                                                    .filter(r => r.netPay > 0)
+                                                    .map(r => ({ id: r.employeeId, name: employees.find(e => e.id === r.employeeId)?.name || r.employeeId }))
+                                                    .sort((a, b) => a.name.localeCompare(b.name))
+                                                    .map(emp => (
+                                                        <option key={emp.id} value={emp.id}>{emp.name}</option>
+                                                    ))
+                                                }
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {paySlipFilter !== 'all' && (
+                                        <div className="space-y-2 animate-in fade-in zoom-in-95">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                                Select {paySlipFilter === 'site' ? 'Site' : 'Division'}
+                                            </label>
+                                            <select
+                                                value={paySlipFilterValue}
+                                                onChange={e => setPaySlipFilterValue(e.target.value)}
+                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors"
+                                                title={`Select ${paySlipFilter}`}
+                                                aria-label={`Select ${paySlipFilter}`}
+                                            >
+                                                <option value="">-- Select {paySlipFilter === 'site' ? 'Site' : 'Division'} --</option>
+                                                {Array.from(new Set(
+                                                    currentResults.map(r => {
+                                                        const emp = employees.find(e => e.id === r.employeeId);
+                                                        return paySlipFilter === 'site' ? emp?.site : emp?.division;
+                                                    }).filter(Boolean)
+                                                ))
+                                                    .sort()
+                                                    .map(val => (
+                                                        <option key={val} value={val!}>{val}</option>
+                                                    ))}
+                                            </select>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 

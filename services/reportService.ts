@@ -654,7 +654,7 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
 };
 
 
-export const generatePaySlipsPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, customTitle?: string): Promise<string | null> => {
+export const generatePaySlipsPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, customTitle?: string, customFilename?: string): Promise<string | null> => {
     const doc = new jsPDF();
     const companyName = companyProfile.establishmentName || 'The Bharat Puraatana Parishad';
     const address = [companyProfile.doorNo, companyProfile.buildingName, companyProfile.street, companyProfile.area, companyProfile.city, companyProfile.state, companyProfile.pincode].filter(Boolean).join(', ');
@@ -738,7 +738,7 @@ export const generatePaySlipsPDF = async (results: PayrollResult[], employees: E
     });
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
-    const fileName = getStandardFileName('PaySlips', companyProfile, month, year);
+    const fileName = customFilename || getStandardFileName('PaySlips', companyProfile, month, year);
     const res = await electronSaveReport(fileName, u8, 'pdf');
     if (!res.success) {
         doc.save(`${fileName}.pdf`);

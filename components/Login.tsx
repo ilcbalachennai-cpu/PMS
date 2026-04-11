@@ -32,6 +32,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
   const [isResetting, setIsResetting] = useState(false);
   const [resetError, setResetError] = useState('');
   const [showDevModal, setShowDevModal] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState(false);
+  const [hasAgreedLegal, setHasAgreedLegal] = useState(() => {
+    const lastAgreedDate = localStorage.getItem('app_legal_agreed_date');
+    const today = new Date().toISOString().split('T')[0];
+    return lastAgreedDate === today;
+  });
   const [devOTP, setDevOTP] = useState('');
   const [isVerifyingDev, setIsVerifyingDev] = useState(false);
   const [devError, setDevError] = useState('');
@@ -50,7 +56,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
       setShowTimeoutMessage(true);
       sessionStorage.removeItem('logout_reason');
     }
-  }, []);
+    
+    // Check if legal alert should be shown
+    if (companyProfile?.loginAlertEnabled && companyProfile.loginAlertMessage && !hasAgreedLegal) {
+      setShowLegalModal(true);
+    }
+  }, [companyProfile, hasAgreedLegal]);
 
   // Monitor bridge status
   useEffect(() => {
@@ -389,6 +400,27 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
     }
   };
 
+  const handleAcceptLegal = () => {
+    const today = new Date().toISOString().split('T')[0];
+    setHasAgreedLegal(true);
+    setShowLegalModal(false);
+    localStorage.setItem('app_legal_agreed_date', today);
+  };
+
+  const handleDisagreeLegal = () => {
+    const api = (window as any).electronAPI;
+    if (api) {
+      try {
+        if (api.closeApp) api.closeApp();
+        else if (api.invoke) api.invoke('close-app');
+      } catch (err) {
+        console.error("LEGAL: Close failed", err);
+      }
+    } else {
+      window.close();
+    }
+  };
+
   return (
     <div className="min-h-screen w-full bg-[#020617] flex items-center justify-center p-4 relative">
       {/* Full Screen Toggle Button */}
@@ -466,39 +498,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
               <div className="h-1 w-24 bg-gradient-to-r from-transparent via-blue-500 to-transparent mx-auto rounded-full opacity-50"></div>
             </div>
 
-            {/* Branding Footer */}
-            <div className="pt-0 flex flex-col items-center gap-2">
-              <span className="text-[9px] text-slate-600 font-bold tracking-widest uppercase mb-0">Architected & Engineered by</span>
-              <div className="px-6 py-2 bg-slate-900/40 border border-slate-800 rounded-2xl">
-                <span className="text-xs font-black text-[#FF9933] tracking-wider uppercase">{BRAND_CONFIG.companyName}</span>
-              </div>
-              <p className="text-slate-500 text-[8px] font-bold uppercase tracking-[0.2em] mt-0">{BRAND_CONFIG.tagline}</p>
-
-              {/* Version Pill */}
-              <div className="mt-4 px-4 py-1 bg-slate-800/80 border border-slate-700/50 rounded-full shadow-lg">
-                <span className="text-[9px] font-black tracking-widest text-[#FFD700] uppercase">Version {APP_VERSION}</span>
-              </div>
-
-              {/* Dynamic Alert Message Board - Legal Notice / News */}
-              {companyProfile?.loginAlertEnabled && companyProfile.loginAlertMessage && (
-                <div className="mt-6 p-5 bg-[#0a0f1d] border-2 border-rose-500/30 rounded-3xl max-w-[320px] shadow-[0_0_20px_rgba(244,63,94,0.1)] relative overflow-hidden group/alert animate-in fade-in slide-in-from-bottom-4 duration-1000">
-                  <div className="absolute inset-0 bg-rose-500/[0.02] group-hover/alert:bg-rose-500/[0.05] transition-colors"></div>
-                  <div className="relative z-10">
-                    <p className="text-[10px] text-rose-400 font-black uppercase tracking-[0.2em] mb-3 flex items-center justify-center gap-2">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
-                      </span>
-                      Legal Notice
-                    </p>
-                    <div className="h-px w-12 bg-rose-500/20 mx-auto mb-3"></div>
-                    <p className="text-[10px] leading-relaxed text-slate-300 font-bold text-center whitespace-pre-wrap px-1">
-                      {companyProfile.loginAlertMessage}
-                    </p>
-                  </div>
+              {/* Branding Footer */}
+              <div className="pt-0 flex flex-col items-center gap-2">
+                <span className="text-[9px] text-slate-600 font-bold tracking-widest uppercase mb-0">Architected & Engineered by</span>
+                <div className="px-6 py-2 bg-slate-900/40 border border-slate-800 rounded-2xl">
+                  <span className="text-xs font-black text-[#FF9933] tracking-wider uppercase">{BRAND_CONFIG.companyName}</span>
                 </div>
-              )}
-            </div>
+                <p className="text-slate-500 text-[8px] font-bold uppercase tracking-[0.2em] mt-0">{BRAND_CONFIG.tagline}</p>
+  
+                {/* Version Pill */}
+                <div className="mt-4 px-4 py-1 bg-slate-800/80 border border-slate-700/50 rounded-full shadow-lg">
+                  <span className="text-[9px] font-black tracking-widest text-[#FFD700] uppercase">Version {APP_VERSION}</span>
+                </div>
+              </div>
           </div>
         </div>
 
@@ -675,6 +687,65 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
           &copy; 2025 {BRAND_CONFIG.companyName}. All rights reserved.
         </div>
       </div>
+
+      {/* Legal Notice Modal Gate */}
+      {showLegalModal && companyProfile?.loginAlertMessage && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-[#020617]/95 backdrop-blur-xl animate-in fade-in duration-500">
+          <div className="bg-[#1e293b] w-full max-w-2xl rounded-[2.5rem] border border-blue-500/30 shadow-[0_0_50px_rgba(37,99,235,0.2)] overflow-hidden flex flex-col animate-in zoom-in-95 duration-500">
+            {/* Header Section */}
+            <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 p-8 flex items-center gap-6 border-b border-white/10">
+              <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-md border border-white/10 shadow-lg">
+                <ShieldAlert className="text-white" size={32} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-2xl font-black text-white tracking-tight uppercase italic leading-none">Mandatory Legal Notice</h3>
+                <p className="text-blue-200 text-[10px] font-bold opacity-80 uppercase tracking-[0.3em]">Identity Verification & Compliance Board</p>
+              </div>
+            </div>
+
+            {/* Content Section */}
+            <div className="p-10 space-y-8 bg-[#1e293b] overflow-y-auto max-h-[60vh] custom-scrollbar">
+              <div className="p-5 bg-blue-500/5 border-l-4 border-blue-500 rounded-r-2xl">
+                <p className="text-[14px] leading-relaxed text-slate-100 font-medium italic whitespace-pre-wrap">
+                  {companyProfile.loginAlertMessage}
+                </p>
+              </div>
+
+              <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700/50 space-y-4">
+                <div className="flex items-start gap-4">
+                  <div className="mt-1 w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0"></div>
+                  <p className="text-xs text-slate-400 leading-relaxed font-semibold">
+                    By clicking <span className="text-emerald-400 font-black">"I HAVE READ & ACCEPT"</span>, you acknowledge that you are authorized to access this system and agree to comply with all corporate and statutory regulations.
+                  </p>
+                </div>
+                <div className="flex items-start gap-4">
+                  <div className="mt-1 w-2 h-2 rounded-full bg-red-500 shrink-0"></div>
+                  <p className="text-xs text-slate-400 leading-relaxed font-semibold">
+                    Selection of <span className="text-rose-400 font-black underline">"I DISAGREE"</span> will immediately terminate this application session.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Action Bar */}
+            <div className="p-8 bg-[#0f172a] border-t border-slate-800 flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={handleDisagreeLegal}
+                className="flex-1 py-4 bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 font-black rounded-2xl transition-all uppercase tracking-widest text-xs border border-slate-700 hover:border-rose-500/30 group"
+              >
+                I Disagree
+              </button>
+              <button
+                onClick={handleAcceptLegal}
+                className="flex-[2] py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-blue-900/40 uppercase tracking-widest text-xs group flex items-center justify-center gap-3 active:scale-95"
+              >
+                I Have Read & Accept
+                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Forgot Password Modal */}
       <CustomModal

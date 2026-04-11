@@ -1,7 +1,7 @@
 /**
- * BHARATPAY PRO - GOOGLE APPS SCRIPT (v02.02.13 ULTIMATE_HEARTBEAT_FULL)
+ * BHARATPAY PRO - GOOGLE APPS SCRIPT (v02.02.14 ULTIMATE_HEARTBEAT_FULL)
  * -----------------------------------------------------------
- * - Updated: 10-APR-2026 19:42 PM
+ * - Updated: 10-APR-2026 23:45 PM
  * - feature: Strict One-Machine-One-Row Tracking
  * - feature: Auto-Deduplication Engine for Active_Users
  * - feature: Professional Branded Email Engine (RESTORED FULL)
@@ -73,8 +73,25 @@ function doPost(e) {
 // 2. LIVE USER TRACKING (Active_Users)
 // ============================================================
 
-// --- DEVELOPER IDENTITY GUARD (Strict Data Isolation) ---
-function isDeveloperRequest(ss, params) {
+// --- HELPER: Fetch existing historical hours from source sheets ---
+function fetchHistoricalMins(ss, email) {
+    let baseMins = 0;
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(shName) {
+        if (baseMins > 0) return;
+        const targetSheet = ss.getSheetByName(shName); if (!targetSheet) return;
+        const targetData = targetSheet.getDataRange().getValues();
+        const emailColIdx = shName.includes('Trial') ? 3 : 5;
+        for (let j = 1; j < targetData.length; j++) {
+            if (String(targetData[j][emailColIdx]).trim().toLowerCase() === email.trim().toLowerCase()) {
+                baseMins = parseHHMMToMinutes(String(targetData[j][COL_TOTAL_HOURS - 1]));
+                break;
+            }
+        }
+    });
+    return baseMins;
+}
+
+function IsDeveloperRequest(ss, params) {
     const dev = getDeveloperCredentials(ss);
     const mID = String(params.machineId || "").trim().toLowerCase();
     const uID = String(params.userID || "").trim().toLowerCase();
@@ -95,7 +112,7 @@ function isDeveloperRequest(ss, params) {
 
 function handleTrackHeartbeat(ss, params) {
     // --- STRICT BYPASS: Developer never writes tracker data ---
-    if (isDeveloperRequest(ss, params)) return jsonResponse({ success: true, note: "Dev Isolation Mode" });
+    if (IsDeveloperRequest(ss, params)) return jsonResponse({ success: true, note: "Dev Isolation Mode" });
 
     const sheetName = 'Active_Users';
     let sheet = ss.getSheetByName(sheetName);
@@ -147,8 +164,16 @@ function handleTrackHeartbeat(ss, params) {
     ];
 
     if (userRowIdx !== -1) {
-        // Retrieve base minutes from Column 9 if it exists
-        const baseMins = parseInt(data[userRowIdx - 1][8]) || 0;
+        let baseMins = parseInt(data[userRowIdx - 1][8]) || 0;
+        const prevStatus = String(data[userRowIdx - 1][3] || "").toUpperCase();
+        const prevSessionStart = String(data[userRowIdx - 1][5] || "");
+        const currentSessionStartStr = Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss");
+
+        // --- THE FIX: Refresh baseMins on New Login OR Change of Session Start ---
+        if ((status === "LIVE" && prevStatus !== "LIVE") || prevSessionStart !== currentSessionStartStr) {
+            baseMins = fetchHistoricalMins(ss, email);
+        }
+
         sheet.getRange(userRowIdx, 1, 1, 9).setValues([[
             userID, machineID, location, status, nowStr, 
             Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss"),
@@ -158,20 +183,8 @@ function handleTrackHeartbeat(ss, params) {
         // --- SYNC TO LICENSE/TRIAL SHEET (Cumulative) ---
         syncCumulativeHours(ss, email, baseMins, h, m);
     } else {
-        // NEW SESSION: Look up existing historical hours from Column N
-        let baseMins = 0;
-        ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(shName) {
-            if (baseMins > 0) return;
-            const targetSheet = ss.getSheetByName(shName); if (!targetSheet) return;
-            const targetData = targetSheet.getDataRange().getValues();
-            const emailColIdx = shName.includes('Trial') ? 3 : 5;
-            for (let j = 1; j < targetData.length; j++) {
-                if (String(targetData[j][emailColIdx]).trim().toLowerCase() === email.trim().toLowerCase()) {
-                    baseMins = parseHHMMToMinutes(String(targetData[j][COL_TOTAL_HOURS - 1]));
-                    break;
-                }
-            }
-        });
+        // NEW SESSION (No previous row in Active_Users found)
+        let baseMins = fetchHistoricalMins(ss, email);
 
         const rowData = [userID, machineID, location, status, nowStr, Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss"), usageStr, email, baseMins];
         sheet.appendRow(rowData);
