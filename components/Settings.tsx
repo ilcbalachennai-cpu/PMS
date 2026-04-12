@@ -16,7 +16,7 @@ import {
     getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
     requestResetOTP
 } from '../services/licenseService';
-import { formatExpiryDate } from '../utils/formatters';
+import { formatExpiryDate, formatIndianNumber } from '../utils/formatters';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 
 declare global {
@@ -197,32 +197,55 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [umError, setUmError] = useState('');
     const umNameRef = useRef<HTMLInputElement>(null);
 
+    const isAdminEdit = umEditId && umForm.role === 'Administrator';
+    const isTrialRestricted = !umEditId && (!licenseInfo?.key || licenseInfo.key.replace(/-/g, '').length !== 16);
+
     const saveAppUsers = (users: User[]) => {
-        setAppUsers(users);
-        localStorage.setItem('app_users', JSON.stringify(users));
-        if (window.electronAPI) window.electronAPI.dbSet('app_users', users);
+        try {
+            setAppUsers(users);
+            localStorage.setItem('app_users', JSON.stringify(users));
+            if (window.electronAPI && window.electronAPI.dbSet) {
+                window.electronAPI.dbSet('app_users', users);
+            }
+            return true;
+        } catch (err) {
+            console.error("Failed to save users:", err);
+            return false;
+        }
     };
 
     const handleUmSave = async () => {
         setUmError('');
-        if (!umForm.name.trim() || !umForm.username.trim() || !umForm.password.trim()) {
-            setUmError('All fields are required.'); return;
-        }
+        try {
+            if (!umForm.name.trim() || !umForm.username.trim() || !umForm.password.trim()) {
+                setUmError('All fields are required.'); return;
+            }
 
-        const cleanUsername = umForm.username.trim().toLowerCase();
-        const existing = appUsers.find(u => u.username.toLowerCase() === cleanUsername && u.username.toLowerCase() !== umEditId?.toLowerCase());
-        if (existing) { setUmError('Username already exists.'); return; }
+            const cleanUsername = umForm.username.trim().toLowerCase();
+            const existing = appUsers.find(u => (u.username || '').toLowerCase() === cleanUsername && (u.username || '').toLowerCase() !== umEditId?.toLowerCase());
+            if (existing) { setUmError('Username already exists.'); return; }
 
-        if (umEditId) {
-            const updated = appUsers.map(u => u.username.toLowerCase() === umEditId.toLowerCase() ? { ...u, name: umForm.name.trim(), username: cleanUsername, password: umForm.password, role: umForm.role } : u);
-            saveAppUsers(updated);
-        } else {
-            const newUser: User = { name: umForm.name.trim(), username: cleanUsername, password: umForm.password, role: umForm.role, email: umForm.email };
-            saveAppUsers([...appUsers, newUser]);
+            const cleanName = umForm.name.trim().toUpperCase();
+            let success = false;
+            if (umEditId) {
+                const updated = appUsers.map(u => (u.username || '').toLowerCase() === umEditId.toLowerCase() ? { ...u, name: cleanName, username: cleanUsername, password: umForm.password, role: umForm.role } : u);
+                success = saveAppUsers(updated);
+            } else {
+                const newUser: User = { name: cleanName, username: cleanUsername, password: umForm.password, role: umForm.role, email: umForm.email };
+                success = saveAppUsers([...appUsers, newUser]);
+            }
+
+            if (success) {
+                showAlert('success', 'User Account Saved', `Identity for "${umForm.name}" has been ${umEditId ? 'updated' : 'initialized'} successfully.`);
+                setUmForm({ name: '', username: '', password: '', role: 'User', email: '' });
+                setUmEditId(null);
+                setUmShowPwd(false);
+            } else {
+                setUmError('Data synchronization failed.');
+            }
+        } catch (err: any) {
+            setUmError(`System Error: ${err.message}`);
         }
-        setUmForm({ name: '', username: '', password: '', role: 'User', email: '' });
-        setUmEditId(null);
-        setUmShowPwd(false);
     };
 
     const handleUmEdit = (u: User) => {
@@ -235,7 +258,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
     const handleUmDelete = (username: string) => {
         if (username === currentUser?.username) { setUmError("You cannot delete your own account."); return; }
-        saveAppUsers(appUsers.filter(u => u.username !== username));
+        requireAuth(() => {
+            saveAppUsers(appUsers.filter(u => u.username !== username));
+            showAlert('success', 'User Deleted', `Account "${username}" has been removed from the local system.`);
+        });
     };
 
     useEffect(() => {
@@ -638,6 +664,28 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         setFormData({
             ...formData,
             pfOriginalWagesComponents: {
+                ...currentComponents,
+                [key]: !currentComponents[key]
+            }
+        });
+    };
+
+    const handleBonusWagesToggle = (key: keyof WageBasisComponents) => {
+        const currentComponents = formData.bonusWagesComponents || INITIAL_STATUTORY_CONFIG.bonusWagesComponents;
+        setFormData({
+            ...formData,
+            bonusWagesComponents: {
+                ...currentComponents,
+                [key]: !currentComponents[key]
+            }
+        });
+    };
+
+    const handleGratuityWagesToggle = (key: keyof WageBasisComponents) => {
+        const currentComponents = formData.gratuityWagesComponents || INITIAL_STATUTORY_CONFIG.gratuityWagesComponents;
+        setFormData({
+            ...formData,
+            gratuityWagesComponents: {
                 ...currentComponents,
                 [key]: !currentComponents[key]
             }
@@ -1079,23 +1127,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                     </div>
                     {/* ... Other sections (Bonus, Leave, PT, LWF) ... */}
-                    <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-                        {/* ... Bonus & Gratuity ... */}
-                        <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center gap-3"><Heart className="text-red-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-red-400">Employee Welfare (Bonus & Gratuity)</h3></div>
-                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                                <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><Percent size={14} className="text-amber-400" /><span className="text-xs font-bold text-slate-300 uppercase">Annual Bonus Policy</span></div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1"><label htmlFor="bonus-rate" className="text-[10px] font-bold text-slate-500 uppercase">Rate (%)</label><input id="bonus-rate" type="number" step="0.0001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={(formData.bonusRate * 100).toFixed(2)} onChange={e => setFormData({ ...formData, bonusRate: +e.target.value / 100 })} title="Annual Bonus Rate" aria-label="Annual Bonus Rate" /></div>
-                                    <div className="flex flex-col justify-end"><span className="text-[9px] text-slate-500 italic">Standard: 8.33% Min</span></div>
-                                </div>
-                            </div>
-                            <div className="space-y-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                                <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2"><Building2 size={14} className="text-blue-400" /><span className="text-xs font-bold text-slate-300 uppercase">LIC Gratuity Policy</span></div>
-                                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Calculation Basis (Formula)</label><div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-blue-300 font-mono">(Basic + DA) * (15/26) * Years</div><p className="text-[9px] text-slate-500 mt-2">Calculated as per LIC Master Policy for Statutory Gratuity (Act 1972).</p></div>
-                            </div>
-                        </div>
-                    </div>
 
                     {/* Annual Leave Policy */}
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
@@ -1252,6 +1283,117 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                     </div>
 
+                    {/* Employee Welfare (Bonus & Gratuity) */}
+                    <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
+                        <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <Heart className="text-rose-400" size={20} />
+                                <h3 className="font-black uppercase tracking-widest text-xs text-rose-400">Employee Welfare (Bonus & Gratuity)</h3>
+                            </div>
+                        </div>
+                        <div className="p-6 space-y-8">
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                {/* Bonus Section */}
+                                <div className="space-y-4 p-4 bg-slate-900/40 rounded-xl border border-slate-800/50">
+                                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                                        <div className="flex items-center gap-2">
+                                            <Calculator className="text-amber-400" size={16} />
+                                            <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Annual Bonus Policy</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[9px] text-slate-500 font-bold uppercase">Rate (%)</span>
+                                            <input 
+                                                type="number" 
+                                                className="w-16 bg-slate-800 border border-slate-700 rounded p-1 text-xs text-amber-400 font-mono text-center"
+                                                value={formData.bonusRate * 100}
+                                                onChange={e => setFormData({...formData, bonusRate: (+e.target.value / 100)})}
+                                                step="0.01"
+                                                title="Bonus Percentage Rate"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-4">
+                                        <p className="text-[10px] text-slate-500 font-medium italic">"Select components for Bonus 'Eligible Wages' calculation."</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {[
+                                                { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                                { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                                { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
+                                                { key: 'special3', label: 'Allow 3' }
+                                            ].map(comp => {
+                                                const components = formData.bonusWagesComponents || INITIAL_STATUTORY_CONFIG.bonusWagesComponents;
+                                                const isActive = components[comp.key as keyof typeof components];
+                                                return (
+                                                    <button
+                                                        key={comp.key}
+                                                        onClick={() => handleBonusWagesToggle(comp.key as any)}
+                                                        className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-amber-600/20 border-amber-500 text-amber-100' : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'}`}
+                                                        title={`Toggle ${comp.label} for Bonus Wages`}
+                                                    >
+                                                        {isActive ? <CheckSquare size={12} className="text-amber-400" /> : <Square size={12} />}
+                                                        <span className="truncate">{comp.label}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Gratuity Section */}
+                                <div className="space-y-4 p-4 bg-slate-900/40 rounded-xl border border-slate-800/50">
+                                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                                        <div className="flex items-center gap-2">
+                                            <Landmark className="text-blue-400" size={16} />
+                                            <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">LIC Gratuity Policy</span>
+                                        </div>
+                                        <span className="text-[9px] text-blue-400 font-black border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 rounded">ACT 1972</span>
+                                    </div>
+                                    <div className="space-y-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase">Calculation Basis (Formula)</label>
+                                            <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-[11px] text-blue-300 font-mono shadow-inner border-l-4 border-l-blue-500">
+                                                (Selected Wages * (15/26) * Completed Years of Service)
+                                            </div>
+                                        </div>
+                                        <div className="space-y-3">
+                                            <p className="text-[10px] text-slate-500 font-medium italic">"Select components for Gratuity 'Eligible Wages' basis."</p>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {[
+                                                    { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                                    { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                                    { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
+                                                    { key: 'special3', label: 'Allow 3' }
+                                                ].map(comp => {
+                                                    const components = formData.gratuityWagesComponents || INITIAL_STATUTORY_CONFIG.gratuityWagesComponents;
+                                                    const isActive = components[comp.key as keyof typeof components];
+                                                    return (
+                                                        <button
+                                                            key={comp.key}
+                                                            onClick={() => handleGratuityWagesToggle(comp.key as any)}
+                                                            className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-blue-600/20 border-blue-500 text-blue-100' : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'}`}
+                                                            title={`Toggle ${comp.label} for Gratuity Wages`}
+                                                        >
+                                                            {isActive ? <CheckSquare size={12} className="text-blue-400" /> : <Square size={12} />}
+                                                            <span className="truncate">{comp.label}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            <p className="text-[9px] text-slate-500 mt-2 italic flex items-center gap-1">
+                                                <Info size={10} className="text-slate-600" />
+                                                Calculated as per LIC Master Policy for Statutory Gratuity (Act 1972).
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                             </div>
+                             <div className="flex items-center gap-2 p-3 bg-amber-900/10 border border-amber-900/30 rounded-xl">
+                                <AlertTriangle className="text-amber-500" size={14} />
+                                <p className="text-[9px] text-slate-400 font-medium">Calculation Rule: Total Eligible Wages from months in range * (Applicable Policy Rates). Bonus usually 8.33% Min. Gratuity calculated as per tenure.</p>
+                             </div>
+                        </div>
+                    </div>
+
                     {/* PT Matrix */}
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
                         <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
@@ -1298,7 +1440,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <div className="space-y-1"><label htmlFor="lwf-cycle" className="text-[10px] font-bold text-slate-500 uppercase">Cycle</label><select id="lwf-cycle" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white" value={formData.lwfDeductionCycle} onChange={e => setFormData({ ...formData, lwfDeductionCycle: e.target.value as any })} title="LWF Deduction Cycle" aria-label="LWF Deduction Cycle"><option value="Monthly">Monthly</option><option value="HalfYearly">Half-Yearly</option><option value="Yearly">Yearly</option></select></div>
                                 <div className="space-y-1"><label htmlFor="lwf-ee-contrib" className="text-[10px] font-bold text-slate-500 uppercase">EE Contribution (₹)</label><input id="lwf-ee-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployeeContribution} onChange={e => setFormData({ ...formData, lwfEmployeeContribution: +e.target.value })} title="Employee LWF Contribution" aria-label="Employee LWF Contribution" /></div>
                                 <div className="space-y-1"><label htmlFor="lwf-er-contrib" className="text-[10px] font-bold text-slate-500 uppercase">ER Contribution (₹)</label><input id="lwf-er-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployerContribution} onChange={e => setFormData({ ...formData, lwfEmployerContribution: +e.target.value })} title="Employer LWF Contribution" aria-label="Employer LWF Contribution" /></div>
-                                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Total (₹)</label><div className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-emerald-400 font-mono font-bold">{(formData.lwfEmployeeContribution + formData.lwfEmployerContribution).toLocaleString()}</div></div>
+                                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Total (₹)</label><div className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-emerald-400 font-mono font-bold">{formatIndianNumber(formData.lwfEmployeeContribution + formData.lwfEmployerContribution)}</div></div>
                             </div>
                         )}
                     </div>
@@ -1352,17 +1494,20 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                     <div className="space-y-1"><label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label><input id="profile-est-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500 uppercase" placeholder="Your Name - as mentioned in App request mail" value={profileData.establishmentName} onChange={e => setProfileData({ ...profileData, establishmentName: e.target.value.toUpperCase() })} title="Establishment Name" aria-label="Establishment Name" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-trade-name" className="text-[10px] font-bold text-slate-400 uppercase">Trade Name (If Any)</label><input id="profile-trade-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Trade Name" value={profileData.tradeName} onChange={e => setProfileData({ ...profileData, tradeName: e.target.value })} title="Trade Name" aria-label="Trade Name" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-cin" className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)*</label><input id="profile-cin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.cin} onChange={e => setProfileData({ ...profileData, cin: e.target.value })} placeholder="U00000XX0000XXX000000" title="Corporate Identification Number" aria-label="Corporate Identification Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-lin" className="text-[10px] font-bold text-sky-400 uppercase">LIN No (Labour ID)*</label><input id="profile-lin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.lin} onChange={e => setProfileData({ ...profileData, lin: e.target.value })} placeholder="L0000000000" title="Labour Identification Number" aria-label="Labour Identification Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pan-no" className="text-[10px] font-bold text-sky-400 uppercase">PAN Number of Establishment*</label><input id="profile-pan-no" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" placeholder="PAN Number" value={profileData.pan} onChange={e => setProfileData({ ...profileData, pan: e.target.value })} title="PAN Number" aria-label="PAN Number" /></div>
                                 </div>
                             </div>
                             {/* ... Registration Codes ... */}
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Registration Codes</h4>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     <div className="space-y-1"><label htmlFor="profile-pf-code" className="text-[10px] font-bold text-slate-400 uppercase">PF Code</label><input id="profile-pf-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PF Code" value={profileData.pfCode} onChange={e => setProfileData({ ...profileData, pfCode: e.target.value })} title="PF Code Number" aria-label="PF Code Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-esi-code" className="text-[10px] font-bold text-slate-400 uppercase">ESI Code</label><input id="profile-esi-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="ESI Code" value={profileData.esiCode} onChange={e => setProfileData({ ...profileData, esiCode: e.target.value })} title="ESI Code Number" aria-label="ESI Code Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-gst-no" className="text-[10px] font-bold text-slate-400 uppercase">GST No</label><input id="profile-gst-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="GST Number" value={profileData.gstNo} onChange={e => setProfileData({ ...profileData, gstNo: e.target.value })} title="GST Number" aria-label="GST Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-pan-no" className="text-[10px] font-bold text-slate-400 uppercase">PAN No</label><input id="profile-pan-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PAN Number" value={profileData.pan} onChange={e => setProfileData({ ...profileData, pan: e.target.value })} title="PAN Number" aria-label="PAN Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-lin" className="text-[10px] font-bold text-slate-400 uppercase">LIN No (Labour ID)</label><input id="profile-lin" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" value={profileData.lin} onChange={e => setProfileData({ ...profileData, lin: e.target.value })} placeholder="L0000000000" title="Labour Identification Number" aria-label="Labour Identification Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pt-no" className="text-[10px] font-bold text-slate-400 uppercase">PT Registration No</label><input id="profile-pt-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PT Registration" value={profileData.ptNo || ''} onChange={e => setProfileData({ ...profileData, ptNo: e.target.value })} title="PT Registration Number" aria-label="PT Registration Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-tan-no" className="text-[10px] font-bold text-slate-400 uppercase">TDS No. (TAN)</label><input id="profile-tan-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="TAN Number" value={profileData.tan || ''} onChange={e => setProfileData({ ...profileData, tan: e.target.value })} title="TAN Number" aria-label="TAN Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-lwf-no" className="text-[10px] font-bold text-slate-400 uppercase">LWF Registration No</label><input id="profile-lwf-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="LWF Registration" value={profileData.lwfRegNo || ''} onChange={e => setProfileData({ ...profileData, lwfRegNo: e.target.value })} title="LWF Registration Number" aria-label="LWF Registration Number" /></div>
                                 </div>
                             </div>
                             {/* ... Address ... */}
@@ -1645,32 +1790,6 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                         </div>
                     </div>
 
-                    {/* Application Storage Section - MOVED TO TOP */}
-                    <div className="bg-[#0f172a] p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/30 transition-all group shadow-lg mb-8">
-                        <div className="flex items-center gap-4 mb-4">
-                            <div className="p-3 bg-indigo-900/20 text-indigo-400 rounded-xl group-hover:scale-110 transition-transform">
-                                <FolderOpen size={24} />
-                            </div>
-                            <div>
-                                <h4 className="font-black text-white uppercase tracking-tighter">Application Storage Location</h4>
-                                <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded">Root Path</span>
-                            </div>
-                        </div>
-                        <div className="space-y-4">
-                            <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-slate-400 break-all leading-relaxed">
-                                {appDirectory || 'Scanning for configured path...'}
-                            </div>
-                            <button
-                                onClick={() => requireAuth(handleChangeDirectory)}
-                                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-700 shadow-lg active:scale-95"
-                            >
-                                <Lock size={14} className="text-indigo-400" /> Secure Change Directory
-                            </button>
-                            <p className="text-[9px] text-slate-500 italic text-center">
-                                * Requires Administrator Authorization to modify system storage path.
-                            </p>
-                        </div>
-                    </div>
 
                     {isSetupMode ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1783,6 +1902,33 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             </div>
                         </>
                     )}
+
+                    {/* Application Storage Section - SHIFTED TO BOTTOM */}
+                    <div className="bg-[#0f172a] p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/30 transition-all group shadow-lg">
+                        <div className="flex items-center gap-4 mb-4">
+                            <div className="p-3 bg-indigo-900/20 text-indigo-400 rounded-xl group-hover:scale-110 transition-transform">
+                                <FolderOpen size={24} />
+                            </div>
+                            <div>
+                                <h4 className="font-black text-white uppercase tracking-tighter">Application Storage Location</h4>
+                                <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded">Root Path</span>
+                            </div>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-slate-400 break-all leading-relaxed">
+                                {appDirectory || 'Scanning for configured path...'}
+                            </div>
+                            <button
+                                onClick={() => requireAuth(handleChangeDirectory)}
+                                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-700 shadow-lg active:scale-95"
+                            >
+                                <Lock size={14} className="text-indigo-400" /> Secure Change Directory
+                            </button>
+                            <p className="text-[9px] text-slate-500 italic text-center">
+                                * Requires Administrator Authorization to modify system storage path.
+                            </p>
+                        </div>
+                    </div>
                 </div>
             )
             }
@@ -2330,17 +2476,37 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 </div>
 
                                 <div className="space-y-6">
+                                    {isAdminEdit && (
+                                        <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex gap-3 animate-in fade-in slide-in-from-top-2">
+                                            <ShieldAlert size={20} className="text-rose-500 shrink-0" />
+                                            <p className="text-[10px] text-rose-200 leading-relaxed font-black uppercase tracking-wider">
+                                                Administrator Can't be Edited, any Change has to be through a mail from registered mailid to <span className="text-rose-400">ilcbala.bharatpayroll@gmail.com</span>
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {isTrialRestricted && (
+                                        <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex gap-3 animate-in fade-in slide-in-from-top-2">
+                                            <AlertTriangle size={20} className="text-amber-500 shrink-0" />
+                                            <p className="text-[10px] text-amber-200 leading-relaxed font-black uppercase tracking-wider">
+                                                User creation is Restricted in Trial version. Please activate a full license to add multiple users.
+                                            </p>
+                                        </div>
+                                    )}
+
                                     <div className="space-y-1.5">
                                         <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Full Name</label>
                                         <input
                                             ref={umNameRef}
                                             type="text"
                                             placeholder="Enter user's full name"
-                                            className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-sky-500/10 placeholder-gray-600"
+                                            readOnly={isAdminEdit}
+                                            className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-sky-500/10 placeholder-gray-600 uppercase ${isAdminEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
                                             value={umForm.name}
-                                            onChange={e => setUmForm({ ...umForm, name: e.target.value })}
+                                            onChange={e => setUmForm({ ...umForm, name: e.target.value.toUpperCase() })}
                                         />
                                     </div>
+
 
                                     <div className="space-y-1.5">
                                         <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Username / ID</label>
@@ -2360,13 +2526,15 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             <input
                                                 type={umShowPwd ? "text" : "password"}
                                                 placeholder="Enter secure password"
-                                                className="w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-sky-500/10 pr-12 placeholder-gray-600"
+                                                readOnly={isAdminEdit}
+                                                className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-sky-500/10 pr-12 placeholder-gray-600 ${isAdminEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
                                                 value={umForm.password}
                                                 onChange={e => setUmForm({ ...umForm, password: e.target.value })}
                                             />
                                             <button
-                                                onClick={() => setUmShowPwd(!umShowPwd)}
-                                                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-sky-400 transition-colors bg-white/5 p-1 rounded-lg"
+                                                onClick={() => !isAdminEdit && setUmShowPwd(!umShowPwd)}
+                                                disabled={isAdminEdit}
+                                                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-sky-400 transition-colors bg-white/5 p-1 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
                                                 title={umShowPwd ? "Hide Password" : "Show Password"}
                                             >
                                                 {umShowPwd ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -2374,26 +2542,30 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         </div>
                                     </div>
 
+
                                     <div className="space-y-3">
                                         <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">System Role</label>
-                                        <div className="grid grid-cols-2 gap-2 bg-[#0a0f1d] p-1.5 rounded-2xl border border-white/5">
+                                        <div className={`grid grid-cols-2 gap-2 bg-[#0a0f1d] p-1.5 rounded-2xl border border-white/5 ${isAdminEdit ? 'opacity-60 cursor-not-allowed' : ''}`}>
                                             <button
-                                                onClick={() => setUmForm({ ...umForm, role: 'Administrator' })}
+                                                onClick={() => !isAdminEdit && setUmForm({ ...umForm, role: 'Administrator' })}
+                                                disabled={isAdminEdit}
                                                 className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'Administrator' ? 'bg-sky-600/20 text-sky-400 ring-2 ring-sky-500/30 shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
                                             >
                                                 Administrator
                                             </button>
                                             <button
-                                                onClick={() => setUmForm({ ...umForm, role: 'User' })}
+                                                onClick={() => !isAdminEdit && setUmForm({ ...umForm, role: 'User' })}
+                                                disabled={isAdminEdit}
                                                 className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'User' ? 'bg-sky-600 text-white shadow-xl shadow-sky-900/40 ring-2 ring-white/20' : 'text-slate-500 hover:text-slate-300'}`}
                                             >
                                                 User
                                             </button>
                                         </div>
                                     </div>
+
                                 </div>
 
-                                <div className="mt-auto pt-6 border-t border-white/5 flex flex-col gap-3">
+                                <div className="pt-6 border-t border-white/5 flex flex-col gap-3">
                                     {umError && <div className="px-4 py-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-500 text-[10px] font-bold text-center animate-pulse uppercase tracking-widest">{umError}</div>}
                                     <div className="flex gap-3">
                                         {umEditId && (
@@ -2406,11 +2578,13 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         )}
                                         <button
                                             onClick={handleUmSave}
-                                            className="flex-[2] py-4 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white font-black uppercase text-xs rounded-xl shadow-xl shadow-sky-900/30 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                            disabled={isAdminEdit || isTrialRestricted}
+                                            className={`flex-[2] py-4 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white font-black uppercase text-xs rounded-xl shadow-xl shadow-sky-900/30 transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${(isAdminEdit || isTrialRestricted) ? 'opacity-40 grayscale cursor-not-allowed' : ''}`}
                                         >
                                             <Save size={16} />
                                             {umEditId ? 'Update Identity' : 'Save User Account'}
                                         </button>
+
                                     </div>
                                 </div>
                             </div>

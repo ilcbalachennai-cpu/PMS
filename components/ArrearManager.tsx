@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TrendingUp, Calendar, Save, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
 import { Employee, CompanyProfile, ArrearBatch, ArrearRecord, PayrollResult } from '../types';
+import { formatIndianNumber } from '../utils/formatters';
 
 import { ModalType } from './Shared/CustomModal';
 
@@ -503,7 +504,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                         </td>
 
                                         {/* BASIC */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.basicPay)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.basicPay))}</td>
                                         {incrementType === 'Adhoc' ? renderAdhocInput('basic') : (
                                             percentageMode === 'Specific' && (
                                                 <td className="px-2 py-2 text-center bg-blue-900/10">
@@ -519,58 +520,58 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                                 </td>
                                             )
                                         )}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newBasic}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newBasic)}</td>
 
                                         {/* DA */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.da || 0)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.da || 0))}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('da')}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newDA}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newDA)}</td>
 
                                         {/* Retaining */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.retainingAllowance || 0)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.retainingAllowance || 0))}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('retaining')}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newRetaining}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newRetaining)}</td>
 
                                         {/* HRA */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.hra || 0)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.hra || 0))}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('hra')}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newHRA}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newHRA)}</td>
 
                                         {/* Conveyance */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.conveyance || 0)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.conveyance || 0))}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('conveyance')}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newConveyance}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newConveyance)}</td>
 
                                         {/* Washing */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.washing || 0)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.washing || 0))}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('washing')}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newWashing}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newWashing)}</td>
 
                                         {/* Attire */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.attire || 0)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.attire || 0))}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('attire')}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newAttire}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newAttire)}</td>
 
                                         {/* Special 1 */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.specialAllowance1 || 0)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.specialAllowance1 || 0))}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('special1')}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newSpecial1}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newSpecial1)}</td>
 
                                         {/* Special 2 */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.specialAllowance2 || 0)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.specialAllowance2 || 0))}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('special2')}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newSpecial2}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newSpecial2)}</td>
 
                                         {/* Special 3 */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{Math.round(emp.specialAllowance3 || 0)}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.specialAllowance3 || 0))}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('special3')}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{proposed.newSpecial3}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newSpecial3)}</td>
 
                                         {/* GROSS TOTALS */}
-                                        <td className="px-4 py-2 text-right font-mono font-bold text-slate-400 bg-slate-900/20 shadow-inner px-2 text-[11px]">{proposed.oldGross.toLocaleString()}</td>
-                                        <td className="px-4 py-2 text-right font-mono font-black text-emerald-400 bg-emerald-900/5 text-[11px]">{proposed.newGross.toLocaleString()}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-bold text-slate-400 bg-slate-900/20 shadow-inner px-2 text-[11px]">{formatIndianNumber(proposed.oldGross)}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-black text-emerald-400 bg-emerald-900/5 text-[11px]">{formatIndianNumber(proposed.newGross)}</td>
                                         <td className="px-5 py-2 text-right font-mono font-black text-indigo-400 bg-indigo-900/10 border-l border-indigo-500/30 text-xs">
-                                            {Math.round((proposed.newGross - proposed.oldGross) * calculateMonthsPassed()).toLocaleString()}
+                                            {formatIndianNumber(Math.round((proposed.newGross - proposed.oldGross) * calculateMonthsPassed()))}
                                         </td>
                                     </tr>
                                 );

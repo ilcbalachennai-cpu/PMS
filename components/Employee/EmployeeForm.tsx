@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Employee } from '../../types';
 import { INDIAN_STATES } from '../../constants';
+import { formatIndianNumber } from '../../utils/formatters';
 
 interface EmployeeFormProps {
     editingId: string | null;
@@ -419,7 +420,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                         </div>
                         <div className="mt-4 p-4 bg-emerald-900/10 border border-emerald-500/20 rounded-xl flex justify-between items-center">
                             <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Total Gross Salary</span>
-                            <span className="text-2xl font-black text-white font-mono">₹ {calculateGrossWage(newEmpForm).toLocaleString()}</span>
+                            <span className="text-2xl font-black text-white font-mono">₹ {formatIndianNumber(calculateGrossWage(newEmpForm))}</span>
                         </div>
                     </div>
                     <div>

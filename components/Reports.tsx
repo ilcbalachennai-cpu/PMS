@@ -20,6 +20,7 @@ import {
     generateTemplateWorkbook,
     getMonthAbbr
 } from '../services/reportService';
+import { formatIndianNumber } from '../utils/formatters';
 
 
 interface ReportsProps {
@@ -74,10 +75,10 @@ const Reports: React.FC<ReportsProps> = ({
     // New State for Arrear Report Generation Batch Selection
     const [arrearSelectedPeriod, setArrearSelectedPeriod] = useState<string>('');
 
-    // New State for Pay Sheet Filtering (Site/Division)
-    const [paySheetFilter, setPaySheetFilter] = useState<'all' | 'site' | 'division'>('all');
+    // New State for Pay Sheet Filtering (Site/Branch/Division)
+    const [paySheetFilter, setPaySheetFilter] = useState<'all' | 'site' | 'branch' | 'division'>('all');
     const [paySheetFilterValue, setPaySheetFilterValue] = useState<string>('');
-    const [paySlipFilter, setPaySlipFilter] = useState<'all' | 'site' | 'division'>('all');
+    const [paySlipFilter, setPaySlipFilter] = useState<'all' | 'site' | 'branch' | 'division'>('all');
     const [paySlipFilterValue, setPaySlipFilterValue] = useState<string>('');
 
     useEffect(() => {
@@ -373,9 +374,9 @@ const Reports: React.FC<ReportsProps> = ({
                             </p>
                             <div className="space-y-1">
                                 {leavingWithAdvance.map((s, idx) => (
-                                    <div key={idx} className="flex justify-between items-center text-xs bg-red-950/40 px-2 py-1.5 rounded border border-red-900/30">
+                                    <div className="flex justify-between items-center text-xs bg-red-950/40 px-2 py-1.5 rounded border border-red-900/30">
                                         <span className="text-white font-semibold">{s.name}</span>
-                                        <span className="text-red-400 font-bold font-mono">Pending ₹ {s.balance.toLocaleString()}</span>
+                                        <span className="text-red-400 font-bold font-mono">Pending ₹ {formatIndianNumber(Math.round(s.balance))}</span>
                                     </div>
                                 ))}
                             </div>
@@ -459,7 +460,7 @@ const Reports: React.FC<ReportsProps> = ({
                             {employeesWithAdvance.map(([id]) => {
                                 const emp = employees.find(e => e.id === id);
                                 const adv = advanceLedgers.find(a => a.employeeId === id);
-                                return <li key={id}>{emp?.name}: ₹ {adv?.balance.toLocaleString()}</li>;
+                                return <li key={id}>{emp?.name}: ₹ {formatIndianNumber(Math.round(adv?.balance || 0))}</li>;
                             })}
                         </ul>
                         <p className="text-xs text-slate-400 italic">Are you sure you want to finalize their exit and freeze payroll?</p>
@@ -541,6 +542,7 @@ const Reports: React.FC<ReportsProps> = ({
                         const emp = employees.find(e => e.id === r.employeeId);
                         if (!emp) return false;
                         if (paySheetFilter === 'site') return emp.site === paySheetFilterValue;
+                        if (paySheetFilter === 'branch') return emp.branch === paySheetFilterValue;
                         if (paySheetFilter === 'division') return emp.division === paySheetFilterValue;
                         return true;
                     });
@@ -554,6 +556,7 @@ const Reports: React.FC<ReportsProps> = ({
                             'Name': emp?.name,
                             'Designation': emp?.designation,
                             'Site': emp?.site || '-',
+                            'Branch': emp?.branch || '-',
                             'Division': emp?.division || '-',
                             'Days Paid': r.payableDays,
                             'Basic': Math.round(r.earnings?.basic || 0),
@@ -592,6 +595,7 @@ const Reports: React.FC<ReportsProps> = ({
                         'Name': 'GRAND TOTAL',
                         'Designation': '',
                         'Site': '',
+                        'Branch': '',
                         'Division': '',
                         'Days Paid': sum('Days Paid'),
                         'Basic': sum('Basic'),
@@ -635,6 +639,7 @@ const Reports: React.FC<ReportsProps> = ({
                         const emp = employees.find(e => e.id === r.employeeId);
                         if (!emp) return false;
                         if (paySheetFilter === 'site') return emp.site === paySheetFilterValue;
+                        if (paySheetFilter === 'branch') return emp.branch === paySheetFilterValue;
                         if (paySheetFilter === 'division') return emp.division === paySheetFilterValue;
                         return true;
                     });
@@ -644,7 +649,7 @@ const Reports: React.FC<ReportsProps> = ({
                     let subtitle = undefined;
                     let customPDFFileName = undefined;
                     if (paySheetFilter !== 'all') {
-                        subtitle = `${paySheetFilter === 'site' ? 'Site' : 'Division'}: ${paySheetFilterValue}`;
+                        subtitle = `${paySheetFilter === 'site' ? 'Site' : paySheetFilter === 'branch' ? 'Branch' : 'Division'}: ${paySheetFilterValue}`;
                         const monthAbbr = getMonthAbbr(month);
                         customPDFFileName = `${paySheetFilterValue} PaySheet ${monthAbbr} ${year}`;
                     }
@@ -665,6 +670,15 @@ const Reports: React.FC<ReportsProps> = ({
                     slipRecords = slipRecords.filter(r => {
                         const emp = employees.find(e => e.id === r.employeeId);
                         return emp?.site === paySlipFilterValue;
+                    });
+                    const monthAbbr = getMonthAbbr(month);
+                    customSlipFilename = `${paySlipFilterValue} PaySlips ${monthAbbr} ${year}`;
+                    customSlipTitle = `Pay Slips - ${paySlipFilterValue} - ${month} ${year}`;
+                } else if (paySlipFilter === 'branch') {
+                    if (!paySlipFilterValue) throw new Error("Please select a Branch first.");
+                    slipRecords = slipRecords.filter(r => {
+                        const emp = employees.find(e => e.id === r.employeeId);
+                        return emp?.branch === paySlipFilterValue;
                     });
                     const monthAbbr = getMonthAbbr(month);
                     customSlipFilename = `${paySlipFilterValue} PaySlips ${monthAbbr} ${year}`;
@@ -944,7 +958,7 @@ const Reports: React.FC<ReportsProps> = ({
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Filter Report By</label>
                                         <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
-                                            {(['all', 'site', 'division'] as const).map(f => (
+                                            {(['all', 'site', 'branch', 'division'] as const).map(f => (
                                                 <button
                                                     key={f}
                                                     onClick={() => { setPaySheetFilter(f); setPaySheetFilterValue(''); }}
@@ -961,7 +975,7 @@ const Reports: React.FC<ReportsProps> = ({
                                     {paySheetFilter !== 'all' && (
                                         <div className="space-y-2 animate-in fade-in zoom-in-95">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                                                Select {paySheetFilter === 'site' ? 'Site' : 'Division'}
+                                                Select {paySheetFilter === 'site' ? 'Site' : paySheetFilter === 'branch' ? 'Branch' : 'Division'}
                                             </label>
                                             <select
                                                 value={paySheetFilterValue}
@@ -970,11 +984,11 @@ const Reports: React.FC<ReportsProps> = ({
                                                 title={`Select ${paySheetFilter}`}
                                                 aria-label={`Select ${paySheetFilter}`}
                                             >
-                                                <option value="">-- Select {paySheetFilter === 'site' ? 'Site' : 'Division'} --</option>
+                                                <option value="">-- Select {paySheetFilter === 'site' ? 'Site' : paySheetFilter === 'branch' ? 'Branch' : 'Division'} --</option>
                                                 {Array.from(new Set(
                                                     currentResults.map(r => {
                                                         const emp = employees.find(e => e.id === r.employeeId);
-                                                        return paySheetFilter === 'site' ? emp?.site : emp?.division;
+                                                        return paySheetFilter === 'site' ? emp?.site : paySheetFilter === 'branch' ? emp?.branch : emp?.division;
                                                     }).filter(Boolean)
                                                 ))
                                                     .sort()
@@ -992,7 +1006,7 @@ const Reports: React.FC<ReportsProps> = ({
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Filter Slips By</label>
                                         <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
-                                            {(['all', 'site', 'division'] as const).map(f => (
+                                            {(['all', 'site', 'branch', 'division'] as const).map(f => (
                                                 <button
                                                     key={f}
                                                     onClick={() => { setPaySlipFilter(f); setPaySlipFilterValue(''); setSelectedEmployeeId('all'); }}
@@ -1032,7 +1046,7 @@ const Reports: React.FC<ReportsProps> = ({
                                     {paySlipFilter !== 'all' && (
                                         <div className="space-y-2 animate-in fade-in zoom-in-95">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                                                Select {paySlipFilter === 'site' ? 'Site' : 'Division'}
+                                                Select {paySlipFilter === 'site' ? 'Site' : paySlipFilter === 'branch' ? 'Branch' : 'Division'}
                                             </label>
                                             <select
                                                 value={paySlipFilterValue}
@@ -1041,11 +1055,11 @@ const Reports: React.FC<ReportsProps> = ({
                                                 title={`Select ${paySlipFilter}`}
                                                 aria-label={`Select ${paySlipFilter}`}
                                             >
-                                                <option value="">-- Select {paySlipFilter === 'site' ? 'Site' : 'Division'} --</option>
+                                                <option value="">-- Select {paySlipFilter === 'site' ? 'Site' : paySlipFilter === 'branch' ? 'Branch' : 'Division'} --</option>
                                                 {Array.from(new Set(
                                                     currentResults.map(r => {
                                                         const emp = employees.find(e => e.id === r.employeeId);
-                                                        return paySlipFilter === 'site' ? emp?.site : emp?.division;
+                                                        return paySlipFilter === 'site' ? emp?.site : paySlipFilter === 'branch' ? emp?.branch : emp?.division;
                                                     }).filter(Boolean)
                                                 ))
                                                     .sort()
@@ -1278,7 +1292,7 @@ const Reports: React.FC<ReportsProps> = ({
                                                             ₹ {(() => {
                                                                 const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
                                                                 const pending = adv ? (adv.balance + (adv.recovery || 0)) : 0;
-                                                                return pending.toLocaleString();
+                                                                return formatIndianNumber(Math.round(pending));
                                                             })()}
                                                         </div>
                                                     </td>

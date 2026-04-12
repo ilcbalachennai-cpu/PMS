@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, FineRecord, OTRecord } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
 import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName, openSavedReport } from '../services/reportService';
+import { formatIndianNumber } from '../utils/formatters';
 import { ModalType } from './Shared/CustomModal';
 
 interface PayrollProcessorProps {
@@ -504,9 +505,9 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             {results.length > 0 && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 shadow-lg border-l-4 border-l-slate-600"><p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Total Gross</p><h3 className="text-xl font-black text-white">₹ {totalGross.toLocaleString()}</h3></div>
-                        <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 shadow-lg border-l-4 border-l-red-500/50"><p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Total Deductions</p><h3 className="text-xl font-black text-red-400">₹ {totalDed.toLocaleString()}</h3></div>
-                        <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 shadow-lg border-l-4 border-l-emerald-500/50 relative overflow-hidden"><div className="absolute right-0 top-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl -mr-10 -mt-10"></div><p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Net Payable</p><h3 className="text-xl font-black text-emerald-400">₹ {totalNet.toLocaleString()}</h3></div>
+                        <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 shadow-lg border-l-4 border-l-slate-600"><p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Total Gross</p><h3 className="text-xl font-black text-white">₹ {formatIndianNumber(totalGross)}</h3></div>
+                        <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 shadow-lg border-l-4 border-l-red-500/50"><p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Total Deductions</p><h3 className="text-xl font-black text-red-400">₹ {formatIndianNumber(totalDed)}</h3></div>
+                        <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 shadow-lg border-l-4 border-l-emerald-500/50 relative overflow-hidden"><div className="absolute right-0 top-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl -mr-10 -mt-10"></div><p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Net Payable</p><h3 className="text-xl font-black text-emerald-400">₹ {formatIndianNumber(totalNet)}</h3></div>
                     </div>
 
                     <div className="flex items-center bg-[#111827] px-4 py-2 rounded-lg border border-slate-800 shadow-inner">
@@ -563,17 +564,17 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                                 <div className="text-[9px] text-slate-500 font-mono uppercase tracking-normal">{r.employeeId}</div>
                                             </td>
                                             <td className="px-2 py-2 text-center font-mono text-slate-300 text-[11px]">{r.payableDays}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-slate-300 text-[11px]">{(r?.earnings?.basic || 0).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-slate-300 text-[11px]">{(r?.earnings?.da || 0).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-slate-300 text-[11px]">{(r?.earnings?.hra || 0).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-slate-500 text-[11px]">{others.toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono font-black text-white text-[11px]">{(r?.earnings?.total || 0).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-blue-300 text-[11px]">{(r?.deductions?.epf || 0).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-pink-300 text-[11px]">{(r?.deductions?.esi || 0).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-amber-300 text-[11px]">{((r?.deductions?.pt || 0) + (r?.deductions?.it || 0)).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-sky-300 font-black text-[11px]">{(r?.deductions?.advanceRecovery || 0).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-red-300 text-[11px]">{(r?.deductions?.total || 0).toLocaleString()}</td>
-                                            <td className="px-3 py-2 text-right font-mono font-black text-emerald-400 text-xs bg-emerald-900/10">{(r?.netPay || 0).toLocaleString()}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-slate-300 text-[11px]">{formatIndianNumber(Math.round(r?.earnings?.basic || 0))}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-slate-300 text-[11px]">{formatIndianNumber(Math.round(r?.earnings?.da || 0))}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-slate-300 text-[11px]">{formatIndianNumber(Math.round(r?.earnings?.hra || 0))}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-slate-500 text-[11px]">{formatIndianNumber(Math.round(others))}</td>
+                                            <td className="px-3 py-2 text-right font-mono font-black text-white text-[11px]">{formatIndianNumber(Math.round(r?.earnings?.total || 0))}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-blue-300 text-[11px]">{formatIndianNumber(Math.round(r?.deductions?.epf || 0))}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-pink-300 text-[11px]">{formatIndianNumber(Math.round(r?.deductions?.esi || 0))}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-amber-300 text-[11px]">{formatIndianNumber(Math.round((r?.deductions?.pt || 0) + (r?.deductions?.it || 0)))}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-sky-300 font-black text-[11px]">{formatIndianNumber(Math.round(r?.deductions?.advanceRecovery || 0))}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-red-300 text-[11px]">{formatIndianNumber(Math.round(r?.deductions?.total || 0))}</td>
+                                            <td className="px-3 py-2 text-right font-mono font-black text-emerald-400 text-xs bg-emerald-900/10">{formatIndianNumber(Math.round(r?.netPay || 0))}</td>
                                             <td className="px-3 py-2 text-center sticky right-0 bg-[#1e293b] shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.5)]">
                                                 <button onClick={() => setPreviewRecord(r)} className="p-1.5 bg-blue-900/20 text-blue-400 hover:text-white hover:bg-blue-600 rounded-lg transition-colors" title={`View Pay Slip for ${emp?.name}`} aria-label={`View Pay Slip for ${emp?.name}`}>
                                                     <Eye size={12} />
@@ -587,17 +588,17 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                 <tr className="text-[10px] font-black uppercase tracking-tight">
                                     <td className="px-5 py-3 text-sky-400">Total Summary</td>
                                     <td className="px-2 py-3 text-center font-mono text-white bg-white/5">{tableTotals.days.toFixed(1)}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{Math.round(tableTotals.basic).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{Math.round(tableTotals.da).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{Math.round(tableTotals.hra).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-slate-500">{Math.round(tableTotals.others).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-white bg-white/5 font-black">{Math.round(tableTotals.gross).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-blue-400">{Math.round(tableTotals.pf).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-pink-400">{Math.round(tableTotals.esi).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-amber-400">{Math.round(tableTotals.ptTds).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-sky-400">{Math.round(tableTotals.advance).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-red-400 bg-red-950/20">{Math.round(tableTotals.dedn).toLocaleString()}</td>
-                                    <td className="px-3 py-3 text-right font-mono text-emerald-400 bg-emerald-950/20 font-black">{Math.round(tableTotals.net).toLocaleString()}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{formatIndianNumber(Math.round(tableTotals.basic))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{formatIndianNumber(Math.round(tableTotals.da))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-slate-300">{formatIndianNumber(Math.round(tableTotals.hra))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-slate-500">{formatIndianNumber(Math.round(tableTotals.others))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-white bg-white/5 font-black">{formatIndianNumber(Math.round(tableTotals.gross))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-blue-400">{formatIndianNumber(Math.round(tableTotals.pf))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-pink-400">{formatIndianNumber(Math.round(tableTotals.esi))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-amber-400">{formatIndianNumber(Math.round(tableTotals.ptTds))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-sky-400">{formatIndianNumber(Math.round(tableTotals.advance))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-red-400 bg-red-950/20">{formatIndianNumber(Math.round(tableTotals.dedn))}</td>
+                                    <td className="px-3 py-3 text-right font-mono text-emerald-400 bg-emerald-950/20 font-black">{formatIndianNumber(Math.round(tableTotals.net))}</td>
                                     <td className="px-3 py-3 bg-[#0f172a] sticky right-0"></td>
                                 </tr>
                             </tfoot>
@@ -638,9 +639,9 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                                 <span className="font-bold text-white">{c.name}</span><br />
                                                 <span className="text-slate-500 text-[10px]">{c.employeeId}</span>
                                             </td>
-                                            <td className="py-2 text-right font-mono">{c.codeGross.toLocaleString()}</td>
-                                            <td className="py-2 text-right font-mono text-amber-400 font-bold">{c.proposed.toLocaleString()}</td>
-                                            <td className="py-2 text-right font-mono text-emerald-400">{c.limit.toLocaleString()}</td>
+                                            <td className="py-2 text-right font-mono">{formatIndianNumber(Math.round(c.codeGross))}</td>
+                                            <td className="py-2 text-right font-mono text-amber-400 font-bold">{formatIndianNumber(Math.round(c.proposed))}</td>
+                                            <td className="py-2 text-right font-mono text-emerald-400">{formatIndianNumber(Math.round(c.limit))}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -703,7 +704,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                     <div className="flex justify-between"><span className="text-slate-500 font-bold uppercase">PAN No</span><span className="font-bold text-slate-900">{emp.pan || 'N/A'}</span></div>
                                 </div>
                                     <div className="border border-slate-800"><div className="grid grid-cols-4 bg-slate-800 text-white text-xs font-bold uppercase text-center divide-x divide-slate-600"><div className="p-2">Earnings</div><div className="p-2">Amount (₹)</div><div className="p-2">Deductions</div><div className="p-2">Amount (₹)</div></div><div className="grid grid-cols-4 text-xs divide-x divide-slate-300"><div className="space-y-1 p-2"><div className="text-slate-600">Basic Pay</div><div className="text-slate-600">DA</div><div className="text-slate-600">Retaining Allw</div><div className="text-slate-600">HRA</div><div className="text-slate-600">Conveyance</div><div className="text-slate-600">Overtime Pay</div><div className="text-slate-600">Special Allw</div><div className="text-slate-600">Other Allw</div><div className="text-slate-600">Leave Encash</div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.earnings?.basic || 0).toFixed(2)}</div><div>{(r?.earnings?.da || 0).toFixed(2)}</div><div>{(r?.earnings?.retainingAllowance || 0).toFixed(2)}</div><div>{(r?.earnings?.hra || 0).toFixed(2)}</div><div>{(r?.earnings?.conveyance || 0).toFixed(2)}</div><div className="font-bold text-blue-600">{(r?.earnings?.otAmount || 0).toFixed(2)}</div><div>{special.toFixed(2)}</div><div>{other.toFixed(2)}</div><div>{(r?.earnings?.leaveEncashment || 0).toFixed(2)}</div></div><div className="space-y-1 p-2"><div className="text-slate-600">Provident Fund {r.isCode88 ? '*' : ''}{isPropPFCapped ? <span className="text-[#000080] font-bold"> #</span> : ''}</div><div className="text-slate-600">ESI {r.isESICodeWagesUsed ? '**' : ''}</div><div className="text-slate-600">Professional Tax</div><div className="text-slate-600">Income Tax</div><div className="text-slate-600">VPF</div><div className="text-slate-600">LWF</div><div className="text-slate-600">Adv Recovery</div><div className="text-red-600 font-bold">Fine / Damages</div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.deductions?.epf || 0).toFixed(2)}</div><div>{(r?.deductions?.esi || 0).toFixed(2)}</div><div>{(r?.deductions?.pt || 0).toFixed(2)}</div><div>{(r?.deductions?.it || 0).toFixed(2)}</div><div>{(r?.deductions?.vpf || 0).toFixed(2)}</div><div>{(r?.deductions?.lwf || 0).toFixed(2)}</div><div>{(r?.deductions?.advanceRecovery || 0).toFixed(2)}</div><div className="text-red-600 font-bold">{(r?.deductions?.fine || 0).toFixed(2)}</div></div></div><div className="grid grid-cols-4 bg-slate-100 border-t border-slate-800 text-xs font-bold divide-x divide-slate-300"><div className="p-2 text-slate-800">Gross Earnings</div><div className="p-2 text-right text-slate-900">{(r?.earnings?.total || 0).toFixed(2)}</div><div className="p-2 text-slate-800">Total Deductions</div><div className="p-2 text-right text-slate-900">{(r?.deductions?.total || 0).toFixed(2)}</div></div></div>
-                                    <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 flex flex-col md:flex-row justify-between items-center gap-4"><div><p className="text-xs font-bold text-blue-800 uppercase tracking-widest">Net Salary Payable</p><p className="text-[10px] text-blue-600 italic mt-1 max-w-sm">{numberToWords(Math.round(r?.netPay || 0))} Rupees Only</p></div><div className="text-3xl font-black text-blue-900">₹ {Math.round(r?.netPay || 0).toLocaleString('en-IN')}</div></div>
+                                    <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 flex flex-col md:flex-row justify-between items-center gap-4"><div><p className="text-xs font-bold text-blue-800 uppercase tracking-widest">Net Salary Payable</p><p className="text-[10px] text-blue-600 italic mt-1 max-w-sm">{numberToWords(Math.round(r?.netPay || 0))} Rupees Only</p></div><div className="text-3xl font-black text-blue-900">₹ {formatIndianNumber(Math.round(r?.netPay || 0))}</div></div>
                                     <div className="text-[10px] text-slate-400 space-y-1 pt-4 border-t border-slate-200">{r.isCode88 && <p>* PF calculated on Code Wages (Social Security Code 2020)</p>}{r.isESICodeWagesUsed && <p>** ESI calculated on Code Wages (Social Security Code 2020)</p>}{isPropPFCapped && <p className="text-[#000080] font-bold italic"># Proportionate Wages(15000*days worked/actual days of the month) considered for PF Calculation due to Non Contribution Days (NCP)</p>}{r.esiRemark && <p className="text-amber-600 font-bold">{r.esiRemark}</p>}<p className="text-center italic mt-4">This is a computer-generated document and does not require a signature.</p></div></>
                                 );
                             })()}

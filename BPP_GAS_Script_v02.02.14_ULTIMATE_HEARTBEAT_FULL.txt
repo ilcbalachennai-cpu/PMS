@@ -1,5 +1,5 @@
 /**
- * BHARATPAY PRO - GOOGLE APPS SCRIPT (v02.02.14 ULTIMATE_HEARTBEAT_FULL)
+ * BHARATPAY PRO - GOOGLE APPS SCRIPT (v02.02.15 ULTIMATE_HEARTBEAT_FULL)
  * -----------------------------------------------------------
  * - Updated: 10-APR-2026 23:45 PM
  * - feature: Strict One-Machine-One-Row Tracking
@@ -191,7 +191,19 @@ function handleTrackHeartbeat(ss, params) {
         syncCumulativeHours(ss, email, baseMins, h, m);
     }
 
+    // --- V02.02.15: SECURITY ALERT MONITORING ---
+    if (status.indexOf("SECURITY_") === 0) {
+        sendEmailNotification("ilcbala.BharatPayRoll@gmail.com", "🚨 Security Violation", "VIOLATION", {
+            userName: userID,
+            attemptID: userID,
+            attemptEmail: email,
+            attemptMachine: machineID,
+            timestamp: nowStr
+        });
+    }
+
     return jsonResponse({ success: true, serverTime: nowStr });
+
 }
 
 function syncCumulativeHours(ss, email, baseMins, sessH, sessM) {

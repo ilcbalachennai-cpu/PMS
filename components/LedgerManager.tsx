@@ -516,7 +516,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                                 {isExPending && <span className="text-red-400 font-black px-1 rounded-[2px] bg-red-950/30 border border-red-500/20">LEFT</span>}
                                             </div>
                                         </td>
-                                        <td className="px-3 py-2.5 text-center text-slate-400 font-mono text-[11px]">{a.opening || 0}</td>
+                                        <td className="px-3 py-2.5 text-center text-slate-400 font-mono text-[11px]">{formatIndianNumber(a.opening || 0)}</td>
                                         <td className="px-3 py-2.5 text-center">
                                             <input disabled={inputDisabled} title={`New Advance for ${emp.name}`} aria-label={`New Advance for ${emp.name}`} type="number" min={0}
                                                 className="w-14 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-emerald-400 font-black text-[11px] font-mono disabled:opacity-50 outline-none focus:border-emerald-500"
@@ -540,9 +540,9 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                                 value={a.emiCount || 0}
                                                 onChange={e => handleAdvanceUpdate(emp.id, 'emiCount', +e.target.value)} />
                                         </td>
-                                        <td className="px-3 py-2.5 text-center font-mono text-sky-400 font-black text-xs">{a.recovery || 0}</td>
+                                        <td className="px-3 py-2.5 text-center font-mono text-sky-400 font-black text-xs">{formatIndianNumber(a.recovery || 0)}</td>
                                         <td className="px-3 py-2.5 text-center">
-                                            <div className="font-black text-white text-sm">{a.balance || 0}</div>
+                                            <div className="font-black text-white text-sm">{formatIndianNumber(a.balance || 0)}</div>
                                             {isExPending && <div className="text-[7px] text-pink-400 font-black uppercase tracking-widest leading-none mt-0.5">PENDING</div>}
                                         </td>
                                     </tr>

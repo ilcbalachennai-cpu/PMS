@@ -54,6 +54,20 @@ export interface Attendance {
 }
 
 export type PFComplianceType = 'Statutory' | 'Voluntary';
+export type ESIComplianceType = 'Covered' | 'Uncovered';
+
+export interface WageBasisComponents {
+  basic: boolean;
+  da: boolean;
+  retaining: boolean;
+  hra: boolean;
+  conveyance: boolean;
+  washing: boolean;
+  attire: boolean;
+  special1: boolean;
+  special2: boolean;
+  special3: boolean;
+}
 
 export interface StatutoryConfig {
   epfCeiling: number;
@@ -81,74 +95,22 @@ export interface StatutoryConfig {
   // NEW: Higher Contribution Logic
   enableHigherContribution: boolean;
   higherContributionType: 'By Employee' | 'By Employee & Employer';
-  higherContributionComponents: {
-    basic: boolean;
-    da: boolean;
-    retaining: boolean;
-    conveyance: boolean;
-    washing: boolean;
-    attire: boolean;
-    special1: boolean;
-    special2: boolean;
-    special3: boolean;
-  };
+  higherContributionComponents: WageBasisComponents;
 
   // NEW: Leave Wages Calculation Policy (Default Basic + DA)
-  leaveWagesComponents: {
-    basic: boolean;
-    da: boolean;
-    retaining: boolean;
-    hra: boolean;
-    conveyance: boolean;
-    washing: boolean;
-    attire: boolean;
-    special1: boolean;
-    special2: boolean;
-    special3: boolean;
-  };
+  leaveWagesComponents: WageBasisComponents;
 
   // NEW: Overtime Policy
   enableOT: boolean;
   otCalculationFactor: 1 | 2;
-  otComponents: {
-    basic: boolean;
-    da: boolean;
-    retaining: boolean;
-    hra: boolean;
-    conveyance: boolean;
-    washing: boolean;
-    attire: boolean;
-    special1: boolean;
-    special2: boolean;
-    special3: boolean;
-  };
+  otComponents: WageBasisComponents;
 
   // NEW: Statutory Calculation Basis
   pfEsiCalculationBasis: 'LabourCode' | 'OriginalWages';
-  pfOriginalWagesComponents: {
-    basic: boolean;
-    da: boolean;
-    retaining: boolean;
-    hra: boolean;
-    conveyance: boolean;
-    washing: boolean;
-    attire: boolean;
-    special1: boolean;
-    special2: boolean;
-    special3: boolean;
-  };
-  esiOriginalWagesComponents: {
-    basic: boolean;
-    da: boolean;
-    retaining: boolean;
-    hra: boolean;
-    conveyance: boolean;
-    washing: boolean;
-    attire: boolean;
-    special1: boolean;
-    special2: boolean;
-    special3: boolean;
-  };
+  pfOriginalWagesComponents: WageBasisComponents;
+  esiOriginalWagesComponents: WageBasisComponents;
+  bonusWagesComponents: WageBasisComponents;
+  gratuityWagesComponents: WageBasisComponents;
   enableArrearSalary: boolean;
 }
 
@@ -161,6 +123,9 @@ export interface CompanyProfile {
   esiCode: string;
   gstNo: string;
   pan: string;
+  ptNo: string;
+  tan: string;
+  lwfRegNo: string;
 
   // Granular Address
   doorNo: string;

@@ -50,3 +50,35 @@ export const formatExpiryDate = (date: Date | string | undefined | null): string
 
   return `${day}-${month}-${year}`;
 };
+
+/**
+ * Formats a number according to the Indian Numbering System (en-IN)
+ * Example: 100000 -> 1,00,000
+ */
+export const formatIndianNumber = (num: number | string | undefined | null): string => {
+  if (num === undefined || num === null || num === '') return '0';
+  const val = typeof num === 'string' ? parseFloat(num) : num;
+  if (isNaN(val)) return '0';
+  
+  return new Intl.NumberFormat('en-IN', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0
+  }).format(val);
+};
+
+/**
+ * Formats a value as Indian Rupee (₹) with Indian Numbering System
+ * Example: 100000 -> ₹ 1,00,000
+ */
+export const formatCurrency = (num: number | string | undefined | null, includeSymbol = true): string => {
+  if (num === undefined || num === null || num === '') return includeSymbol ? '₹ 0' : '0';
+  const val = typeof num === 'string' ? parseFloat(num) : num;
+  if (isNaN(val)) return includeSymbol ? '₹ 0' : '0';
+
+  const formatted = new Intl.NumberFormat('en-IN', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2
+  }).format(val);
+
+  return includeSymbol ? `₹ ${formatted}` : formatted;
+};

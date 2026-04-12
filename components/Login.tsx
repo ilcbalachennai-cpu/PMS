@@ -705,8 +705,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
 
             {/* Content Section */}
             <div className="p-10 space-y-8 bg-[#1e293b] overflow-y-auto max-h-[60vh] custom-scrollbar">
-              <div className="p-5 bg-blue-500/5 border-l-4 border-blue-500 rounded-r-2xl">
-                <p className="text-[14px] leading-relaxed text-slate-100 font-medium italic whitespace-pre-wrap">
+              <div className="p-6 px-12 bg-blue-500/5 border-l-4 border-blue-500 rounded-r-2xl">
+                <p className="text-[14px] leading-relaxed text-slate-100 font-medium italic whitespace-pre-wrap text-center">
                   {companyProfile.loginAlertMessage}
                 </p>
               </div>

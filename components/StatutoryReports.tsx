@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, Table, Download, BookOpen, ScrollText, HandCoins, ReceiptText } from 'lucide-react';
+import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, Table, Download, BookOpen, ScrollText, HandCoins, ReceiptText, Info } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
 import { INDIAN_STATES } from '../constants';
 import {
@@ -10,6 +10,10 @@ import {
     generateESIReturn,
     generateESIForm5,
     generateESIExitReport,
+    generateJoinedEmployeesReport,
+    generateLeftEmployeesReport,
+    generateJoinedEmployeesPDF,
+    generateEmployeesLeftPDF,
     generatePTReport,
     generateTDSReport,
     generateGratuityReport,
@@ -22,7 +26,13 @@ import {
     getStandardFileName,
     openSavedReport,
     generatePFForm3A,
-    generatePFForm6A
+    generatePFForm6A,
+    generateConsolidatedPTReport,
+    generateConsolidatedTDSReport,
+    generateConsolidatedBonusReport,
+    generateConsolidatedGratuityReport,
+    generateLWFReport,
+    generateConsolidatedLWFReport
 } from '../services/reportService';
 
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
@@ -76,7 +86,13 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
     const [selectedState, setSelectedState] = useState<string>(companyProfile.state || 'Tamil Nadu');
     const [rangeModal, setRangeModal] = useState({ isOpen: false, reportType: '', fromMonth: globalMonth, fromYear: globalYear, toMonth: globalMonth, toYear: globalYear });
-    const [msgModal, setMsgModal] = useState({ isOpen: false, title: '', message: '', type: 'error' as 'error' | 'success', onConfirm: null as any });
+    const [msgModal, setMsgModal] = useState({ isOpen: false, title: '', message: '', type: 'error' as 'error' | 'success' | 'info', onConfirm: null as any });
+
+    const [taxReportMode, setTaxReportMode] = useState<'Month' | 'Period'>('Month');
+    const [taxFromMonth, setTaxFromMonth] = useState(globalMonth);
+    const [taxFromYear, setTaxFromYear] = useState(globalYear);
+    const [taxToMonth, setTaxToMonth] = useState(globalMonth);
+    const [taxToYear, setTaxToYear] = useState(globalYear);
 
     const currentForms = useMemo(() => STATE_FORM_MAPPINGS[selectedState] || STATE_FORM_MAPPINGS['Default'], [selectedState]);
 
@@ -88,44 +104,74 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
     const handleDownload = async (reportName: string, format: 'PDF' | 'Excel' | 'Text') => {
         const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
-        if (currentData.length === 0) {
-            setMsgModal({ isOpen: true, title: 'No Data Found', message: `No final records found for ${globalMonth} ${globalYear}. Please finalize payroll first.`, type: 'error', onConfirm: null });
-            return;
-        }
         const fileName = getStandardFileName(reportName, companyProfile, globalMonth, globalYear);
         let savedPath: string | null = null;
 
         try {
-            if (reportName.includes('PF ECR')) {
-                savedPath = await generatePFECR(currentData, employees, config, format as 'Excel' | 'Text', fileName);
-            } else if (reportName === 'PF ECR Arrears') {
-                const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
-                if (!batch) throw new Error(`No arrears processed for ${globalMonth} ${globalYear}`);
-                savedPath = format === 'Excel' ? await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName) : await generateArrearECRText(batch, payrollHistory, employees, config, fileName);
-            } else if (reportName.includes('ESI Monthly')) {
-                savedPath = await generateESIReturn(currentData, employees, 'Excel', fileName, companyProfile);
-            } else if (reportName.includes('Form 12A')) {
-                savedPath = await generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
-            } else if (reportName.includes('Gratuity')) {
-                savedPath = await generateGratuityReport(employees, companyProfile);
-            } else if (reportName.includes('Bonus')) {
-                savedPath = await generateBonusReport(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, companyProfile, format as 'PDF' | 'Excel');
-            } else if (reportName.includes('PT Report')) {
-                savedPath = await generatePTReport(currentData, employees, fileName, companyProfile);
-            } else if (reportName.includes('TDS Report')) {
-                savedPath = await generateTDSReport(currentData, employees, fileName, companyProfile);
-            } else if (reportName.includes('ESI Exit')) {
-                savedPath = await generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
-            } else if (reportName.includes('Form B')) {
-                savedPath = await generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
-            } else if (reportName.includes('Form C')) {
-                savedPath = await generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
-            } else if (reportName === 'Wage Register') {
-                savedPath = await generateStateWageRegister(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.wage);
-            } else if (reportName === 'Wage Slip') {
-                savedPath = await generateStatePaySlip(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.slip);
-            } else if (reportName === 'Advance Register') {
-                savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
+            if (taxReportMode === 'Period' && ['PT Report', 'TDS Report', 'Gratuity', 'Bonus', 'LWF Report'].includes(reportName)) {
+                if (reportName === 'PT Report') savedPath = await generateConsolidatedPTReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                else if (reportName === 'TDS Report') savedPath = await generateConsolidatedTDSReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                else if (reportName === 'Bonus') savedPath = await generateConsolidatedBonusReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                else if (reportName === 'Gratuity') savedPath = await generateConsolidatedGratuityReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                else if (reportName === 'LWF Report') savedPath = await generateConsolidatedLWFReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+            } else {
+                if (currentData.length === 0 && !['Employees Joined', 'Employees Left'].includes(reportName)) {
+                    setMsgModal({ isOpen: true, title: 'No Data Found', message: `No payroll records found for ${globalMonth} ${globalYear}.`, type: 'error', onConfirm: null });
+                    return;
+                }
+                if (reportName.includes('PF ECR')) {
+                    savedPath = await generatePFECR(currentData, employees, config, format as 'Excel' | 'Text', fileName);
+                } else if (reportName === 'PF ECR Arrears') {
+                    const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
+                    if (!batch) throw new Error(`No arrears processed for ${globalMonth} ${globalYear}`);
+                    savedPath = format === 'Excel' ? await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName) : await generateArrearECRText(batch, payrollHistory, employees, config, fileName);
+                } else if (reportName.includes('ESI Monthly')) {
+                    savedPath = await generateESIReturn(currentData, employees, 'Excel', fileName, companyProfile);
+                } else if (reportName.includes('Form 12A')) {
+                    savedPath = await generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
+                } else if (reportName === 'Employees Joined') {
+                    const monthIdx = monthsArr.indexOf(globalMonth);
+                    const hasData = employees.some(emp => emp.doj && new Date(emp.doj).getMonth() === monthIdx && new Date(emp.doj).getFullYear() === globalYear);
+                    if (!hasData) {
+                        setMsgModal({ isOpen: true, title: 'Info', message: `There are no Employees Joined During : ${globalMonth} , ${globalYear}`, type: 'info', onConfirm: null });
+                        return;
+                    }
+                    savedPath = format === 'PDF' ? await generateJoinedEmployeesPDF(employees, globalMonth, globalYear, companyProfile) : await generateJoinedEmployeesReport(employees, globalMonth, globalYear, companyProfile);
+                } else if (reportName === 'Employees Left') {
+                    const monthIdx = monthsArr.indexOf(globalMonth);
+                    const hasData = employees.some(emp => emp.dol && new Date(emp.dol).getMonth() === monthIdx && new Date(emp.dol).getFullYear() === globalYear);
+                    if (!hasData) {
+                        setMsgModal({ isOpen: true, title: 'Info', message: `There are no Employees Left During : ${globalMonth} , ${globalYear}`, type: 'info', onConfirm: null });
+                        return;
+                    }
+                    savedPath = format === 'PDF' ? await generateEmployeesLeftPDF(employees, globalMonth, globalYear, companyProfile) : await generateLeftEmployeesReport(employees, globalMonth, globalYear, companyProfile);
+                } else if (reportName.includes('Gratuity')) {
+                    savedPath = await generateGratuityReport(employees, companyProfile, format as any);
+                } else if (reportName.includes('Bonus')) {
+                    savedPath = await generateBonusReport(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, companyProfile, format as 'PDF' | 'Excel');
+                } else if (reportName.includes('PT Report')) {
+                    savedPath = await generatePTReport(currentData, employees, fileName, companyProfile, globalMonth, globalYear, format as any);
+                } else if (reportName.includes('TDS Report')) {
+                    savedPath = await generateTDSReport(currentData, employees, fileName, companyProfile, globalMonth, globalYear, format as any);
+                } else if (reportName === 'LWF Report') {
+                    savedPath = await generateLWFReport(currentData, employees, fileName, companyProfile, format as any);
+                } else if (reportName.includes('ESI Exit')) {
+                    savedPath = await generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
+                } else if (reportName.includes('Form B')) {
+                    savedPath = await generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
+                } else if (reportName.includes('Form C')) {
+                    savedPath = await generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
+                } else if (reportName === 'Wage Register') {
+                    savedPath = await generateStateWageRegister(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.wage);
+                } else if (reportName === 'Wage Slip') {
+                    savedPath = await generateStatePaySlip(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.slip);
+                } else if (reportName === 'Advance Register') {
+                    savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
+                } else if (reportName === 'PF 3A') {
+                    savedPath = await generatePFForm3A(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, undefined, companyProfile);
+                } else if (reportName === 'PF 6A') {
+                    savedPath = await generatePFForm6A(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, companyProfile);
+                }
             }
 
             if (savedPath) _showAlert('success', 'Report Generated', `Saved as ${fileName}`, () => openSavedReport(savedPath), undefined, 'Open Report', undefined, undefined, 2);
@@ -148,7 +194,14 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         } catch (err: any) { setMsgModal({ isOpen: true, title: 'Error', message: err.message, type: 'error', onConfirm: null }); }
     };
 
-    const ReportCard = ({ title, icon: Icon, color, reports, headerAction }: { title: string, icon: any, color: string, reports: { label: string, action: () => void, format?: string, textColor?: string }[], headerAction?: React.ReactNode }) => (
+    const ReportCard = ({ title, icon: Icon, color, reports, headerAction, subHeader }: { 
+        title: string, 
+        icon: any, 
+        color: string, 
+        reports: { label: string, action: (format?: any) => void, format?: string, textColor?: string }[], 
+        headerAction?: React.ReactNode,
+        subHeader?: React.ReactNode 
+    }) => (
         <div className={`bg-[#1e293b] rounded-xl border border-slate-800 shadow-lg overflow-hidden group transition-all h-full ${isWin7 ? `hover:border-${color}-500/50` : 'hover:border-slate-700'}`}>
             <div className={`p-4 flex items-center justify-between border-b border-slate-800 ${isWin7 ? `bg-gradient-to-r from-[#0f172a] to-[#1e293b]` : 'bg-[#0f172a]'}`}>
                 <div className="flex items-center gap-3">
@@ -157,12 +210,26 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 </div>
                 {headerAction}
             </div>
+            {subHeader && (
+                <div className="px-4 py-2 border-b border-slate-800/50 bg-[#0f1728]/30 animate-in slide-in-from-top-2 duration-300">
+                    {subHeader}
+                </div>
+            )}
             <div className="p-3 grid grid-cols-1 gap-2">
                 {reports.map((r, i) => (
-                    <button key={i} onClick={r.action} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900/40 hover:bg-slate-800 border border-slate-800/50 transition-all text-left group/btn">
-                        <span className={`text-[11px] font-bold ${r.textColor || 'text-slate-300'} group-hover/btn:text-white`}>{r.label}</span>
-                        <span className="text-[9px] font-black text-slate-500 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">{r.format || 'PDF'}</span>
-                    </button>
+                    <div key={i} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900/40 border border-slate-800/50 transition-all text-left">
+                        <span className={`text-[11px] font-bold ${r.textColor || 'text-slate-300'}`}>{r.label}</span>
+                        <div className="flex gap-1.5">
+                            {r.format === 'BOTH' ? (
+                                <>
+                                    <button onClick={() => r.action('Excel')} className="text-[9px] font-black text-slate-400 hover:text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800 hover:border-slate-600 transition-colors" title="Download XLSX">XLSX</button>
+                                    <button onClick={() => r.action('PDF')} className="text-[9px] font-black text-slate-400 hover:text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800 hover:border-slate-600 transition-colors" title="Download PDF">PDF</button>
+                                </>
+                            ) : (
+                                <button onClick={() => r.action()} className="text-[9px] font-black text-slate-400 hover:text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800 hover:border-slate-600 transition-colors ">{r.format || 'PDF'}</button>
+                            )}
+                        </div>
+                    </div>
                 ))}
             </div>
         </div>
@@ -203,14 +270,57 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 <ReportCard title="ESI Act, 1948" icon={ShieldCheck} color="pink" reports={[
                     { label: 'ESI Monthly Return', action: () => handleDownload('ESI Monthly', 'Excel'), format: 'XLSX' },
                     { label: 'Form 5 (Contribution)', action: () => openRangeModal('Form 5'), format: 'PDF' },
-                    { label: 'ESI Exit/OoC IP', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' }
+                    { label: 'ESI Exit/OoC IP', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' },
+                    { label: 'Employees Joined During the Month', action: (fmt) => handleDownload('Employees Joined', fmt), format: 'BOTH', textColor: 'text-sky-400' },
+                    { label: 'Employees Left During the Month', action: (fmt) => handleDownload('Employees Left', fmt), format: 'BOTH', textColor: 'text-rose-400' }
                 ]} />
 
-                <ReportCard title="Taxes & Benefits" icon={FileText} color="amber" reports={[
-                    { label: 'Professional Tax Report', action: () => handleDownload('PT Report', 'Excel'), format: 'XLSX' },
-                    { label: 'TDS (Income Tax) Report', action: () => handleDownload('TDS Report', 'Excel'), format: 'XLSX' },
-                    { label: 'Gratuity Valuation', action: () => handleDownload('Gratuity', 'PDF') },
-                    { label: 'Bonus Statement', action: () => handleDownload('Bonus', 'PDF') }
+                <ReportCard 
+                    title="Taxes & Benefits" 
+                    icon={FileText} 
+                    color="amber" 
+                    headerAction={
+                        <div className="flex bg-slate-900/80 rounded-lg p-0.5 border border-slate-700 mx-1 shadow-inner">
+                            {['Month', 'Period'].map((m) => (
+                                <button
+                                    key={m}
+                                    onClick={() => setTaxReportMode(m as any)}
+                                    className={`px-3 py-1 rounded text-[9px] font-black uppercase tracking-tighter transition-all ${taxReportMode === m ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                                >
+                                    {m}
+                                </button>
+                            ))}
+                        </div>
+                    }
+                    subHeader={taxReportMode === 'Period' ? (
+                        <div className="flex items-center justify-center gap-2">
+                            <div className="flex items-center gap-1">
+                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">From:</span>
+                                 <select title="From Month" value={taxFromMonth} onChange={e => setTaxFromMonth(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] font-bold text-slate-300 outline-none hover:border-slate-500 transition-colors">
+                                    {monthsArr.map(m => <option key={m} value={m}>{m.substring(0,3)}</option>)}
+                                </select>
+                                <select title="From Year" value={taxFromYear} onChange={e => setTaxFromYear(+e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] font-bold text-slate-300 outline-none hover:border-slate-500 transition-colors">
+                                    {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                                </select>
+                            </div>
+                            <div className="w-4 h-[1px] bg-slate-700"></div>
+                            <div className="flex items-center gap-1">
+                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">To:</span>
+                                <select title="To Month" value={taxToMonth} onChange={e => setTaxToMonth(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] font-bold text-amber-500 outline-none hover:border-amber-500/50 transition-colors">
+                                    {monthsArr.map(m => <option key={m} value={m}>{m.substring(0,3)}</option>)}
+                                </select>
+                                <select title="To Year" value={taxToYear} onChange={e => setTaxToYear(+e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] font-bold text-amber-500 outline-none hover:border-amber-500/50 transition-colors">
+                                    {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    ) : null}
+                    reports={[
+                    { label: 'Professional Tax Report', action: (fmt) => handleDownload('PT Report', fmt), format: 'BOTH' },
+                    { label: 'TDS (Income Tax) Report', action: (fmt) => handleDownload('TDS Report', fmt), format: 'BOTH' },
+                    { label: 'Labour Welfare Fund', action: (fmt) => handleDownload('LWF Report', fmt), format: 'BOTH' },
+                    { label: 'Gratuity Statement', action: (fmt) => handleDownload('Gratuity', fmt), format: 'BOTH', textColor: 'text-fuchsia-400' },
+                    { label: 'Bonus Statement', action: (fmt) => handleDownload('Bonus', fmt), format: 'BOTH', textColor: 'text-lime-400' }
                 ]} />
             </div>
 
@@ -277,8 +387,14 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             {msgModal.isOpen && (
                 <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4">
                     <div className="bg-[#1e293b] max-w-sm w-full rounded-2xl border border-slate-700 p-8 text-center space-y-4 shadow-2xl">
-                        <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${msgModal.type === 'error' ? 'bg-red-950 text-red-500' : 'bg-emerald-950 text-emerald-500'}`}>
-                            {msgModal.type === 'error' ? <AlertTriangle size={32} /> : <CheckCircle size={32} />}
+                         <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${
+                            msgModal.type === 'error' ? 'bg-red-950 text-red-500' : 
+                            msgModal.type === 'info' ? 'bg-sky-950 text-sky-500' :
+                            'bg-emerald-950 text-emerald-500'
+                        }`}>
+                            {msgModal.type === 'error' ? <AlertTriangle size={32} /> : 
+                             msgModal.type === 'info' ? <Info size={32} /> :
+                             <CheckCircle size={32} />}
                         </div>
                         <h3 className="text-lg font-bold text-white uppercase">{msgModal.title}</h3>
                         <p className="text-slate-400 text-sm">{msgModal.message}</p>

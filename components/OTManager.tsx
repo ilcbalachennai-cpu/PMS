@@ -3,6 +3,7 @@ import { Upload, Save, Edit2, Download, Calculator } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, OTRecord, PayrollResult, StatutoryConfig, CompanyProfile } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
+import { formatIndianNumber } from '../utils/formatters';
 
 interface OTManagerProps {
     employees: Employee[];
@@ -236,7 +237,7 @@ const OTManager: React.FC<OTManagerProps> = ({
                                         <div className="text-[9px] text-slate-500 font-mono">{emp.id}</div>
                                     </td>
                                     <td className="px-3 py-3 text-right">
-                                        <div className="text-[11px] text-sky-400 font-mono font-bold">₹ {Math.round(calculateOTRate(emp)).toLocaleString()}</div>
+                                        <div className="text-[11px] text-sky-400 font-mono font-bold">₹ {formatIndianNumber(Math.round(calculateOTRate(emp)))}</div>
                                     </td>
                                     <td className="px-3 py-3 text-center">
                                         <input
@@ -261,7 +262,7 @@ const OTManager: React.FC<OTManagerProps> = ({
                                         />
                                     </td>
                                     <td className="px-5 py-3 text-right">
-                                        <div className="text-xs font-black text-emerald-400 font-mono">₹ {record.otAmount.toLocaleString()}</div>
+                                        <div className="text-xs font-black text-emerald-400 font-mono">₹ {formatIndianNumber(record.otAmount)}</div>
                                     </td>
                                 </tr>
                             );

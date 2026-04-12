@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
+import { formatIndianNumber } from '../utils/formatters';
 
 // ==========================================
 // UTILITIES
@@ -114,11 +115,37 @@ export const autoSizeSheet = (ws: XLSX.WorkSheet) => {
     ws['!cols'] = cols;
 };
 
-export const generateExcelReport = async (data: any[], sheetName: string, fileName: string): Promise<string | null> => {
+export interface ReportHeaderInfo {
+    company: string;
+    type: string;
+    period: string;
+    regNo?: string;
+}
+
+export const generateExcelReport = async (data: any[], sheetName: string, fileName: string, headerInfo?: ReportHeaderInfo): Promise<string | null> => {
     if (!data || data.length === 0) {
         throw new Error('No Data Available to Generate Report');
     }
-    const ws = XLSX.utils.json_to_sheet(data);
+
+    let ws: XLSX.WorkSheet;
+    if (headerInfo) {
+        const headerData = [
+            [headerInfo.company.toUpperCase()],
+            [headerInfo.regNo ? headerInfo.regNo.toUpperCase() : ''],
+            [headerInfo.type],
+            [headerInfo.period],
+            [] // Spacer row
+        ];
+        ws = XLSX.utils.aoa_to_sheet(headerData);
+        XLSX.utils.sheet_add_json(ws, data, { origin: 'A6' });
+        
+        // Basic styling for headers if supported by the environment (though standard xlsx doesn't do much style without extra libs)
+        // At least we can set row 1-3 to be bold in our logic if we had a styler, 
+        // but simple AOA is a great start.
+    } else {
+        ws = XLSX.utils.json_to_sheet(data);
+    }
+
     autoSizeSheet(ws);
 
     const wb = XLSX.utils.book_new();
@@ -210,21 +237,56 @@ export const generateTemplateWorkbook = async (wb: XLSX.WorkBook, fileName: stri
 };
 
 
-export const generatePDFTableReport = async (title: string, headers: string[], data: any[][], fileName: string, orientation: 'p' | 'l', summary: string, company: CompanyProfile, columnStyles?: any): Promise<string | null> => {
+export const generatePDFTableReport = async (title: string, headers: string[], data: any[][], fileName: string, orientation: 'p' | 'l', summary: string, company: CompanyProfile, columnStyles?: any, period?: string, regNo?: string): Promise<string | null> => {
     if (!data || data.length === 0) {
         throw new Error('No Data Available to Generate Report');
     }
     const doc = new jsPDF(orientation);
-    doc.setFontSize(14);
-    doc.text(company.establishmentName || 'Company Name', 14, 15);
-    doc.setFontSize(10);
-    doc.text(title, 14, 22);
-    if (summary) doc.text(summary, 14, 28);
+    const pageW = doc.internal.pageSize.getWidth();
+    let y = 15;
+
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text((company.establishmentName || 'Company Name').toUpperCase(), pageW / 2, y, { align: 'center' });
+    y += 7;
+
+    if (period && period.includes('TDS')) { // Special case check if needed or just use passed title
+    }
+
+    // Centered professional 3/4-line header
+    if (regNo) {
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(regNo.toUpperCase(), pageW / 2, y, { align: 'center' });
+        y += 6;
+    }
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(title.toUpperCase(), pageW / 2, y, { align: 'center' });
+    y += 6;
+
+    if (period) {
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.text(period, pageW / 2, y, { align: 'center' });
+        y += 7;
+    }
+
+    if (summary) {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(100);
+        doc.text(summary, pageW / 2, y, { align: 'center' });
+        y += 5;
+    }
+
+    doc.setTextColor(0);
 
     autoTable(doc, {
         head: [headers],
         body: data,
-        startY: 35,
+        startY: y + 5,
         theme: 'grid',
         styles: { fontSize: 8 },
         headStyles: { fillColor: [41, 128, 185] },
@@ -727,7 +789,7 @@ export const generatePaySlipsPDF = async (results: PayrollResult[], employees: E
         doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(50, 100, 200);
         const amountInWords = numberToWords(Math.round(r.netPay)) + " Rupees Only";
         doc.text(amountInWords, 20, finalY + 18);
-        doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text(`Rs. ${Math.round(r.netPay).toLocaleString('en-IN')}`, 185, finalY + 15, { align: 'right' });
+        doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text(`Rs. ${formatIndianNumber(Math.round(r.netPay))}`, 185, finalY + 15, { align: 'right' });
         const footerY = finalY + 40; doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100); doc.text("This is a computer-generated document and does not require a signature.", 105, footerY, { align: 'center' });
         if (isPropPFCapped) {
             doc.setTextColor(0, 0, 128); // Navy Blue
@@ -840,7 +902,7 @@ export const generateSinglePayslipU8 = async (
     doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(50, 100, 200);
     const amountInWords = numberToWords(Math.round(result.netPay)) + " Rupees Only";
     doc.text(amountInWords, 20, finalY + 18);
-    doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text(`Rs. ${Math.round(result.netPay).toLocaleString('en-IN')}`, 185, finalY + 15, { align: 'right' });
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text(`Rs. ${formatIndianNumber(Math.round(result.netPay))}`, 185, finalY + 15, { align: 'right' });
 
     const footerY = finalY + 40;
     doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
@@ -1428,16 +1490,16 @@ export const generateFormB = async (results: PayrollResult[], employees: Employe
             r.employeeId,
             emp?.name || '',
             emp?.designation || '',
-            basic.toLocaleString('en-IN'),
-            da.toLocaleString('en-IN'),
-            retn.toLocaleString('en-IN'),
-            otherAllow.toLocaleString('en-IN'),
-            overtime.toLocaleString('en-IN'),
-            gross.toLocaleString('en-IN'),
-            pf.toLocaleString('en-IN'),
-            esi.toLocaleString('en-IN'),
-            otherDeductions.toLocaleString('en-IN'),
-            net.toLocaleString('en-IN')
+            formatIndianNumber(basic),
+            formatIndianNumber(da),
+            formatIndianNumber(retn),
+            formatIndianNumber(otherAllow),
+            formatIndianNumber(overtime),
+            formatIndianNumber(gross),
+            formatIndianNumber(pf),
+            formatIndianNumber(esi),
+            formatIndianNumber(otherDeductions),
+            formatIndianNumber(net)
         ];
     });
 
@@ -1968,15 +2030,21 @@ export const generateGratuityReport = async (employees: Employee[], companyProfi
     const headers = ['ID', 'Name', 'DOJ', 'Years', 'Salary', 'Gratuity Accrued'];
     const data = employees.map(e => [e.id, e.name, formatDateInd(e.doj), '0', Math.round(e.basicPay + e.da), '0']);
     const fileName = getStandardFileName('Gratuity_Report', companyProfile, 'All', 'N_A');
-    return await generatePDFTableReport('Gratuity Liability Statement', headers, data, fileName, 'l', '', companyProfile);
+    return await generatePDFTableReport('Gratuity Liability Statement', headers, data, fileName, 'l', '', companyProfile, {}, 'As of Date');
 };
 
 export const generateBonusReport = async (_history: PayrollResult[], employees: Employee[], _config: StatutoryConfig, sM: string, sY: number, _eM: string, _eY: number, company: CompanyProfile, format: 'PDF' | 'Excel'): Promise<string | null> => {
     const headers = ['ID', 'Name', 'Wages', 'Bonus Payable'];
     const data = employees.map(e => [e.id, e.name, '0', '0']);
     const fileName = getStandardFileName('Bonus_Report', company, sM, sY);
-    if (format === 'Excel') return await generateExcelReport([{ ID: '', Name: '', Wages: 0, Bonus: 0 }], 'Bonus', fileName);
-    else return await generatePDFTableReport('Form C (Bonus)', headers, data, fileName, 'l', '', company);
+    if (format === 'Excel') {
+        return await generateExcelReport([{ ID: '', Name: '', Wages: 0, Bonus: 0 }], 'Bonus', fileName, {
+            company: company.establishmentName || 'Company',
+            type: 'Bonus Statement',
+            period: `For the Month of: ${sM} ${sY}`
+        });
+    }
+    else return await generatePDFTableReport('Form C (Bonus)', headers, data, fileName, 'l', '', company, {}, `For the Month of: ${sM} ${sY}`);
 };
 
 export const generateESIForm5 = async (payrollHistory: PayrollResult[], employees: Employee[], halfYearPeriod: 'Apr-Sep' | 'Oct-Mar', year: number, companyProfile: CompanyProfile): Promise<string | null> => {
@@ -2289,7 +2357,7 @@ export const generateESIReturn = async (results: PayrollResult[], employees: Emp
     return null;
 };
 
-export const generatePTReport = (results: PayrollResult[], employees: Employee[], fileName: string, _companyProfile: CompanyProfile): Promise<string | null> => {
+export const generatePTReport = (results: PayrollResult[], employees: Employee[], fileName: string, companyProfile: CompanyProfile, month: string, year: number, format: 'Excel' | 'PDF'): Promise<string | null> => {
     const data = results.filter(r => r.deductions.pt > 0).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
         return {
@@ -2299,10 +2367,23 @@ export const generatePTReport = (results: PayrollResult[], employees: Employee[]
             'PT Deducted': r.deductions.pt
         };
     });
-    return generateExcelReport(data, 'PT Report', fileName);
+
+    if (format === 'PDF') {
+        const headers = ['Employee ID', 'Name', 'Gross Salary', 'PT Deducted'];
+        const tableBody = data.map(r => [r['Employee ID'], r['Name'] || '', r['Gross Salary'], r['PT Deducted']]);
+        const regStr = companyProfile.ptNo ? `PT Reg No: ${companyProfile.ptNo}` : '';
+        return generatePDFTableReport('Professional Tax Report', headers, tableBody, fileName, 'p', '', companyProfile, { 2: { halign: 'right' }, 3: { halign: 'right' } }, `For the Month of: ${month} ${year}`, regStr);
+    }
+
+    return generateExcelReport(data, 'PT Report', fileName, {
+        company: companyProfile.establishmentName || 'Company',
+        type: 'Professional Tax Report',
+        period: `For the Month of: ${month} ${year}`,
+        regNo: companyProfile.ptNo ? `PT Reg No: ${companyProfile.ptNo}` : ''
+    });
 };
 
-export const generateTDSReport = (results: PayrollResult[], employees: Employee[], fileName: string, _companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateTDSReport = (results: PayrollResult[], employees: Employee[], fileName: string, companyProfile: CompanyProfile, month: string, year: number, format: 'Excel' | 'PDF'): Promise<string | null> => {
     const data = results.filter(r => r.deductions.it > 0).map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
         return {
@@ -2312,7 +2393,20 @@ export const generateTDSReport = (results: PayrollResult[], employees: Employee[
             'TDS Deducted': r.deductions.it
         };
     });
-    return generateExcelReport(data, 'TDS Report', fileName);
+
+    if (format === 'PDF') {
+        const headers = ['Employee ID', 'Name', 'PAN', 'TDS Deducted'];
+        const tableBody = data.map(r => [r['Employee ID'], r['Name'] || '', r['PAN'] || '-', r['TDS Deducted']]);
+        const regStr = (companyProfile.tan || companyProfile.pan) ? `TDS NO (TAN): ${companyProfile.tan || companyProfile.pan}` : '';
+        return generatePDFTableReport('TDS (Income Tax) Report', headers, tableBody, fileName, 'p', '', companyProfile, { 3: { halign: 'right' } }, `For the Month of: ${month} ${year}`, regStr);
+    }
+
+    return generateExcelReport(data, 'TDS Report', fileName, {
+        company: companyProfile.establishmentName || 'Company',
+        type: 'TDS (Income Tax) Report',
+        period: `For the Month of: ${month} ${year}`,
+        regNo: (companyProfile.tan || companyProfile.pan) ? `TDS NO (TAN): ${companyProfile.tan || companyProfile.pan}` : ''
+    });
 };
 
 export const generateCodeOnWagesReport = (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile) => {
@@ -2962,4 +3056,548 @@ export const generateArrearECRExcel = async (
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Arrear ECR details');
     return await generateExcelWorkbook(wb, fileName);
+};
+
+export const generateJoinedEmployeesReport = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthIdx = months.indexOf(month);
+
+    const filtered = employees.filter(emp => {
+        if (!emp.doj) return false;
+        const d = new Date(emp.doj);
+        return d.getMonth() === monthIdx && d.getFullYear() === year;
+    });
+
+    const data = filtered.map(emp => ({
+        'Employee ID': emp.id,
+        'Full Name': emp.name,
+        'Designation': emp.designation,
+        'Division': emp.division || '-',
+        'Department': emp.department || '-',
+        'Gender': emp.gender,
+        'Date of Joining': formatDateInd(emp.doj),
+        'Date of Birth': formatDateInd(emp.dob),
+        'Father/Spouse Name': emp.fatherSpouseName,
+        'Relationship': emp.relationship,
+        'Mobile No': emp.mobile,
+        'Email': emp.email || '-',
+        'Bank Account': emp.bankAccount,
+        'IFSC Code': emp.ifsc,
+        'PAN': emp.pan,
+        'Aadhaar Number': emp.aadhaarNumber,
+        'UAN Number': emp.uanc,
+        'ESI Number': emp.esiNumber || '-'
+    }));
+
+    const fileName = getStandardFileName('Employees_Joined', companyProfile, month, year);
+    return await generateExcelReport(data, 'Joined_Employees', fileName);
+};
+
+export const generateLeftEmployeesReport = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthIdx = months.indexOf(month);
+
+    const filtered = employees.filter(emp => {
+        if (!emp.dol) return false;
+        const d = new Date(emp.dol);
+        return d.getMonth() === monthIdx && d.getFullYear() === year;
+    });
+
+    const data = filtered.map(emp => ({
+        'Employee ID': emp.id,
+        'Full Name': emp.name,
+        'Designation': emp.designation,
+        'Division': emp.division || '-',
+        'Department': emp.department || '-',
+        'Gender': emp.gender,
+        'Date of Joining': formatDateInd(emp.doj),
+        'Date of Leaving': formatDateInd(emp.dol),
+        'Leaving Reason': emp.leavingReason || '-',
+        'Date of Birth': formatDateInd(emp.dob),
+        'Father/Spouse Name': emp.fatherSpouseName,
+        'Relationship': emp.relationship,
+        'Mobile No': emp.mobile,
+        'Email': emp.email || '-',
+        'Bank Account': emp.bankAccount,
+        'IFSC Code': emp.ifsc,
+        'PAN': emp.pan,
+        'Aadhaar Number': emp.aadhaarNumber,
+        'UAN Number': emp.uanc,
+        'ESI Number': emp.esiNumber || '-'
+    }));
+
+    const fileName = getStandardFileName('Employees_Left', companyProfile, month, year);
+    return await generateExcelReport(data, 'Left_Employees', fileName);
+};
+
+export const generateConsolidatedPTReport = async (history: PayrollResult[], employees: Employee[], fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile, format: 'Excel' | 'PDF' = 'Excel'): Promise<string | null> => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const range = [];
+    const start = fromY * 12 + months.indexOf(fromM);
+    const end = toY * 12 + months.indexOf(toM);
+    for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
+
+    const empDataItems: any[] = [];
+    const activeEmpIds = Array.from(new Set(history.filter(r => range.some(p => p.m === r.month && p.y === r.year)).map(r => r.employeeId)));
+
+    activeEmpIds.forEach((id, idx) => {
+        const emp = employees.find(e => e.id === id);
+        const row: any = { 'Sl No': idx + 1, 'EMPID': id, 'Name': emp?.name || 'Unknown' };
+        let totalGross = 0;
+        let totalPT = 0;
+
+        range.forEach(p => {
+            const res = history.find(r => r.employeeId === id && r.month === p.m && r.year === p.y);
+            const gross = res ? res.earnings.total : 0;
+            const pt = res ? res.deductions.pt : 0;
+            row[`${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`] = pt; // We show PT in the month columns
+            totalGross += gross;
+            totalPT += pt;
+        });
+
+        row['Total Gross'] = totalGross;
+        row['Tax on Total Gross'] = totalPT;
+        
+        if (totalGross > 0 || totalPT > 0) {
+            row['Sl No'] = empDataItems.length + 1;
+            empDataItems.push(row);
+        }
+    });
+
+    const fileName = getStandardFileName('Consolidated_PT_Report', company, `${fromM}-${toM}`, `${fromY}-${toY}`);
+    const typeTitle = 'Consolidated Professional Tax Report';
+    const periodStr = `From ${fromM} ${fromY} To ${toM} ${toY}`;
+
+    if (format === 'PDF') {
+        const monthCols = range.map(p => `${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`);
+        const headers = ['Sl No', 'EMPID', 'Name', ...monthCols, 'Total Gross', 'Total PT'];
+        const tableBody = empDataItems.map(r => [
+            r['Sl No'], r['EMPID'], r['Name'],
+            ...monthCols.map(m => r[m]),
+            r['Total Gross'], r['Tax on Total Gross']
+        ]);
+        const regStr = company.ptNo ? `PT Reg No: ${company.ptNo}` : '';
+        return generatePDFTableReport(typeTitle, headers, tableBody, fileName, 'l', '', company, {}, periodStr, regStr);
+    }
+
+    // Summary Row for Excel
+    const summary: any = { 'Sl No': '', 'EMPID': 'TOTAL', 'Name': '' };
+    range.forEach(p => {
+        const key = `${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`;
+        summary[key] = empDataItems.reduce((sum, r) => sum + (r[key] || 0), 0);
+    });
+    summary['Total Gross'] = empDataItems.reduce((sum, r) => sum + r['Total Gross'], 0);
+    summary['Tax on Total Gross'] = empDataItems.reduce((sum, r) => sum + r['Tax on Total Gross'], 0);
+    empDataItems.push(summary);
+
+    return await generateExcelReport(empDataItems, 'PT_Register', fileName, {
+        company: company.establishmentName || 'Company',
+        type: typeTitle,
+        period: periodStr,
+        regNo: company.ptNo ? `PT Reg No: ${company.ptNo}` : ''
+    });
+};
+
+export const generateConsolidatedTDSReport = async (history: PayrollResult[], employees: Employee[], fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile, format: 'Excel' | 'PDF' = 'Excel'): Promise<string | null> => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const range = [];
+    const start = fromY * 12 + months.indexOf(fromM);
+    const end = toY * 12 + months.indexOf(toM);
+    for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
+
+    const empDataItems: any[] = [];
+    const activeEmpIds = Array.from(new Set(history.filter(r => range.some(p => p.m === r.month && p.y === r.year)).map(r => r.employeeId)));
+
+    activeEmpIds.forEach((id, idx) => {
+        const emp = employees.find(e => e.id === id);
+        const row: any = { 'Sl No': idx + 1, 'EMPID': id, 'Name': emp?.name || 'Unknown', 'PAN': emp?.pan || '-' };
+        let totalTax = 0;
+
+        range.forEach(p => {
+            const res = history.find(r => r.employeeId === id && r.month === p.m && r.year === p.y);
+            const tax = res ? res.deductions.it : 0;
+            row[`${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`] = tax;
+            totalTax += tax;
+        });
+
+        row['Total Tax'] = totalTax;
+        
+        if (totalTax > 0) {
+            row['Sl No'] = empDataItems.length + 1;
+            empDataItems.push(row);
+        }
+    });
+
+    const fileName = getStandardFileName('Consolidated_TDS_Report', company, `${fromM}-${toM}`, `${fromY}-${toY}`);
+    const typeTitle = 'Consolidated TDS (Income Tax) Report';
+    const periodStr = `From ${fromM} ${fromY} To ${toM} ${toY}`;
+
+    if (format === 'PDF') {
+        const monthCols = range.map(p => `${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`);
+        const headers = ['Sl No', 'EMPID', 'Name', 'PAN', ...monthCols, 'Total Tax'];
+        const tableBody = empDataItems.map(r => [
+            r['Sl No'], r['EMPID'], r['Name'], r['PAN'],
+            ...monthCols.map(m => r[m]),
+            r['Total Tax']
+        ]);
+        const regStr = (company.tan || company.pan) ? `TDS NO (TAN): ${company.tan || company.pan}` : '';
+        return generatePDFTableReport(typeTitle, headers, tableBody, fileName, 'l', '', company, {}, periodStr, regStr);
+    }
+
+    return await generateExcelReport(empDataItems, 'TDS_Register', fileName, {
+        company: company.establishmentName || 'Company',
+        type: typeTitle,
+        period: periodStr,
+        regNo: (company.tan || company.pan) ? `TDS NO (TAN): ${company.tan || company.pan}` : ''
+    });
+};
+
+export const generateConsolidatedBonusReport = async (history: PayrollResult[], employees: Employee[], config: StatutoryConfig, fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile, format: 'Excel' | 'PDF' = 'Excel'): Promise<string | null> => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const range = [];
+    const start = fromY * 12 + months.indexOf(fromM);
+    const end = toY * 12 + months.indexOf(toM);
+    for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
+
+    const empDataItems: any[] = [];
+    const activeEmpIds = Array.from(new Set(history.filter(r => range.some(p => p.m === r.month && p.y === r.year)).map(r => r.employeeId)));
+
+    activeEmpIds.forEach((id, idx) => {
+        const emp = employees.find(e => e.id === id);
+        const row: any = { 'Sl No': idx + 1, 'EMPID': id, 'Name': emp?.name || 'Unknown' };
+        let totalWages = 0;
+
+        range.forEach(p => {
+            const res = history.find(r => r.employeeId === id && r.month === p.m && r.year === p.y);
+            let eligibleWages = 0;
+            if (res) {
+                const bc = config.bonusWagesComponents || { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false };
+                if (bc.basic) eligibleWages += res.earnings.basic;
+                if (bc.da) eligibleWages += res.earnings.da || 0;
+                if (bc.retaining) eligibleWages += res.earnings.retainingAllowance || 0;
+                if (bc.hra) eligibleWages += res.earnings.hra || 0;
+                if (bc.conveyance) eligibleWages += res.earnings.conveyance || 0;
+                if (bc.washing) eligibleWages += res.earnings.washing || 0;
+                if (bc.attire) eligibleWages += res.earnings.attire || 0;
+                if (bc.special1) eligibleWages += res.earnings.special1 || 0;
+                if (bc.special2) eligibleWages += res.earnings.special2 || 0;
+                if (bc.special3) eligibleWages += res.earnings.special3 || 0;
+            }
+            row[`${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`] = eligibleWages;
+            totalWages += eligibleWages;
+        });
+
+        row['Total Wages'] = totalWages;
+        row['Bonus Calculation'] = Math.round(totalWages * (config.bonusRate || 0.0833));
+        
+        // Filter: only add if there are eligible wages in the period
+        if (totalWages > 0) {
+            row['Sl No'] = empDataItems.length + 1;
+            empDataItems.push(row);
+        }
+    });
+
+    const fileName = getStandardFileName('Consolidated_Bonus_Report', company, `${fromM}-${toM}`, `${fromY}-${toY}`);
+    return await generateExcelReport(empDataItems, 'Bonus_Register', fileName, {
+        company: company.establishmentName || 'Company',
+        type: 'Consolidated Bonus Register',
+        period: `From ${fromM} ${fromY} To ${toM} ${toY}`
+    });
+};
+
+export const generateConsolidatedGratuityReport = async (history: PayrollResult[], employees: Employee[], config: StatutoryConfig, fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile): Promise<string | null> => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const range = [];
+    const start = fromY * 12 + months.indexOf(fromM);
+    const end = toY * 12 + months.indexOf(toM);
+    for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
+
+    const empDataItems: any[] = [];
+    const activeEmpIds = Array.from(new Set(history.filter(r => range.some(p => p.m === r.month && p.y === r.year)).map(r => r.employeeId)));
+
+    activeEmpIds.forEach((id, idx) => {
+        const emp = employees.find(e => e.id === id);
+        const row: any = { 'Sl No': idx + 1, 'EMPID': id, 'Name': emp?.name || 'Unknown' };
+        let totalWages = 0;
+
+        range.forEach(p => {
+            const res = history.find(r => r.employeeId === id && r.month === p.m && r.year === p.y);
+            let eligibleWages = 0;
+            if (res) {
+                const gc = config.gratuityWagesComponents || { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false };
+                if (gc.basic) eligibleWages += res.earnings.basic;
+                if (gc.da) eligibleWages += res.earnings.da || 0;
+                if (gc.retaining) eligibleWages += res.earnings.retainingAllowance || 0;
+                if (gc.hra) eligibleWages += res.earnings.hra || 0;
+                if (gc.conveyance) eligibleWages += res.earnings.conveyance || 0;
+                if (gc.washing) eligibleWages += res.earnings.washing || 0;
+                if (gc.attire) eligibleWages += res.earnings.attire || 0;
+                if (gc.special1) eligibleWages += res.earnings.special1 || 0;
+                if (gc.special2) eligibleWages += res.earnings.special2 || 0;
+                if (gc.special3) eligibleWages += res.earnings.special3 || 0;
+            }
+            row[`${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`] = eligibleWages;
+            totalWages += eligibleWages;
+        });
+
+        row['Total Wages'] = totalWages;
+        const monthsCount = range.length;
+        row['Gratuity Calculation'] = Math.round(((totalWages / monthsCount) * (15 / 26)) * (monthsCount / 12));
+        
+        // Filter: only add if there are eligible wages in the period
+        if (totalWages > 0) {
+            row['Sl No'] = empDataItems.length + 1;
+            empDataItems.push(row);
+        }
+    });
+
+    const fileName = getStandardFileName('Consolidated_Gratuity_Report', company, `${fromM}-${toM}`, `${fromY}-${toY}`);
+    return await generateExcelReport(empDataItems, 'Gratuity_Register', fileName, {
+        company: company.establishmentName || 'Company',
+        type: 'Consolidated Gratuity Register',
+        period: `From ${fromM} ${fromY} To ${toM} ${toY}`
+    });
+};
+
+export const generateLWFReport = async (results: PayrollResult[], employees: Employee[], fileName: string, company: CompanyProfile, format: 'Excel' | 'PDF'): Promise<string | null> => {
+    const data = results.filter(r => (r.deductions.lwf > 0 || r.employerContributions.lwf > 0)).map((r, idx) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        return {
+            'Sl No': idx + 1,
+            'EMPID': r.employeeId,
+            'Name': emp?.name || 'Unknown',
+            'UAN': emp?.uanc || '-',
+            'Gross Wages': r.earnings.total,
+            'Employee Share': r.deductions.lwf,
+            'Employer Share': r.employerContributions.lwf,
+            'Total Contribution': (r.deductions.lwf || 0) + (r.employerContributions.lwf || 0)
+        };
+    });
+
+    if (data.length === 0) return null;
+
+    if (format === 'PDF') {
+        const headers = ['Sl No', 'EMPID', 'Name', 'UAN', 'Gross Wages', 'EE Share', 'ER Share', 'Total'];
+        const tableBody = data.map(r => [r['Sl No'], r['EMPID'], r['Name'], r['UAN'], r['Gross Wages'], r['Employee Share'], r['Employer Share'], r['Total Contribution']]);
+        
+        const totals = {
+            gross: data.reduce((s, r) => s + r['Gross Wages'], 0),
+            ee: data.reduce((s, r) => s + r['Employee Share'], 0),
+            er: data.reduce((s, r) => s + r['Employer Share'], 0),
+            tot: data.reduce((s, r) => s + r['Total Contribution'], 0)
+        };
+        tableBody.push(['', 'TOTAL', '', '', totals.gross, totals.ee, totals.er, totals.tot]);
+
+        const regStr = (company.lwfRegNo || company.lin) ? `LWF REG NO: ${company.lwfRegNo || company.lin}` : '';
+        return generatePDFTableReport('Labour Welfare Fund Report', headers, tableBody, fileName, 'l', '', company, { 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' } }, `For the Month of: ${results[0]?.month} ${results[0]?.year}`, regStr);
+    }
+
+    // Summary Row for Excel
+    data.push({
+        'Sl No': '', 'EMPID': 'TOTAL', 'Name': '', 'UAN': '',
+        'Gross Wages': data.reduce((sum, r) => sum + r['Gross Wages'], 0),
+        'Employee Share': data.reduce((sum, r) => sum + r['Employee Share'], 0),
+        'Employer Share': data.reduce((sum, r) => sum + r['Employer Share'], 0),
+        'Total Contribution': data.reduce((sum, r) => sum + r['Total Contribution'], 0)
+    } as any);
+
+    return await generateExcelReport(data, 'LWF_Report', fileName, {
+        company: company.establishmentName || 'Company',
+        type: 'Labour Welfare Fund Report',
+        period: `For the Month of: ${results[0]?.month} ${results[0]?.year}`,
+        regNo: (company.lwfRegNo || company.lin) ? `LWF REG NO: ${company.lwfRegNo || company.lin}` : ''
+    });
+};
+
+export const generateConsolidatedLWFReport = async (history: PayrollResult[], employees: Employee[], fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile, format: 'Excel' | 'PDF' = 'Excel'): Promise<string | null> => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const range = [];
+    const start = fromY * 12 + months.indexOf(fromM);
+    const end = toY * 12 + months.indexOf(toM);
+    for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
+
+    const empDataItems: any[] = [];
+    const activeEmpIds = Array.from(new Set(history.filter(r => range.some(p => p.m === r.month && p.y === r.year)).map(r => r.employeeId)));
+
+    activeEmpIds.forEach((id) => {
+        const emp = employees.find(e => e.id === id);
+        const row: any = { 'Sl No': 0, 'EMPID': id, 'Name': emp?.name || 'Unknown' };
+        let totalEE = 0;
+        let totalER = 0;
+
+        range.forEach(p => {
+            const res = history.find(r => r.employeeId === id && r.month === p.m && r.year === p.y);
+            const ee = res ? res.deductions.lwf : 0;
+            const er = res ? res.employerContributions.lwf : 0;
+            const total = ee + er;
+            row[`${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`] = total;
+            totalEE += ee;
+            totalER += er;
+        });
+
+        row['Total EE Share'] = totalEE;
+        row['Total ER Share'] = totalER;
+        row['Grand Total'] = totalEE + totalER;
+        
+        if (totalEE > 0 || totalER > 0) {
+            row['Sl No'] = empDataItems.length + 1;
+            empDataItems.push(row);
+        }
+    });
+
+    if (empDataItems.length === 0) return null;
+
+    const fileName = getStandardFileName('Consolidated_LWF_Report', company, `${fromM}-${toM}`, `${fromY}-${toY}`);
+    const typeTitle = 'Consolidated Labour Welfare Fund Report';
+    const periodStr = `From ${fromM} ${fromY} To ${toM} ${toY}`;
+    const regStr = (company.lwfRegNo || company.lin) ? `LWF REG NO: ${company.lwfRegNo || company.lin}` : '';
+
+    if (format === 'PDF') {
+        const monthCols = range.map(p => `${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`);
+        const headers = ['Sl No', 'EMPID', 'Name', ...monthCols, 'Total EE', 'Total ER', 'Grand Total'];
+        const tableBody = empDataItems.map(r => [
+            r['Sl No'], r['EMPID'], r['Name'],
+            ...monthCols.map(m => r[m]),
+            r['Total EE Share'], r['Total ER Share'], r['Grand Total']
+        ]);
+        return generatePDFTableReport(typeTitle, headers, tableBody, fileName, 'l', '', company, {}, periodStr, regStr);
+    }
+
+    // Summary Row for Excel
+    const summary: any = { 'Sl No': '', 'EMPID': 'TOTAL', 'Name': '' };
+    range.forEach(p => {
+        const key = `${p.m.substring(0, 3)}-${p.y.toString().substring(2)}`;
+        summary[key] = empDataItems.reduce((sum, r) => sum + (r[key] || 0), 0);
+    });
+    summary['Total EE Share'] = empDataItems.reduce((sum, r) => sum + r['Total EE Share'], 0);
+    summary['Total ER Share'] = empDataItems.reduce((sum, r) => sum + r['Total ER Share'], 0);
+    summary['Grand Total'] = empDataItems.reduce((sum, r) => sum + r['Grand Total'], 0);
+    empDataItems.push(summary);
+
+    return await generateExcelReport(empDataItems, 'LWF_Register', fileName, {
+        company: company.establishmentName || 'Company',
+        type: typeTitle,
+        period: periodStr,
+        regNo: regStr
+    });
+};
+
+export const generateJoinedEmployeesPDF = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthIdx = months.indexOf(month);
+
+    const filtered = employees.filter(emp => {
+        if (!emp.doj) return false;
+        const d = new Date(emp.doj);
+        return d.getMonth() === monthIdx && d.getFullYear() === year;
+    });
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = 297;
+    let y = 15;
+
+    // Header
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text((companyProfile.establishmentName || '').toUpperCase(), pageW / 2, y, { align: 'center' }); y += 7;
+    doc.setFontSize(12);
+    doc.text('Employees Joined During the Month', pageW / 2, y, { align: 'center' }); y += 6;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`For the Month of: ${month} ${year}`, pageW / 2, y, { align: 'center' }); y += 10;
+
+    const tableData = filtered.map((emp, i) => {
+        // Calculate Tenure
+        let tenureStr = '0 M';
+        if (emp.doj) {
+            const doj = new Date(emp.doj);
+            const now = new Date(year, monthIdx + 1, 0); // End of that month
+            const diffTime = Math.abs(now.getTime() - doj.getTime());
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            if (diffDays < 30) tenureStr = `${diffDays} Days`;
+            else tenureStr = `${Math.floor(diffDays / 30)} M`;
+        }
+
+        return [
+            i + 1,
+            emp.uanc || '-',
+            emp.name,
+            emp.fatherSpouseName || '-',
+            formatDateInd(emp.dob),
+            formatDateInd(emp.doj),
+            tenureStr,
+            '' // Remarks
+        ];
+    });
+
+    autoTable(doc, {
+        head: [['Sl No', 'UAN', 'Name', 'Father/Spouse Name', 'DOB', 'DOJ', 'Total Service Period', 'Remarks']],
+        body: tableData,
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' }
+    });
+
+    const fileName = getStandardFileName('Employees_Joined', companyProfile, month, year);
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const res = await electronSaveReport(fileName, u8, 'pdf');
+    if (!res.success) {
+        doc.save(`${fileName}.pdf`);
+        return null;
+    }
+    return res.path || null;
+};
+
+export const generateEmployeesLeftPDF = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthIdx = months.indexOf(month);
+
+    const filtered = employees.filter(emp => {
+        if (!emp.dol) return false;
+        const d = new Date(emp.dol);
+        return d.getMonth() === monthIdx && d.getFullYear() === year;
+    });
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = 297;
+    let y = 15;
+
+    // Header
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text((companyProfile.establishmentName || '').toUpperCase(), pageW / 2, y, { align: 'center' }); y += 7;
+    doc.setFontSize(12);
+    doc.text('Employees Left During the Month', pageW / 2, y, { align: 'center' }); y += 6;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`For the Month of: ${month} ${year}`, pageW / 2, y, { align: 'center' }); y += 10;
+
+    const tableData = filtered.map((emp, i) => [
+        i + 1,
+        emp.uanc || '-',
+        emp.name,
+        emp.fatherSpouseName || '-',
+        formatDateInd(emp.dol),
+        emp.leavingReason || '-',
+        '' // Remarks
+    ]);
+
+    autoTable(doc, {
+        head: [['Sl No', 'UAN', 'Name', 'Father/Spouse Name', 'DOL', 'Reason For Leaving', 'Remarks']],
+        body: tableData,
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 9, cellPadding: 3 },
+        headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' }
+    });
+
+    const fileName = getStandardFileName('Employees_Left', companyProfile, month, year);
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const res = await electronSaveReport(fileName, u8, 'pdf');
+    if (!res.success) {
+        doc.save(`${fileName}.pdf`);
+        return null;
+    }
+    return res.path || null;
 };

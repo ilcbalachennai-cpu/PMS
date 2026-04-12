@@ -3,7 +3,7 @@ import { LicenseData, User } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.13";
+export const APP_VERSION = "02.02.14";
 
 export interface ActivationResult {
   success: boolean;
@@ -427,6 +427,7 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
     // --- V02.02.12: FORCE INITIALIZATION OF SECURITY MARKERS ---
     // This ensures app_time_sync and other local markers are set BEFORE any blocking checks
     const timeCheck = trackActivityTime();
+    const currentMachineId = await getMachineId();
     
     const stored = getStoredLicense();
     
@@ -437,6 +438,19 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
       }
       
       if (timeCheck.tampered) {
+        // --- REPORT TAMPERING TO CLOUD ---
+        if (stored) {
+          fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'HEARTBEAT',
+              email: stored.registeredTo,
+              machineId: currentMachineId,
+              userID: stored.userID,
+              status: 'SECURITY_TAMPERED'
+            })
+          }).catch(e => console.warn("Failed to report tampering:", e));
+        }
         return { valid: false, message: 'SECURITY VIOLATION', data: { isTampered: true } };
       }
       
@@ -459,7 +473,6 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
        return { valid: false, message: 'Initial Internet Connection Required', data: { isSyncBlocked: true } };
     }
 
-    const currentMachineId = await getMachineId();
   // Ensure the fetched machine ID is persisted for synchronous lookups (getMachineKey)
   if (currentMachineId && currentMachineId !== 'UNKNOWN-MACHINE-ID') {
     localStorage.setItem('app_machine_id', currentMachineId);

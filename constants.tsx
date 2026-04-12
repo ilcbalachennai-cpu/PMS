@@ -165,6 +165,30 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
     special2: false,
     special3: false
   },
+  bonusWagesComponents: {
+    basic: true,
+    da: true,
+    retaining: false,
+    hra: false,
+    conveyance: false,
+    washing: false,
+    attire: false,
+    special1: false,
+    special2: false,
+    special3: false
+  },
+  gratuityWagesComponents: {
+    basic: true,
+    da: true,
+    retaining: false,
+    hra: false,
+    conveyance: false,
+    washing: false,
+    attire: false,
+    special1: false,
+    special2: false,
+    special3: false
+  },
   enableArrearSalary: false
 };
 
