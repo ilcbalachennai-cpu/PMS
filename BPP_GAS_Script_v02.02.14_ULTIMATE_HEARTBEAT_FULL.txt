@@ -628,7 +628,7 @@ function processLicenseIssuance(d) {
 function showPasswordResetForm() {
     var html = HtmlService.createHtmlOutput(`<!DOCTYPE html><html><head><style>body{font-family:"Segoe UI",sans-serif;padding:25px;background:#f8fafc;}h3{border-bottom:3px solid #f43f5e;padding-bottom:10px;text-transform:uppercase;font-size:16px;}label{display:block;font-size:9px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:6px;}input,select{width:100%;padding:12px;margin-bottom:15px;border:1.5px solid #cbd5e1;border-radius:8px;font-size:13px;}button{width:100%;padding:13px;background:#f43f5e;color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer;}#status{display:none;padding:12px;text-align:center;border-radius:8px;font-size:11px;margin-bottom:15px;}.ok{background:#dcfce7;color:#166534;}.err{background:#fee2e2;color:#991b1b;}</style></head>
     <body><h3>Password Reset</h3><div id="status"></div><label>Account</label><select id="user-select"><option value="">-- Syncing --</option></select><label>Master Key</label><input id="pass" type="password" placeholder="●●●●●●"><button onclick="reset()">Send Reset Link</button>
-    <script>window.onload=function(){ google.script.run.withSuccessHandler(function(users){ var sel=document.getElementById("user-select"); sel.innerHTML='<option value="">-- Select Contact --</option>'; users.forEach(function(u){ var o=document.createElement("option"); o.value=u.email+"|"+u.name; o.text=u.name+" ("+u.email+")"; sel.appendChild(o); }).withFailureHandler(function(err){alert(err);}).getAllUsersForAdmin(); };
+    <script>window.onload=function(){ google.script.run.withSuccessHandler(function(users){ var sel=document.getElementById("user-select"); sel.innerHTML='<option value="">-- Select Contact --</option>'; users.forEach(function(u){ var o=document.createElement("option"); o.value=u.email+"|"+u.name; o.text=u.name+" ("+u.email+")"; sel.appendChild(o); }); }).withFailureHandler(function(err){alert(err);}).getAllUsersForAdmin(); };
     function reset(){ var val=document.getElementById("user-select").value; var pass=document.getElementById("pass").value; if(!val||!pass)return; var p=val.split("|"); google.script.run.withSuccessHandler(function(res){ if(res.success){ document.getElementById("status").innerText="Success!"; document.getElementById("status").className="ok"; document.getElementById("status").style.display="block"; setTimeout(function(){google.script.host.close();},2000); } }).withFailureHandler(function(err){alert(err);}).processPasswordReset({email:p[0],name:p[1],masterPass:pass}); }
     </script></body></html>`).setWidth(360).setHeight(400);
     SpreadsheetApp.getUi().showModalDialog(html, 'Security Gateway');
@@ -862,7 +862,7 @@ function getAllUsersForAdmin() {
     ['Approved_Trial_Data', 'BPP_APP_License'].forEach(function(n) {
         const s = ss.getSheetByName(n); if (!s) return; const d = s.getDataRange().getValues();
         const eC = n.includes('Trial') ? 3 : 5; const nC = n.includes('Trial') ? 0 : 1;
-        for (let i = 1; i < d.length; i++) { if (d[i][eC]) users.push({ name: String(data[i][nC]), email: String(d[i][eC]) }); }
+        for (let i = 1; i < d.length; i++) { if (d[i][eC]) users.push({ name: String(d[i][nC]), email: String(d[i][eC]) }); }
     });
     return users;
 }
