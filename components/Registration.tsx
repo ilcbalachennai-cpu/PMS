@@ -84,8 +84,13 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 setError('Full Name is required.');
                 return;
             }
+            const idRegex = /^[A-Z0-9]{5,12}$/;
             if (!userID) {
                 setError('User ID is required.');
+                return;
+            }
+            if (!idRegex.test(userID)) {
+                setError('User ID must be 5-12 alphanumeric characters with no spaces.');
                 return;
             }
             if (!regEmail || !regEmail.includes('@')) {
@@ -515,7 +520,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                     placeholder="Enter your User ID"
                                                     value={userID}
-                                                    onChange={e => setUserID(e.target.value)}
+                                                    onChange={e => setUserID(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12))}
                                                 />
                                             </div>
                                         </div>
@@ -528,7 +533,11 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white font-mono text-center tracking-[0.2em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
                                                 placeholder="XXXX-XXXX-XXXX-XXXX"
                                                 value={licenseKey}
-                                                onChange={e => setLicenseKey(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 16))}
+                                                onChange={e => {
+                                                    const val = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 16);
+                                                    const formatted = val.match(/.{1,4}/g)?.join('-') || val;
+                                                    setLicenseKey(formatted);
+                                                }}
                                             />
                                         </div>
                                     </div>
@@ -572,7 +581,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                 <button
                                     onClick={nextStep}
                                     disabled={isProcessing}
-                                    className="group px-10 py-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black uppercase tracking-widest rounded-xl shadow-2xl shadow-blue-500/20 transition-all flex items-center gap-3"
+                                    className="group px-10 py-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black uppercase tracking-widest rounded-xl shadow-2xl shadow-blue-500/20 transition-all flex items-center gap-3"
                                 >
                                     {isProcessing ? <Loader2 size={24} className="animate-spin" /> : <>Verify & Activate <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" /></>}
                                 </button>

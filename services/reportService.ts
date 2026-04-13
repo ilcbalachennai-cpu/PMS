@@ -1534,7 +1534,352 @@ export const generateFormB = async (results: PayrollResult[], employees: Employe
     return res.path || null;
 };
 
+
+export const generateLegacyFormB = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+    const doc = new jsPDF('l', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    
+    const drawHeader = (doc: jsPDF, pageNum: number) => {
+        let y = 10;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(150, 0, 0); // Maroon Color
+        doc.text("REGISTER OF WAGES", pageWidth / 2, y, { align: 'center' });
+        y += 6;
+
+        doc.setFontSize(14);
+        doc.text("FORM-B", pageWidth / 2, y, { align: 'center' });
+        y += 5;
+
+        doc.setFontSize(8);
+        doc.text("UNDER CENTRAL LABOUR LAW COMPLIANCE", pageWidth / 2, y, { align: 'center' });
+        y += 10;
+
+        doc.setFontSize(10);
+        doc.setTextColor(0);
+        // Left Column
+        doc.text((companyProfile.establishmentName || "Establishment").toUpperCase(), 14, y - 5);
+        doc.setFontSize(8);
+        doc.text(`Division of : ${companyProfile.establishmentName || ""}`, 14, y);
+        
+        // Right Column
+        doc.setFontSize(12);
+        const siteName = results.length > 0 ? (employees.find(e => e.id === results[0].employeeId)?.site || companyProfile.city) : companyProfile.city;
+        doc.text(`Site:  ${siteName.toUpperCase()}`, pageWidth - 14, y-5, { align: 'right' });
+        
+        doc.setFontSize(9);
+        doc.text(`For the Month of          ${month}          ${year}`, pageWidth / 2 + 30, y, { align: 'center' });
+        
+        y += 5;
+        // Double Header Line - THICK MAROON
+        doc.setDrawColor(150, 0, 0);
+        doc.setLineWidth(0.6);
+        doc.line(14, y, pageWidth - 14, y);
+        doc.line(14, y + 1.0, pageWidth - 14, y + 1.0);
+        y += 7.5; // Added more padding
+
+        // Label Block Headers
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(150, 0, 0); // Maroon color for Labels
+        const colX = [18, 48, 78, 108, 138, 168, 198, 228, 258];
+        const labels1 = [":  Rdays:", "Basic:", "DA    :", "H.R.A  :", "Convey  :", "Washing", "Spl1 :", "Spl2 :", "Spl3"];
+        labels1.forEach((l, i) => doc.text(l, colX[i], y));
+        doc.text(" :", pageWidth - 16, y);
+        y += 6.5;
+        
+        doc.setDrawColor(200, 200, 200);
+        doc.line(14, y-4.5, pageWidth-14, y-4.5);
+
+        // Highlighted Header for Employee
+        doc.setDrawColor(150, 0, 0);
+        doc.setLineWidth(0.6);
+        doc.line(14, y - 5, pageWidth - 14, y - 5);
+        doc.setLineWidth(0.2);
+        
+        doc.setFillColor(240, 240, 240);
+        doc.rect(14, y - 4, pageWidth - 28, 5, 'F');
+
+        const labels2 = [": OTdays", "OTrate", "OTamt  :", "OTSum  :", "", "", "", "Other_Allow :", "Gross"];
+        labels2.forEach((l, i) => doc.text(l, colX[i], y));
+        doc.text(" :", pageWidth - 16, y);
+        y += 6.5;
+
+        doc.line(14, y-4.5, pageWidth-14, y-4.5);
+
+        const labels3 = [":    ESI :", "PF :", "Sal.Adv :", "Uni_Adv :", "Fest_Adv :", "Cant_Adv:", "", "", ""];
+        labels3.forEach((l, i) => doc.text(l, colX[i], y));
+        doc.text(" :", pageWidth - 16, y);
+        y += 7.5; 
+
+        doc.line(14, y - 4.5, pageWidth - 14, y - 4.5);
+
+        const labels4 = [": Income_Tax  :", "Prof.Tax:", "Fine    :", "", "", "", "", "Total Deduct", "Net Pay"];
+        labels4.forEach((l, i) => doc.text(l, colX[i], y));
+        doc.text("LWF :", colX[3], y); // Adding LWF label
+        doc.text(" :", pageWidth - 16, y);
+        y += 5.0; // Increased to avoid overlap
+        doc.setTextColor(0); // Reset for data
+
+        doc.setDrawColor(150, 0, 0);
+        doc.setLineWidth(0.6);
+        doc.line(14, y, pageWidth - 14, y);
+        doc.line(14, y + 1.0, pageWidth - 14, y + 1.0);
+        doc.setLineWidth(0.2); // Reset
+        
+        return y + 5;
+    };
+
+    let y = drawHeader(doc, 1);
+    const colX = [18, 48, 78, 108, 138, 168, 198, 228, 258];
+    const totals = {
+        payableDays: 0, basic: 0, da: 0, hra: 0, conveyance: 0, washing: 0,
+        special1: 0, special2: 0, special3: 0, otherAllow: 0, gross: 0,
+        esi: 0, epf: 0, vpf: 0, advanceRecovery: 0, it: 0, pt: 0, fine: 0, lwf: 0,
+        totalDeductions: 0, netPay: 0, otAmount: 0
+    };
+
+    results.forEach((r, idx) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (!emp) return;
+
+        // Check for page break
+        if (y > pageHeight - 40) {
+            doc.addPage();
+            y = drawHeader(doc, doc.internal.pages.length - 1);
+        }
+
+        // Highlighted Header for Employee
+        doc.setDrawColor(150, 0, 0);
+        doc.setLineWidth(0.6);
+        doc.line(14, y - 5, pageWidth - 14, y - 5);
+        doc.setLineWidth(0.2);
+        
+        doc.setFillColor(240, 240, 240);
+        doc.rect(14, y - 4, pageWidth - 28, 5, 'F');
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(150, 0, 0); // Maroon
+
+        doc.text(`: TokenNo:      ${emp.id}    Name:  ${emp.name.toUpperCase()}      ESI_No:           ${emp.esiNumber || '0'}      UAN_ID${emp.uanc || '0'}`, 14, y);
+        doc.text(":", pageWidth - 16, y);
+        y += 2.5;
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.4); // slightly thicker divider
+        doc.line(14, y, pageWidth-14, y);
+        doc.setLineWidth(0.2); // reset for subsequent lines
+        y += 5.5;
+        doc.setTextColor(0);
+
+        doc.setFont('helvetica', 'normal');
+        
+        // Row 1 Values
+        const remainder = (r.earnings?.total || 0) - (r.earnings?.basic || 0) - (r.earnings?.da || 0) - (r.earnings?.hra || 0) - (r.earnings?.conveyance || 0) - (r.earnings?.washing || 0) - (r.earnings?.otAmount || 0);
+        const spl2 = Math.round(r.earnings?.special2 || 0);
+        const spl3 = Math.round(r.earnings?.special3 || 0);
+        const spl1 = Math.round(remainder - (r.earnings?.special2 || 0) - (r.earnings?.special3 || 0));
+
+        const val1 = [
+            `  ${r.payableDays || 0} :`, 
+            formatIndianNumber(Math.round(r.earnings?.basic || 0)) + " :",
+            formatIndianNumber(Math.round(r.earnings?.da || 0)) + " :",
+            formatIndianNumber(Math.round(r.earnings?.hra || 0)) + " :",
+            formatIndianNumber(Math.round(r.earnings?.conveyance || 0)) + " :",
+            formatIndianNumber(Math.round(r.earnings?.washing || 0)) + " :",
+            formatIndianNumber(spl1) + " :",
+            formatIndianNumber(spl2) + " :",
+            formatIndianNumber(spl3)
+        ];
+        val1.forEach((v, i) => doc.text(v, colX[i] + 24, y, { align: 'right' }));
+        doc.text(" :", pageWidth - 16, y);
+        y += 6.5;
+        doc.line(14, y - 4.5, pageWidth - 14, y - 4.5, 'S');
+
+        // Row 2 Values (OT + Other + Gross)
+        const otherAllw = (r.earnings?.bonus || 0) + (r.earnings?.leaveEncashment || 0) + (r.earnings?.attire || 0);
+        const val2 = [
+            `${(r.earnings?.otAmount || 0) > 0 ? '0' : '0'} :`, 
+            `0 :`, 
+            `${formatIndianNumber(Math.round(r.earnings?.otAmount || 0))} :`,
+            `${formatIndianNumber(Math.round(r.earnings?.otAmount || 0))} :`,
+            `:`,
+            `:`,
+            `:`,
+            `${formatIndianNumber(Math.round(otherAllw))} :`,
+            `${formatIndianNumber(Math.round(r.earnings?.total || 0))}`
+        ];
+        val2.forEach((v, i) => {
+           if (v === ':') doc.text(v, colX[i] + 24, y, { align: 'right' });
+           else doc.text(v, colX[i] + 24, y, { align: 'right' });
+        });
+        doc.text(" :", pageWidth - 16, y);
+        y += 4.5;
+        doc.line(14, y-3, pageWidth-14, y-3, 'S');
+
+        // Row 3 Values (Statutory + Advances)
+        const val3 = [
+            `${formatIndianNumber(Math.round(r.deductions?.esi || 0))} :`,
+            `${formatIndianNumber(Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)))} :`,
+            `${formatIndianNumber(Math.round(r.deductions?.advanceRecovery || 0))} :`,
+            `0 :`,
+            `0 :`,
+            `0`,
+            `:`,
+            `:`,
+            `:`
+        ];
+        val3.forEach((v, i) => {
+            if (v === ':') doc.text(v, colX[i] + 24, y, { align: 'right' });
+            else doc.text(v, colX[i] + 24, y, { align: 'right' });
+        });
+        doc.text(" :", pageWidth - 16, y);
+        y += 6.5;
+        doc.line(14, y - 4.5, pageWidth - 14, y - 4.5, 'S');
+
+        // Row 4 Values (Tax + Deduct + Net)
+        const val4 = [
+            formatIndianNumber(Math.round(r.deductions?.it || 0)) + " :",
+            formatIndianNumber(Math.round(r.deductions?.pt || 0)) + " :",
+            formatIndianNumber(Math.round(r.deductions?.fine || 0)) + " :",
+            formatIndianNumber(Math.round(r.deductions?.lwf || 0)) + " :",
+            `:`,
+            `:`,
+            `:`,
+            `${formatIndianNumber(Math.round(r.deductions?.total || 0))}`,
+            `${formatIndianNumber(Math.round(r.netPay || 0))}`
+        ];
+        val4.forEach((v, i) => {
+            if (v === ':') doc.text(v, colX[i] + 24, y, { align: 'right' });
+            else doc.text(v, colX[i] + 24, y, { align: 'right' });
+        });
+        doc.text(" :", pageWidth - 16, y);
+        y += 5.5; 
+
+        // Separator between employees
+        doc.setLineWidth(0.4);
+        doc.line(14, y, pageWidth - 14, y);
+        doc.line(14, y+0.8, pageWidth - 14, y+0.8);
+        // Totals for Summary
+        totals.payableDays += (r.payableDays || 0);
+        totals.basic += (r.earnings?.basic || 0);
+        totals.da += (r.earnings?.da || 0);
+        totals.hra += (r.earnings?.hra || 0);
+        totals.conveyance += (r.earnings?.conveyance || 0);
+        totals.washing += (r.earnings?.washing || 0);
+        totals.special1 += (r.earnings?.special1 || 0);
+        totals.special2 += (r.earnings?.special2 || 0);
+        totals.special3 += (r.earnings?.special3 || 0);
+        totals.otAmount += (r.earnings?.otAmount || 0);
+        totals.otherAllow += otherAllw;
+        totals.gross += (r.earnings?.total || 0);
+        totals.esi += (r.deductions?.esi || 0);
+        totals.epf += (r.deductions?.epf || 0);
+        totals.vpf += (r.deductions?.vpf || 0);
+        totals.advanceRecovery += (r.deductions?.advanceRecovery || 0);
+        totals.it += (r.deductions?.it || 0);
+        totals.pt += (r.deductions?.pt || 0);
+        totals.fine += (r.deductions?.fine || 0);
+        totals.lwf += (r.deductions?.lwf || 0);
+        totals.totalDeductions += (r.deductions?.total || 0);
+        totals.netPay += (r.netPay || 0);
+
+        y += 5.5;
+    });
+
+    // RENDER GRAND TOTAL SUMMARY
+    if (y > pageHeight - 60) {
+        doc.addPage();
+        y = drawHeader(doc, doc.internal.pages.length - 1);
+    }
+
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(150, 0, 0); 
+    doc.text("G.Total_Summary", 14, y);
+    doc.text(":", pageWidth - 16, y);
+    y += 2.5;
+    doc.setDrawColor(150, 0, 0);
+    doc.setLineWidth(0.8);
+    doc.line(14, y, pageWidth - 14, y);
+    doc.line(14, y + 1.2, pageWidth - 14, y + 1.2);
+    y += 5.5;
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(0);
+    const sumRemainder = (totals.gross) - (totals.basic) - (totals.da) - (totals.hra) - (totals.conveyance) - (totals.washing) - (totals.otAmount);
+    const sumSpl2 = Math.round(totals.special2);
+    const sumSpl3 = Math.round(totals.special3);
+    const sumSpl1 = Math.round(sumRemainder - totals.special2 - totals.special3);
+
+    const sum1 = [
+        `  ${totals.payableDays} :`,
+        formatIndianNumber(Math.round(totals.basic)) + " :",
+        formatIndianNumber(Math.round(totals.da)) + " :",
+        formatIndianNumber(Math.round(totals.hra)) + " :",
+        formatIndianNumber(Math.round(totals.conveyance)) + " :",
+        formatIndianNumber(Math.round(totals.washing)) + " :",
+        formatIndianNumber(sumSpl1) + " :",
+        formatIndianNumber(sumSpl2) + " :",
+        formatIndianNumber(sumSpl3) + " :"
+    ];
+    sum1.forEach((v, i) => doc.text(v, colX[i] + 24, y, { align: 'right' }));
+    doc.text(" :", pageWidth - 16, y);
+    y += 6.5;
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.2);
+    doc.line(14, y - 4.5, pageWidth - 14, y - 4.5);
+
+    const sum2 = [
+        `0 :`, `0 :`, `${formatIndianNumber(Math.round(totals.otAmount))} :`, `${formatIndianNumber(Math.round(totals.otAmount))} :`, `:`, `:`, `:`, `${formatIndianNumber(Math.round(totals.otherAllow))} :`, `${formatIndianNumber(Math.round(totals.gross))}`
+    ];
+    sum2.forEach((v, i) => { if (v === ':') doc.text(v, colX[i] + 24, y, { align: 'right' }); else doc.text(v, colX[i] + 24, y, { align: 'right' }); });
+    doc.text(" :", pageWidth - 16, y);
+    y += 6.5;
+    doc.line(14, y - 4.5, pageWidth - 14, y - 4.5);
+
+    const sum3 = [
+        `${formatIndianNumber(Math.round(totals.esi))} :`,
+        `${formatIndianNumber(Math.round(totals.epf + totals.vpf))} :`,
+        `${formatIndianNumber(Math.round(totals.advanceRecovery))} :`,
+        `0 :`, `0 :`, `0`, `:`, `:`, `:`
+    ];
+    sum3.forEach((v, i) => { if (v === ':') doc.text(v, colX[i] + 24, y, { align: 'right' }); else doc.text(v, colX[i] + 24, y, { align: 'right' }); });
+    doc.text(" :", pageWidth - 16, y);
+    y += 6.5;
+    doc.line(14, y - 4.5, pageWidth - 14, y - 4.5);
+
+    const sum4 = [
+        `${formatIndianNumber(Math.round(totals.it))} :`,
+        `${formatIndianNumber(Math.round(totals.pt))} :`,
+        `${formatIndianNumber(Math.round(totals.fine))} :`,
+        `${formatIndianNumber(Math.round(totals.lwf))} :`, 
+        `:`, `:`, `:`,
+        `${formatIndianNumber(Math.round(totals.totalDeductions))}`,
+        `${formatIndianNumber(Math.round(totals.netPay))}`
+    ];
+    sum4.forEach((v, i) => { if (v === ':') doc.text(v, colX[i] + 24, y, { align: 'right' }); else doc.text(v, colX[i] + 24, y, { align: 'right' }); });
+    doc.text(" :", pageWidth - 16, y);
+    y += 5.5;
+    doc.setDrawColor(150, 0, 0);
+    doc.setLineWidth(0.8);
+    doc.line(14, y, pageWidth - 14, y);
+    doc.line(14, y + 1.2, pageWidth - 14, y + 1.2);
+
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const siteName = results.length > 0 ? (employees.find(e => e.id === results[0].employeeId)?.site || 'G.Total') : 'G.Total';
+    const sitePrefix = siteName.replace(/\s+/g, '_').toUpperCase();
+    const fileName = getStandardFileName(`${sitePrefix}_FormB_Legacy`, companyProfile, month, year);
+    const res = await electronSaveReport(fileName, u8, 'pdf');
+    if (!res.success) {
+        doc.save(`${fileName}.pdf`);
+        return null;
+    }
+    return res.path || null;
+};
+
 export const generateFormC = async (results: PayrollResult[], employees: Employee[], _attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+
     const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const monthIndex = MONTHS.indexOf(month);
     const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();

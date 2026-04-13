@@ -9,6 +9,7 @@ import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, L
 import {
     generateExcelReport,
     generateSimplePaySheetPDF,
+    generateLegacyFormB,
     generatePaySlipsPDF,
     generateBankStatementPDF,
     generateLeaveLedgerReport,
@@ -80,6 +81,7 @@ const Reports: React.FC<ReportsProps> = ({
     const [paySheetFilterValue, setPaySheetFilterValue] = useState<string>('');
     const [paySlipFilter, setPaySlipFilter] = useState<'all' | 'site' | 'branch' | 'division'>('all');
     const [paySlipFilterValue, setPaySlipFilterValue] = useState<string>('');
+    const [useLegacyDesign, setUseLegacyDesign] = useState(false);
 
     useEffect(() => {
         if (arrearHistory && arrearHistory.length > 0) {
@@ -373,7 +375,7 @@ const Reports: React.FC<ReportsProps> = ({
                                 <AlertTriangle size={14} /> Critical: Pending Advance for Exits
                             </p>
                             <div className="space-y-1">
-                                {leavingWithAdvance.map((s, idx) => (
+                                {leavingWithAdvance.map((s) => (
                                     <div className="flex justify-between items-center text-xs bg-red-950/40 px-2 py-1.5 rounded border border-red-900/30">
                                         <span className="text-white font-semibold">{s.name}</span>
                                         <span className="text-red-400 font-bold font-mono">Pending ₹ {formatIndianNumber(Math.round(s.balance))}</span>
@@ -654,7 +656,11 @@ const Reports: React.FC<ReportsProps> = ({
                         customPDFFileName = `${paySheetFilterValue} PaySheet ${monthAbbr} ${year}`;
                     }
 
-                    savedPath = await generateSimplePaySheetPDF(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName);
+                    if (useLegacyDesign) {
+                        savedPath = await generateLegacyFormB(validToExport, employees, month, year, companyProfile);
+                    } else {
+                        savedPath = await generateSimplePaySheetPDF(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName);
+                    }
                 }
             } else if (reportType === 'Pay Slips') {
                 let slipRecords = currentResults.filter(r => r.netPay > 0);
@@ -996,6 +1002,24 @@ const Reports: React.FC<ReportsProps> = ({
                                                         <option key={val} value={val!}>{val}</option>
                                                     ))}
                                             </select>
+                                        </div>
+                                    )}
+
+
+                                    {format === 'PDF' && (
+                                        <div className="flex items-center gap-3 p-3 bg-indigo-900/10 border border-indigo-500/20 rounded-xl mt-4 cursor-pointer hover:bg-indigo-900/20 transition-all">
+                                            <input 
+                                                id="useLegacyDesign"
+                                                type="checkbox" 
+                                                title="Use Legacy MS Access Layout"
+                                                checked={useLegacyDesign} 
+                                                onChange={() => setUseLegacyDesign(!useLegacyDesign)}
+                                                className="w-4 h-4 rounded border-indigo-500 text-indigo-600 focus:ring-indigo-500 bg-slate-900" 
+                                            />
+                                            <label htmlFor="useLegacyDesign" className="cursor-pointer">
+                                                <p className="text-[11px] font-bold text-indigo-400">Use Legacy MS Access Layout</p>
+                                                <p className="text-[9px] text-slate-500">Enable 4-row employee blocks (Form B Style)</p>
+                                            </label>
                                         </div>
                                     )}
                                 </div>

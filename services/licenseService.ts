@@ -3,11 +3,13 @@ import { LicenseData, User } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.14";
+export const APP_VERSION = "02.02.15";
 
 export interface ActivationResult {
   success: boolean;
   message: string;
+  userName?: string;
+  userID?: string;
   dataSize?: number;
   expiryDate?: string;
   isTrial?: boolean;
@@ -671,44 +673,42 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
             const usersRawAfterSync = localStorage.getItem('app_users');
             let localUsers = usersRawAfterSync ? JSON.parse(usersRawAfterSync) : [];
 
-            if (cloudData.adminUser || cloudData.adminPass) {
-              const cloudAdminUser = cloudData.adminUser;
-              const cloudAdminPass = cloudData.adminPass;
+            const cloudAdminUser = String(cloudData.adminUser || "").trim();
+            const cloudAdminPass = String(cloudData.adminPass || "").trim();
 
-              const adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
+            if (cloudAdminUser || cloudAdminPass) {
 
-              if (adminIndex !== -1) {
-                // Update existing username & password strictly from Cloud
-                if (localUsers[adminIndex].username !== cloudAdminUser || localUsers[adminIndex].password !== cloudAdminPass) {
-                  console.log("♻️  Updating Local Administrator (Suganthi) credentials from Cloud...");
-                  const oldPass = localUsers[adminIndex].password;
-                  
-                  // FORCE: Use registered ID for username, removing 'admin'
-                  localUsers[adminIndex].username = cloudAdminUser;
-                  localUsers[adminIndex].password = cloudAdminPass;
-                  
-                  // Flag for forced reset if cloud has a temp code and we just synced it
-                  if (cloudAdminPass && cloudAdminPass.length <= 8 && cloudAdminPass !== oldPass) {
-                    sessionStorage.setItem('app_forced_reset', 'true');
+              if (cloudAdminUser) {
+                // Find ANY user that might be the primary account if Administrator isn't found
+                let adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
+                if (adminIndex === -1 && localUsers.length > 0) adminIndex = 0; 
+
+                if (adminIndex !== -1) {
+                  const localUser = localUsers[adminIndex];
+                  if (localUser.username !== cloudAdminUser || localUser.password !== cloudAdminPass) {
+                    console.log(`♻️  Syncing Local User Profile: ${localUser.username} -> ${cloudAdminUser}`);
+                    localUser.username = cloudAdminUser;
+                    localUser.password = cloudAdminPass;
+                    
+                    // Also update the name if the cloud provides it
+                    if (cloudData.userName) localUser.name = cloudData.userName;
+
+                    localStorage.setItem('app_users', JSON.stringify(localUsers));
+                    if ((window as any).electronAPI) (window as any).electronAPI.dbSet('app_users', localUsers);
                   }
-
-                  localStorage.setItem('app_users', JSON.stringify(localUsers));
-                  // @ts-ignore
-                  if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
+                } else if (localUsers.length === 0) {
+                  // Total Recovery: Cloud is our only source of truth
+                  console.log("🛠️  Recovering local user database from Cloud identity...");
+                  const recoveredUser = {
+                    username: cloudAdminUser,
+                    password: cloudAdminPass,
+                    name: cloudData.userName || "System Administrator",
+                    role: 'Administrator',
+                    email: cloudData.registeredTo || cloudData.registeredTo || ""
+                  };
+                  localStorage.setItem('app_users', JSON.stringify([recoveredUser]));
+                  if ((window as any).electronAPI) (window as any).electronAPI.dbSet('app_users', [recoveredUser]);
                 }
-              } else if (localUsers.length === 0 && cloudAdminUser) {
-                // Recover missing admin using restored identity info (Registered ID only!)
-                const recoveredAdmin: User = {
-                  username: cloudAdminUser,
-                  password: cloudAdminPass,
-                  name: activeLicense ? activeLicense.userName : 'System Administrator',
-                  role: 'Administrator',
-                  email: activeLicense ? activeLicense.registeredTo : ''
-                };
-                localUsers = [recoveredAdmin];
-                localStorage.setItem('app_users', JSON.stringify(localUsers));
-                // @ts-ignore
-                if (window.electronAPI) window.electronAPI.dbSet('app_users', localUsers);
               }
             }
           }
@@ -852,6 +852,53 @@ export const trackCloudLogin = async (email: string, machineId: string) => {
 };
 
 /**
+ * NEW: Verifies if an email exists in the cloud database before allowing repair.
+ */
+export const verifyIdentityEmail = async (email: string): Promise<ActivationResult> => {
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'VERIFY_IDENTITY_EMAIL',
+                email
+            })
+        });
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
+    }
+};
+
+/**
+ * NEW: Synchronizes a new identity (UserID/Password) with the cloud and local storage.
+ */
+export const syncIdentityRepair = async (email: string, newUserID: string, newPassword: string): Promise<ActivationResult> => {
+    const machineId = await getMachineId();
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'SYNC_IDENTITY_REPAIR',
+                email,
+                newUserID,
+                newPassword,
+                machineId
+            })
+        });
+
+        if (result.success) {
+            // CRITICAL: Immediately trigger a local validation sync to repair the app state
+            console.log("🛠️ Cloud Identity Synced. Triggering local state repair...");
+            await validateLicenseStartup(true, newUserID);
+        }
+
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `Sync Repair Error: ${error.message || "Unknown Failure"}` };
+    }
+};
+
+/**
  * Fetches the latest developer messages from Google Sheets (Consolidated)
  */
 export const fetchLatestMessages = async (force: boolean = false): Promise<{ 
@@ -876,14 +923,14 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
     });
 
     if (result.success && result.messages) {
-      const { scrollNews, statutory, flash } = result.messages;
+      const { scrollNews, statutory } = result.messages;
 
       // Get current stored messages to check for updates
       const storedProfileRaw = localStorage.getItem('app_company_profile');
       const storedProfile = (() => { try { return JSON.parse(storedProfileRaw || '{}'); } catch { return {}; } })();
       const lastNewsDate = localStorage.getItem('app_last_news_date') || "";
       const lastStatutoryDate = localStorage.getItem('app_last_statutory_date') || "";
-      const lastFlashId = localStorage.getItem('app_last_flash_id') || "";
+
 
       let updated = false;
 

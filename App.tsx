@@ -295,8 +295,15 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     const resetTimer = () => {
       clearTimeout(timeoutId);
       // 10 minutes = 600000 ms
-      timeoutId = setTimeout(() => {
+      timeoutId = setTimeout(async () => {
         sessionStorage.setItem('logout_reason', 'timeout');
+        // Report auto-logout to cloud to clear "LIVE" status
+        if (currentUser && currentUser.role !== 'Developer') {
+          try {
+            const mid = await getMachineId();
+            await trackHeartbeat(currentUser.email || "", mid, currentUser.username, sessionStartRef.current, "LOGGED OUT");
+          } catch (e) { console.warn("Auto-logout heartbeat failed", e); }
+        }
         logout();
       }, 600000);
     };

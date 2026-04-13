@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, ShieldCheck, Maximize, Minimize, Power } from 'lucide-react';
 import { User as UserType, CompanyProfile } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
-import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense, requestResetOTP, updateCloudPassword, requestDeveloperOTP, verifyDeveloperOTP } from '../services/licenseService';
+import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense, requestResetOTP, updateCloudPassword, requestDeveloperOTP, verifyDeveloperOTP, verifyIdentityEmail, syncIdentityRepair } from '../services/licenseService';
 import CustomModal from './Shared/CustomModal';
 import { Mail, CheckCircle2, ShieldAlert, Loader2 } from 'lucide-react';
 
@@ -41,6 +41,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
   const [devOTP, setDevOTP] = useState('');
   const [isVerifyingDev, setIsVerifyingDev] = useState(false);
   const [devError, setDevError] = useState('');
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [syncStep, setSyncStep] = useState<'EMAIL' | 'FORM' | 'SUCCESS'>('EMAIL');
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [syncNotice, setSyncNotice] = useState('');
+  const [syncEmail, setSyncEmail] = useState('');
+  const [syncNewUID, setSyncNewUID] = useState('');
+  const [syncNewPass, setSyncNewPass] = useState('');
+  const [syncConfirmPass, setSyncConfirmPass] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const [syncedUserName, setSyncedUserName] = useState('');
   const otpInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-focus OTP input when Developer modal opens
@@ -109,7 +120,28 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
       }
     };
 
+    const checkMigrationRequirement = () => {
+      const savedUsersRaw = localStorage.getItem('app_users');
+      if (savedUsersRaw) {
+        try {
+          const savedUsers: UserType[] = JSON.parse(savedUsersRaw);
+          const admin = savedUsers.find(u => u.role === 'Administrator');
+          if (admin) {
+            const id = String(admin.username).toUpperCase();
+            const idRegex = /^[A-Z0-9]{5,12}$/;
+            // Auto-trigger if ID is generic 'ADMIN' or doesn't meet 5-12 char criteria
+            if (id === 'ADMIN' || !idRegex.test(id)) {
+              console.log("🚩 Mandatory Security Migration Triggered: Legacy ID detected.");
+              setSyncStep('EMAIL');
+              setShowSyncModal(true);
+            }
+          }
+        } catch (e) { }
+      }
+    };
+
     checkAdminLockout();
+    checkMigrationRequirement();
 
     const timer = setTimeout(() => {
       if (usernameRef.current) {
@@ -172,7 +204,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
         }
       }
 
-      const cleanUsername = username.trim();
+      const cleanUsername = username.trim().toUpperCase();
       const cleanPassword = password.trim();
 
       // --- V02.02.11: DEVELOPER SECURE BYPASS (OTP FIRST/MANDATORY) ---
@@ -204,22 +236,23 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
       // --- V02.02.07: IDENTITY-AWARE LOOKUP (Standard Users) ---
       const license = getStoredLicense();
       const user = allUsers.find((u) => {
-        const uNameStr = String(u.username).trim().toLowerCase();
-        const inputUNameStr = cleanUsername.toLowerCase();
+        const uNameStr = String(u.username).trim();
+        const inputUNameStr = cleanUsername;
 
-        // Match 1: Direct username match
+        // Match 1: Direct username match (STRICT CASE)
         const isDirectMatch = uNameStr === inputUNameStr;
 
-        // Match 2: Registered Identity Alias (For Admin)
+        // Match 2: Registered Identity Alias (For Admin) - STRICT CASE
         const isIdentityAlias = (u.role === 'Administrator' &&
           license && license.userID &&
-          String(license.userID).trim().toLowerCase() === inputUNameStr);
+          String(license.userID).trim() === inputUNameStr);
 
         return (isDirectMatch || isIdentityAlias) && String(u.password).trim() === cleanPassword;
       });
 
       if (user) {
         console.log("✅ Login successful for:", cleanUsername);
+        setFailedAttempts(0); // Reset on success
 
         // --- V01.0.11: CLOUD LOGIN TRACKING ---
         try {
@@ -251,15 +284,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
         let freshDev = getAppDeveloper();
         if (freshDev) {
           console.log("🛠️ Cloud Developer synced:", freshDev.username);
-          if (String(freshDev.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
+          if (String(freshDev.username).trim() === cleanUsername &&
             String(freshDev.password).trim() === cleanPassword) {
             console.log("✅ Login successful via Cloud Sync (Developer Bypass) for:", cleanUsername);
+            setFailedAttempts(0);
             onLogin(freshDev);
             return;
           }
         }
 
         if (syncResult.valid) {
+          setFailedAttempts(0);
           // Re-read users after sync
           const updatedUsersRaw = localStorage.getItem('app_users');
           if (updatedUsersRaw) {
@@ -299,11 +334,35 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
         }
 
         // Final failure message
-        const userExists = allUsers.some(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
-        if (userExists) {
-          setError('Invalid password. Credentials do not match.');
+        const license = getStoredLicense();
+        const primaryUID = license?.userID || "";
+        const cleanUID = username.trim().toUpperCase();
+
+        // Ground Truth: If we have a verified identity that matches exactly
+        const isPerfectMatch = (primaryUID === cleanUID && primaryUID !== "");
+
+        const isLegacy = (cleanUID.length > 0 && cleanUID.length < 5 || cleanUID === 'ADMIN');
+        const isCaseMismatch = !isPerfectMatch && allUsers.some(u => String(u.username).trim().toLowerCase() === cleanUID.toLowerCase());
+        const isLicenseMismatch = !isPerfectMatch && license?.userID && String(license.userID).trim().toLowerCase() === cleanUID.toLowerCase();
+
+        // ONLY trigger transition if identity is bad OR if failure limit reached on a non-hardened account
+        if (isLegacy || isCaseMismatch || isLicenseMismatch || (!isPerfectMatch && failedAttempts >= 3)) {
+          setError('Identity Transition Required');
+          setSyncNotice('Dear user kindly reset your USER ID (one time) with new ID as per the criteria set under User ID for a seamless access in future');
+          setSyncStep('EMAIL');
+          setShowSyncModal(true);
+          setSyncNewUID(username);
+          setSyncError('');
+          setSyncEmail('');
         } else {
-          setError('Invalid credentials. Please check your username and password.');
+          setSyncNotice('');
+          const userExists = allUsers.some(u => u.username.toLowerCase() === cleanUID.toLowerCase());
+          if (userExists) {
+            setError('Invalid password. Credentials do not match.');
+          } else {
+            setError(syncResult.message || "Invalid credentials. Please check your username and password.");
+            setFailedAttempts(prev => prev + 1);
+          }
         }
         setIsLoading(false);
       }
@@ -405,6 +464,60 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
     setHasAgreedLegal(true);
     setShowLegalModal(false);
     localStorage.setItem('app_legal_agreed_date', today);
+  };
+
+  const handleVerifySyncEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSyncError('');
+    setIsSyncing(true);
+    try {
+      const res = await verifyIdentityEmail(syncEmail);
+      if (res.success) {
+        setSyncedUserName(res.userName || 'Verified User');
+        setSyncStep('FORM');
+      } else {
+        setSyncError(res.message);
+      }
+    } catch (err: any) {
+      setSyncError(err.message);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleExecuteSyncRepair = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSyncError('');
+    
+    // Strict Format Validation
+    const idRegex = /^[A-Z0-9]{5,12}$/;
+    if (!idRegex.test(syncNewUID)) {
+      setSyncError('User ID must be 5-12 alphanumeric characters (UC).');
+      return;
+    }
+    if (syncNewPass.length < 9) {
+      setSyncError('Password must be at least 9 characters.');
+      return;
+    }
+    if (syncNewPass !== syncConfirmPass) {
+      setSyncError('Passwords do not match.');
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      const res = await syncIdentityRepair(syncEmail, syncNewUID, syncNewPass);
+      if (res.success) {
+        setSyncStep('SUCCESS');
+        // The service already calls validateLicenseStartup(true)
+      } else {
+        setSyncError(res.message);
+      }
+    } catch (err: any) {
+      setSyncError(err.message);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleDisagreeLegal = () => {
@@ -534,9 +647,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
 
             <form onSubmit={handleLogin} className="space-y-6">
               {error && (
-                <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-4 flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
-                  <AlertCircle className="text-red-400 shrink-0" size={20} />
-                  <p className="text-xs text-red-200">{error}</p>
+                <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="text-red-400 shrink-0" size={20} />
+                    <p className="text-xs text-red-200">{error}</p>
+                  </div>
                 </div>
               )}
 
@@ -548,11 +663,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
                     ref={usernameRef}
                     type="text"
                     value={username}
-                    onChange={(e) => setUsername(e.target.value)}
+                    onChange={(e) => setUsername(e.target.value.toUpperCase())}
                     title="Username"
                     aria-label="Username"
-                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm"
-                    placeholder="Enter username"
+                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm uppercase"
+                    placeholder="ENTER USERNAME"
                   />
                 </div>
               </div>
@@ -571,17 +686,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
                     placeholder="••••••••"
                   />
                 </div>
-                <div className="flex justify-end pr-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowResetModal(true);
-                      setResetStep('IDENTIFY');
-                    }}
-                    className="text-[10px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest transition-colors"
-                  >
-                    Forgot Password?
-                  </button>
+                <div className="flex flex-col gap-2 pt-1">
+                  <div className="flex justify-end pr-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowResetModal(true);
+                        setResetStep('IDENTIFY');
+                      }}
+                      className="text-[10px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest transition-colors"
+                    >
+                      Forgot Password?
+                    </button>
+                  </div>
                 </div>
               </div>
               <button
@@ -963,6 +1080,166 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
                 {isVerifyingDev ? <Loader2 className="animate-spin" size={18} /> : "Authorize Developer Session"}
               </button>
             </form>
+          </div>
+        }
+      />
+
+      {/* NEW: Universal Identity Repair & Sync Portal */}
+      <CustomModal
+        isOpen={showSyncModal}
+        onClose={() => !isSyncing && setShowSyncModal(false)}
+        type={syncStep === 'SUCCESS' ? 'success' : 'info'}
+        title="Identity Sync Portal"
+        message={
+          <div className="py-2">
+            {syncNotice && (
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 mb-6 animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center shrink-0">
+                    <ShieldCheck className="text-emerald-400" size={20} />
+                  </div>
+                  <p className="text-[11px] font-bold text-emerald-100 leading-relaxed uppercase tracking-wider italic">
+                    {syncNotice}
+                  </p>
+                </div>
+              </div>
+            )}
+            {syncStep === 'EMAIL' && (
+              <div className="space-y-6">
+                <div className="flex flex-col items-center justify-center text-center space-y-3 mb-4">
+                  <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center">
+                    <Mail className="text-emerald-400" size={32} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight">Sync & Repair Account</h3>
+                    <p className="text-xs text-slate-400 mt-1 pb-1">Enter your registered Email to verify your identity in the cloud database.</p>
+                  </div>
+                </div>
+
+                {syncError && (
+                  <div className="bg-red-950/20 border border-red-500/30 rounded-xl p-3 flex items-start gap-2">
+                    <ShieldAlert size={16} className="text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-[10px] font-bold text-red-200 uppercase leading-relaxed">{syncError}</p>
+                  </div>
+                )}
+
+                <form onSubmit={handleVerifySyncEmail} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Registered Corporate Email</label>
+                    <input
+                      type="email"
+                      required
+                      value={syncEmail}
+                      onChange={(e) => setSyncEmail(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                      placeholder="mail@example.com"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSyncing || !syncEmail}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
+                  >
+                    {isSyncing ? <Loader2 className="animate-spin" size={18} /> : "Verify Identity"}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {syncStep === 'FORM' && (
+              <div className="space-y-6">
+                <div className="flex flex-col items-center justify-center text-center space-y-3 mb-4">
+                  <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center">
+                    <CheckCircle2 className="text-emerald-400" size={32} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight">Identity Verified</h3>
+                    <p className="text-xs text-slate-400 mt-1">Hello <span className="text-emerald-400 font-bold">{syncedUserName}</span>, please set your new hardened credentials below.</p>
+                  </div>
+                </div>
+
+                {syncError && (
+                  <div className="bg-red-950/20 border border-red-500/30 rounded-xl p-3 flex items-start gap-2">
+                    <ShieldAlert size={16} className="text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-[10px] font-bold text-red-200 uppercase leading-relaxed">{syncError}</p>
+                  </div>
+                )}
+
+                <form onSubmit={handleExecuteSyncRepair} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">New User ID (5-12 Alphanumeric)</label>
+                    <input
+                      type="text"
+                      required
+                      value={syncNewUID}
+                      onChange={(e) => setSyncNewUID(e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase())}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500 transition-all font-mono"
+                      placeholder="e.g. SBobby12"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">New Password</label>
+                      <input
+                        type="password"
+                        required
+                        value={syncNewPass}
+                        onChange={(e) => setSyncNewPass(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-xs outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Confirm</label>
+                      <input
+                        type="password"
+                        required
+                        value={syncConfirmPass}
+                        onChange={(e) => setSyncConfirmPass(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-xs outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSyncing}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
+                  >
+                    {isSyncing ? <Loader2 className="animate-spin" size={18} /> : "Finalise & Sync Identity"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSyncStep('EMAIL')}
+                    className="w-full text-[10px] font-black text-slate-500 hover:text-slate-400 uppercase tracking-widest py-2"
+                  >
+                    Back to Identification
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {syncStep === 'SUCCESS' && (
+              <div className="py-8 flex flex-col items-center justify-center text-center space-y-6">
+                <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center scale-110 shadow-[0_0_30px_rgba(16,185,129,0.2)]">
+                  <ShieldCheck className="text-emerald-400" size={48} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-black text-white uppercase tracking-tight">Identity Fully Synced</h3>
+                  <p className="text-xs text-slate-400 max-w-[220px] mx-auto leading-relaxed">Your account has been migrated to the new security standard and synchronized with the Google Sheet.</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowSyncModal(false);
+                    setUsername(syncNewUID);
+                    setPassword('');
+                  }}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-black py-4 rounded-xl transition-all uppercase tracking-widest text-xs border border-slate-700"
+                >
+                  Return to Login
+                </button>
+              </div>
+            )}
           </div>
         }
       />
