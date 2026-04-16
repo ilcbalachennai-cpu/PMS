@@ -44,8 +44,16 @@ namespace BharatPayLauncher
                 else { return; }
             }
 
+            Console.Clear();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(@"  ____  ____  ____  ");
+            Console.WriteLine(@" | __ )|  _ \|  _ \ ");
+            Console.WriteLine(@" |  _ \| |_) | |_) |");
+            Console.WriteLine(@" | |_) |  __/|  __/ ");
+            Console.WriteLine(@" |____/|_|   |_|    ");
+            Console.WriteLine(@"  BharatPay Pro - Intelligent Bootstrapper");
+            Console.ResetColor();
             Console.WriteLine("==================================================");
-            Console.WriteLine("    BharatPay Pro — Intelligent Bootstrapper");
             Console.WriteLine("        [ Status: Cloud Sync Enabled ]");
             Console.WriteLine("==================================================");
             
@@ -123,9 +131,12 @@ namespace BharatPayLauncher
             
             using (WebClient client = new WebClient())
             {
+                // Add User-Agent to satisfy GitHub/Cloud security policies
+                client.Headers.Add("User-Agent", "BharatPay-Pro-Bootstrap-Launcher");
+                
                 string json = client.DownloadString(GOOGLE_SCRIPT_URL);
                 
-                // Extract version and URLs. 
+                // Extract version and URLs
                 string downloadUrl = ExtractJsonValue(json, "downloadUrl");
                 string downloadUrlWin7 = ExtractJsonValue(json, "downloadUrlWin7");
                 string version = ExtractJsonValue(json, "latestVersion");

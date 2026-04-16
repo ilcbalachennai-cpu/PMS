@@ -311,6 +311,37 @@ ipcMain.handle('open-item-path', async (_, filePath: string) => {
     }
 });
 
+// 2d. Dedicated Open User Manual Handler
+ipcMain.handle('open-user-manual', async () => {
+    try {
+        console.log(`[IPC] Received open-user-manual request`);
+        
+        // Strategy 1: Use app.getAppPath() which is reliable across dev and prod
+        const appRoot = isDev ? process.cwd() : app.getAppPath();
+        const manualPath = path.join(appRoot, 'docs', 'user_manual.html');
+
+        console.log(`[IPC] Resolved manual path: ${manualPath}`);
+        
+        if (fs.existsSync(manualPath)) {
+            await shell.openPath(manualPath);
+            return { success: true };
+        } 
+        
+        // Strategy 2: Fallback to directory-based resolution
+        const altPath = path.resolve(__dirname, '..', 'docs', 'user_manual.html');
+        console.log(`[IPC] Falling back to alt path: ${altPath}`);
+        if (fs.existsSync(altPath)) {
+            await shell.openPath(altPath);
+            return { success: true };
+        }
+
+        throw new Error(`User manual not found at expected location. Searched: ${manualPath}`);
+    } catch (e: any) {
+        console.error('[IPC] Open user manual failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('send-email', async (_, { smtpConfig, mailOptions }) => {
     try {
         console.log(`[IPC] send-email requested to: ${mailOptions.to}`);

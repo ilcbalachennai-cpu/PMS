@@ -29,6 +29,27 @@ html, body {
   }
 }
 
+@keyframes dual-color-blink {
+  0%, 100% {
+    background-color: rgba(30, 41, 59, 0.3); /* Slate-800-ish */
+    border-color: rgba(154, 52, 18, 0.3); /* Orange-800-ish shadow */
+    box-shadow: 0 0 0px transparent;
+  }
+  50% {
+    background-color: rgba(154, 52, 18, 0.2); /* Orange-800 translucent */
+    border-color: rgba(249, 115, 22, 0.6); /* Orange-500 */
+    box-shadow: 0 0 15px rgba(249, 115, 22, 0.2);
+  }
+}
+
+.animate-dual-color-blink {
+  animation: dual-color-blink 1.5s ease-in-out infinite;
+}
+
+.animate-slight-blink {
+  animation: slight-blink 2s ease-in-out infinite;
+}
+
 .animate-slow-pulse {
   animation: slow-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }

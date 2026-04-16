@@ -17,11 +17,13 @@ import {
     Upload,
     Loader2,
     UserCircle,
-    Power
+    Power,
+    BadgeCheck,
+    SendHorizonal
 } from 'lucide-react';
 import { CompanyProfile, StatutoryConfig, User } from '../types';
 import { INITIAL_COMPANY_PROFILE, INITIAL_STATUTORY_CONFIG, BRAND_CONFIG } from '../constants';
-import { activateFullLicense, registerTrial, isValidKeyFormat, updateCloudPassword } from '../services/licenseService';
+import { activateFullLicense, registerTrial, isValidKeyFormat, updateCloudPassword, sendRegistrationOTP, verifyRegistrationOTP } from '../services/licenseService';
 import CryptoJS from 'crypto-js';
 
 interface RegistrationProps {
@@ -48,6 +50,13 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
 
+    // Email OTP Verification State
+    type EmailVerifyState = 'idle' | 'sending' | 'otp_pending' | 'verifying' | 'verified';
+    const [emailVerifyState, setEmailVerifyState] = useState<EmailVerifyState>('idle');
+    const [regOTP, setRegOTP] = useState('');
+    const [emailVerifyMsg, setEmailVerifyMsg] = useState('');
+    const otpInputRef = React.useRef<HTMLInputElement>(null);
+
     // Restore State
     const [showRestoreFields, setShowRestoreFields] = useState(false);
     const [encryptionKey, setEncryptionKey] = useState('');
@@ -59,10 +68,57 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
     const containerRef = React.useRef<HTMLDivElement>(null);
 
+    // Reset email verification when the email address is changed
+    useEffect(() => {
+        if (emailVerifyState !== 'idle') {
+            setEmailVerifyState('idle');
+            setRegOTP('');
+            setEmailVerifyMsg('');
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [regEmail]);
+
     // Clear error when inputs change
     useEffect(() => {
         setError('');
     }, [userName, userID, regEmail, regMobile, adminPassword, confirmPassword, encryptionKey]);
+
+    const handleSendEmailOTP = async () => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!regEmail || !emailRegex.test(regEmail)) {
+            setEmailVerifyMsg('Please enter a valid email address first.');
+            return;
+        }
+        setEmailVerifyState('sending');
+        setEmailVerifyMsg('');
+        setRegOTP('');
+        const result = await sendRegistrationOTP(regEmail);
+        if (result.success) {
+            setEmailVerifyState('otp_pending');
+            setEmailVerifyMsg('OTP sent! Check your inbox and enter the 6-digit code below.');
+            setTimeout(() => otpInputRef.current?.focus(), 100);
+        } else {
+            setEmailVerifyState('idle');
+            setEmailVerifyMsg(result.message || 'Failed to send OTP. Please try again.');
+        }
+    };
+
+    const handleVerifyEmailOTP = async () => {
+        if (regOTP.length !== 6) {
+            setEmailVerifyMsg('Please enter the complete 6-digit OTP.');
+            return;
+        }
+        setEmailVerifyState('verifying');
+        setEmailVerifyMsg('');
+        const result = await verifyRegistrationOTP(regEmail, regOTP);
+        if (result.success) {
+            setEmailVerifyState('verified');
+            setEmailVerifyMsg('Email verified successfully!');
+        } else {
+            setEmailVerifyState('otp_pending');
+            setEmailVerifyMsg(result.message || 'Invalid OTP. Please try again.');
+        }
+    };
 
     // Auto-focus on step change
     useEffect(() => {
@@ -262,7 +318,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 };
 
                 // Sync Password to Cloud (Background)
-                updateCloudPassword(adminUser.email, adminUser.password || '').catch(e => console.error("Cloud Password Sync Failed:", e));
+                updateCloudPassword(adminUser.email, adminUser.password || '', regOTP).catch(e => console.error("Cloud Password Sync Failed:", e));
 
                 // Backup EVERYTHING critical before clearing (Strict Preservation)
                 const currentLicense = localStorage.getItem('app_license_secure');
@@ -355,7 +411,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
         // Sync Password to Cloud (Wait for result to ensure integrity)
         try {
-            await updateCloudPassword(regEmail || 'admin@bharatpay.com', adminPassword);
+            await updateCloudPassword(regEmail || 'admin@bharatpay.com', adminPassword, regOTP);
         } catch (e) {
             console.warn("Initial Cloud Password Sync Failed (Setup Mode):", e);
         }
@@ -542,22 +598,115 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {/* Email Verification Block */}
+                                    <div className="grid grid-cols-1 gap-4">
                                         <div className="space-y-2">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Registered Email ID</label>
-                                            <div className="relative">
-                                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                                                <input
-                                                    type="email"
-                                                    title="Registered Email ID"
-                                                    aria-label="Registered Email ID"
-                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-500"
-                                                    placeholder="mail@example.com"
-                                                    value={regEmail}
-                                                    onChange={e => setRegEmail(e.target.value)}
-                                                />
+                                            <div className="flex items-center justify-between pl-1">
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Registered Email ID *</label>
+                                                {emailVerifyState === 'verified' && (
+                                                    <span className="flex items-center gap-1 text-[10px] font-black text-emerald-400 uppercase tracking-wide">
+                                                        <BadgeCheck size={13} /> Verified
+                                                    </span>
+                                                )}
                                             </div>
+                                            <div className="flex gap-2">
+                                                <div className="relative flex-1">
+                                                    <Mail className={`absolute left-3 top-1/2 -translate-y-1/2 ${emailVerifyState === 'verified' ? 'text-emerald-500' : 'text-slate-500'}`} size={18} />
+                                                    <input
+                                                        type="email"
+                                                        title="Registered Email ID"
+                                                        aria-label="Registered Email ID"
+                                                        id="reg-email-input"
+                                                        className={`w-full bg-slate-950 border rounded-xl p-3.5 pl-10 text-white focus:ring-2 outline-none transition-all placeholder:text-slate-500 ${
+                                                            emailVerifyState === 'verified'
+                                                                ? 'border-emerald-500/60 focus:ring-emerald-500/30 text-emerald-300'
+                                                                : 'border-slate-800 focus:ring-blue-500/50'
+                                                        } ${emailVerifyState === 'otp_pending' || emailVerifyState === 'verifying' || emailVerifyState === 'verified' ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                                        placeholder="mail@example.com"
+                                                        value={regEmail}
+                                                        readOnly={emailVerifyState === 'otp_pending' || emailVerifyState === 'verifying' || emailVerifyState === 'verified'}
+                                                        onChange={e => setRegEmail(e.target.value)}
+                                                    />
+                                                </div>
+                                                {emailVerifyState !== 'verified' && (
+                                                    <button
+                                                        id="send-otp-btn"
+                                                        type="button"
+                                                        onClick={handleSendEmailOTP}
+                                                        disabled={emailVerifyState === 'sending' || emailVerifyState === 'otp_pending' || emailVerifyState === 'verifying' || !regEmail}
+                                                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-black uppercase tracking-wider rounded-xl transition-all whitespace-nowrap shrink-0 shadow-lg shadow-blue-900/30"
+                                                        title="Verify email by sending OTP"
+                                                    >
+                                                        {emailVerifyState === 'sending'
+                                                            ? <><Loader2 size={14} className="animate-spin" /> Sending...</>
+                                                            : <><SendHorizonal size={14} /> Send OTP</>
+                                                        }
+                                                    </button>
+                                                )}
+                                                {emailVerifyState === 'verified' && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setEmailVerifyState('idle'); setRegOTP(''); setEmailVerifyMsg(''); }}
+                                                        className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 text-[11px] font-bold rounded-xl transition-all shrink-0"
+                                                        title="Change email"
+                                                    >
+                                                        Change
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {/* OTP Entry Row */}
+                                            {(emailVerifyState === 'otp_pending' || emailVerifyState === 'verifying') && (
+                                                <div className="mt-2 flex gap-2 items-center animate-in slide-in-from-top-2 duration-200">
+                                                    <input
+                                                        ref={otpInputRef}
+                                                        id="email-otp-input"
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        maxLength={6}
+                                                        title="Enter 6-digit OTP"
+                                                        aria-label="Email OTP"
+                                                        className="flex-1 bg-slate-950 border border-blue-500/40 rounded-xl p-3 text-white text-center font-mono text-lg tracking-[0.4em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-600 placeholder:text-sm placeholder:tracking-normal"
+                                                        placeholder="_ _ _ _ _ _"
+                                                        value={regOTP}
+                                                        onChange={e => setRegOTP(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                                        onKeyDown={e => { if (e.key === 'Enter' && regOTP.length === 6) handleVerifyEmailOTP(); }}
+                                                    />
+                                                    <button
+                                                        id="verify-otp-btn"
+                                                        type="button"
+                                                        onClick={handleVerifyEmailOTP}
+                                                        disabled={emailVerifyState === 'verifying' || regOTP.length !== 6}
+                                                        className="flex items-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-black uppercase tracking-wider rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/30"
+                                                    >
+                                                        {emailVerifyState === 'verifying'
+                                                            ? <><Loader2 size={14} className="animate-spin" /> Verifying...</>
+                                                            : <><BadgeCheck size={14} /> Confirm OTP</>
+                                                        }
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSendEmailOTP}
+                                                        disabled={emailVerifyState === 'verifying'}
+                                                        className="px-3 py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-400 text-[10px] font-bold rounded-xl transition-all shrink-0"
+                                                        title="Resend OTP"
+                                                    >
+                                                        Resend
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {/* Status Message */}
+                                            {emailVerifyMsg && (
+                                                <p className={`text-[11px] font-semibold pl-1 ${
+                                                    emailVerifyState === 'verified' ? 'text-emerald-400' : 'text-amber-400'
+                                                }`}>
+                                                    {emailVerifyMsg}
+                                                </p>
+                                            )}
                                         </div>
+
+                                        {/* Mobile Number */}
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Mobile Number</label>
                                             <div className="relative">
@@ -577,11 +726,18 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                 </div>
                             </div>
 
-                            <div className="flex justify-end">
+                            <div className="flex justify-end items-center gap-3">
+                                {emailVerifyState !== 'verified' && (
+                                    <p className="text-[10px] text-amber-500 font-semibold flex items-center gap-1.5">
+                                        <AlertCircle size={12} />
+                                        Verify your email to continue
+                                    </p>
+                                )}
                                 <button
                                     onClick={nextStep}
-                                    disabled={isProcessing}
+                                    disabled={isProcessing || emailVerifyState !== 'verified'}
                                     className="group px-10 py-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black uppercase tracking-widest rounded-xl shadow-2xl shadow-blue-500/20 transition-all flex items-center gap-3"
+                                    title={emailVerifyState !== 'verified' ? 'Please verify your email first' : 'Proceed to next step'}
                                 >
                                     {isProcessing ? <Loader2 size={24} className="animate-spin" /> : <>Verify & Activate <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" /></>}
                                 </button>

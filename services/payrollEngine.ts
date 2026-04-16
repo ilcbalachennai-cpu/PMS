@@ -33,6 +33,21 @@ const getBranchState = (branchName: string = ''): string | null => {
     return null;
 };
 
+const getComponentBasedWage = (employee: Employee, components: any, factor: number): number => {
+    let base = 0;
+    if (components.basic) base += employee.basicPay;
+    if (components.da) base += (employee.da || 0);
+    if (components.retaining) base += (employee.retainingAllowance || 0);
+    if (components.hra) base += (employee.hra || 0);
+    if (components.conveyance) base += (employee.conveyance || 0);
+    if (components.washing) base += (employee.washing || 0);
+    if (components.attire) base += (employee.attire || 0);
+    if (components.special1) base += (employee.specialAllowance1 || 0);
+    if (components.special2) base += (employee.specialAllowance2 || 0);
+    if (components.special3) base += (employee.specialAllowance3 || 0);
+    return Math.round(base * factor);
+};
+
 export const calculatePayroll = (
     employee: Employee,
     config: StatutoryConfig,
@@ -137,26 +152,16 @@ export const calculatePayroll = (
     const special2 = Math.round((employee.specialAllowance2 || 0) * factor);
     const special3 = Math.round((employee.specialAllowance3 || 0) * factor);
 
-    const bonus = 0;
+    const bonusRate = (config.bonusRate || 0) / 100;
+    let bonus = 0;
     const encashedDays = attendance.encashedDays || 0;
 
-    let leaveWageBase = 0;
     const lwComponents = config.leaveWagesComponents || { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false };
+    const leaveWageBaseRaw = getComponentBasedWage(employee, lwComponents, 1);
 
-    if (lwComponents.basic) leaveWageBase += employee.basicPay;
-    if (lwComponents.da) leaveWageBase += (employee.da || 0);
-    if (lwComponents.retaining) leaveWageBase += (employee.retainingAllowance || 0);
-    if (lwComponents.hra) leaveWageBase += (employee.hra || 0);
-    if (lwComponents.conveyance) leaveWageBase += (employee.conveyance || 0);
-    if (lwComponents.washing) leaveWageBase += (employee.washing || 0);
-    if (lwComponents.attire) leaveWageBase += (employee.attire || 0);
-    if (lwComponents.special1) leaveWageBase += (employee.specialAllowance1 || 0);
-    if (lwComponents.special2) leaveWageBase += (employee.specialAllowance2 || 0);
-    if (lwComponents.special3) leaveWageBase += (employee.specialAllowance3 || 0);
+    const leaveEncashment = Math.round((leaveWageBaseRaw / daysInMonth) * encashedDays);
 
-    const leaveEncashment = Math.round((leaveWageBase / daysInMonth) * encashedDays);
-
-    const grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
+    let grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
 
     const standardMonthlyGross = employee.basicPay + (employee.da || 0) + (employee.retainingAllowance || 0) + (employee.hra || 0) + (employee.conveyance || 0) + (employee.washing || 0) + (employee.attire || 0) + (employee.specialAllowance1 || 0) + (employee.specialAllowance2 || 0) + (employee.specialAllowance3 || 0);
 
@@ -185,36 +190,19 @@ export const calculatePayroll = (
     let esiStandardBasisWage = codeWage;
 
     if (config.pfEsiCalculationBasis === 'OriginalWages') {
-        // PF Basis
-        const poc = config.pfOriginalWagesComponents || { basic: true, da: true, retaining: true, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false };
-        let pfBase = 0;
-        if (poc.basic) pfBase += basic;
-        if (poc.da) pfBase += da;
-        if (poc.retaining) pfBase += retaining;
-        if (poc.hra) pfBase += hra;
-        if (poc.conveyance) pfBase += conveyance;
-        if (poc.washing) pfBase += washing;
-        if (poc.attire) pfBase += attire;
-        if (poc.special1) pfBase += special1;
-        if (poc.special2) pfBase += special2;
-        if (poc.special3) pfBase += special3;
-        pfStandardBasisWage = Math.round(pfBase);
-
-        // ESI Basis
-        const eoc = config.esiOriginalWagesComponents || { basic: true, da: true, retaining: true, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false };
-        let esiBase = 0;
-        if (eoc.basic) esiBase += basic;
-        if (eoc.da) esiBase += da;
-        if (eoc.retaining) esiBase += retaining;
-        if (eoc.hra) esiBase += hra;
-        if (eoc.conveyance) esiBase += conveyance;
-        if (eoc.washing) esiBase += washing;
-        if (eoc.attire) esiBase += attire;
-        if (eoc.special1) esiBase += special1;
-        if (eoc.special2) esiBase += special2;
-        if (eoc.special3) esiBase += special3;
-        esiStandardBasisWage = Math.round(esiBase);
+        pfStandardBasisWage = getComponentBasedWage(employee, config.pfOriginalWagesComponents, factor);
+        esiStandardBasisWage = getComponentBasedWage(employee, config.esiOriginalWagesComponents, factor);
     }
+
+    // --- Bonus Calculation ---
+    let bonusBasisWage = codeWage;
+    if (config.pfEsiCalculationBasis === 'OriginalWages') {
+        bonusBasisWage = getComponentBasedWage(employee, config.bonusWagesComponents, factor);
+    }
+    bonus = Math.round(bonusBasisWage * bonusRate);
+
+    // --- Recalculate Gross with Bonus ---
+    grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
     
     let isCode88 = (config.pfEsiCalculationBasis === 'LabourCode' && wageD > 0);
 
@@ -540,24 +528,29 @@ export const calculatePayroll = (
 
     const totalDeductions = statutoryDeductions + fineAmount + advanceRecovery;
 
-    return {
-        employeeId: employee.id,
-        month,
-        year,
-        daysInMonth,
-        payableDays: effectivePayableDays,
-        earnings: {
-            basic, da, retainingAllowance: retaining, hra, conveyance, washing, attire,
-            special1, special2, special3, bonus, leaveEncashment, 
-            otAmount: otRecord?.otAmount || 0,
-            total: grossEarnings + (otRecord?.otAmount || 0)
-        },
-        deductions: {
-            epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf: lwfEmployee,
-            advanceRecovery, fine: fineAmount, total: totalDeductions
-        },
-        employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer, lwf: lwfEmployer },
-        gratuityAccrual: Math.round(((basic + da) * 15 / 26) / 12),
+        let gratuityBasisWage = codeWage;
+        if (config.pfEsiCalculationBasis === 'OriginalWages') {
+            gratuityBasisWage = getComponentBasedWage(employee, config.gratuityWagesComponents, factor);
+        }
+
+        return {
+            employeeId: employee.id,
+            month,
+            year,
+            daysInMonth,
+            payableDays: effectivePayableDays,
+            earnings: {
+                basic, da, retainingAllowance: retaining, hra, conveyance, washing, attire,
+                special1, special2, special3, bonus, leaveEncashment, 
+                otAmount: otRecord?.otAmount || 0,
+                total: grossEarnings + (otRecord?.otAmount || 0)
+            },
+            deductions: {
+                epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf: lwfEmployee,
+                advanceRecovery, fine: fineAmount, total: totalDeductions
+            },
+            employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer, lwf: lwfEmployer },
+            gratuityAccrual: Math.round(((gratuityBasisWage) * 15 / 26) / 12),
         netPay: (grossEarnings + (otRecord?.otAmount || 0)) - totalDeductions,
         isProportionatePFCapped,
         isCode88,

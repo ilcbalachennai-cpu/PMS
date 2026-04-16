@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { IndianRupee, Users, Building, TrendingUp, Database, Calendar, Calculator, ArrowRight, ExternalLink, Sparkles } from 'lucide-react';
+import { IndianRupee, Users, Building, TrendingUp, Database, Calendar, Calculator, ArrowRight, ExternalLink, Sparkles, FileText } from 'lucide-react';
 import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, View, CompanyProfile, PayrollResult } from '../types';
 import { formatIndianNumber } from '../utils/formatters';
 
@@ -42,7 +42,7 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
   const [localYear, setLocalYear] = useState<number>(() => lastProcessed?.year || year);
 
   const QuickLinks = ({ centered = false }: { centered?: boolean }) => (
-    <div className={`grid grid-cols-1 ${centered ? 'md:grid-cols-2 max-w-3xl' : 'md:grid-cols-3'} gap-4 w-full`}>
+    <div className={`grid grid-cols-1 ${centered ? 'md:grid-cols-2 max-w-3xl' : 'md:grid-cols-2 lg:grid-cols-4'} gap-4 w-full`}>
       <button
         onClick={() => onNavigate(View.PFCalculator)}
         title="Open PF ECR Calculator"
@@ -101,6 +101,35 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
           </div>
         </div>
         <div className="p-1.5 bg-slate-800 rounded-full text-slate-400 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+          <ArrowRight size={16} />
+        </div>
+      </button>
+
+      <button
+        onClick={async () => {
+          if (window.electronAPI && window.electronAPI.openUserManual) {
+            const res = await window.electronAPI.openUserManual();
+            if (res && !res.success) {
+               alert("Unable to open user manual: " + res.error);
+            }
+          } else {
+            alert("Application Backend Update Required: Please close and restart the BharatPay Pro application to enable the new Manual link.");
+          }
+        }}
+        title="Open User Manual & Guidelines"
+        aria-label="Open User Manual & Guidelines"
+        className="col-span-1 p-4 rounded-xl border flex items-center justify-between group transition-all shadow-lg cursor-pointer text-left animate-dual-color-blink"
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-orange-600 rounded-xl text-white shadow-lg shadow-orange-900/50 group-hover:scale-110 transition-transform">
+            <FileText size={20} />
+          </div>
+          <div>
+            <h3 className="font-bold text-white text-xs">User Manual & Help</h3>
+            <p className="text-[9px] text-orange-200/70">Master Guidelines & Features</p>
+          </div>
+        </div>
+        <div className="p-1.5 bg-slate-800 rounded-full text-slate-400 group-hover:bg-orange-600 group-hover:text-white transition-colors">
           <ArrowRight size={16} />
         </div>
       </button>

@@ -225,6 +225,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             const existing = appUsers.find(u => (u.username || '').toLowerCase() === cleanUsername && (u.username || '').toLowerCase() !== umEditId?.toLowerCase());
             if (existing) { setUmError('Username already exists.'); return; }
 
+            // --- SINGLE ADMIN ENFORCEMENT ---
+            if (umForm.role === 'Administrator' && !canSelectAdminRole) {
+                setUmError('Only one Administrator is allowed in the system.');
+                return;
+            }
+
             const cleanName = umForm.name.trim().toUpperCase();
             let success = false;
             if (umEditId) {
@@ -272,6 +278,29 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
             setNewUserID(licenseInfo.userID || '');
         }
     }, [licenseInfo]);
+
+    // --- SINGLE ADMIN REPAIR LOGIC ---
+    useEffect(() => {
+        if (activeTab === 'USERS' && appUsers.length > 0) {
+            const adminUsers = appUsers.filter(u => u.role === 'Administrator');
+            if (adminUsers.length > 1) {
+                console.warn("🛡️ Security Repair: Multiple Admins detected. Enforcing Single Admin policy.");
+                const firstAdmin = adminUsers[0];
+                const repairedUsers = appUsers.map(u => {
+                    // Keep the first admin found, downgrade others
+                    if (u.role === 'Administrator' && u.username !== firstAdmin.username) {
+                        return { ...u, role: 'User' as 'User' };
+                    }
+                    return u;
+                });
+                saveAppUsers(repairedUsers);
+                showAlert('info', 'System Repaired', 'Multiple Administrator accounts were detected and repaired. Only the primary account remains an Administrator.');
+            }
+        }
+    }, [activeTab, appUsers.length]);
+
+    const hasAdminAlready = appUsers.some(u => u.role === 'Administrator');
+    const canSelectAdminRole = !hasAdminAlready || (umEditId && appUsers.find(u => u.username === umEditId)?.role === 'Administrator');
 
     const handleCloudSync = async () => {
         setIsSyncing(true);
@@ -974,17 +1003,19 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
                                         { key: 'special3', label: 'Allow 3' },
                                     ].map(comp => {
+                                        const isLocked = comp.key === 'basic' || comp.key === 'da';
                                         const components = formData.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
-                                        const isActive = components[comp.key as keyof typeof components];
+                                        const isActive = isLocked ? true : components[comp.key as keyof typeof components];
                                         return (
                                             <button
                                                 key={comp.key}
+                                                disabled={isLocked}
                                                 onClick={() => handlePFOriginalWagesToggle(comp.key as any)}
-                                                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-blue-600 border-blue-400 text-white shadow-blue-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700'}`}
-                                                title={`Toggle ${comp.label} for PF Base`}
+                                                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-blue-600 border-blue-400 text-white shadow-blue-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700'} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
+                                                title={isLocked ? "Mandatory Component" : `Toggle ${comp.label} for PF Base`}
                                             >
-                                                {isActive ? <CheckSquare size={14} className="shrink-0" /> : <Square size={14} className="shrink-0 opacity-40" />}
-                                                <span className="truncate">{comp.label}</span>
+                                                {isActive ? <CheckSquare size={14} className={isLocked ? 'shrink-0 text-blue-200' : 'shrink-0'} /> : <Square size={14} className="shrink-0 opacity-40" />}
+                                                <span className="truncate">{comp.label} {isLocked && <span className="opacity-40 ml-1">(Locked)</span>}</span>
                                             </button>
                                         );
                                     })}
@@ -1011,17 +1042,19 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
                                         { key: 'special3', label: 'Allow 3' },
                                     ].map(comp => {
+                                        const isLocked = comp.key === 'basic' || comp.key === 'da';
                                         const components = formData.esiOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents;
-                                        const isActive = components[comp.key as keyof typeof components];
+                                        const isActive = isLocked ? true : components[comp.key as keyof typeof components];
                                         return (
                                             <button
                                                 key={comp.key}
+                                                disabled={isLocked}
                                                 onClick={() => handleESIOriginalWagesToggle(comp.key as any)}
-                                                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-pink-600 border-pink-400 text-white shadow-pink-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-pink-900/20 hover:border-pink-500/30'}`}
-                                                title={`Toggle ${comp.label} for ESI Base`}
+                                                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-pink-600 border-pink-400 text-white shadow-pink-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-pink-900/20 hover:border-pink-500/30'} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
+                                                title={isLocked ? "Mandatory Component" : `Toggle ${comp.label} for ESI Base`}
                                             >
-                                                {isActive ? <CheckSquare size={14} className="shrink-0" /> : <Square size={14} className="shrink-0 opacity-40" />}
-                                                <span className="truncate">{comp.label}</span>
+                                                {isActive ? <CheckSquare size={14} className={isLocked ? 'shrink-0 text-pink-200' : 'shrink-0'} /> : <Square size={14} className="shrink-0 opacity-40" />}
+                                                <span className="truncate">{comp.label} {isLocked && <span className="opacity-40 ml-1">(Locked)</span>}</span>
                                             </button>
                                         );
                                     })}
@@ -1313,29 +1346,47 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         </div>
                                     </div>
                                     <div className="space-y-4">
-                                        <p className="text-[10px] text-slate-500 font-medium italic">"Select components for Bonus 'Eligible Wages' calculation."</p>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {[
-                                                { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
-                                                { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                                { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
-                                                { key: 'special3', label: 'Allow 3' }
-                                            ].map(comp => {
-                                                const components = formData.bonusWagesComponents || INITIAL_STATUTORY_CONFIG.bonusWagesComponents;
-                                                const isActive = components[comp.key as keyof typeof components];
-                                                return (
-                                                    <button
-                                                        key={comp.key}
-                                                        onClick={() => handleBonusWagesToggle(comp.key as any)}
-                                                        className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-amber-600/20 border-amber-500 text-amber-100' : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'}`}
-                                                        title={`Toggle ${comp.label} for Bonus Wages`}
-                                                    >
-                                                        {isActive ? <CheckSquare size={12} className="text-amber-400" /> : <Square size={12} />}
-                                                        <span className="truncate">{comp.label}</span>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
+                                        {formData.pfEsiCalculationBasis === 'OriginalWages' ? (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-[10px] text-slate-500 font-medium italic">"Select Bonus Wages Components. Basic & DA locked."</p>
+                                                    <span className="text-[8px] text-slate-600 uppercase font-black">Override Mode</span>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    {[
+                                                        { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                                        { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                                        { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
+                                                        { key: 'special3', label: 'Allow 3' }
+                                                    ].map(comp => {
+                                                        const isLocked = comp.key === 'basic' || comp.key === 'da';
+                                                        const components = formData.bonusWagesComponents || INITIAL_STATUTORY_CONFIG.bonusWagesComponents;
+                                                        const isActive = isLocked ? true : components[comp.key as keyof typeof components];
+                                                        return (
+                                                            <button
+                                                                key={comp.key}
+                                                                disabled={isLocked}
+                                                                onClick={() => setFormData(p => ({ ...p, bonusWagesComponents: { ...p.bonusWagesComponents, [comp.key]: !isActive }}))}
+                                                                className={`flex items-center gap-2 p-1.5 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-amber-600/20 border-amber-500 text-amber-100' : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'} ${isLocked ? 'cursor-not-allowed grayscale-[0.8]' : 'hover:border-amber-400'}`}
+                                                            >
+                                                                {isActive ? <CheckSquare size={10} className={isLocked ? 'text-slate-500' : 'text-amber-400'} /> : <Square size={10} />}
+                                                                <span className="truncate">{comp.label}</span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-800/50">
+                                                <p className="text-[10px] text-slate-400 italic leading-relaxed">
+                                                    {formData.pfEsiCalculationBasis === 'LabourCode' ? (
+                                                        <>Bonus uses <span className="text-blue-300 font-bold underline decoration-blue-500/50">Code Wages (Clause 88)</span> as basis.</>
+                                                    ) : (
+                                                        <>Bonus uses the <span className="text-blue-300 font-bold underline decoration-blue-500/50">Standard Definition (Basic + DA)</span> as per Payment of Bonus Act.</>
+                                                    )}
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
@@ -1355,35 +1406,47 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                                 (Selected Wages * (15/26) * Completed Years of Service)
                                             </div>
                                         </div>
-                                        <div className="space-y-3">
-                                            <p className="text-[10px] text-slate-500 font-medium italic">"Select components for Gratuity 'Eligible Wages' basis."</p>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {[
-                                                    { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
-                                                    { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                                    { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
-                                                    { key: 'special3', label: 'Allow 3' }
-                                                ].map(comp => {
-                                                    const components = formData.gratuityWagesComponents || INITIAL_STATUTORY_CONFIG.gratuityWagesComponents;
-                                                    const isActive = components[comp.key as keyof typeof components];
-                                                    return (
-                                                        <button
-                                                            key={comp.key}
-                                                            onClick={() => handleGratuityWagesToggle(comp.key as any)}
-                                                            className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-blue-600/20 border-blue-500 text-blue-100' : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'}`}
-                                                            title={`Toggle ${comp.label} for Gratuity Wages`}
-                                                        >
-                                                            {isActive ? <CheckSquare size={12} className="text-blue-400" /> : <Square size={12} />}
-                                                            <span className="truncate">{comp.label}</span>
-                                                        </button>
-                                                    );
-                                                })}
+                                        {formData.pfEsiCalculationBasis === 'OriginalWages' ? (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-[10px] text-slate-500 font-medium italic">"Select Gratuity Wages Components. Basic & DA locked."</p>
+                                                    <span className="text-[8px] text-indigo-400 uppercase font-black">Override Mode</span>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    {[
+                                                        { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                                        { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                                        { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
+                                                        { key: 'special3', label: 'Allow 3' }
+                                                    ].map(comp => {
+                                                        const isLocked = comp.key === 'basic' || comp.key === 'da';
+                                                        const components = formData.gratuityWagesComponents || INITIAL_STATUTORY_CONFIG.gratuityWagesComponents;
+                                                        const isActive = isLocked ? true : components[comp.key as keyof typeof components];
+                                                        return (
+                                                            <button
+                                                                key={comp.key}
+                                                                disabled={isLocked}
+                                                                onClick={() => setFormData(p => ({ ...p, gratuityWagesComponents: { ...p.gratuityWagesComponents, [comp.key]: !isActive }}))}
+                                                                className={`flex items-center gap-2 p-1.5 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-indigo-600/20 border-indigo-500 text-indigo-100' : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'} ${isLocked ? 'cursor-not-allowed grayscale-[0.8]' : 'hover:border-indigo-400'}`}
+                                                            >
+                                                                {isActive ? <CheckSquare size={10} className={isLocked ? 'text-slate-500' : 'text-indigo-400'} /> : <Square size={10} />}
+                                                                <span className="truncate">{comp.label}</span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
-                                            <p className="text-[9px] text-slate-500 mt-2 italic flex items-center gap-1">
-                                                <Info size={10} className="text-slate-600" />
-                                                Calculated as per LIC Master Policy for Statutory Gratuity (Act 1972).
-                                            </p>
-                                        </div>
+                                        ) : (
+                                            <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-800/50">
+                                                <p className="text-[10px] text-slate-400 italic leading-relaxed">
+                                                    {formData.pfEsiCalculationBasis === 'LabourCode' ? (
+                                                        <>Gratuity uses <span className="text-blue-300 font-bold underline decoration-blue-500/50">Code Wages (Clause 88)</span> as basis.</>
+                                                    ) : (
+                                                        <>Gratuity uses the <span className="text-blue-300 font-bold underline decoration-blue-500/50">Standard Definition (Basic + DA)</span> as per Payment of Gratuity Act.</>
+                                                    )}
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                              </div>
@@ -2161,7 +2224,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">User ID</label>
                                             <input
                                                 type="text"
-                                                placeholder="Sbobby12"
+                                                placeholder="SBOBBY12"
                                                 className="w-full bg-[#0a0f1d] opacity-60 cursor-not-allowed border border-white/5 rounded-xl p-3 text-white text-xs font-mono outline-none"
                                                 value={newUserID}
                                                 readOnly
@@ -2547,9 +2610,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">System Role</label>
                                         <div className={`grid grid-cols-2 gap-2 bg-[#0a0f1d] p-1.5 rounded-2xl border border-white/5 ${isAdminEdit ? 'opacity-60 cursor-not-allowed' : ''}`}>
                                             <button
-                                                onClick={() => !isAdminEdit && setUmForm({ ...umForm, role: 'Administrator' })}
-                                                disabled={isAdminEdit}
-                                                className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'Administrator' ? 'bg-sky-600/20 text-sky-400 ring-2 ring-sky-500/30 shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                                                onClick={() => !isAdminEdit && canSelectAdminRole && setUmForm({ ...umForm, role: 'Administrator' })}
+                                                disabled={isAdminEdit || !canSelectAdminRole}
+                                                title={!canSelectAdminRole ? "Administrator already exists" : ""}
+                                                className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'Administrator' ? 'bg-sky-600/20 text-sky-400 ring-2 ring-sky-500/30 shadow-lg' : 'text-slate-500 hover:text-slate-300'} ${!canSelectAdminRole ? 'opacity-40 cursor-not-allowed' : ''}`}
                                             >
                                                 Administrator
                                             </button>

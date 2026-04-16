@@ -3,7 +3,8 @@ import { LicenseData, User } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.15";
+export const APP_VERSION = "02.02.17";
+const BPP_AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
   success: boolean;
@@ -20,6 +21,7 @@ export interface ActivationResult {
     adminUser?: string;
     adminPass?: string;
   };
+  status?: string;
 }
 
 /**
@@ -41,12 +43,62 @@ export const getMachineId = async (): Promise<string> => {
 };
 
 /**
+ * Helper for fetch with timeout
+ */
+const fetchWithTimeout = async (url: string, options: any, timeout = 8000) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+};
+
+/**
+ * Tracks active usage days while offline
+ */
+export const trackActiveOfflineDay = () => {
+  const today = new Date().toISOString().split('T')[0];
+  const offlineDatesRaw = localStorage.getItem('app_offline_usage_dates') || '[]';
+  try {
+    let offlineDates: string[] = JSON.parse(offlineDatesRaw);
+    if (!offlineDates.includes(today)) {
+      // Only keep the last 10 dates to prevent bloat
+      offlineDates = [...offlineDates, today].slice(-10);
+      localStorage.setItem('app_offline_usage_dates', JSON.stringify(offlineDates));
+    }
+  } catch (e) {
+    localStorage.setItem('app_offline_usage_dates', JSON.stringify([today]));
+  }
+};
+
+/**
+ * Returns unique offline usage days count
+ */
+export const getOfflineActiveDaysCount = () => {
+  const offlineDatesRaw = localStorage.getItem('app_offline_usage_dates') || '[]';
+  try {
+    const offlineDates: string[] = JSON.parse(offlineDatesRaw);
+    return offlineDates.length;
+  } catch { return 0; }
+};
+
+/**
  * Checks if the application has internet access.
  */
 export const checkOnlineStatus = async (): Promise<{ isOnline: boolean }> => {
   if (!navigator.onLine) return { isOnline: false };
   try {
-    const response = await fetch("https://www.google.com/favicon.ico", { mode: 'no-cors', cache: 'no-store' });
+    // 8 second timeout for status check
+    const response = await fetchWithTimeout("https://www.google.com/favicon.ico", { mode: 'no-cors', cache: 'no-store' }, 8000);
     return { isOnline: !!response };
   } catch (e) {
     return { isOnline: false };
@@ -141,22 +193,53 @@ export const trackActivityTime = () => {
  * Checks if a mandatory internet sync is required (Day 2 Warning, Day 3 Block)
  */
 export const checkSyncRequirement = () => {
-  const lastSyncRaw = localStorage.getItem('app_license_last_check');
   const secureTime = localStorage.getItem('app_time_sync');
-  
   // If baseline time sync is missing, force immediate internet sync
   if (!secureTime) return { required: true, blocked: true, message: "Initialization Sync Required" };
-  
-  if (!lastSyncRaw) return { required: true, blocked: false };
-  
-  const lastSync = new Date(lastSyncRaw.split('-').reverse().join('-')).getTime();
-  const now = Date.now();
-  const diffDays = Math.floor((now - lastSync) / (1000 * 60 * 60 * 24));
-  
-  if (diffDays >= 3) return { required: true, blocked: true, message: "Connection Required (Access Suspended)" };
-  if (diffDays >= 2) return { required: true, blocked: false, message: "Internet connection required for uninterrupted use" };
-  
-  return { required: false, blocked: false };
+
+  const offlineDaysCount = getOfflineActiveDaysCount();
+
+  // Day 1: Seamless access
+  if (offlineDaysCount <= 1) return { required: false, blocked: false };
+
+  // Day 2: Alert message
+  if (offlineDaysCount === 2) {
+    return { 
+      required: true, 
+      blocked: false, 
+      isSyncWarning: true,
+      message: "Internet connection required for uninterrupted use" 
+    };
+  }
+
+  // Day 3: Warning + 10-minute countdown
+  if (offlineDaysCount === 3) {
+    let graceExpiry = localStorage.getItem('app_offline_grace_expiry');
+    const now = Date.now();
+
+    if (!graceExpiry) {
+      graceExpiry = String(now + 600000); // 10 minutes from now
+      localStorage.setItem('app_offline_grace_expiry', graceExpiry);
+    }
+
+    const remaining = Number(graceExpiry) - now;
+
+    if (remaining > 0) {
+      return { 
+        required: true, 
+        blocked: false, 
+        isSyncGracePeriod: true, 
+        graceRemaining: remaining, 
+        message: `Sync Required: Access will be suspended in ${Math.ceil(remaining / 60000)} minutes` 
+      };
+    } else {
+      // Countdown finished
+      return { required: true, blocked: true, message: "Grace Period Expired: Internet Connection Required to continue" };
+    }
+  }
+
+  // Day 4+: Persistent Block
+  return { required: true, blocked: true, message: "Connection Required (Access Suspended)" };
 };
 
 export const getStoredLicense = (): LicenseData | null => {
@@ -220,12 +303,23 @@ export const isValidKeyFormat = (key: string): boolean => {
 
 const fetchFromApi = async (url: string, options: any) => {
   try {
+    // --- V02.02.15: AUTOMATIC AUTHORIZATION INJECTION ---
+    if (options.method === 'POST' && options.body) {
+      try {
+        const bodyObj = JSON.parse(options.body);
+        bodyObj.authSecret = BPP_AUTH_SECRET;
+        options.body = JSON.stringify(bodyObj);
+      } catch (e) {
+        console.warn("API Auth Injection failed: Body is not JSON.");
+      }
+    }
+
     // @ts-ignore
     if (window.electronAPI && window.electronAPI.apiFetch) {
       // @ts-ignore
       return await window.electronAPI.apiFetch(url, options);
     }
-    const res = await fetch(url, options);
+    const res = await fetchWithTimeout(url, options, 8000); // 8s timeout
     try {
       return await res.json();
     } catch { return { success: false, message: 'Invalid JSON response from server' }; }
@@ -430,6 +524,7 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
     // This ensures app_time_sync and other local markers are set BEFORE any blocking checks
     const timeCheck = trackActivityTime();
     const currentMachineId = await getMachineId();
+    console.log(`[LICENSE] Hardware ID for Sync: ${currentMachineId}`);
     
     const stored = getStoredLicense();
     
@@ -470,9 +565,28 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
     }
 
     const { isOnline } = await checkOnlineStatus();
-    if (!isOnline && !stored) {
-       // Cannot initialize for the first time without internet
-       return { valid: false, message: 'Initial Internet Connection Required', data: { isSyncBlocked: true } };
+    if (!isOnline) {
+      // --- TRACK ACTIVE OFFLINE DAY ---
+      trackActiveOfflineDay();
+      
+      const syncCheck = checkSyncRequirement();
+      // Only block if NOT forcing a sync and blocked by policy
+      if (syncCheck.blocked && !force) {
+        return { 
+          valid: false, 
+          message: syncCheck.message, 
+          data: { 
+            isSyncBlocked: true,
+            isSyncGracePeriod: syncCheck.isSyncGracePeriod,
+            graceRemaining: syncCheck.graceRemaining
+          } 
+        };
+      }
+      
+      if (!stored) {
+         // Cannot initialize for the first time without internet
+         return { valid: false, message: 'Initial Internet Connection Required', data: { isSyncBlocked: true } };
+      }
     }
 
   // Ensure the fetched machine ID is persisted for synchronous lookups (getMachineKey)
@@ -509,10 +623,12 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
         const localUsers = JSON.parse(usersRaw);
         const adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
         if (adminIndex !== -1 && localUsers[adminIndex].username !== stored.userID) {
-          console.log(`🛠️ Repairing Identity: Changing internal username ${localUsers[adminIndex].username} -> ${stored.userID}`);
+          console.log(`🛠️ [IDENTITY] Repairing local username case: ${localUsers[adminIndex].username} -> ${stored.userID}`);
           localUsers[adminIndex].username = stored.userID;
           localStorage.setItem('app_users', JSON.stringify(localUsers));
           if ((window as any).electronAPI) (window as any).electronAPI.dbSet('app_users', localUsers);
+        } else {
+          console.log(`✅ [IDENTITY] Local username matches cloud database: ${stored.userID}`);
         }
       }
     } catch (e) {
@@ -576,6 +692,15 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
         }
 
         if (!result.success) {
+          // --- V02.02.15: IDENTITY RESTORATION PASSTHROUGH ---
+          if (result.message === "IDENTITY_RESTORE_REQUIRED") {
+             return { 
+               valid: false, 
+               message: result.message, 
+               status: 'PENDING_RESTORE',
+               data: result.data 
+             };
+          }
           return { valid: false, message: result.message };
         }
 
@@ -626,6 +751,11 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
 
             if (cloudData.expiryDate && cloudData.expiryDate !== activeLicense.expiryDate) {
               activeLicense.expiryDate = cloudData.expiryDate;
+              storageUpdated = true;
+            }
+            if (cloudData.userID && cloudData.userID !== activeLicense.userID) {
+              console.log(`🆔 [SYNC] Cloud User ID mismatch detected: ${activeLicense.userID} -> ${cloudData.userID}`);
+              activeLicense.userID = cloudData.userID;
               storageUpdated = true;
             }
             if (incomingKey && incomingKey !== activeLicense.key) {
@@ -713,9 +843,14 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
             }
           }
 
+          // --- SUCCESSFUL CLOUD SYNC: RESET COUNTERS ---
           localStorage.setItem('app_license_last_check', today);
+          localStorage.removeItem('app_offline_usage_dates');
+          localStorage.removeItem('app_offline_grace_expiry');
+
           console.log("✅ Daily License/Trial Sync Complete (Database IDs Only).");
-          return { valid: true, data: cloudData };
+          // Ensure SyncCheck data is cleared in result
+          return { valid: true, data: { ...cloudData, isSyncBlocked: false, isSyncGracePeriod: false } };
         }
 
       } catch (e) {
@@ -728,6 +863,46 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
   // If we still don't have a valid license after sync, but the attemptedID exists in local users,
   // we might be able to proceed locally (offline mode).
   return { valid: !!stored };
+};
+
+/**
+ * NEW: Sends a registration OTP to verify the email during initial setup.
+ * Backend checks if the email is already bound to a different machine before dispatching.
+ */
+export const sendRegistrationOTP = async (email: string): Promise<ActivationResult> => {
+    const machineId = await getMachineId();
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'SEND_REG_OTP',
+                email,
+                machineId
+            })
+        });
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `OTP Dispatch Error: ${error.message || 'Unknown Failure'}` };
+    }
+};
+
+/**
+ * NEW: Verifies the OTP sent during initial registration email verification.
+ */
+export const verifyRegistrationOTP = async (email: string, otp: string): Promise<ActivationResult> => {
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'VERIFY_REG_OTP',
+                email,
+                otp
+            })
+        });
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `OTP Verification Error: ${error.message || 'Unknown Failure'}` };
+    }
 };
 
 /**
@@ -1067,4 +1242,48 @@ export const trackHeartbeat = async (email: string, machineId: string, userID: s
   } catch (e) {
     console.warn("Heartbeat Tracking Error:", e);
   }
+};
+
+/**
+ * Requests an OTP for Identity Restoration.
+ */
+export const requestRestoreOTP = async (userID: string, email: string, mobile: string): Promise<ActivationResult> => {
+    const machineId = await getMachineId();
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'REQUEST_RESTORE_OTP',
+                userID,
+                machineId,
+                email,
+                mobile
+            })
+        });
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `Restore Error: ${error.message || "Unknown Failure"}` };
+    }
+};
+
+/**
+ * Verifies the restoration OTP and returns the full profile data.
+ */
+export const verifyRestoreOTP = async (userID: string, email: string, otp: string): Promise<ActivationResult> => {
+    const machineId = await getMachineId();
+    try {
+        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'VERIFY_RESTORE_OTP',
+                userID,
+                machineId,
+                email,
+                otp
+            })
+        });
+        return result;
+    } catch (error: any) {
+        return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
+    }
 };

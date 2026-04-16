@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('open-item-location', filePath),
     openItemPath: (filePath: string) =>
         ipcRenderer.invoke('open-item-path', filePath),
+    openUserManual: () => ipcRenderer.invoke('open-user-manual'),
     getOSVersion: () => ipcRenderer.invoke('get-os-version'),
     onUpdateDownloadComplete: (callback: () => void) => {
         ipcRenderer.on('update-download-complete', callback);

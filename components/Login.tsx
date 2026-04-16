@@ -52,7 +52,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState('');
   const [syncedUserName, setSyncedUserName] = useState('');
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const [restoreStep, setRestoreStep] = useState<'INPUT' | 'OTP' | 'SUCCESS'>('INPUT');
+  const [restoreEmail, setRestoreEmail] = useState('');
+  const [restoreMobile, setRestoreMobile] = useState('');
+  const [restoreName, setRestoreName] = useState('');
+  const [restoreOTP, setRestoreOTP] = useState('');
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState('');
+  const [restoreTargetName, setRestoreTargetName] = useState('');
   const otpInputRef = useRef<HTMLInputElement>(null);
+  const restoreOtpRef = useRef<HTMLInputElement>(null);
 
   // Auto-focus OTP input when Developer modal opens
   useEffect(() => {
@@ -293,6 +303,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
           }
         }
 
+        // --- V02.02.16: IDENTITY RESTORATION TRIGGER ---
+        if (syncResult.status === 'PENDING_RESTORE') {
+          console.log("🛠️ Identity Restoration Required for:", syncResult.data?.userName);
+          setRestoreTargetName(syncResult.data?.userName || 'User');
+          setRestoreStep('INPUT');
+          setShowRestoreModal(true);
+          setIsLoading(false);
+          return;
+        }
+
         if (syncResult.valid) {
           setFailedAttempts(0);
           // Re-read users after sync
@@ -338,8 +358,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
         const primaryUID = license?.userID || "";
         const cleanUID = username.trim().toUpperCase();
 
-        // Ground Truth: If we have a verified identity that matches exactly
-        const isPerfectMatch = (primaryUID === cleanUID && primaryUID !== "");
+        // Ground Truth: If we have a verified identity that matches (case-insensitive for sync repair)
+        const isPerfectMatch = (primaryUID.toUpperCase() === cleanUID.toUpperCase() && primaryUID !== "");
 
         const isLegacy = (cleanUID.length > 0 && cleanUID.length < 5 || cleanUID === 'ADMIN');
         const isCaseMismatch = !isPerfectMatch && allUsers.some(u => String(u.username).trim().toLowerCase() === cleanUID.toLowerCase());
@@ -517,6 +537,48 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
       setSyncError(err.message);
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleRequestRestoreOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRestoreError('');
+    setIsRestoring(true);
+    try {
+      const targetUID = username.trim().toUpperCase();
+      const res = await requestRestoreOTP(targetUID, restoreEmail, restoreMobile);
+      if (res.success) {
+        setRestoreStep('OTP');
+        setTimeout(() => { if (restoreOtpRef.current) restoreOtpRef.current.focus(); }, 150);
+      } else {
+        setRestoreError(res.message);
+      }
+    } catch (err: any) {
+      setRestoreError(err.message);
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  const handleVerifyAndFinalizeRestore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRestoreError('');
+    setIsRestoring(true);
+    try {
+      const targetUID = username.trim().toUpperCase();
+      const res = await verifyRestoreOTP(targetUID, restoreEmail, restoreOTP);
+      if (res.success) {
+        // Trigger a fresh sync to rebuild local profile from restored cloud data
+        await validateLicenseStartup(true, targetUID);
+        setSyncedUserName(res.data?.userName || 'User');
+        setRestoreStep('SUCCESS');
+      } else {
+        setRestoreError(res.message);
+      }
+    } catch (err: any) {
+      setRestoreError(err.message);
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -1174,7 +1236,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
                       value={syncNewUID}
                       onChange={(e) => setSyncNewUID(e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase())}
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500 transition-all font-mono"
-                      placeholder="e.g. SBobby12"
+                      placeholder="e.g. SBOBBY12"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -1237,6 +1299,159 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
                   className="w-full bg-slate-800 hover:bg-slate-700 text-white font-black py-4 rounded-xl transition-all uppercase tracking-widest text-xs border border-slate-700"
                 >
                   Return to Login
+                </button>
+              </div>
+            )}
+          </div>
+        }
+      />
+
+      {/* NEW: Identity Restoration Backdrop (Hardware Locked) */}
+      <CustomModal
+        isOpen={showRestoreModal}
+        onClose={() => !isRestoring && setShowRestoreModal(false)}
+        type={restoreStep === 'SUCCESS' ? 'success' : 'info'}
+        title="Identity Restoration"
+        message={
+          <div className="py-2">
+            {restoreStep === 'INPUT' && (
+              <div className="space-y-6">
+                <div className="flex flex-col items-center justify-center text-center space-y-3 mb-4">
+                  <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center border border-blue-500/20">
+                    <ShieldCheck className="text-blue-400" size={32} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight">Access Locked</h3>
+                    <p className="text-xs text-slate-400 mt-1">Hello <span className="text-blue-400 font-bold">{restoreTargetName}</span>, recognized hardware detected but local data is missing.</p>
+                  </div>
+                </div>
+
+                <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-4 space-y-2">
+                  <p className="text-[10px] text-blue-300 font-bold uppercase tracking-widest text-center italic">Stage 2: Knowledge Proof Required</p>
+                  <p className="text-[9px] text-slate-500 text-center uppercase leading-relaxed font-black">Provide your registered credentials to verify ownership of this hardware identity.</p>
+                </div>
+
+                {restoreError && (
+                  <div className="bg-red-950/20 border border-red-500/30 rounded-xl p-3 flex items-start gap-2">
+                    <ShieldAlert size={16} className="text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-[10px] font-bold text-red-200 uppercase leading-relaxed">{restoreError}</p>
+                  </div>
+                )}
+
+                <form onSubmit={handleRequestRestoreOTP} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Registered Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={restoreName}
+                        onChange={(e) => setRestoreName(e.target.value.toUpperCase())}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all uppercase"
+                        placeholder="E.G. JEY PRANAV"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Registered Email</label>
+                      <input
+                        type="email"
+                        required
+                        value={restoreEmail}
+                        onChange={(e) => setRestoreEmail(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        placeholder="e.g. jeypranav@email.com"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Registered Mobile (Last 10 Digits)</label>
+                      <input
+                        type="text"
+                        required
+                        value={restoreMobile}
+                        onChange={(e) => setRestoreMobile(e.target.value.replace(/\D/g, ''))}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
+                        placeholder="8838XXXXXX"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isRestoring || !restoreEmail || !restoreMobile}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
+                  >
+                    {isRestoring ? <Loader2 className="animate-spin" size={18} /> : "Request Restoration OTP"}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {restoreStep === 'OTP' && (
+              <div className="space-y-6">
+                <div className="flex flex-col items-center justify-center text-center space-y-3 mb-4">
+                  <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center">
+                    <Mail className="text-amber-400" size={32} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight">Stage 3: OTP Verification</h3>
+                    <p className="text-xs text-slate-400 mt-1">Verification code sent to <span className="text-amber-400 font-bold">{restoreEmail}</span></p>
+                  </div>
+                </div>
+
+                {restoreError && (
+                  <div className="bg-red-950/20 border border-red-500/30 rounded-xl p-3 flex items-start gap-2">
+                    <ShieldAlert size={16} className="text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-[10px] font-bold text-red-200 uppercase leading-relaxed">{restoreError}</p>
+                  </div>
+                )}
+
+                <form onSubmit={handleVerifyAndFinalizeRestore} className="space-y-6">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1 text-center block">6-Digit Verification Code</label>
+                    <input
+                      ref={restoreOtpRef}
+                      type="text"
+                      required
+                      maxLength={6}
+                      value={restoreOTP}
+                      onChange={(e) => setRestoreOTP(e.target.value.replace(/[^0-9]/g, ''))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl py-4 px-4 text-white text-2xl font-black text-center tracking-[1em] outline-none focus:ring-2 focus:ring-amber-500 transition-all font-mono"
+                      placeholder="000000"
+                    />
+                    <p className="text-[10px] font-black text-amber-500 text-center tracking-widest uppercase mt-2 flex items-center justify-center gap-1">
+                      <span>⏱</span> Restoration code valid for 120s
+                    </p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isRestoring || restoreOTP.length < 6}
+                    className="w-full bg-amber-600 hover:bg-amber-500 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
+                  >
+                    {isRestoring ? <Loader2 className="animate-spin" size={18} /> : "Finalize Restoration"}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {restoreStep === 'SUCCESS' && (
+              <div className="py-8 flex flex-col items-center justify-center text-center space-y-6">
+                <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center scale-110 shadow-[0_0_30px_rgba(16,185,129,0.3)]">
+                  <ShieldCheck className="text-emerald-400" size={48} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-black text-white uppercase tracking-tight">Identity Restored</h3>
+                  <p className="text-xs text-slate-400 max-w-[220px] mx-auto leading-relaxed">Full profile successfully reconstructed from cloud. Local sync complete.</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowRestoreModal(false);
+                    // Force a direct login attempt now that profile is synced
+                    const targetU = username.trim().toUpperCase();
+                    handleLogin({ preventDefault: () => {} } as React.FormEvent);
+                  }}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-black py-4 rounded-xl transition-all uppercase tracking-widest text-xs border border-slate-700"
+                >
+                  Enter Application
                 </button>
               </div>
             )}

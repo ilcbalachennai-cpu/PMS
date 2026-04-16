@@ -25,7 +25,7 @@ import CustomModal from './components/Shared/CustomModal';
 import TrialNoticeModal from './components/Shared/TrialNoticeModal';
 import SocialSecurityCode from './components/SocialSecurityCode';
 
-import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId } from './services/licenseService';
+import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount } from './services/licenseService';
 import { parseExpiryDate, formatExpiryDate } from './utils/formatters';
 import { View, User, Employee, PayrollResult, CompanyProfile, StatutoryConfig } from './types';
 import { BRAND_CONFIG } from './constants';
@@ -67,6 +67,54 @@ const NavigationItem = ({ view, icon: Icon, label, activeView, onNavigate, isSid
   </button>
 );
 
+const SyncCountdownBanner: FC<{ initialMs: number; onExpiry: () => void }> = ({ initialMs, onExpiry }) => {
+  const [remaining, setRemaining] = useState(initialMs);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRemaining(prev => {
+        if (prev <= 1000) {
+          clearInterval(timer);
+          onExpiry();
+          return 0;
+        }
+        return prev - 1000;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [onExpiry]);
+
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+  const isUrgent = remaining < 180000; // 3 minutes
+
+  return (
+    <div className={`fixed top-0 left-0 right-0 z-[1000] px-6 py-2 flex items-center justify-between border-b shadow-2xl transition-all ${
+      isUrgent ? 'bg-rose-600 border-rose-400 animate-pulse' : 'bg-amber-600 border-amber-400'
+    }`}>
+      <div className="flex items-center gap-3">
+        <WifiOff size={18} className="text-white animate-bounce" />
+        <div className="flex flex-col">
+          <span className="text-[11px] font-black uppercase tracking-widest text-white">Identity Verification Required</span>
+          <span className="text-[9px] font-bold text-white/80 uppercase">Please connect to internet to synchronize license status</span>
+        </div>
+      </div>
+      
+      <div className="flex items-center gap-4">
+        <div className="flex flex-col items-end">
+          <span className="text-[9px] font-bold text-white/70 uppercase">Access Suspends In</span>
+          <span className="text-xl font-black text-white tabular-nums tracking-tighter">
+            {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+          </span>
+        </div>
+        <div className="h-8 w-px bg-white/20"></div>
+        <div className="p-1.5 bg-white/10 rounded-lg">
+          <CalendarClock size={20} className="text-white" />
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const mainContentRef = useRef<HTMLElement>(null);
@@ -100,9 +148,60 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     isSetupComplete, setIsSetupComplete
   } = useUIState(employees.length, activeView, setActiveView);
 
-  // NEW: Dedicated Flash Message State
   const [showFlashPopup, setShowFlashPopup] = useState(false);
   const [isSettingsDirty, setIsSettingsDirty] = useState(false);
+
+  // --- CONNECTIVITY MONITORING (Day 1/2/3 Logic) ---
+  const [connStatus, setConnStatus] = useState<{
+    isOnline: boolean;
+    offlineDay: number;
+    graceRemaining: number | null;
+  }>({
+    isOnline: navigator.onLine,
+    offlineDay: 0,
+    graceRemaining: null
+  });
+
+  useEffect(() => {
+    // Check Status Frequently
+    const monitorConnectivity = async () => {
+      // 1. Check Hardware/Nav Status
+      const { isOnline } = await checkOnlineStatus();
+      
+      // 2. Check Policy/Grace
+      const syncInfo = checkSyncRequirement();
+      const offlineDays = getOfflineActiveDaysCount();
+
+      setConnStatus({
+        isOnline,
+        offlineDay: offlineDays,
+        graceRemaining: syncInfo.isSyncGracePeriod ? syncInfo.graceRemaining || null : null
+      });
+
+      // If blocked, trigger license verification to show the block screen
+      if (syncInfo.blocked && !isOnline) {
+         verifyLicense();
+      }
+    };
+
+    // Initial check
+    monitorConnectivity();
+
+    // Polling: Slow when online (30s), Fast when offline (5s)
+    const interval = setInterval(monitorConnectivity, connStatus.isOnline ? 30000 : 5000);
+    
+    // Also listen to window events
+    const handleOnline = () => monitorConnectivity();
+    const handleOffline = () => monitorConnectivity();
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [connStatus.isOnline, verifyLicense]);
 
   const safeNavigate = (view: View, tab?: string) => {
     if (activeView === View.Settings && isSettingsDirty && view !== View.Settings) {
@@ -661,8 +760,19 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   return (
     <div className={`flex h-[100dvh] overflow-hidden bg-[#020617] text-white ${isWin7 ? 'is-win7' : ''}`}>
-      {/* Sync Warning Banner */}
-      {isSyncWarning && (
+      {/* Sync Countdown (Day 3 Grace Period) */}
+      {licenseStatus.data?.isSyncGracePeriod && licenseStatus.data.graceRemaining > 0 && (
+        <SyncCountdownBanner 
+          initialMs={licenseStatus.data.graceRemaining} 
+          onExpiry={() => {
+            // Force block state and logout
+            window.location.reload(); 
+          }} 
+        />
+      )}
+
+      {/* Sync Warning Banner (Day 2) */}
+      {isSyncWarning && !licenseStatus.data?.isSyncGracePeriod && (
         <div className="fixed top-0 left-0 right-0 z-[100] bg-amber-600 text-white text-[11px] font-bold py-1.5 px-4 text-center shadow-lg animate-in slide-in-from-top duration-500 flex items-center justify-center gap-2">
           <Wifi size={14} className="animate-pulse" /> {syncMessage}
         </div>
@@ -828,12 +938,39 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 <img src={logoUrl} alt="Logo" className="w-10 h-10 rounded-full border border-slate-700 shadow-xl object-cover" />
                 <div className="flex flex-col">
                   <span className="text-sm font-black text-white tracking-tight">{companyProfile.establishmentName || (BRAND_CONFIG.appName + " " + BRAND_CONFIG.appNameSuffix)}</span>
-                  <span className="text-[10px] font-black text-[#FFD700] tracking-widest mt-0.5">
-                    {licenseInfo?.isTrial ? "Trial Valid Upto : " : "License Valid Upto : "}{formatExpiryDate(licenseInfo?.expiryDate)}
-                  </span>
+                  <div className="flex flex-col gap-0.5 mt-0.5">
+                    <span className="text-[10px] font-black text-[#FFD700] tracking-widest">
+                      {licenseInfo?.isTrial ? "Trial Valid Upto : " : "License Valid Upto : "}{formatExpiryDate(licenseInfo?.expiryDate)}
+                    </span>
+                    
+                    {/* NEW: Repositioned Connection Status Indicator */}
+                    <div className="flex items-center gap-2">
+                       <div className={`flex items-center gap-1.5 transition-all duration-500 ${
+                        connStatus.isOnline 
+                          ? 'text-emerald-400' 
+                          : (connStatus.offlineDay >= 3 ? 'text-rose-500 animate-pulse' : 'text-amber-500')
+                      }`}>
+                        {connStatus.isOnline ? (
+                          <>
+                            <div className="w-1 h-1 bg-emerald-500 rounded-full shadow-[0_0_8px_#10b981] animate-pulse"></div>
+                            <span className="text-[8px] font-black uppercase tracking-widest opacity-80">System Live</span>
+                          </>
+                        ) : (
+                          <>
+                            <WifiOff size={8} className={connStatus.offlineDay >= 3 ? 'animate-bounce' : ''} />
+                            <span className="text-[8px] font-black uppercase tracking-widest">
+                              {connStatus.graceRemaining !== null 
+                                ? `Access Suspends in ${Math.floor(connStatus.graceRemaining / 60000)}:${String(Math.floor((connStatus.graceRemaining % 60000) / 1000)).padStart(2, '0')}`
+                                : `Offline Mode: Day ${connStatus.offlineDay || 1}`}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="flex-1 px-4 min-w-[300px] max-w-xl mx-auto">
+              <div className="flex-1 px-4 min-w-[200px] max-w-lg mx-auto">
                 <div className="flex items-center gap-0 bg-[#020617] rounded-xl border border-slate-800 overflow-hidden h-10 shadow-2xl">
                   <div className="bg-slate-900 border-r border-slate-800 h-full px-4 flex items-center justify-center shrink-0">
                     <Megaphone size={16} className="text-amber-500" />
@@ -854,19 +991,18 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 >
                   {document.fullscreenElement ? <Minimize size={18} /> : <Maximize size={18} />}
                 </button>
-
-                <div className="flex flex-col items-end gap-0">
-                  <div className="px-4 py-1.5 bg-[#020617] border border-emerald-800/60 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-slow-pulse">
-                    <span className="text-[10px] font-black text-[#10b981] uppercase tracking-widest flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 bg-[#10b981] rounded-full shadow-[0_0_8px_#10b981]"></div>
-                      {getFinancialYearLabel()}
-                    </span>
-                  </div>
-                  <div className="px-3 py-1 bg-slate-900 border border-slate-800/80 rounded-md shadow-sm -mt-1.5 relative z-0">
-                    <span className="text-[9px] text-[#FFD700] uppercase tracking-[0.2em] font-black">VERSION {APP_VERSION}</span>
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="px-4 py-1.5 bg-[#020617] border border-emerald-800/60 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-slow-pulse">
+                      <span className="text-[10px] font-black text-[#10b981] uppercase tracking-widest flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 bg-[#10b981] rounded-full shadow-[0_0_8px_#10b981]"></div>
+                        {getFinancialYearLabel()}
+                      </span>
+                    </div>
+                    <div className="px-3 py-1 bg-slate-900 border border-slate-800/80 rounded-md shadow-sm -mt-1.5 relative z-0">
+                      <span className="text-[9px] text-[#FFD700] uppercase tracking-[0.2em] font-black">VERSION {APP_VERSION}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
             </header>
 
             <main

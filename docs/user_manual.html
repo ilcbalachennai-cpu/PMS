@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BharatPay Pro - User Manual</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1e40af;
+            --slate-50: #f8fafc;
+            --slate-100: #f1f5f9;
+            --slate-200: #e2e8f0;
+            --slate-700: #334155;
+            --slate-800: #1e293b;
+            --slate-900: #0f172a;
+            --accent-orange: #ff9933;
+            --accent-green: #4ade80;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            line-height: 1.6;
+            color: var(--slate-700);
+            background-color: var(--slate-50);
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 60px 80px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 60px;
+            border-bottom: 2px solid var(--slate-100);
+            padding-bottom: 40px;
+        }
+
+        .logo-text {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 8px;
+            color: var(--slate-900);
+        }
+
+        .logo-text .orange { color: var(--accent-orange); }
+        .logo-text .green { color: var(--accent-green); }
+
+        .version {
+            font-weight: 600;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-size: 0.9rem;
+        }
+
+        h1, h2, h3 {
+            color: var(--slate-900);
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+        }
+
+        h1 { font-size: 2rem; border-left: 5px solid var(--primary); padding-left: 15px; }
+        h2 { font-size: 1.5rem; margin-top: 3rem; border-bottom: 1px solid var(--slate-200); padding-bottom: 8px; }
+        h3 { font-size: 1.2rem; color: var(--primary-dark); }
+
+        p { margin-bottom: 1.2rem; }
+
+        ul, ol {
+            margin-bottom: 1.5rem;
+            padding-left: 1.5rem;
+        }
+
+        li {
+            margin-bottom: 0.8rem;
+        }
+
+        .highlight-box {
+            background-color: #eff6ff;
+            border-left: 4px solid var(--primary);
+            padding: 20px;
+            margin: 2rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .highlight-box strong {
+            color: var(--primary-dark);
+        }
+
+        .footer {
+            margin-top: 80px;
+            text-align: center;
+            font-size: 0.85rem;
+            color: var(--slate-700);
+            border-top: 1px solid var(--slate-200);
+            padding-top: 30px;
+        }
+
+        .contact-info {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin: 20px 0;
+        }
+
+        .btn-print {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        @media print {
+            .btn-print { display: none; }
+            body { background: white; padding: 0; }
+            .container { box-shadow: none; width: 100%; max-width: none; padding: 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <button class="btn-print" onclick="window.print()">Print to PDF</button>
+
+    <div class="container">
+        <header>
+            <div class="logo-text">
+                <span class="orange">Bharat</span>Pay <span class="green">Pro</span>
+            </div>
+            <p class="version">Comprehensive User Manual • v02.02.17</p>
+        </header>
+
+        <p>Welcome to <strong>BharatPay Pro</strong>, a premium Payroll Management System designed for precision, security, and ease of use. This manual will guide you through every aspect of the software, from initial setup to advanced reporting.</p>
+
+        <h2>1. Getting Started</h2>
+        
+        <h3>1.1 First-Time Installation</h3>
+        <p>When you launch BharatPay Pro for the first time, the system will initialize your local database.</p>
+        <ol>
+            <li><strong>Grant Permissions</strong>: If Windows Firewall or Anti-Virus prompts you, click "Allow" to ensure the local database and update services can run.</li>
+            <li><strong>Registration</strong>: New users must click "Register Now".
+                <ul>
+                    <li><strong>Enter your Name</strong>: Use your full legal name or establishment administrator name.</li>
+                    <li><strong>Enter your Email and Mobile number</strong>: Provide valid credentials for OTP verification.</li>
+                    <li><strong>Verify Identity</strong>: Enter the OTP sent to your inbox to proceed.</li>
+                    <li><strong>Set Password</strong>: Create a strong Administrator Password.</li>
+                </ul>
+            </li>
+        </ol>
+
+        <div class="highlight-box">
+            <strong>Important Tip:</strong> Your Administrator Password is tied to your hardware identity. Keep it secure and do not share it.
+        </div>
+
+        <h3>1.2 Hardware Binding & Security</h3>
+        <p>BharatPay Pro uses Hardware-Locked Identity. Your license and data are securely tied to your specific machine to ensure maximum data integrity.</p>
+        <ul>
+            <li><strong>Single Admin Policy</strong>: Only one Administrator is permitted per installation.</li>
+            <li><strong>Internet Synchronization</strong>: The system requires an internet connection <strong>daily</strong> (at least once every 24 hours) to verify license status and prevent unauthorized access.</li>
+            <li><strong>Idle Timeout</strong>: For security, the app will automatically log you out after 10 minutes of inactivity.</li>
+        </ul>
+
+        <h2>2. Statutory Compliance Configuration</h2>
+
+        <h3>2.1 Default Basis</h3>
+        <p>By default, <strong>Code Wages</strong> (Labour Code compliant) serve as the basis for all statutory calculations, including EPF, ESI, and Gratuity. In case you opt for <strong>Original Wages</strong> (Pre Code Wages) as the basis, you must select the specific wage components for EPF and ESI calculations.</p>
+
+        <h3>2.2 Initial Configuration</h3>
+        <p>First-time users must configure the statutory compliance settings to match their establishment's requirements:</p>
+        <ul>
+            <li><strong>Core Compliance</strong>: Setup EPF, ESI, Professional Tax (PT), and Labour Welfare Fund (LWF).</li>
+            <li><strong>Policies</strong>: Define your Gratuity, Leave Policy, and Bonus Policy.</li>
+            <li><strong>Optional Modules</strong>: Choose to enable or disable Overtime (OT) and Arrear Salary calculations based on your needs.</li>
+        </ul>
+
+        <h2>3. Setting Up Your Company</h2>
+        <p>Before adding employees, configure your establishment profile in <strong>Settings > Company Profile</strong>.</p>
+        <ol>
+            <li><strong>Establishment Details</strong>: Enter your Name, Address, PAN, GST, PF, and ESI codes.</li>
+            <li><strong>Statutory Configuration</strong>:
+                <ul>
+                    <li>Set PF/ESI Ceilings as per current central government norms.</li>
+                    <li>Configure Professional Tax (PT) slabs based on your state.</li>
+                </ul>
+            </li>
+        </ol>
+
+        <h2>4. Employee Management</h2>
+        <p>Navigate to the <strong>Employees</strong> section to manage your workforce.</p>
+        <ul>
+            <li><strong>Add Employee</strong>: Click "+" to enter details. <strong>DOJ (Date of Joining)</strong> is critical as the system uses it to calculate pro-rata leave and segments.</li>
+            <li><strong>Bulk Import</strong>: Use the "Import Excel" feature to migrate large datasets quickly.</li>
+            <li><strong>Leave Ledgers</strong>: Each employee has automated tracking for EL (Earned Leave), SL (Sick Leave), and CL (Casual Leave).</li>
+            <li><strong>Documents</strong>: You can upload photos and digital copies of forms for each employee.</li>
+        </ul>
+
+        <h2>5. Monthly Payroll Workflow</h2>
+        <p>The "Pay Process" module follows a logical workflow:</p>
+        <ol>
+            <li><strong>Attendance</strong>: Enter "Present Days" for the month. LOP (Loss of Pay) is automatically calculated.</li>
+            <li><strong>Leave Management</strong>: Record any leaves availed. The system will alert you if an employee exceeds their balance.</li>
+            <li><strong>Advance & Fines</strong>: Manage employee loans/advances. The system automatically recovers EMIs until the balance is zero.</li>
+            <li><strong>Overtime (OT)</strong>: If enabled, enter OT hours or days.</li>
+            <li><strong>Arrear Salary</strong>: For retroactive salary revisions:
+                <ul>
+                    <li>Select the <strong>Effective Month</strong> from which the increment applies.</li>
+                    <li>Choose calculation mode: <strong>Percentage (%)</strong> (Flat/Specific) or <strong>Fixed Ad-hoc Amount</strong>.</li>
+                    <li>The system computes total arrears for the elapsed period. <strong>Save Draft</strong> to record and <strong>Finalize</strong> to update Master database.</li>
+                </ul>
+            </li>
+            <li><strong>Processing</strong>: Click "Calculate Salaries" to process all deductions, taxes, and arrears instantly.</li>
+            <li><strong>Freezing</strong>: Once verified, "Freeze" the month to lock the data and advance to the next month.</li>
+        </ol>
+
+        <h2>6. Pay Reports</h2>
+        <p>Once the payroll is processed and finalized, you can generate various payment-related reports:</p>
+        <ul>
+            <li><strong>Pay Sheet</strong>: A detailed summary of earnings and deductions. Filterable by <strong>Site, Branch, or Division</strong>.</li>
+            <li><strong>Pay Slips</strong>: Professional salary slips for individual employees or bulk generation.</li>
+            <li><strong>Bank Statement</strong>: Ready-to-use transfer instructions for banks, including accounts and IFSC codes.</li>
+            <li><strong>Arrear Report</strong>: Detailed breakdown of retroactive salary revisions and payments.</li>
+            <li><strong>Leave Ledger</strong>: Tracks EL, SL, and CL balances and usage for the month.</li>
+            <li><strong>Advance Shortfall</strong>: Lists employees where planned advance recovery could not be fully met.</li>
+        </ul>
+
+        <h2>7. Statutory Reports</h2>
+        <p>BharatPay Pro automates complex statutory filings and register maintenance:</p>
+        <ul>
+            <li><strong>PF (Provident Fund)</strong>: Generates PF ECR (Text/Excel), Arrear ECR, and statutory forms (12A, 3A, 6A).</li>
+            <li><strong>ESI</strong>: Generates Monthly Return (Excel), Form 5, Exit reports, and Joiner/Leaver lists.</li>
+            <li><strong>Taxes</strong>: Professional Tax (PT), TDS (Income Tax), and Labour Welfare Fund (LWF) reports.</li>
+            <li><strong>Benefits</strong>: Monthly and Period-wise Bonus & Gratuity statements.</li>
+            <li><strong>Labour Registers</strong>: Form B (Wage Register), Form C (Muster Roll), and State-specific registers.</li>
+        </ul>
+
+        <h2>8. MIS (Management Information)</h2>
+        <p>Advanced tools for data-driven HR management:</p>
+        <ul>
+            <li><strong>Dynamic Report Builder</strong>: Create custom reports by selecting your own columns.</li>
+            <li><strong>Increment Analysis</strong>: Analyze salary growth with variance comparisons.</li>
+            <li><strong>Mailing Service</strong>: Automated emailing of payslips directly to employees.</li>
+            <li><strong>Data Analysis</strong>: Bulk registers for employee and payment data.</li>
+        </ul>
+
+        <h2>9. Code Analysis (Social Security)</h2>
+        <p>Stay ahead of compliance with the proposed Social Security Code 2020:</p>
+        <ul>
+            <li><strong>Clause 88 Threshold</strong>: Monitors if exclusions exceed 50% of gross remuneration.</li>
+            <li><strong>Impact Simulation</strong>: Simulates projected liabilities under the new "Code Wages" definition.</li>
+            <li><strong>Coverage Monitoring</strong>: Evaluates how the new ceiling affects employee ESI/PF eligibility.</li>
+        </ul>
+
+        <h2>10. Troubleshooting & Support</h2>
+        <h3>10.1 Common Errors</h3>
+        <ul>
+            <li><strong>"Security Violation"</strong>: This occurs if your system clock is changed manually. Reset your clock to "Internet Time".</li>
+            <li><strong>"License Locked"</strong>: Ensure you are connected to the internet. If you changed hardware, contact support for Identity Restoration.</li>
+            <li><strong>"Sync Required"</strong>: You have been offline for more than 24 hours. Connect to the web for 60 seconds.</li>
+        </ul>
+
+        <div class="footer">
+            <p><strong>Contacting Support</strong></p>
+            <div class="contact-info">
+                <span>📧 ilcbala.BharatPayRoll@gmail.com</span>
+                <span>📞 Refer to License Agreement</span>
+            </div>
+            <p>© 2026 BharatPay Pro. All Rights Reserved.</p>
+        </div>
+    </div>
+
+</body>
+</html>
