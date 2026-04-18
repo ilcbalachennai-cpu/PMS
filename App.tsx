@@ -22,10 +22,11 @@ import MISDashboard from './components/MIS/MISDashboard';
 import Registration from './components/Registration';
 import AppSetup from './components/AppSetup';
 import CustomModal from './components/Shared/CustomModal';
+import UpdatePortal from './components/Shared/UpdatePortal';
 import TrialNoticeModal from './components/Shared/TrialNoticeModal';
 import SocialSecurityCode from './components/SocialSecurityCode';
 
-import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount } from './services/licenseService';
+import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount } from './services/licenseService';
 import { parseExpiryDate, formatExpiryDate } from './utils/formatters';
 import { View, User, Employee, PayrollResult, CompanyProfile, StatutoryConfig } from './types';
 import { BRAND_CONFIG } from './constants';
@@ -120,15 +121,19 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const mainContentRef = useRef<HTMLElement>(null);
 
   // --- Initialize Hooks ---
-  const { alertConfig, setAlertConfig, showAlert, closeAlert } = useAlerts();
+  const { alertConfig, showAlert, closeAlert } = useAlerts();
   const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod();
   const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
   const [isRetryingSync, setIsRetryingSync] = useState(false);
-  const {
-    latestAppVersion, setLatestAppVersion,
+  const { 
+    latestAppVersion, setLatestAppVersion, 
     setDownloadUrl,
-    showUpdateNotice, isUpdateDownloading,
-    updateDownloaded, handleUpdateNow, handleUpdateLater
+    showUpdateNotice, setShowUpdateNotice,
+    showBackgroundNotice, setShowBackgroundNotice,
+    isUpdatePreparing,
+    updateDownloaded,
+    updateError, setUpdateError,
+    handleUpdateNow, handleUpdateLater 
   } = useAppUpdate(showAlert);
   const {
     employees, setEmployees, config, setConfig, companyProfile, setCompanyProfile,
@@ -150,6 +155,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const [showFlashPopup, setShowFlashPopup] = useState(false);
   const [isSettingsDirty, setIsSettingsDirty] = useState(false);
+  const [isRestorationForced, setIsRestorationForced] = useState(false);
 
   // --- CONNECTIVITY MONITORING (Day 1/2/3 Logic) ---
   const [connStatus, setConnStatus] = useState<{
@@ -272,62 +278,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   }, []);
 
-  // Handle New Update Detected
-  useEffect(() => {
-    if (showUpdateNotice && !updateDownloaded && !isUpdateDownloading && latestAppVersion) {
-      setAlertConfig({
-        isOpen: true,
-        type: 'confirm',
-        title: 'New Update Available',
-        message: `A new version (${latestAppVersion}) of BharatPay Pro is available with important enhancements. Would you like to download it now? You can keep working while it downloads in the background.`,
-        confirmLabel: 'Download Now',
-        cancelLabel: 'Later',
-        onConfirm: () => handleUpdateNow(async () => {
-          const keysToPersist = ['app_users', 'app_license_secure', 'app_data_size', 'app_employees', 'app_setup_complete'];
-          for (const k of keysToPersist) {
-            const val = localStorage.getItem(k);
-            if (val && (window as any).electronAPI) {
-              try {
-                const parsed = (val.startsWith('{') || val.startsWith('[')) ? JSON.parse(val) : val;
-                await (window as any).electronAPI.dbSet(k, parsed);
-              } catch (e) {
-                await (window as any).electronAPI.dbSet(k, val);
-              }
-            }
-          }
-        })
-      });
-    }
-  }, [showUpdateNotice, updateDownloaded, isUpdateDownloading, latestAppVersion, setAlertConfig, handleUpdateNow]);
-
-  // Handle Update Prompt on Start (Once Downloaded)
-  useEffect(() => {
-    if (latestAppVersion && updateDownloaded) {
-      setAlertConfig({
-        isOpen: true,
-        type: 'confirm',
-        title: 'Update Ready to Install',
-        message: `Version ${latestAppVersion} has been downloaded. Would you like to install it now? Your data will be backed up automatically.`,
-        confirmLabel: 'Install Now',
-        cancelLabel: 'Later',
-        onConfirm: () => handleUpdateNow(async () => {
-          const keysToPersist = ['app_users', 'app_license_secure', 'app_data_size', 'app_employees', 'app_setup_complete'];
-          for (const k of keysToPersist) {
-            const val = localStorage.getItem(k);
-            if (val && (window as any).electronAPI) {
-              try {
-                const parsed = (val.startsWith('{') || val.startsWith('[')) ? JSON.parse(val) : val;
-                await (window as any).electronAPI.dbSet(k, parsed);
-              } catch (e) {
-                await (window as any).electronAPI.dbSet(k, val);
-              }
-            }
-          }
-        })
-      });
-    }
-  }, [latestAppVersion, updateDownloaded, setAlertConfig, handleUpdateNow]);
-
   useEffect(() => {
     if (!licenseStatus.valid) return;
 
@@ -373,6 +323,15 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     const interval = setInterval(syncMessages, 600000);
     return () => clearInterval(interval);
   }, [licenseStatus.valid, checkNewMessages, setCompanyProfile, setShowLoginMessage]);
+
+  // --- NEW: Immediate Version Sync on Boot ---
+  useEffect(() => {
+    if (licenseStatus.valid && licenseStatus.data) {
+      if (licenseStatus.data.latestVersion) setLatestAppVersion(licenseStatus.data.latestVersion);
+      if (licenseStatus.data.downloadUrl) setDownloadUrl(licenseStatus.data.downloadUrl);
+    }
+  }, [licenseStatus.valid, licenseStatus.data, setLatestAppVersion, setDownloadUrl]);
+
 
   useEffect(() => {
     const lastSessionMsgId = sessionStorage.getItem('app_session_last_msg_id');
@@ -577,6 +536,17 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       }
     }
 
+    // --- V02.02.19: IDENTITY RESTORATION PROACTIVE ALERT ---
+    const isWorkingOnLicense = activeView === View.Settings && settingsTab === 'LICENSE';
+    if (license?.status === 'PENDING_RESTORE' && user.role === 'Administrator' && !isWorkingOnLicense) {
+      setActiveView(View.Settings);
+      setSettingsTab('LICENSE');
+      setTimeout(() => {
+        showAlert('warning', 'Identity Restoration Required', '🔒 System identifies a mismatch between your local identity and cloud records. Please click "Re-Activate System" with your registered Email/Mobile to restore full access.');
+      }, 1000);
+      return; 
+    }
+
     if (!companyProfile?.establishmentName || companyProfile.establishmentName === 'Your Establishment Name') {
       setActiveView(View.Settings);
       setSettingsTab('COMPANY');
@@ -680,6 +650,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         await (window as any).electronAPI.dbDelete('app_license_secure');
         await (window as any).electronAPI.dbDelete('app_machine_id');
       }
+      clearSyncRetryCount();
       window.location.reload();
     }, undefined, 'YES, RESET IDENTITY', undefined, 'CANCEL');
   };
@@ -750,7 +721,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 )}
               </button>
 
-              <p className="text-[10px] text-slate-500 font-medium tracking-tight">BharatPay Pro Security Engine v02.02.12</p>
+              <p className="text-[10px] text-slate-500 font-bold tracking-widest uppercase opacity-60">Security Engine v{licenseStatus.data?.latestVersion || '02.02.19'}</p>
             </div>
           </div>
         </div>
@@ -801,9 +772,32 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 <div className="space-y-6">
                   <Lock size={48} className="mx-auto text-red-500 animate-pulse" />
                   <h2 className="text-2xl font-black uppercase text-white">System Locked</h2>
-                  <p className="text-slate-400">{licenseStatus.message}</p>
-                  <button onClick={() => (window as any).electronAPI?.closeApp()} className="w-full py-4 bg-red-600 text-white font-black rounded-xl uppercase tracking-widest">Quit Application</button>
-                  <button onClick={handleResetLicenseIdentity} className="text-amber-100 text-xs font-bold uppercase tracking-widest hover:underline"><RefreshCw className="inline mr-1" /> Reset Identity</button>
+                  <p className="text-sm text-slate-400 max-w-xs mx-auto">
+                    {licenseStatus.retryCount >= 3 
+                      ? "Security Conflict Detected (3/3 attempts). Your account access has been suspended due to identity mismatch."
+                      : licenseStatus.message}
+                  </p>
+                  
+                  {licenseStatus.retryCount >= 3 ? (
+                    <button 
+                      onClick={() => setIsRestorationForced(true)} 
+                      className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white font-black rounded-xl uppercase tracking-widest transition-all shadow-lg shadow-amber-900/20"
+                    >
+                      <RefreshCw className="inline mr-2 animate-spin-slow" /> 
+                      Initiate Identity Restoration
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => (window as any).electronAPI?.closeApp()} 
+                      className="w-full py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-xl uppercase tracking-widest transition-all"
+                    >
+                      Quit Application
+                    </button>
+                  )}
+                  
+                  <button onClick={handleResetLicenseIdentity} className="text-slate-500 text-[10px] font-bold uppercase tracking-widest hover:text-white transition-colors">
+                    <RefreshCw className="inline mr-1" /> Reset All Local Data
+                  </button>
                 </div>
               )}
             </div>
@@ -824,7 +818,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Security Verification Underway Please Wait.....</p>
           </div>
         </div>
-      ) : (!getStoredLicense() && (showRegistrationManual || (!isSetupComplete && employees.length === 0))) ? (
+      ) : ((!getStoredLicense() || isRestorationForced) && (showRegistrationManual || isRestorationForced || (!isSetupComplete && employees.length === 0))) ? (
         <Registration
           onComplete={handleRegistrationComplete}
           onRestore={() => window.location.reload()}
@@ -952,8 +946,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                       }`}>
                         {connStatus.isOnline ? (
                           <>
-                            <div className="w-1 h-1 bg-emerald-500 rounded-full shadow-[0_0_8px_#10b981] animate-pulse"></div>
-                            <span className="text-[8px] font-black uppercase tracking-widest opacity-80">System Live</span>
+                          <div className="flex items-center gap-1.5 animate-pulse">
+                            <div className="w-1 h-1 bg-emerald-500 rounded-full shadow-[0_0_8px_#10b981]"></div>
+                            <span className="text-[8px] font-black uppercase tracking-widest opacity-80 text-emerald-400">System Live</span>
+                          </div>
                           </>
                         ) : (
                           <>
@@ -992,14 +988,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                   {document.fullscreenElement ? <Minimize size={18} /> : <Maximize size={18} />}
                 </button>
                   <div className="flex flex-col items-end gap-1">
-                    <div className="px-4 py-1.5 bg-[#020617] border border-emerald-800/60 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-slow-pulse">
+                    <div className="px-3 py-1 bg-slate-900 border border-slate-800/80 rounded-md shadow-sm relative z-0">
+                      <span className="text-[9px] text-[#FFD700] uppercase tracking-[0.2em] font-black">VERSION {APP_VERSION}</span>
+                    </div>
+                    <div className="px-4 py-1.5 bg-[#020617] border border-emerald-800/60 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-slow-pulse -mt-1.5 relative z-10">
                       <span className="text-[10px] font-black text-[#10b981] uppercase tracking-widest flex items-center gap-2">
                         <div className="w-1.5 h-1.5 bg-[#10b981] rounded-full shadow-[0_0_8px_#10b981]"></div>
                         {getFinancialYearLabel()}
                       </span>
-                    </div>
-                    <div className="px-3 py-1 bg-slate-900 border border-slate-800/80 rounded-md shadow-sm -mt-1.5 relative z-0">
-                      <span className="text-[9px] text-[#FFD700] uppercase tracking-[0.2em] font-black">VERSION {APP_VERSION}</span>
                     </div>
                   </div>
                 </div>
@@ -1028,25 +1024,81 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         </>
       )}
 
-      {showUpdateNotice && (
-        <div className="fixed bottom-6 right-6 z-[60] bg-slate-900 border border-blue-500/30 p-6 rounded-xl shadow-2xl max-w-sm animate-in slide-in-from-bottom-5">
-          <h4 className="font-bold text-white mb-1">Update Available!</h4>
-          <p className="text-slate-400 text-xs mb-4">Version {latestAppVersion} is ready.</p>
-          <div className="flex gap-2">
-            <button onClick={() => handleUpdateNow(async () => { })} className="flex-1 bg-blue-600 py-2 rounded-lg text-xs font-bold">Update Now</button>
-            <button onClick={handleUpdateLater} className="flex-1 bg-slate-800 py-2 rounded-lg text-xs font-bold">Later</button>
+
+      <UpdatePortal 
+        isOpen={showUpdateNotice || isUpdatePreparing || showBackgroundNotice || updateDownloaded || updateError === 'SECURITY_VIOLATION'}
+        state={
+          updateError === 'SECURITY_VIOLATION' ? 'VIOLATION' :
+          updateDownloaded ? 'READY' :
+          showBackgroundNotice ? 'BACKGROUND' :
+          isUpdatePreparing ? 'PREPARING' : 'TOAST'
+        }
+        version={latestAppVersion}
+        onUpdateNow={() => handleUpdateNow(async () => {
+          // Pre-install persistence
+          const keysToPersist = ['app_users', 'app_license_secure', 'app_data_size', 'app_employees', 'app_setup_complete', 'app_logo'];
+          for (const k of keysToPersist) {
+            const val = localStorage.getItem(k);
+            if (val && (window as any).electronAPI) {
+              await (window as any).electronAPI.dbSet(k, val.startsWith('{') || val.startsWith('[') ? JSON.parse(val) : val);
+            }
+          }
+        })}
+        onUpdateLater={handleUpdateLater}
+        onClose={() => {
+           setShowUpdateNotice(false);
+           setShowBackgroundNotice(false);
+           setUpdateError(null);
+        }}
+      />
+
+      {/* --- V02.02.18: LEGACY VERSION HARD-BLOCK OVERLAY --- */}
+      {licenseStatus.status === 'BLOCK_LEGACY' && (
+        <div className="fixed inset-0 bg-[#020617] z-[10000] flex items-center justify-center p-6 text-center">
+          <div className="max-w-md w-full animate-in fade-in zoom-in duration-500">
+            <div className="mb-8 relative inline-block">
+              <div className="absolute inset-0 bg-rose-500/20 blur-3xl rounded-full"></div>
+              <ShieldAlert size={80} className="text-rose-500 relative animate-pulse" />
+            </div>
+            
+            <h2 className="text-3xl font-black text-white mb-2 tracking-tight uppercase">Legacy Support Ended</h2>
+            <div className="w-16 h-1 bg-rose-600 mx-auto mb-6"></div>
+            
+            <p className="text-slate-400 text-sm leading-relaxed mb-8">
+              Your application version <strong className="text-white">({APP_VERSION})</strong> is no longer supported by the cloud security engine. Since your version lacks built-in update features, a manual refresh is required to maintain system integrity.
+            </p>
+
+            <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 mb-8 text-left">
+              <h4 className="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-3">Next Steps:</h4>
+              <ul className="space-y-3 text-xs text-slate-300">
+                <li className="flex gap-3">
+                  <div className="shrink-0 w-5 h-5 bg-rose-500/20 text-rose-400 rounded-full flex items-center justify-center font-bold">1</div>
+                  <span>Click the update button below to download the latest <strong>Launch_App</strong>.</span>
+                </li>
+                <li className="flex gap-3">
+                  <div className="shrink-0 w-5 h-5 bg-rose-500/20 text-rose-400 rounded-full flex items-center justify-center font-bold">2</div>
+                  <span>Double-click the downloaded file to automatically install and launch the latest version.</span>
+                </li>
+              </ul>
+            </div>
+
+            <a
+              href={licenseStatus.launcherUrl || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-center justify-center gap-3 w-full py-4 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white rounded-xl font-black text-sm transition-all shadow-[0_10px_30px_rgba(225,29,72,0.3)] hover:shadow-[0_15px_40px_rgba(225,29,72,0.4)] hover:-translate-y-0.5"
+            >
+              DOWNLOAD LATEST LAUNCHER
+              <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+            </a>
+            
+            <p className="mt-8 text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+              Security Protocol V02.02.18 Enabled
+            </p>
           </div>
         </div>
       )}
 
-      {isUpdateDownloading && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center">
-          <div className="text-center space-y-4">
-            <Loader2 className="animate-spin text-blue-500 mx-auto" size={48} />
-            <h3 className="text-xl font-bold">Downloading Update...</h3>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

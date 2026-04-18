@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
+import * as crypto from 'crypto';
 
 import { spawn, execSync } from 'child_process';
 import * as os from 'os';
@@ -316,26 +317,38 @@ ipcMain.handle('open-user-manual', async () => {
     try {
         console.log(`[IPC] Received open-user-manual request`);
         
-        // Strategy 1: Use app.getAppPath() which is reliable across dev and prod
+        const isDev = !app.isPackaged;
         const appRoot = isDev ? process.cwd() : app.getAppPath();
         const manualPath = path.join(appRoot, 'docs', 'user_manual.html');
 
-        console.log(`[IPC] Resolved manual path: ${manualPath}`);
+        console.log(`[IPC] Resolved source manual path: ${manualPath}`);
         
         if (fs.existsSync(manualPath)) {
-            await shell.openPath(manualPath);
-            return { success: true };
+            if (isDev) {
+                await shell.openPath(manualPath);
+                return { success: true };
+            } else {
+                // In production, extract to temp to bypass asar shell restrictions
+                const tempDir = app.getPath('temp');
+                const tempManualPath = path.join(tempDir, 'BPP_User_Manual.html');
+                
+                const content = fs.readFileSync(manualPath);
+                fs.writeFileSync(tempManualPath, content as any);
+                
+                console.log(`[IPC] Extracted manual to temp: ${tempManualPath}`);
+                await shell.openPath(tempManualPath);
+                return { success: true };
+            }
         } 
         
-        // Strategy 2: Fallback to directory-based resolution
+        // Fallback Strategy
         const altPath = path.resolve(__dirname, '..', 'docs', 'user_manual.html');
-        console.log(`[IPC] Falling back to alt path: ${altPath}`);
         if (fs.existsSync(altPath)) {
             await shell.openPath(altPath);
             return { success: true };
         }
 
-        throw new Error(`User manual not found at expected location. Searched: ${manualPath}`);
+        throw new Error(`User manual not found. Please ensure 'docs/user_manual.html' exists.`);
     } catch (e: any) {
         console.error('[IPC] Open user manual failed:', e);
         return { success: false, error: e.message };
@@ -643,7 +656,7 @@ ipcMain.handle('find-bpp-app', async () => {
 const INSTALLER_NAME = 'bpp_installer.exe';
 const getInstallerPath = () => path.join(os.tmpdir(), INSTALLER_NAME);
 
-ipcMain.handle('start-update-download', async (_, downloadUrl: string) => {
+ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedHash?: string) => {
     return new Promise((resolve) => {
         try {
             const dest = getInstallerPath();
@@ -659,9 +672,40 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string) => {
                     file.write(chunk);
                 });
                 
-                response.on('end', () => {
+                response.on('end', async () => {
                     file.end();
                     console.log('✅ Update downloaded to:', dest);
+
+                    // ── SHA-256 INTEGRITY VERIFICATION ──
+                    if (expectedHash && expectedHash.trim() !== "") {
+                        console.log('🛡️ Verifying SHA-256 integrity...');
+                        try {
+                            const hash = crypto.createHash('sha256');
+                            const input = fs.createReadStream(dest);
+                            
+                            const calculatedHash = await new Promise<string>((res, rej) => {
+                                input.on('data', chunk => hash.update(chunk as any));
+                                input.on('end', () => res(hash.digest('hex')));
+                                input.on('error', err => rej(err));
+                            });
+
+                            if (calculatedHash.toLowerCase() !== expectedHash.toLowerCase()) {
+                                console.error(`❌ Security Violation: Hash Mismatch!\nExpected: ${expectedHash}\nActual: ${calculatedHash}`);
+                                fs.unlinkSync(dest); // Delete malicious/corrupted file
+                                resolve({ success: false, error: 'SECURITY_HASH_MISMATCH' });
+                                return;
+                            }
+                            console.log('✅ Integrity Verified successfully.');
+                        } catch (hashErr: any) {
+                            console.error('❌ Hash calculation failed:', hashErr);
+                            fs.unlinkSync(dest);
+                            resolve({ success: false, error: 'Integrity check failed' });
+                            return;
+                        }
+                    } else {
+                        console.warn('⚠️ No SHA-256 hash provided for this update. Skipping verification.');
+                    }
+
                     BrowserWindow.getAllWindows().forEach(win => {
                         win.webContents.send('update-download-complete');
                     });

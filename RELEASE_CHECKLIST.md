@@ -3,7 +3,7 @@
 To prevent "infinite update" loops or version mismatches, follow this checklist before every production build.
 
 ## 1. Version Synchronization
-- [ ] **package.json**: Update `"version"` (e.g., `02.02.15`).
+- [ ] **package.json**: Update `"version"` (e.g., `02.02.21`).
 - [ ] **package.json**: Update `artifactName` in `build:win10` and `build:win7` scripts.
 - [ ] **licenseService.ts**: Update `APP_VERSION` constant (must match `package.json`).
 - [ ] **Google Apps Script**: Deploy new version of the Web App and confirm it returns the correct `latestVersion`.

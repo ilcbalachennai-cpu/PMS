@@ -1,10 +1,10 @@
 import CryptoJS from 'crypto-js';
-import { LicenseData, User } from '../types';
+import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.17";
-const BPP_AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
+export const APP_VERSION = "02.02.21";
+const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
   success: boolean;
@@ -17,6 +17,7 @@ export interface ActivationResult {
   data?: any;
   latestVersion?: string;
   downloadUrl?: string;
+  launcherUrl?: string; // NEW: Specific link for hard-locked users (D2)
   recoveryData?: {
     adminUser?: string;
     adminPass?: string;
@@ -48,7 +49,7 @@ export const getMachineId = async (): Promise<string> => {
 const fetchWithTimeout = async (url: string, options: any, timeout = 8000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
-  
+
   try {
     const response = await fetch(url, {
       ...options,
@@ -171,7 +172,7 @@ export const isExpiredOffline = (expiryStr: string | undefined): boolean => {
 export const trackActivityTime = () => {
   const secureTime = localStorage.getItem('app_time_sync');
   const now = Date.now();
-  
+
   if (secureTime) {
     try {
       const lastKnown = Number(unscramble(secureTime));
@@ -184,7 +185,7 @@ export const trackActivityTime = () => {
       localStorage.removeItem('app_time_sync');
     }
   }
-  
+
   localStorage.setItem('app_time_sync', scramble(String(now)));
   return { tampered: false };
 };
@@ -204,11 +205,11 @@ export const checkSyncRequirement = () => {
 
   // Day 2: Alert message
   if (offlineDaysCount === 2) {
-    return { 
-      required: true, 
-      blocked: false, 
+    return {
+      required: true,
+      blocked: false,
       isSyncWarning: true,
-      message: "Internet connection required for uninterrupted use" 
+      message: "Internet connection required for uninterrupted use"
     };
   }
 
@@ -225,12 +226,12 @@ export const checkSyncRequirement = () => {
     const remaining = Number(graceExpiry) - now;
 
     if (remaining > 0) {
-      return { 
-        required: true, 
-        blocked: false, 
-        isSyncGracePeriod: true, 
-        graceRemaining: remaining, 
-        message: `Sync Required: Access will be suspended in ${Math.ceil(remaining / 60000)} minutes` 
+      return {
+        required: true,
+        blocked: false,
+        isSyncGracePeriod: true,
+        graceRemaining: remaining,
+        message: `Sync Required: Access will be suspended in ${Math.ceil(remaining / 60000)} minutes`
       };
     } else {
       // Countdown finished
@@ -240,6 +241,24 @@ export const checkSyncRequirement = () => {
 
   // Day 4+: Persistent Block
   return { required: true, blocked: true, message: "Connection Required (Access Suspended)" };
+};
+
+/**
+ * NEW V02.02.18: Retry Tracking for 4-Field Identity Conflicts
+ */
+export const getSyncRetryCount = (): number => {
+  return Number(localStorage.getItem('app_sync_retry_count') || 0);
+};
+
+export const incrementSyncRetryCount = (): number => {
+  const current = getSyncRetryCount();
+  const next = current + 1;
+  localStorage.setItem('app_sync_retry_count', String(next));
+  return next;
+};
+
+export const clearSyncRetryCount = () => {
+  localStorage.removeItem('app_sync_retry_count');
 };
 
 export const getStoredLicense = (): LicenseData | null => {
@@ -303,11 +322,12 @@ export const isValidKeyFormat = (key: string): boolean => {
 
 const fetchFromApi = async (url: string, options: any) => {
   try {
-    // --- V02.02.15: AUTOMATIC AUTHORIZATION INJECTION ---
+    // --- V02.02.18: AUTOMATIC SECURITY & VERSION INJECTION ---
     if (options.method === 'POST' && options.body) {
       try {
         const bodyObj = JSON.parse(options.body);
-        bodyObj.authSecret = BPP_AUTH_SECRET;
+        bodyObj.authSecret = AUTH_SECRET;
+        bodyObj.version = APP_VERSION; // Inject current app version for cloud sentry
         options.body = JSON.stringify(bodyObj);
       } catch (e) {
         console.warn("API Auth Injection failed: Body is not JSON.");
@@ -336,7 +356,8 @@ export const registerTrial = async (
   userName: string,
   userID: string,
   email: string,
-  mobile: string
+  mobile: string,
+  password?: string
 ): Promise<ActivationResult> => {
   const machineId = await getMachineId();
 
@@ -388,15 +409,20 @@ export const registerTrial = async (
   }
 
   try {
+    // --- V02.02.18: STRICT IDENTITY NORMALIZATION ---
+    const cleanUserID = userID.toUpperCase().trim();
+    const cleanEmail = email.toLowerCase().trim();
+
     const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({
         action: 'REGISTER_TRIAL',
-        userName,
-        userID,
-        email,
+        userName: userName.toUpperCase(),
+        userID: cleanUserID,
+        email: cleanEmail,
         mobile,
-        machineId
+        machineId,
+        password: password || ""
       })
     });
     // ... rest of the logic
@@ -407,10 +433,10 @@ export const registerTrial = async (
       const licenseData: LicenseData = {
         key: 'TRIAL',
         status: respData.status || 'REGISTERED',
-        userName: userName,
-        userID: userID,
-        registeredTo: email,
-        registeredMobile: String(mobile),
+        userName: respData.userName || userName,
+        userID: respData.userID || userID,
+        registeredTo: respData.registeredTo || respData.email || email,
+        registeredMobile: String(respData.registeredMobile || respData.mobile || mobile),
         machineId: machineId,
         password: respData.password || "AS_REGISTERED",
         dataSize: Number(respData.dataSize || 50),
@@ -454,7 +480,8 @@ export const activateFullLicense = async (
   userID: string,
   licenseKey: string,
   email: string,
-  mobile: string
+  mobile: string,
+  password?: string
 ): Promise<ActivationResult> => {
   const machineId = await getMachineId();
   const cleanKey = licenseKey.replace(/[^0-9A-Z]/g, '');
@@ -463,17 +490,22 @@ export const activateFullLicense = async (
     return { success: false, message: 'Invalid License Key format.' };
   }
 
+  // --- V02.02.18: STRICT IDENTITY NORMALIZATION ---
+  const cleanUserID = userID.toUpperCase().trim();
+  const cleanEmail = email.toLowerCase().trim();
+
   try {
     const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({
         action: 'ACTIVATE_LICENSE',
+        userName: userName.toUpperCase(),
+        userID: cleanUserID,
         licenseKey: cleanKey,
-        userName,
-        userID,
-        email,
+        email: cleanEmail,
         mobile,
-        machineId
+        machineId,
+        appPassword: password || ""
       })
     });
 
@@ -482,10 +514,10 @@ export const activateFullLicense = async (
       const licenseData: LicenseData = {
         key: cleanKey,
         status: respData.status || 'REGISTERED',
-        userName: userName,
-        userID: userID,
-        registeredTo: email,
-        registeredMobile: String(mobile),
+        userName: respData.userName || userName,
+        userID: respData.userID || userID,
+        registeredTo: respData.registeredTo || respData.email || email,
+        registeredMobile: String(respData.registeredMobile || respData.mobile || mobile),
         machineId: machineId,
         password: respData.password || "AS_REGISTERED",
         dataSize: Number(respData.dataSize || 5000),
@@ -494,6 +526,8 @@ export const activateFullLicense = async (
         isTrial: false,
         checksum: ''
       };
+
+      const prevLicense = localStorage.getItem('app_license_secure');
 
       licenseData.checksum = generateChecksum(licenseData);
       const scrambled = scramble(JSON.stringify(licenseData));
@@ -508,6 +542,58 @@ export const activateFullLicense = async (
         await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
       }
       localStorage.setItem('app_license_last_check', new Date().toISOString().split('T')[0]);
+
+      // --- V02.02.18: DOUBLE-SYNC FORCE REPAIR ---
+      // Backend ACTIVATE_LICENSE omits contact details, so we force-sync immediately
+      // with the typed EMAIL and MOBILE to ensure the cloud validates and repairs local storage.
+      console.log("🔄 [SYNC] Forcing full identity repair after activation...");
+      const syncResult = await validateLicenseStartup(true, userID, email, mobile);
+
+      if (!syncResult.valid) {
+        // --- ROLLBACK INCONSISTENT IDENTITY ---
+        console.error("❌ [SYNC] Identity mismatch. Rolling back activation...");
+        if (prevLicense) {
+          localStorage.setItem('app_license_secure', prevLicense);
+          if ((window as any).electronAPI) await (window as any).electronAPI.dbSet('app_license_secure', prevLicense);
+        } else {
+          localStorage.removeItem('app_license_secure');
+          if ((window as any).electronAPI) await (window as any).electronAPI.dbDelete('app_license_secure');
+        }
+        return {
+          success: false,
+          message: syncResult.message || "Identity Verification Failed: Provided Email/Mobile do not match cloud records."
+        };
+      }
+
+      // --- V02.02.18: STRICT FIDELITY COMPARISON (Hardened) ---
+      // We normalize everything: strip all whitespaces, lowercase emails, and strip all non-digits from mobile.
+      const cloudEmailRaw = String(syncResult.data?.registeredTo || syncResult.data?.email || "");
+      const cloudMobileRaw = String(syncResult.data?.registeredMobile || syncResult.data?.mobile || "");
+
+      const cloudEmail = cloudEmailRaw.replace(/\s+/g, '').toLowerCase();
+      const cloudMobile = cloudMobileRaw.replace(/\D/g, '');
+      const typedEmail = email.replace(/\s+/g, '').toLowerCase();
+      const typedMobile = mobile.replace(/\D/g, '');
+
+      if (typedEmail !== cloudEmail || typedMobile !== cloudMobile) {
+        console.error(`❌ [FIDELITY] Identity Mismatch Detected!`);
+        console.log(`Cloud Data: Email[${cloudEmailRaw}] Mobile[${cloudMobileRaw}]`);
+        console.log(`Typed Data: Email[${email}] Mobile[${mobile}]`);
+
+        // Rollback
+        if (prevLicense) {
+          localStorage.setItem('app_license_secure', prevLicense);
+          if ((window as any).electronAPI) await (window as any).electronAPI.dbSet('app_license_secure', prevLicense);
+        } else {
+          localStorage.removeItem('app_license_secure');
+          if ((window as any).electronAPI) await (window as any).electronAPI.dbDelete('app_license_secure');
+        }
+
+        return {
+          success: false,
+          message: `Identity Mismatch: The details you entered do not exactly match our cloud records. Please double-check for typos, missing letters (like .com vs .co), or incorrect mobile digits.`
+        };
+      }
     }
     return result;
   } catch (error: any) {
@@ -519,75 +605,86 @@ export const activateFullLicense = async (
  * Startup validation.
  * Includes a daily online verification sync.
  */
-export const validateLicenseStartup = async (force: boolean = false, attemptedID?: string): Promise<{ valid: boolean; message?: string; data?: any }> => {
-    // --- V02.02.12: FORCE INITIALIZATION OF SECURITY MARKERS ---
-    // This ensures app_time_sync and other local markers are set BEFORE any blocking checks
-    const timeCheck = trackActivityTime();
-    const currentMachineId = await getMachineId();
-    console.log(`[LICENSE] Hardware ID for Sync: ${currentMachineId}`);
-    
-    const stored = getStoredLicense();
-    
-    // 1. OFFLINE ENFORCEMENT (Strict)
-    if (stored) {
-      if (isExpiredOffline(stored.expiryDate)) {
-        return { valid: false, message: 'LICENSE EXPIRED', data: { isExpired: true } };
-      }
-      
-      if (timeCheck.tampered) {
-        // --- REPORT TAMPERING TO CLOUD ---
-        if (stored) {
-          fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-              action: 'HEARTBEAT',
-              email: stored.registeredTo,
-              machineId: currentMachineId,
-              userID: stored.userID,
-              status: 'SECURITY_TAMPERED'
-            })
-          }).catch(e => console.warn("Failed to report tampering:", e));
-        }
-        return { valid: false, message: 'SECURITY VIOLATION', data: { isTampered: true } };
-      }
-      
-      const syncCheck = checkSyncRequirement();
-      // Only block if NOT forcing a sync
-      if (syncCheck.blocked && !force) {
-        return { valid: false, message: syncCheck.message, data: { isSyncBlocked: true } };
-      }
-    } else {
-      // No license: Still perform a sync check for baseline security
-      const syncCheck = checkSyncRequirement();
-      if (syncCheck.blocked && !force) {
-        return { valid: false, message: syncCheck.message, data: { isSyncBlocked: true } };
-      }
+export const validateLicenseStartup = async (
+  force = false,
+  attemptedID?: string,
+  overrideEmail?: string,
+  overrideMobile?: string
+): Promise<{
+  valid: boolean;
+  message?: string;
+  status?: string;
+  launcherUrl?: string; // Specific link for blockade redirection
+  data?: any;
+}> => {
+  // --- V02.02.12: FORCE INITIALIZATION OF SECURITY MARKERS ---
+  // This ensures app_time_sync and other local markers are set BEFORE any blocking checks
+  const timeCheck = trackActivityTime();
+  const currentMachineId = await getMachineId();
+  console.log(`[LICENSE] Hardware ID for Sync: ${currentMachineId}`);
+
+  const stored = getStoredLicense();
+
+  // 1. OFFLINE ENFORCEMENT (Strict)
+  if (stored) {
+    if (isExpiredOffline(stored.expiryDate)) {
+      return { valid: false, message: 'LICENSE EXPIRED', data: { isExpired: true } };
     }
 
-    const { isOnline } = await checkOnlineStatus();
-    if (!isOnline) {
-      // --- TRACK ACTIVE OFFLINE DAY ---
-      trackActiveOfflineDay();
-      
-      const syncCheck = checkSyncRequirement();
-      // Only block if NOT forcing a sync and blocked by policy
-      if (syncCheck.blocked && !force) {
-        return { 
-          valid: false, 
-          message: syncCheck.message, 
-          data: { 
-            isSyncBlocked: true,
-            isSyncGracePeriod: syncCheck.isSyncGracePeriod,
-            graceRemaining: syncCheck.graceRemaining
-          } 
-        };
+    if (timeCheck.tampered) {
+      // --- REPORT TAMPERING TO CLOUD ---
+      if (stored) {
+        fetchFromApi(GOOGLE_SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'HEARTBEAT',
+            email: stored.registeredTo,
+            machineId: currentMachineId,
+            userID: stored.userID,
+            status: 'SECURITY_TAMPERED'
+          })
+        }).catch(e => console.warn("Failed to report tampering:", e));
       }
-      
-      if (!stored) {
-         // Cannot initialize for the first time without internet
-         return { valid: false, message: 'Initial Internet Connection Required', data: { isSyncBlocked: true } };
-      }
+      return { valid: false, message: 'SECURITY VIOLATION', data: { isTampered: true } };
     }
+
+    const syncCheck = checkSyncRequirement();
+    // Only block if NOT forcing a sync
+    if (syncCheck.blocked && !force) {
+      return { valid: false, message: syncCheck.message, data: { isSyncBlocked: true } };
+    }
+  } else {
+    // No license: Still perform a sync check for baseline security
+    const syncCheck = checkSyncRequirement();
+    if (syncCheck.blocked && !force) {
+      return { valid: false, message: syncCheck.message, data: { isSyncBlocked: true } };
+    }
+  }
+
+  const { isOnline } = await checkOnlineStatus();
+  if (!isOnline) {
+    // --- TRACK ACTIVE OFFLINE DAY ---
+    trackActiveOfflineDay();
+
+    const syncCheck = checkSyncRequirement();
+    // Only block if NOT forcing a sync and blocked by policy
+    if (syncCheck.blocked && !force) {
+      return {
+        valid: false,
+        message: syncCheck.message,
+        data: {
+          isSyncBlocked: true,
+          isSyncGracePeriod: syncCheck.isSyncGracePeriod,
+          graceRemaining: syncCheck.graceRemaining
+        }
+      };
+    }
+
+    if (!stored) {
+      // Cannot initialize for the first time without internet
+      return { valid: false, message: 'Initial Internet Connection Required', data: { isSyncBlocked: true } };
+    }
+  }
 
   // Ensure the fetched machine ID is persisted for synchronous lookups (getMachineKey)
   if (currentMachineId && currentMachineId !== 'UNKNOWN-MACHINE-ID') {
@@ -662,11 +759,11 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
           body: JSON.stringify({
             action: 'VALIDATE_STARTUP',
             licenseKey: stored ? (stored.isTrial ? 'TRIAL' : stored.key) : 'RESCUE',
-            email: stored?.registeredTo || 'RESCUE',
-            mobile: stored?.registeredMobile || 'RESCUE',
+            email: overrideEmail || (stored?.registeredTo || 'RESCUE'),
+            mobile: overrideMobile || (stored?.registeredMobile || 'RESCUE'),
             machineId: currentMachineId,
             userID: attemptedID || (stored?.userID || 'RESCUE'),
-            appPassword: adminUser?.password 
+            appPassword: adminUser?.password
           })
         });
 
@@ -692,14 +789,29 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
         }
 
         if (!result.success) {
+          // --- V02.02.18: LEGACY BLOCK (Hard Guard) ---
+          if (result.status === 'BLOCK_LEGACY' || result.message?.includes('VERSION_STUCK')) {
+            return {
+              valid: false,
+              message: result.message || 'Application Version no longer supported.',
+              status: 'BLOCK_LEGACY',
+              launcherUrl: result.launcherUrl
+            };
+          }
+
           // --- V02.02.15: IDENTITY RESTORATION PASSTHROUGH ---
           if (result.message === "IDENTITY_RESTORE_REQUIRED") {
-             return { 
-               valid: false, 
-               message: result.message, 
-               status: 'PENDING_RESTORE',
-               data: result.data 
-             };
+            // V02.02.18: IDENTITY MISMATCH GUIDANCE
+            const errorMsg = "Registration Conflict: The Email/Mobile provided do not match our cloud records for this User ID. Please verify your registered details or contact Support.";
+            console.warn(`⚠️ [SYNC] ${errorMsg}`);
+
+            incrementSyncRetryCount();
+            return {
+              valid: false,
+              message: errorMsg,
+              status: 'PENDING_RESTORE',
+              data: result.data
+            };
           }
           return { valid: false, message: result.message };
         }
@@ -711,26 +823,26 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
           // If local license is missing OR is a trial and cloud says it's a full license
           const cloudIsTrial = cloudData.isTrial === true;
           const localIsTrial = activeLicense?.isTrial === true;
-          
+
           if ((!activeLicense || (localIsTrial && !cloudIsTrial)) && cloudData.userName) {
             console.log("🛠️ Syncing/Restoring Identity from Cloud (FORCE UPGRADE)...");
             const cloudKey = cloudData.licenseKey || cloudData.key;
-            
+
             const restoredLicense: LicenseData = {
-               key: cloudKey || (cloudIsTrial ? "TRIAL" : "ACTIVATED"),
-               userName: cloudData.userName,
-               userID: cloudData.userID || "RESCUE",
-               registeredTo: cloudData.registeredTo || cloudData.email || "",
-               registeredMobile: cloudData.registeredMobile || cloudData.mobile || "",
-               startDate: cloudData.startDate || "",
-               expiryDate: cloudData.expiryDate || "",
-               machineId: currentMachineId,
-               status: cloudData.status || (cloudIsTrial ? "REGISTERED" : "ACTIVATED"),
-               dataSize: Number(cloudData.dataSize) || (cloudIsTrial ? 50 : 5000),
-               isTrial: cloudIsTrial,
-               checksum: ""
+              key: cloudKey || (cloudIsTrial ? "TRIAL" : "ACTIVATED"),
+              userName: cloudData.userName,
+              userID: cloudData.userID || "RESCUE",
+              registeredTo: cloudData.registeredTo || cloudData.email || "",
+              registeredMobile: cloudData.registeredMobile || cloudData.mobile || "",
+              startDate: cloudData.startDate || "",
+              expiryDate: cloudData.expiryDate || "",
+              machineId: currentMachineId,
+              status: cloudData.status || (cloudIsTrial ? "REGISTERED" : "ACTIVATED"),
+              dataSize: Number(cloudData.dataSize) || (cloudIsTrial ? 50 : 5000),
+              isTrial: cloudIsTrial,
+              checksum: ""
             };
-            
+
             restoredLicense.checksum = generateChecksum(restoredLicense);
             const scrambled = scramble(JSON.stringify(restoredLicense));
             localStorage.setItem('app_license_secure', scrambled);
@@ -744,7 +856,7 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
             console.log("✅ Identity Forced to Enterprise successfully.");
           }
 
-            if (activeLicense) {
+          if (activeLicense) {
             // 3. Sync Expiry Date & Key (Incremental Updates)
             let storageUpdated = false;
             const incomingKey = cloudData.licenseKey || cloudData.key;
@@ -770,6 +882,17 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
             }
             if (cloudData.status && cloudData.status !== activeLicense.status) {
               activeLicense.status = cloudData.status;
+              storageUpdated = true;
+            }
+            // --- V02.02.18: IDENTITY FIDELITY SYNC ---
+            if (cloudData.registeredTo && cloudData.registeredTo !== activeLicense.registeredTo) {
+              console.log(`📧 [SYNC] Email Update: ${activeLicense.registeredTo} -> ${cloudData.registeredTo}`);
+              activeLicense.registeredTo = cloudData.registeredTo;
+              storageUpdated = true;
+            }
+            if (cloudData.registeredMobile && cloudData.registeredMobile !== activeLicense.registeredMobile) {
+              console.log(`📱 [SYNC] Mobile Update: ${activeLicense.registeredMobile} -> ${cloudData.registeredMobile}`);
+              activeLicense.registeredMobile = String(cloudData.registeredMobile);
               storageUpdated = true;
             }
             // ✅ FIX: Sync dataSize (Employee Data Limit) from cloud
@@ -811,7 +934,7 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
               if (cloudAdminUser) {
                 // Find ANY user that might be the primary account if Administrator isn't found
                 let adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
-                if (adminIndex === -1 && localUsers.length > 0) adminIndex = 0; 
+                if (adminIndex === -1 && localUsers.length > 0) adminIndex = 0;
 
                 if (adminIndex !== -1) {
                   const localUser = localUsers[adminIndex];
@@ -819,7 +942,7 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
                     console.log(`♻️  Syncing Local User Profile: ${localUser.username} -> ${cloudAdminUser}`);
                     localUser.username = cloudAdminUser;
                     localUser.password = cloudAdminPass;
-                    
+
                     // Also update the name if the cloud provides it
                     if (cloudData.userName) localUser.name = cloudData.userName;
 
@@ -870,135 +993,137 @@ export const validateLicenseStartup = async (force: boolean = false, attemptedID
  * Backend checks if the email is already bound to a different machine before dispatching.
  */
 export const sendRegistrationOTP = async (email: string): Promise<ActivationResult> => {
-    const machineId = await getMachineId();
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'SEND_REG_OTP',
-                email,
-                machineId
-            })
-        });
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `OTP Dispatch Error: ${error.message || 'Unknown Failure'}` };
-    }
+  const machineId = await getMachineId();
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'SEND_REG_OTP',
+        email,
+        machineId
+      })
+    });
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `OTP Dispatch Error: ${error.message || 'Unknown Failure'}` };
+  }
 };
 
 /**
- * NEW: Verifies the OTP sent during initial registration email verification.
+ * V02.02.15: Verify OTP for Registration
  */
-export const verifyRegistrationOTP = async (email: string, otp: string): Promise<ActivationResult> => {
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'VERIFY_REG_OTP',
-                email,
-                otp
-            })
-        });
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `OTP Verification Error: ${error.message || 'Unknown Failure'}` };
-    }
+export const verifyRegistrationOTP = async (email: string, mobile: string, otp: string): Promise<any> => {
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'VERIFY_REG_OTP',
+        email,
+        mobile,
+        otp,
+        authSecret: AUTH_SECRET // Ensure backend recognizes the identity fetch request
+      })
+    });
+    return result;
+  } catch (error) {
+    return { success: false, message: "Verification connection failed." };
+  }
 };
 
 /**
  * NEW: Requests a password reset OTP from the cloud.
  */
 export const requestResetOTP = async (email: string, userID: string): Promise<ActivationResult> => {
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'REQUEST_OTP_RESET',
-                email,
-                userID
-            })
-        });
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `OTP Request Error: ${error.message || "Unknown Failure"}` };
-    }
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'REQUEST_OTP_RESET',
+        email,
+        userID
+      })
+    });
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `OTP Request Error: ${error.message || "Unknown Failure"}` };
+  }
 };
 
 /**
  * NEW: Request a secure developer bypass OTP.
  */
 export const requestDeveloperOTP = async (username: string, password?: string): Promise<ActivationResult> => {
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'REQUEST_DEV_OTP',
-                username,
-                password
-            })
-        });
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `Developer Auth Error: ${error.message || "Unknown Failure"}` };
-    }
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'REQUEST_DEV_OTP',
+        username,
+        password
+      })
+    });
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `Developer Auth Error: ${error.message || "Unknown Failure"}` };
+  }
 };
 
 /**
  * NEW: Verifies the Developer OTP and syncs credentials locally.
  */
 export const verifyDeveloperOTP = async (username: string, otp: string): Promise<ActivationResult> => {
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'VERIFY_DEV_OTP',
-                otp,
-                username
-            })
-        });
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'VERIFY_DEV_OTP',
+        otp,
+        username
+      })
+    });
 
-        if (result.success && result.data) {
-          const devObj = {
-            username: result.data.devUser,
-            password: result.data.devPass,
-            name: result.data.name,
-            role: 'Developer',
-            email: 'developer@bharatpay.com'
-          };
-          // Hard-lock creds to this hardware
-          const machineKey = localStorage.getItem('app_machine_id') || 'INITIAL_PMS_KEY';
-          const scrambled = CryptoJS.AES.encrypt(JSON.stringify(devObj), machineKey).toString();
-          localStorage.setItem('app_developer_secure', scrambled);
-          // @ts-ignore
-          if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambled);
-        }
-
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
+    if (result.success && result.data) {
+      const devObj = {
+        username: result.data.devUser,
+        password: result.data.devPass,
+        name: result.data.name,
+        role: 'Developer',
+        email: 'developer@bharatpay.com'
+      };
+      // Hard-lock creds to this hardware
+      const machineKey = localStorage.getItem('app_machine_id') || 'INITIAL_PMS_KEY';
+      const scrambled = CryptoJS.AES.encrypt(JSON.stringify(devObj), machineKey).toString();
+      localStorage.setItem('app_developer_secure', scrambled);
+      // @ts-ignore
+      if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambled);
     }
+
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
+  }
 };
 
 /**
  * Updates the user's password in the Google Sheet for cloud sync integrity via OTP.
  */
 export const updateCloudPassword = async (email: string, newPassword: string, otp: string): Promise<ActivationResult> => {
-    const machineId = await getMachineId();
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'UPDATE_PASSWORD',
-                email,
-                machineId,
-                newPassword,
-                otp
-            })
-        });
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `Cloud Sync Error: ${error.message || "Unknown Failure"}` };
-    }
+  const machineId = await getMachineId();
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'UPDATE_PASSWORD',
+        email,
+        machineId,
+        newPassword,
+        otp
+      })
+    });
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `Cloud Sync Error: ${error.message || "Unknown Failure"}` };
+  }
 };
 
 
@@ -1030,63 +1155,65 @@ export const trackCloudLogin = async (email: string, machineId: string) => {
  * NEW: Verifies if an email exists in the cloud database before allowing repair.
  */
 export const verifyIdentityEmail = async (email: string): Promise<ActivationResult> => {
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'VERIFY_IDENTITY_EMAIL',
-                email
-            })
-        });
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
-    }
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'VERIFY_IDENTITY_EMAIL',
+        email
+      })
+    });
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
+  }
 };
 
 /**
  * NEW: Synchronizes a new identity (UserID/Password) with the cloud and local storage.
  */
 export const syncIdentityRepair = async (email: string, newUserID: string, newPassword: string): Promise<ActivationResult> => {
-    const machineId = await getMachineId();
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'SYNC_IDENTITY_REPAIR',
-                email,
-                newUserID,
-                newPassword,
-                machineId
-            })
-        });
+  const machineId = await getMachineId();
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'SYNC_IDENTITY_REPAIR',
+        email,
+        newUserID,
+        newPassword,
+        machineId
+      })
+    });
 
-        if (result.success) {
-            // CRITICAL: Immediately trigger a local validation sync to repair the app state
-            console.log("🛠️ Cloud Identity Synced. Triggering local state repair...");
-            await validateLicenseStartup(true, newUserID);
-        }
-
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `Sync Repair Error: ${error.message || "Unknown Failure"}` };
+    if (result.success) {
+      // CRITICAL: Immediately trigger a local validation sync to repair the app state
+      console.log("🛠️ Cloud Identity Synced. Triggering local state repair...");
+      await validateLicenseStartup(true, newUserID);
     }
+
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `Sync Repair Error: ${error.message || "Unknown Failure"}` };
+  }
 };
 
 /**
  * Fetches the latest developer messages from Google Sheets (Consolidated)
  */
-export const fetchLatestMessages = async (force: boolean = false): Promise<{ 
-  scrollNews: string, 
-  statutory: string, 
-  header?: string, 
-  alignment?: 'LEFT' | 'CENTER' | 'RIGHT', 
-  key?: string, 
+export const fetchLatestMessages = async (force: boolean = false): Promise<{
+  scrollNews: string,
+  statutory: string,
+  header?: string,
+  alignment?: 'LEFT' | 'CENTER' | 'RIGHT',
+  key?: string,
   messageId?: string,
   flashPopupMessage?: string,
   flashPopupHeader?: string,
   flashPopupPriority?: 'REGULAR' | 'IMMEDIATE',
   flashPopupId?: string,
+  loginAlertMessage?: string,
+  loginAlertEnabled?: boolean,
   latestVersion?: string,
   downloadUrl?: string,
   downloadUrlWin7?: string
@@ -1178,10 +1305,10 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
  * Updates the Cloud Developer Board message
  */
 export const updateDeveloperMessages = async (
-  message: string, 
-  type: 'MESSAGE' | 'NEWS' | 'FLASH' | 'ALERT', 
-  header?: string, 
-  alignment?: string, 
+  message: string,
+  type: 'MESSAGE' | 'NEWS' | 'FLASH' | 'ALERT',
+  header?: string,
+  alignment?: string,
   key?: string
 ): Promise<ActivationResult> => {
   try {
@@ -1209,35 +1336,46 @@ export const trackHeartbeat = async (email: string, machineId: string, userID: s
   if (!navigator.onLine) return;
 
   try {
-    // Attempt multi-provider location detection
+    const isLogout = status === "LOGGED OUT";
     let location = "Auto-Detecting...";
-    try {
-      const locRes = await Promise.any([
-        fetch('https://ipapi.co/json/').then(r => r.json()),
-        fetch('http://ip-api.com/json').then(r => r.json())
-      ]);
-      
-      if (locRes.city && (locRes.country_name || locRes.country)) {
-        location = `${locRes.city}, ${locRes.country_name || locRes.country}`;
-      } else if (locRes.region) {
-        location = `${locRes.region}, ${locRes.country || 'India'}`;
+
+    if (!isLogout) {
+      // Attempt multi-provider location detection only for LIVE status to avoid logout delays
+      try {
+        const locRes = await Promise.any([
+          fetch('https://ipapi.co/json/').then(r => r.json()),
+          fetch('http://ip-api.com/json').then(r => r.json())
+        ]);
+
+        if (locRes.city && (locRes.country_name || locRes.country)) {
+          location = `${locRes.city}, ${locRes.country_name || locRes.country}`;
+        } else if (locRes.region) {
+          location = `${locRes.region}, ${locRes.country || 'India'}`;
+        }
+      } catch (e) {
+        console.warn("Location detection failed:", e);
+        location = "Auto-Detected";
       }
-    } catch (e) {
-      console.warn("Location detection failed:", e);
-      location = "Auto-Detected";
+    } else {
+      location = "Session Ended";
     }
 
+    const payload = JSON.stringify({
+      action: 'HEARTBEAT',
+      email: email,
+      machineId: machineId,
+      userID: userID,
+      sessionStart: sessionStart,
+      location: location,
+      status: status
+    });
+
+    // For logouts, use keepalive to ensure the request finishes even if the app closes
     fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: 'POST',
-      body: JSON.stringify({
-        action: 'HEARTBEAT',
-        email: email,
-        machineId: machineId,
-        userID: userID,
-        sessionStart: sessionStart,
-        location: location,
-        status: status
-      })
+      body: payload,
+      // @ts-ignore
+      keepalive: isLogout 
     }).catch(e => console.error("Heartbeat Tracking Warning:", e));
   } catch (e) {
     console.warn("Heartbeat Tracking Error:", e);
@@ -1248,42 +1386,42 @@ export const trackHeartbeat = async (email: string, machineId: string, userID: s
  * Requests an OTP for Identity Restoration.
  */
 export const requestRestoreOTP = async (userID: string, email: string, mobile: string): Promise<ActivationResult> => {
-    const machineId = await getMachineId();
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'REQUEST_RESTORE_OTP',
-                userID,
-                machineId,
-                email,
-                mobile
-            })
-        });
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `Restore Error: ${error.message || "Unknown Failure"}` };
-    }
+  const machineId = await getMachineId();
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'REQUEST_RESTORE_OTP',
+        userID,
+        machineId,
+        email,
+        mobile
+      })
+    });
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `Restore Error: ${error.message || "Unknown Failure"}` };
+  }
 };
 
 /**
  * Verifies the restoration OTP and returns the full profile data.
  */
 export const verifyRestoreOTP = async (userID: string, email: string, otp: string): Promise<ActivationResult> => {
-    const machineId = await getMachineId();
-    try {
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'VERIFY_RESTORE_OTP',
-                userID,
-                machineId,
-                email,
-                otp
-            })
-        });
-        return result;
-    } catch (error: any) {
-        return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
-    }
+  const machineId = await getMachineId();
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'VERIFY_RESTORE_OTP',
+        userID,
+        machineId,
+        email,
+        otp
+      })
+    });
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
+  }
 };

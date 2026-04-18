@@ -1,9 +1,14 @@
 import { useState, useCallback } from 'react';
-import { validateLicenseStartup, getStoredLicense, fetchLatestMessages } from '../services/licenseService';
+import { 
+  validateLicenseStartup, getStoredLicense, fetchLatestMessages,
+  getSyncRetryCount, incrementSyncRetryCount, clearSyncRetryCount
+} from '../services/licenseService';
 import { LicenseData } from '../types';
 
 export const useLicense = () => {
-  const [licenseStatus, setLicenseStatus] = useState<{ checked: boolean; valid: boolean; message: string; data?: any }>({ checked: false, valid: false, message: '', data: null });
+  const [licenseStatus, setLicenseStatus] = useState<{ checked: boolean; valid: boolean; message: string; data?: any; retryCount: number; status?: string; launcherUrl?: string }>({ 
+    checked: false, valid: false, message: '', data: null, retryCount: getSyncRetryCount() 
+  });
   const [licenseInfo, setLicenseInfo] = useState<LicenseData | null>(getStoredLicense());
   const [dataSizeLimit, setDataSizeLimit] = useState<number>(() => {
     const license = getStoredLicense();
@@ -16,12 +21,27 @@ export const useLicense = () => {
     setLicenseInfo(license);
     
     if (!result.valid) {
-      setLicenseStatus({ checked: true, valid: false, message: result.message || 'License Verification Failed', data: result.data });
+      setLicenseStatus({ 
+        checked: true, 
+        valid: false, 
+        message: result.message || 'License Verification Failed', 
+        data: result.data,
+        retryCount: getSyncRetryCount(),
+        status: (result as any).status,
+        launcherUrl: (result as any).launcherUrl
+      });
     } else {
+      clearSyncRetryCount();
       if (license?.dataSize) {
         setDataSizeLimit(license.dataSize);
       }
-      setLicenseStatus({ checked: true, valid: true, message: '', data: result.data });
+      setLicenseStatus({ 
+        checked: true, 
+        valid: true, 
+        message: '', 
+        data: result.data,
+        retryCount: 0
+      });
     }
   }, []);
 

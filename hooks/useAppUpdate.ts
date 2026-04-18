@@ -5,9 +5,13 @@ import { APP_VERSION } from '../services/licenseService';
 export const useAppUpdate = (showAlert: any) => {
   const [latestAppVersion, setLatestAppVersion] = useState<string | null>(localStorage.getItem('app_latest_version'));
   const [downloadUrl, setDownloadUrl] = useState<string | null>(localStorage.getItem('app_download_url'));
+  const [sha256, setSha256] = useState<string | null>(localStorage.getItem('app_update_hash'));
   const [showUpdateNotice, setShowUpdateNotice] = useState(false);
+  const [showBackgroundNotice, setShowBackgroundNotice] = useState(false);
   const [isUpdateDownloading, setIsUpdateDownloading] = useState(false);
+  const [isUpdatePreparing, setIsUpdatePreparing] = useState(false);
   const [updateDownloaded, setUpdateDownloaded] = useState(localStorage.getItem('app_update_ready') === 'true');
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   const isVersionHigher = (latest: string, current: string): boolean => {
     try {
@@ -62,30 +66,40 @@ export const useAppUpdate = (showAlert: any) => {
 
         let res;
         try {
+          setIsUpdatePreparing(true);
           // @ts-ignore
           res = await Promise.race([
-            (window as any).electronAPI.startUpdateDownload(finalUrl),
+            (window as any).electronAPI.startUpdateDownload(finalUrl, sha256 || localStorage.getItem('app_update_hash')),
             timeoutPromise
           ]);
         } catch (err: any) {
+          setIsUpdatePreparing(false);
           if (err.message === "TIMEOUT") {
             setIsUpdateDownloading(false);
-            showAlert('info', 'Updating in Background', 'The download is taking a few moments. We will continue in the background. You can keep using the application, and we will prompt you once it is ready.');
+            setShowBackgroundNotice(true);
             return;
           } else {
             setIsUpdateDownloading(false);
+            setUpdateError('DOWNLOAD_FAILED');
             showAlert('error', 'Download Failed', 'Failed to download the update. Please check your internet connection.');
             return;
           }
         }
         
+        setIsUpdatePreparing(false);
         if (res && res.success === false) {
            setIsUpdateDownloading(false);
-           showAlert('error', 'Download Failed', `Update failed: ${res.error || 'Network error'}. Please check your connection.`);
+           if (res.error === 'SECURITY_HASH_MISMATCH') {
+              setUpdateError('SECURITY_VIOLATION');
+           } else {
+              setUpdateError('DOWNLOAD_FAILED');
+              showAlert('error', 'Download Failed', `Update failed: ${res.error || 'Network error'}. Please check your connection.`);
+           }
            return;
         }
 
       }
+
 
       // Pre-install persistence
       await onInstall();
@@ -144,9 +158,13 @@ export const useAppUpdate = (showAlert: any) => {
   return { 
     latestAppVersion, setLatestAppVersion, 
     downloadUrl, setDownloadUrl, 
+    sha256, setSha256,
     showUpdateNotice, setShowUpdateNotice,
+    showBackgroundNotice, setShowBackgroundNotice,
     isUpdateDownloading, setIsUpdateDownloading,
+    isUpdatePreparing, setIsUpdatePreparing,
     updateDownloaded, setUpdateDownloaded,
+    updateError, setUpdateError,
     handleUpdateNow, handleUpdateLater
   };
 };

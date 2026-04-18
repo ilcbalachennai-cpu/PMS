@@ -71,6 +71,28 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
     }
   }, [showDevModal]);
 
+  // V02.02.21: Auto-focus submit button when OTP is 6 digits
+  useEffect(() => {
+    if (devOTP.length === 6) {
+      const btn = document.getElementById('btn-dev-auth');
+      if (btn) btn.focus();
+    }
+  }, [devOTP]);
+
+  useEffect(() => {
+    if (resetOTP.length === 6) {
+      const btn = document.getElementById('btn-reset-auth');
+      if (btn) btn.focus();
+    }
+  }, [resetOTP]);
+
+  useEffect(() => {
+    if (restoreOTP.length === 6) {
+      const btn = document.getElementById('btn-restore-auth');
+      if (btn) btn.focus();
+    }
+  }, [restoreOTP]);
+
   // Check for auto-logout timeout
   useEffect(() => {
     if (sessionStorage.getItem('logout_reason') === 'timeout') {
@@ -80,9 +102,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
     
     // Check if legal alert should be shown
     if (companyProfile?.loginAlertEnabled && companyProfile.loginAlertMessage && !hasAgreedLegal) {
-      setShowLegalModal(true);
+      // Small timeout to ensure app state is settled
+      const timer = setTimeout(() => setShowLegalModal(true), 500);
+      return () => clearTimeout(timer);
     }
-  }, [companyProfile, hasAgreedLegal]);
+  }, [companyProfile?.loginAlertEnabled, companyProfile?.loginAlertMessage, hasAgreedLegal]);
 
   // Monitor bridge status
   useEffect(() => {
@@ -365,9 +389,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
         const isCaseMismatch = !isPerfectMatch && allUsers.some(u => String(u.username).trim().toLowerCase() === cleanUID.toLowerCase());
         const isLicenseMismatch = !isPerfectMatch && license?.userID && String(license.userID).trim().toLowerCase() === cleanUID.toLowerCase();
 
-        // ONLY trigger transition if identity is bad OR if failure limit reached on a non-hardened account
-        if (isLegacy || isCaseMismatch || isLicenseMismatch || (!isPerfectMatch && failedAttempts >= 3)) {
-          setError('Identity Transition Required');
+        // ONLY trigger transition if identity is bad OR if failure limit reached
+        const nextFailedCount = failedAttempts + 1;
+        setFailedAttempts(nextFailedCount);
+
+        if (isLegacy || isCaseMismatch || isLicenseMismatch || (!isPerfectMatch && nextFailedCount >= 3)) {
+          setError(`Identity Transition Required (Attempt ${nextFailedCount}/3)`);
           setSyncNotice('Dear user kindly reset your USER ID (one time) with new ID as per the criteria set under User ID for a seamless access in future');
           setSyncStep('EMAIL');
           setShowSyncModal(true);
@@ -378,10 +405,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
           setSyncNotice('');
           const userExists = allUsers.some(u => u.username.toLowerCase() === cleanUID.toLowerCase());
           if (userExists) {
-            setError('Invalid password. Credentials do not match.');
+            setError(`Invalid password. Credentials do not match. (Attempt ${nextFailedCount}/3)`);
           } else {
-            setError(syncResult.message || "Invalid credentials. Please check your username and password.");
-            setFailedAttempts(prev => prev + 1);
+            setError(`${syncResult.message || "Invalid credentials."} (Attempt ${nextFailedCount}/3)`);
           }
         }
         setIsLoading(false);
@@ -1044,6 +1070,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
                     </div>
                   </div>
                   <button
+                    id="btn-reset-auth"
                     type="submit"
                     disabled={isResetting}
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
@@ -1135,6 +1162,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
               </div>
 
               <button
+                id="btn-dev-auth"
                 type="submit"
                 disabled={isVerifyingDev}
                 className="w-full bg-amber-600 hover:bg-amber-500 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
@@ -1423,6 +1451,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
                   </div>
 
                   <button
+                    id="btn-restore-auth"
                     type="submit"
                     disabled={isRestoring || restoreOTP.length < 6}
                     className="w-full bg-amber-600 hover:bg-amber-500 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"

@@ -4,9 +4,9 @@ import {
     Database, Users, KeyRound, ShieldCheck, Mail, Megaphone, Building2,
     CalendarClock, Phone, Globe, CheckCircle2, AlertCircle, Lock, Plus,
     ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator,
-    ScrollText, Percent, HandCoins, Wallet, Scale, RotateCw, TrendingUp,
+    ScrollText, HandCoins, Wallet, Scale, RotateCw, TrendingUp,
     ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
-    FolderOpen, FolderSearch
+    FolderOpen
 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG } from '../constants';
@@ -46,7 +46,7 @@ interface SettingsProps {
     verifyLicense?: () => Promise<void>;
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'STATUTORY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange, showAlert, verifyLicense }) => {
+const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'COMPANY', userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange, showAlert, verifyLicense }) => {
     const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(isSetupMode ? 'COMPANY' : initialTab);
 
     const [formData, setFormData] = useState<StatutoryConfig>(() => {
@@ -197,8 +197,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [umError, setUmError] = useState('');
     const umNameRef = useRef<HTMLInputElement>(null);
 
-    const isAdminEdit = umEditId && umForm.role === 'Administrator';
-    const isTrialRestricted = !umEditId && (!licenseInfo?.key || licenseInfo.key.replace(/-/g, '').length !== 16);
+    const isAdminEdit = !!(umEditId && umForm.role === 'Administrator');
+    const isTrialRestricted = !!(!umEditId && (!licenseInfo?.key || licenseInfo.key.replace(/-/g, '').length !== 16));
 
     const saveAppUsers = (users: User[]) => {
         try {
@@ -272,12 +272,21 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
     useEffect(() => {
         if (licenseInfo) {
-            setNewRegEmail(licenseInfo.registeredTo || '');
-            setNewRegMobile(licenseInfo.registeredMobile || '');
+            // V02.02.18: Smart Fallback to Admin Profile if license record is incomplete/na
+            const defaultEmail = (licenseInfo.registeredTo && licenseInfo.registeredTo !== "n/a") 
+                ? licenseInfo.registeredTo 
+                : (currentUser?.email || '');
+            
+            const defaultMobile = (licenseInfo.registeredMobile && licenseInfo.registeredMobile !== "n/a" && licenseInfo.registeredMobile !== "0") 
+                ? licenseInfo.registeredMobile 
+                : (currentUser?.mobile || '');
+
+            setNewRegEmail(defaultEmail);
+            setNewRegMobile(String(defaultMobile));
             setNewUserName(licenseInfo.userName || '');
             setNewUserID(licenseInfo.userID || '');
         }
-    }, [licenseInfo]);
+    }, [licenseInfo, currentUser]);
 
     // --- SINGLE ADMIN REPAIR LOGIC ---
     useEffect(() => {
@@ -699,27 +708,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
         });
     };
 
-    const handleBonusWagesToggle = (key: keyof WageBasisComponents) => {
-        const currentComponents = formData.bonusWagesComponents || INITIAL_STATUTORY_CONFIG.bonusWagesComponents;
-        setFormData({
-            ...formData,
-            bonusWagesComponents: {
-                ...currentComponents,
-                [key]: !currentComponents[key]
-            }
-        });
-    };
 
-    const handleGratuityWagesToggle = (key: keyof WageBasisComponents) => {
-        const currentComponents = formData.gratuityWagesComponents || INITIAL_STATUTORY_CONFIG.gratuityWagesComponents;
-        setFormData({
-            ...formData,
-            gratuityWagesComponents: {
-                ...currentComponents,
-                [key]: !currentComponents[key]
-            }
-        });
-    };
 
     const handleESIOriginalWagesToggle = (key: keyof StatutoryConfig['esiOriginalWagesComponents']) => {
         const currentComponents = formData.esiOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents;
@@ -869,11 +858,11 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
                 {/* Bottom Row: Navigation Tabs */}
                 <div className="flex overflow-x-auto pb-1 custom-scrollbar scroll-smooth px-4 mt-1 border-b border-white/5">
-                    <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
-                        <ShieldCheck size={14} /> STATUTORY RULES
-                    </button>
                     <button onClick={() => setActiveTab('COMPANY')} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'COMPANY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                         <Building2 size={14} /> COMPANY PROFILE
+                    </button>
+                    <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                        <ShieldCheck size={14} /> STATUTORY RULES
                     </button>
                     <button onClick={() => setActiveTab('DATA')} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'DATA' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                         <Database size={14} /> DATA MANAGEMENT
@@ -2242,27 +2231,27 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             />
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-[1.3fr,0.7fr] gap-4">
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Email ID</label>
                                             <input
                                                 type="email"
-                                                placeholder="bala.saipra@gmail.com"
-                                                className="w-full bg-[#0a0f1d] opacity-60 cursor-not-allowed border border-white/5 rounded-xl p-3 text-white text-xs font-bold outline-none"
+                                                className={`w-full bg-[#0a0f1d] border border-white/5 rounded-xl p-3 text-white text-xs font-bold outline-none transition-all ${licenseInfo?.status === 'PENDING_RESTORE' ? 'focus:border-sky-500/50' : 'opacity-60 cursor-not-allowed'}`}
                                                 value={newRegEmail}
-                                                readOnly
-                                                tabIndex={-1}
+                                                onChange={(e) => licenseInfo?.status === 'PENDING_RESTORE' && setNewRegEmail(e.target.value)}
+                                                readOnly={licenseInfo?.status !== 'PENDING_RESTORE'}
+                                                placeholder="Enter Registered Email"
                                             />
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Mobile No</label>
                                             <input
                                                 type="text"
-                                                placeholder="9962520292"
-                                                className="w-full bg-[#0a0f1d] opacity-60 cursor-not-allowed border border-white/5 rounded-xl p-3 text-white text-xs font-mono outline-none"
+                                                className={`w-full bg-[#0a0f1d] border border-white/5 rounded-xl p-3 text-white text-xs font-mono outline-none transition-all ${licenseInfo?.status === 'PENDING_RESTORE' ? 'focus:border-sky-500/50' : 'opacity-60 cursor-not-allowed'}`}
                                                 value={newRegMobile}
-                                                readOnly
-                                                tabIndex={-1}
+                                                onChange={(e) => licenseInfo?.status === 'PENDING_RESTORE' && setNewRegMobile(e.target.value)}
+                                                readOnly={licenseInfo?.status !== 'PENDING_RESTORE'}
+                                                placeholder="Enter Registered Mobile"
                                             />
                                         </div>
                                     </div>
@@ -2278,10 +2267,17 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         const result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile);
                                         setIsActivating(false);
                                         if (result.success) {
-                                            showAlert?.('success', 'Activation Successful', result.message);
-                                            setLicenseInfo(getStoredLicense());
-                                            // Trigger global refresh to update Header UI (Trial -> License)
-                                            setTimeout(() => onRestore(), 500);
+                                            // --- V02.02.21: HOT-SWAP DATA (Stay on page) ---
+                                            const updated = getStoredLicense();
+                                            if (updated) {
+                                                setLicenseInfo(updated);
+                                                setNewLicenseKey(''); // Clear the key field on success
+                                            }
+                                            
+                                            // Update global app state without reload
+                                            if (verifyLicense) await verifyLicense();
+
+                                            showAlert?.('success', 'System Activated', '✅ Your license has been successfully activated and synchronized. All identity fields have been restored.');
                                         } else {
                                             showAlert?.('danger', 'Activation Failed', result.message);
                                         }
@@ -2563,7 +2559,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             ref={umNameRef}
                                             type="text"
                                             placeholder="Enter user's full name"
-                                            readOnly={isAdminEdit}
+                                            readOnly={!!isAdminEdit}
                                             className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-sky-500/10 placeholder-gray-600 uppercase ${isAdminEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
                                             value={umForm.name}
                                             onChange={e => setUmForm({ ...umForm, name: e.target.value.toUpperCase() })}
@@ -2589,7 +2585,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             <input
                                                 type={umShowPwd ? "text" : "password"}
                                                 placeholder="Enter secure password"
-                                                readOnly={isAdminEdit}
+                                                readOnly={!!isAdminEdit}
                                                 className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-sky-500/10 pr-12 placeholder-gray-600 ${isAdminEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
                                                 value={umForm.password}
                                                 onChange={e => setUmForm({ ...umForm, password: e.target.value })}
@@ -2611,7 +2607,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                         <div className={`grid grid-cols-2 gap-2 bg-[#0a0f1d] p-1.5 rounded-2xl border border-white/5 ${isAdminEdit ? 'opacity-60 cursor-not-allowed' : ''}`}>
                                             <button
                                                 onClick={() => !isAdminEdit && canSelectAdminRole && setUmForm({ ...umForm, role: 'Administrator' })}
-                                                disabled={isAdminEdit || !canSelectAdminRole}
+                                                disabled={!!(isAdminEdit || !canSelectAdminRole)}
                                                 title={!canSelectAdminRole ? "Administrator already exists" : ""}
                                                 className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'Administrator' ? 'bg-sky-600/20 text-sky-400 ring-2 ring-sky-500/30 shadow-lg' : 'text-slate-500 hover:text-slate-300'} ${!canSelectAdminRole ? 'opacity-40 cursor-not-allowed' : ''}`}
                                             >
@@ -2619,7 +2615,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             </button>
                                             <button
                                                 onClick={() => !isAdminEdit && setUmForm({ ...umForm, role: 'User' })}
-                                                disabled={isAdminEdit}
+                                                disabled={!!isAdminEdit}
                                                 className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${umForm.role === 'User' ? 'bg-sky-600 text-white shadow-xl shadow-sky-900/40 ring-2 ring-white/20' : 'text-slate-500 hover:text-slate-300'}`}
                                             >
                                                 User

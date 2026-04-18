@@ -1,0 +1,1864 @@
+/**
+ * BHARATPAY PRO - GOOGLE APPS SCRIPT (v02.02.19 CRITICAL_LOGIN_FIX)
+ * -----------------------------------------------------------
+ * - Updated: 17-APR-2026 : 22.16 PM
+ * - FIX 1: handleStartupValidation — STRICT 4-FIELD SYNC (ID, Pass, Machine, Email).
+ * - FIX 2: Fixed Status Column displacement (EXPIRED moving to Machine ID Col).
+ * - FIX 3: Audited Indices: 
+ *          - Trial: Email(3), Mobile(4), Machine(5), Status(9)
+ *          - License: Email(5), Mobile(4), Machine(8), Status(9)
+ * - FIX 4: Refined status labels: LICENSE_ACTIVE, TRIAL_ACTIVE, LICENSE_EXPIRED, TRIAL_EXPIRED.
+ * -----------------------------------------------------------
+ * AUDIT & DESIGN BY: ANTIGRAVITY AI
+ */
+
+const SPREADSHEET_ID = "1iT8-x4syoe3eWYRr6U5U4oHxRoIxgeS4-9cO8umZQGo";
+
+// --- COLUMN MAPPING CONFIG ---
+const COL_MACHINE_ID    = 9;  // Column I (HARD-LOCKED - Hardware Identity)
+const COL_STATUS        = 10; // Column J (Status: PENDING, ACTIVE, EXPIRED)
+const COL_DATA_SIZE     = 11; // Column K
+const COL_LAST_LOGIN    = 12; // Column L
+const COL_LOGIN_COUNT   = 13; // Column M
+const COL_TOTAL_HOURS   = 14; // Column N
+const COL_EXPIRY_DATE   = 8;  // Column H
+const BPP_AUTH_SECRET   = "BPP-ULTIMATE-V2-SECURE";
+
+// ============================================================
+// 1. CENTRAL COMMAND (POST / GET)
+// ============================================================
+
+function doGet(e) {
+    try {
+        const action = e.parameter.action;
+        const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+        if (action === 'GET_MESSAGES') return fetchLatestDeveloperMessages(ss);
+        return jsonResponse({ success: false, message: "Invalid action." });
+    } catch (err) {
+        return jsonResponse({ success: false, message: "GAS GET Error: " + err.toString() });
+    }
+}
+
+function doPost(e) {
+    try {
+        if (!e || !e.postData || !e.postData.contents) return jsonResponse({ success: false, message: 'No payload.' });
+        const params = JSON.parse(e.postData.contents);
+        const action = params.action;
+        const ss     = SpreadsheetApp.openById(SPREADSHEET_ID);
+
+        // --- V02.02.18: SELECTIVE VERSION SENTRY (Hard Guard) ---
+        const SUPPORT_FLOOR = "01.01.12"; // Versions below this lack auto-update code
+        const currentVersion = params.version || "0.0.0";
+        
+        if (compareVersions(currentVersion, SUPPORT_FLOOR) < 0) {
+            const config = getAppConfig(ss);
+            return jsonResponse({ 
+                success: false, 
+                status: "BLOCK_LEGACY",
+                launcherUrl: config.launcherUrl,
+                message: "Critical Update Required: Your current version (" + currentVersion + ") is no longer supported. Please download the latest launcher to refresh your application." 
+            });
+        }
+
+        // --- V02.02.15: CLOUD GATEKEEPER (Authorization) ---
+        if (params.authSecret !== BPP_AUTH_SECRET) {
+            return jsonResponse({ success: false, message: "Security Violation: Unauthorized Cloud Access rejected." });
+        }
+
+        // --- DEVELOPER BYPASS (Isolated Auth - No Sheet Data Updates) ---
+        if (action === 'REQUEST_DEV_OTP')  return handleRequestDevOTP(ss, params);
+        if (action === 'VERIFY_DEV_OTP')   return handleVerifyDevOTP(ss, params);
+
+        updateExpiryStatuses(ss);
+
+        if (action === 'VALIDATE_STARTUP')  return handleStartupValidation(ss, params);
+        if (action === 'REGISTER_TRIAL')    return handleTrialRegistration(ss, params);
+        if (action === 'ACTIVATE_LICENSE')  return handleLicenseActivation(ss, params);
+        if (action === 'UPDATE_PASSWORD')   return handlePasswordUpdate(ss, params);
+        if (action === 'REQUEST_OTP_RESET') return handleRequestOTPReset(ss, params);
+        if (action === 'GET_MESSAGES')      return fetchLatestDeveloperMessages(ss);
+        if (action === 'UPDATE_MESSAGES')   return handleUpdateMessages(ss, params);
+        if (action === 'TRACK_LOGIN')       return handleTrackLogin(ss, params);
+        if (action === 'HEARTBEAT')         return handleTrackHeartbeat(ss, params);
+        if (action === 'GET_PRICING')       return jsonResponse({ success: true, pricing: getLicenceFeeData(ss) });
+        if (action === 'VERIFY_IDENTITY_EMAIL') return handleVerifyIdentityEmail(ss, params);
+        if (action === 'SYNC_IDENTITY_REPAIR')  return handleSyncIdentityRepair(ss, params);
+        if (action === 'REQUEST_RESTORE_OTP')   return handleRequestRestoreOTP(ss, params);
+        if (action === 'VERIFY_RESTORE_OTP')    return handleVerifyRestoreOTP(ss, params);
+        if (action === 'SEND_REG_OTP')          return handleSendRegOTP(ss, params);
+        if (action === 'VERIFY_REG_OTP')        return handleVerifyRegOTP(ss, params);
+
+        return jsonResponse({ success: false, message: 'Unknown action: ' + action });
+    } catch (err) {
+        return jsonResponse({ success: false, message: 'GAS POST Error: ' + err.toString() });
+    }
+}
+
+// ============================================================
+// 2. LIVE USER TRACKING (Active_Users)
+// ============================================================
+
+// --- HELPER: Fetch existing historical hours from source sheets ---
+function fetchHistoricalMins(ss, email) {
+    let baseMins = 0;
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(shName) {
+        if (baseMins > 0) return;
+        const targetSheet = ss.getSheetByName(shName); if (!targetSheet) return;
+        const targetData = targetSheet.getDataRange().getValues();
+        const emailColIdx = shName.includes('Trial') ? 3 : 5;
+        for (let j = 1; j < targetData.length; j++) {
+            if (String(targetData[j][emailColIdx]).trim().toLowerCase() === email.trim().toLowerCase()) {
+                baseMins = parseHHMMToMinutes(String(targetData[j][COL_TOTAL_HOURS - 1]));
+                break;
+            }
+        }
+    });
+    return baseMins;
+}
+
+function IsDeveloperRequest(ss, params) {
+    const dev = getDeveloperCredentials(ss);
+    const mID = String(params.machineId || "").trim().toLowerCase();
+    const uID = String(params.userID || "").trim().toLowerCase();
+    const email = String(params.email || "").trim().toLowerCase();
+    
+    // 1. CRITICAL: Explicitly mute any session logged in as dev user OR dev email
+    const isExplicitDev = (uID === dev.devUser.toLowerCase()) || (email === "ilcbala.bharatpayroll@gmail.com");
+    if (isExplicitDev) return true;
+    
+    // 2. CLEANUP: Mute 'UNKNOWN' heartbeats from the Dev Machine (prevents junk data)
+    const isDevMachine = (dev.devMachine && mID === dev.devMachine.trim().toLowerCase());
+    const isUnknown = (uID === "" || uID === "unknown");
+    if (isDevMachine && isUnknown) return true;
+    
+    // 3. FLEXIBILITY: If logged in as any other user (e.g. Sbobby12), ALLOW tracking even on Dev Machine
+    return false;
+}
+
+function handleTrackHeartbeat(ss, params) {
+    // --- STRICT BYPASS: Developer never writes tracker data ---
+    if (IsDeveloperRequest(ss, params)) return jsonResponse({ success: true, note: "Dev Isolation Mode" });
+
+    // Auto-cleanup stale users (over 10 mins inactive)
+    cleanupStaleActiveUsers(ss);
+
+    const sheetName = 'Active_Users';
+    let sheet = ss.getSheetByName(sheetName);
+    
+    // Auto-create sheet if missing with professional styling
+    if (!sheet) {
+        sheet = ss.insertSheet(sheetName);
+        sheet.appendRow(['User ID', 'Machine ID', 'Location', 'Status', 'Last Active', 'Session Started', 'Hours of Use', 'Email', 'Base Minutes']);
+        sheet.getRange(1, 1, 1, 9).setBackground('#0f172a').setFontColor('white').setFontWeight('bold');
+        sheet.hideColumns(9); // Hide Technical baseMins column
+        sheet.setFrozenRows(1);
+    }
+
+    const now = new Date();
+    const nowStr = Utilities.formatDate(now, "GMT+5:30", "dd-MM-yyyy HH:mm:ss");
+    const status = String(params.status || "LIVE").toUpperCase();
+    const userID = String(params.userID || "UNKNOWN").toUpperCase();
+    const machineID = String(params.machineId || "UNKNOWN");
+    const email = String(params.email || "N/A");
+    const location = String(params.location || "Auto-Detected");
+    const sessionStart = params.sessionStart ? new Date(params.sessionStart) : now;
+    
+    // Calculate Hours of Use
+    const diffMs = now.getTime() - sessionStart.getTime();
+    const h = Math.floor(diffMs / (1000 * 60 * 60));
+    const m = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    const usageStr = h + ":" + (m < 10 ? "0" + m : m);
+
+    const data = sheet.getDataRange().getValues();
+    let userRowIdx = -1;
+
+    // --- STRICT V02.02.11: Find existing session for this MACHINE only ---
+    for (let i = 1; i < data.length; i++) {
+        if (String(data[i][1]) === machineID) {
+            userRowIdx = i + 1;
+            break;
+        }
+    }
+
+    const rowData = [
+        userID,
+        machineID,
+        location,
+        status,
+        nowStr,
+        Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss"),
+        usageStr,
+        email
+    ];
+
+    if (userRowIdx !== -1) {
+        let baseMins = parseInt(data[userRowIdx - 1][8]) || 0;
+        const prevStatus = String(data[userRowIdx - 1][3] || "").toUpperCase();
+        const prevSessionStart = String(data[userRowIdx - 1][5] || "");
+        const currentSessionStartStr = Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss");
+
+        // --- THE FIX: Refresh baseMins on New Login OR Change of Session Start ---
+        if ((status === "LIVE" && prevStatus !== "LIVE") || prevSessionStart !== currentSessionStartStr) {
+            baseMins = fetchHistoricalMins(ss, email);
+        }
+
+        sheet.getRange(userRowIdx, 1, 1, 9).setValues([[
+            userID, machineID, location, status, nowStr, 
+            Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss"),
+            usageStr, email, baseMins
+        ]]);
+        
+        // --- THE STYLE: Status-Based High Contrast Themes ---
+        const statusCell = sheet.getRange(userRowIdx, 4);
+        if (status === "LIVE") {
+            statusCell.setBackground("#ffffff").setFontColor("#15803d").setFontWeight("bold");
+        } else {
+            statusCell.setBackground("#fee2e2").setFontColor("#991b1b").setFontWeight("bold");
+        }
+        
+        // --- SYNC TO LICENSE/TRIAL SHEET (Cumulative) ---
+        syncCumulativeHours(ss, email, baseMins, h, m);
+    } else {
+        // NEW SESSION (No previous row in Active_Users found)
+        let baseMins = fetchHistoricalMins(ss, email);
+
+        const rowData = [userID, machineID, location, status, nowStr, Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss"), usageStr, email, baseMins];
+        sheet.appendRow(rowData);
+        
+        // --- THE STYLE: Status-Based High Contrast Themes ---
+        const statusCell = sheet.getRange(sheet.getLastRow(), 4);
+        if (status === "LIVE") {
+            statusCell.setBackground("#ffffff").setFontColor("#15803d").setFontWeight("bold");
+        } else {
+            statusCell.setBackground("#fee2e2").setFontColor("#991b1b").setFontWeight("bold");
+        }
+
+        syncCumulativeHours(ss, email, baseMins, h, m);
+    }
+
+    // --- V02.02.15: SECURITY ALERT MONITORING ---
+    if (status.indexOf("SECURITY_") === 0) {
+        sendEmailNotification("ilcbala.BharatPayRoll@gmail.com", "🚨 Security Violation", "VIOLATION", {
+            userName: userID,
+            attemptID: userID,
+            attemptEmail: email,
+            attemptMachine: machineID,
+            timestamp: nowStr
+        });
+    }
+
+    return jsonResponse({ success: true, serverTime: nowStr });
+
+}
+
+function syncCumulativeHours(ss, email, baseMins, sessH, sessM) {
+    const totalMins = baseMins + (sessH * 60) + sessM;
+    const totalHHMM = convertMinutesToHHMM(totalMins);
+    
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(shName) {
+        const targetSheet = ss.getSheetByName(shName); if (!targetSheet) return;
+        const targetData = targetSheet.getDataRange().getValues();
+        const emailColIdx = shName.includes('Trial') ? 3 : 5;
+        for (let j = 1; j < targetData.length; j++) {
+            if (String(targetData[j][emailColIdx]).trim().toLowerCase() === email.trim().toLowerCase()) {
+                targetSheet.getRange(j+1, COL_TOTAL_HOURS).setValue(totalHHMM);
+                break;
+            }
+        }
+    });
+}
+
+function parseHHMMToMinutes(val) {
+    if (val === null || val === undefined || val === "") return 0;
+    
+    // If it's already a number (it might be fractional days from Sheets)
+    if (typeof val === 'number') {
+        return Math.round(val * 24 * 60);
+    }
+    
+    // If it's a Date object (Duration often comes as 1899-12-30 HH:mm:ss)
+    if (val instanceof Date) {
+        const baseDate = new Date(1899, 11, 30, 0, 0, 0);
+        const diffMs = val.getTime() - baseDate.getTime();
+        return Math.round(diffMs / (60 * 1000));
+    }
+
+    const str = String(val).trim();
+    const match = str.match(/(\d+):(\d+)/);
+    if (match) {
+        let hours = parseInt(match[1]) || 0;
+        const mins = parseInt(match[2]) || 0;
+        return hours * 60 + mins;
+    }
+    
+    return 0;
+}
+
+function convertMinutesToHHMM(mins) {
+    const isNegative = mins < 0;
+    const absMins = Math.abs(mins);
+    const h = Math.floor(absMins / 60);
+    const m = absMins % 60;
+    return (isNegative ? "-" : "") + h + ":" + (m < 10 ? "0" + m : m);
+}
+
+function cleanupActiveUsers() {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName('Active_Users');
+    if (!sheet) return;
+
+    const data = sheet.getDataRange().getValues();
+    const now = new Date();
+
+    for (let i = 1; i < data.length; i++) {
+        const lastActiveStr = data[i][4];
+        if (!lastActiveStr) continue;
+
+        try {
+            const parts = lastActiveStr.split(" ");
+            const dateParts = parts[0].split("-");
+            const timeParts = parts[1].split(":");
+            const lastActiveDate = new Date(dateParts[2], dateParts[1] - 1, dateParts[0], timeParts[0], timeParts[1], timeParts[2]);
+
+            const diffMinutes = (now.getTime() - lastActiveDate.getTime()) / (1000 * 60);
+            
+            if (diffMinutes > 10) {
+                sheet.getRange(i + 1, 4).setValue("OFFLINE");
+                sheet.getRange(i + 1, 4).setBackground('#fee2e2').setFontColor('#991b1b');
+            }
+        } catch (e) {
+            // Skip invalid dates
+        }
+    }
+}
+
+// ============================================================
+// 3. SECURITY GATEWAY — 4-Field Match
+// ============================================================
+
+function handleStartupValidation(ss, params) {
+    const lock = LockService.getScriptLock();
+    try {
+        lock.waitLock(10000); // Wait 10s for other threads
+        const config   = getAppConfig(ss);
+        const devCreds = getDeveloperCredentials(ss);
+        
+        // Helper to normalize mobile numbers (remove non-digits, last 10 digits)
+        const normalizeMobile = (m) => {
+            const digits = String(m || "").replace(/\D/g, "");
+            return digits.length > 10 ? digits.slice(-10) : digits;
+        };
+
+        let conflictFound       = false;
+        let conflictTargetEmail = "";
+        let victimName          = "";
+
+        const cleanParamsID      = String(params.userID    || "").trim();
+        const cleanParamsEmail   = String(params.email     || "").trim().toLowerCase();
+        const cleanParamsMachine = String(params.machineId || "").trim().toLowerCase();
+        const cleanParamsMobile  = String(params.mobile    || "").trim();
+
+        const isDevMachine = !!(devCreds.devMachine && cleanParamsMachine === devCreds.devMachine.trim().toLowerCase());
+        
+        // --- V02.02.15: ISOLATED DEVELOPER STARTUP BYPASS (Refined) ---
+        const isExplicitDevLogin = (cleanParamsID === devCreds.devUser) || (cleanParamsID === "" && isDevMachine);
+        
+        if (isDevMachine && isExplicitDevLogin) {
+            if (lock.hasLock()) lock.releaseLock();
+            return jsonResponse({
+                success: true, message: "Developer Environment Authorized",
+                data: { 
+                    isTrial: false, status: 'DEVELOPER ACTIVE', userName: "Developer", userID: devCreds.devUser, 
+                    latestVersion: config.latestVersion, adminUser: devCreds.devUser, adminPass: devCreds.devPass, 
+                    devUser: devCreds.devUser, devPass: devCreds.devPass, isDeveloper: true 
+                }
+            });
+        }
+
+        const isRescueMode = (cleanParamsEmail === "rescue" || !cleanParamsEmail) && cleanParamsID.length > 3;
+
+        // --- PHASE 1: SEARCH LICENSED DATABASE (Enterprise Priorities) ---
+        let licenseSheet = ss.getSheetByName('BPP_APP_License');
+        let userFoundInLicense = false;
+
+        if (licenseSheet) {
+            const data = licenseSheet.getDataRange().getValues();
+            for (let i = 1; i < data.length; i++) {
+                const row          = data[i];
+                const rowKey       = String(row[0]).replace(/-/g,"").trim().toLowerCase();
+                const rowID_ColC   = String(row[2]).trim(); // User ID (Col C)
+                const rowID_ColB   = String(row[1]).trim(); // Full Name (Col B)
+                const rowPass      = String(row[3]).trim(); // Password (Col D)
+                const rowMobile    = String(row[4]).trim(); // Mobile (Col E)
+                const rowEmail     = String(row[5]).trim().toLowerCase(); // Email (Col F)
+                const rowMachineId = String(row[8]).trim().toLowerCase(); // Machine ID (Col I)
+                const rowExpiry    = String(row[7]);
+
+                // --- V02.02.18: STRICT 4-FIELD SYNC VALIDATION ---
+                if (rowMachineId && rowMachineId === cleanParamsMachine) {
+                    userFoundInLicense = true;
+                    
+                    const idMatch   = (rowID_ColC.toLowerCase() === cleanParamsID.toLowerCase());
+                    const passMatch = (rowPass === params.appPassword);
+                    const emailMatch = rowEmail === cleanParamsEmail || cleanParamsEmail === "rescue";
+                    
+                    const cleanParamsKey = String(params.licenseKey || "").replace(/-/g,"").trim().toLowerCase();
+                    const keyMatch = (cleanParamsKey === "rescue" || cleanParamsKey === rowKey || cleanParamsKey === "trial");
+
+                    if (idMatch && passMatch && emailMatch && keyMatch && !isRescueMode) {
+                        const expired = isExpired(rowExpiry);
+                        if (!expired) {
+                            logSecurityAudit(ss, "STARTUP_VALIDATION", "SUCCESS", "License Match (4-Field) for " + rowID_ColC, params);
+                            if (lock.hasLock()) lock.releaseLock();
+                            return jsonResponse({
+                                success: true, message: "License Validated",
+                                data: { 
+                                    isTrial: false, licenseKey: row[0], userName: row[1], userID: String(rowID_ColC).toUpperCase(), registeredTo: row[5], registeredMobile: row[4], 
+                                    startDate: row[6], expiryDate: row[7], status: 'LICENSE ACTIVE',
+                                    dataSize: parseInt(row[10]) || 5000, 
+                                    latestVersion: config.latestVersion, adminUser: String(rowID_ColC).toUpperCase(), adminPass: row[3], 
+                                    devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss) 
+                                }
+                            });
+                        } else {
+                            if (lock.hasLock()) lock.releaseLock();
+                            return jsonResponse({
+                                success: true, message: "LICENSE EXPIRED",
+                                data: { status: 'LICENSE_EXPIRED', expiryDate: row[7], userName: row[1] }
+                            });
+                        }
+                    } else {
+                        // HARDWARE MATCHES BUT IDENTITY/CREDENTIALS MISMATCH -> TRIGGER RESTORE
+                        logSecurityAudit(ss, "STARTUP_VALIDATION", "RECOVERY_TRIGGERED", "Hardware Match but Credential Mismatch for: " + rowID_ColC, params);
+                        if (lock.hasLock()) lock.releaseLock();
+                        return jsonResponse({
+                            success: true, 
+                            message: "IDENTITY_RESTORE_REQUIRED", 
+                            data: { status: 'PENDING_RESTORE', userName: row[1], userID: String(rowID_ColC).toUpperCase() }
+                        });
+                    }
+                }
+                
+                // Track email conflicts (same email, different machine)
+                if (!userFoundInLicense && cleanParamsEmail !== "rescue" && cleanParamsEmail === rowEmail) {
+                    const existingMachine = String(row[8]).trim().toLowerCase();
+                    if (existingMachine && existingMachine !== cleanParamsMachine) {
+                        conflictFound = true; conflictTargetEmail = rowEmail; victimName = String(row[1]);
+                    }
+                }
+            }
+        }
+
+        // --- PHASE 2: SEARCH TRIAL DATABASE (Fallback only if no valid Full License found) ---
+        if (!userFoundInLicense) {
+            const trialSheet = ss.getSheetByName('Approved_Trial_Data');
+            if (trialSheet) {
+                const data = trialSheet.getDataRange().getValues();
+                for (let i = 1; i < data.length; i++) {
+                    const row          = data[i];
+                    const rowName      = String(row[0]).trim(); // Name (Col A)
+                    const rowID        = String(row[1]).trim(); // User ID (Col B)
+                    const rowPass      = String(row[2]).trim(); // Password (Col C)
+                    const rowEmail     = String(row[3]).trim().toLowerCase(); // Email (Col D)
+                    const rowMachineId = String(row[5]).trim().toLowerCase(); // Machine ID (Col F)
+                    const rowExpiry    = String(row[7]); // End Date (Col H)
+
+                    // --- V02.02.18: TRIAL 4-FIELD SYNC VALIDATION ---
+                    if (rowMachineId && rowMachineId === cleanParamsMachine) {
+                        const idMatch   = rowID.toLowerCase() === cleanParamsID.toLowerCase();
+                        const passMatch = (rowPass === params.appPassword);
+                        const emailMatch = rowEmail === cleanParamsEmail || cleanParamsEmail === "rescue";
+
+                        if (idMatch && passMatch && emailMatch && !isRescueMode) {
+                            const expired = isExpired(rowExpiry);
+                            logSecurityAudit(ss, "STARTUP_VALIDATION", "SUCCESS", "Trial Match (4-Field) for " + rowName, params);
+                            if (lock.hasLock()) lock.releaseLock();
+                            return jsonResponse({
+                                success: true, message: "Trial Validated",
+                                data: { 
+                                    isTrial: true, licenseKey: "TRIAL", userName: rowName, userID: rowID.toUpperCase(), registeredTo: row[3], registeredMobile: row[4], 
+                                    startDate: row[6], expiryDate: row[7], 
+                                    status: expired ? 'TRIAL_EXPIRED' : 'TRIAL ACTIVE',
+                                    dataSize: parseInt(row[8]) || 50, 
+                                    latestVersion: config.latestVersion, adminUser: rowID.toUpperCase(), adminPass: row[2], 
+                                    devUser: devCreds.devUser, devPass: devCreds.devPass 
+                                }
+                            });
+                        } else {
+                            // HARDWARE MATCHES BUT IDENTITY/CREDENTIALS MISMATCH -> TRIGGER RESTORE
+                            logSecurityAudit(ss, "STARTUP_VALIDATION", "RECOVERY_TRIGGERED", "Trial Hardware Match but Credential Mismatch for: " + rowName, params);
+                            if (lock.hasLock()) lock.releaseLock();
+                            return jsonResponse({
+                                success: true, 
+                                message: "IDENTITY_RESTORE_REQUIRED", 
+                                data: { status: 'PENDING_RESTORE', userName: rowName, userID: rowID }
+                            });
+                        }
+                    } else if (cleanParamsEmail !== "rescue" && cleanParamsEmail === rowEmail) {
+                        // Email conflict - used by someone else on different hardware
+                        const existingMachine = String(row[5]).trim().toLowerCase();
+                        if (existingMachine && existingMachine !== cleanParamsMachine) {
+                            conflictFound = true;
+                            conflictTargetEmail = rowEmail;
+                            victimName = String(row[0]);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // V02.02.17 CRITICAL FIX:
+        // The old code used `conflictFound || !isDevMachine` which caused
+        // EVERY unregistered non-developer machine to trigger a Security
+        // Violation email, blocking all legitimate users.
+        //
+        // NEW LOGIC:
+        //  - conflictFound = TRUE  → REAL THREAT: same email on 2 machines
+        //                           → Send security violation email + block
+        //  - conflictFound = FALSE → UNREGISTERED DEVICE: new clean install
+        //                           → Return simple "Unregistered Device"
+        //                             so app shows System Initialization page
+        //                             (no false security violation email)
+        // ============================================================
+        if (conflictFound) {
+            // REAL SECURITY CONFLICT: Email is already bound to a different machine
+            const securityData = { 
+                userName: victimName || "System User", 
+                attemptID: params.userID, 
+                attemptEmail: params.email, 
+                attemptMachine: params.machineId, 
+                timestamp: new Date().toLocaleString() 
+            };
+            if (conflictTargetEmail) sendEmailNotification(conflictTargetEmail, "⚠️ Security Alert", "VIOLATION", securityData);
+            sendEmailNotification("ilcbala.BharatPayRoll@gmail.com", "🚨 Security Conflict Alert", "VIOLATION", securityData);
+            logSecurityAudit(ss, "STARTUP_VALIDATION", "VIOLATION", "Security Conflict: Email " + cleanParamsEmail + " targeted " + victimName, params);
+            if (lock.hasLock()) lock.releaseLock();
+            return jsonResponse({ success: false, message: "Security Conflict." });
+        }
+        
+        // UNREGISTERED DEVICE (clean new install — NOT a security violation)
+        logSecurityAudit(ss, "STARTUP_VALIDATION", "UNREGISTERED", "New/unregistered device — show System Initialization", params);
+        if (lock.hasLock()) lock.releaseLock();
+        return jsonResponse({ success: false, message: "Unregistered Device." });
+
+    } catch (e) {
+        if (lock.hasLock()) lock.releaseLock();
+        logSecurityAudit(ss, "STARTUP_VALIDATION", "CRITICAL_ERROR", e.toString(), params);
+        return jsonResponse({ success: false, message: "Validation Error: " + e.toString() });
+    }
+}
+
+// ============================================================
+// 4. ADMIN TOOLKIT — Forms & UI
+// ============================================================
+
+function onOpen() {
+    SpreadsheetApp.getUi().createMenu('🚀 BPP Admin')
+        .addItem('Issue New License', 'showLicenseIssuanceForm')
+        .addItem('Password Reset', 'showPasswordResetForm')
+        .addSeparator()
+        .addItem('Repair Status Sync', 'repairLicenseDatabase')
+        .addItem('⚡ Enable Background Auto-Cleanup', 'setupAutoCleanupTrigger').addToUi();
+}
+
+function checkLicenseConflict(email) {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID); const sheet = ss.getSheetByName('BPP_APP_License'); if (!sheet) return { exists: false };
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) { if (String(data[i][5]).trim().toLowerCase() === email.trim().toLowerCase()) return { exists: true, name: data[i][1], row: i + 1 }; }
+    return { exists: false };
+}
+
+function showLicenseIssuanceForm() {
+    // --- logic: 1 Year from Issue Date calculation ---
+    const expDate = new Date(); expDate.setFullYear(expDate.getFullYear() + 1);
+    const expStr = Utilities.formatDate(expDate, "GMT+5:30", "dd-MM-yyyy");
+
+    var html = HtmlService.createHtmlOutput(`
+    <!DOCTYPE html><html><head><style>
+      body{font-family:"Segoe UI",sans-serif;padding:25px;background:#f8fafc;color:#1e293b;overflow-x:hidden;}
+      h3{margin-top:0;color:#0f172a;text-transform:uppercase;border-bottom:3px solid #3b82f6;padding-bottom:10px;margin-bottom:15px;font-size:18px;}
+      .p-desc{font-size:10px;color:#64748b;margin-bottom:15px;}
+      .form-label{display:block;font-size:9px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:4px;}
+      input,select{width:100%;padding:10px;margin-bottom:12px;border:1.5px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-size:12px;}
+      button{width:100%;padding:12px;background:#3b82f6;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;margin-top:5px; transition:0.2s;}
+      button:hover{background:#2563eb;}button:disabled{background:#94a3b8;cursor:not-allowed;}
+      #status{display:none;padding:10px;border-radius:8px;margin-bottom:12px;font-size:11px;font-weight:bold;text-align:center;}
+      .btn-group{display:flex;gap:10px;}.err{background:#fee2e2;color:#991b1b;}.ok{background:#dcfce7;color:#166534;}
+      .badge{padding:2px 5px; background:#dcfce7; color:#166534; font-size:9px; border-radius:4px; margin-left:5px;}
+      #modal-overlay{display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.8); z-index:1001; animation: fadeIn 0.2s;}
+      #custom-modal{background:white; width:85%; max-width:320px; border-radius:20px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:30px; text-align:center; box-shadow:0 25px 50px -12px rgba(0,0,0,0.4);}
+      #m-title{font-weight:800; font-size:16px; text-transform:uppercase; margin-bottom:10px;}
+      #m-body{font-size:13px; color:#475569; line-height:1.5; margin-bottom:10px;} #m-icon{font-size:45px; margin-bottom:15px;}
+      .m-btn-row{display:flex; gap:10px;} .m-btn{flex:1; padding:12px; border-radius:10px; font-weight:700; cursor:pointer; font-size:12px; border:none;}
+      .m-btn-ok{background:#3b82f6; color:white;} .m-btn-no{background:#f1f5f9; color:#64748b;}
+      #m-extra{margin:15px 0 20px 0; font-size:12px; color:#1e293b; background:#f8fafc; padding:10px; border-radius:8px; text-align:left;}
+      @keyframes fadeIn { from {opacity:0;} to {opacity:1;} }
+    </style></head><body>
+    <div id="modal-overlay">
+      <div id="custom-modal">
+        <div id="m-icon">⚠️</div><div id="m-title">DUPLICATE DETECTED</div><div id="m-body">Loading...</div>
+        <div id="m-extra">
+          <label style="cursor:pointer; display:flex; align-items:center;">
+            <input type="checkbox" id="m-reset-pass" style="width:auto; margin:0 8px 0 0;"> Reset User Password?
+          </label>
+        </div>
+        <div id="m-controls" class="m-btn-row">
+          <button class="m-btn m-btn-no" onclick="closeModal(false)">Cancel</button>
+          <button class="m-btn m-btn-ok" onclick="closeModal(true)">Yes, Reissue</button>
+        </div>
+      </div>
+    </div>
+    <h3>License Center</h3>
+    <p class="p-desc">Dispatch professional BPP identities. (Trial passwords & Hardened security are inherited automatically)</p>
+    <div id="status"></div>
+    <label class="form-label">Trial Data <span id="trial-count" class="badge">Loading...</span></label>
+    <select id="trial-select" onchange="autoFill()"><option value="">-- Manual Entry --</option></select>
+    <label class="form-label">Client Name</label><input id="name" type="text" placeholder="Full Name">
+    <label class="form-label">User ID</label><input id="uid" type="text" placeholder="e.g. BALA01">
+    <div class="btn-group">
+      <div style="flex:1"><label class="form-label">Email</label><input id="email" type="email" placeholder="mail@example.com"></div>
+      <div style="flex:1"><label class="form-label">Mobile</label><input id="mobile" type="text" placeholder="+91"></div>
+    </div>
+    <div class="btn-group">
+      <div style="flex:1"><label class="form-label">Expiry Date (1 Year Auto)</label><input id="expiry" type="text" value="${expStr}"></div>
+      <div style="flex:1">
+        <label class="form-label">Limit (Data Size)</label>
+        <select id="limit" style="width:100% !important; padding:10px; border:1.5px solid #cbd5e1; border-radius:8px;">
+          <option value="20">20 Employees</option>
+          <option value="50">50 Employees</option>
+          <option value="100">100 Employees</option>
+          <option value="200">200 Employees</option>
+          <option value="300">300 Employees</option>
+          <option value="500">500 Employees</option>
+        </select>
+      </div>
+    </div>
+    <label class="form-label">Master Key</label><input id="pass" type="password" placeholder="●●●●●●">
+    <button id="otp-btn" onclick="requestOTP()">1. Dispatch OTP Code</button>
+    <div id="otp-section" style="display:none; margin-top:20px; border-top:1px dashed #cbd5e1; padding-top:10px;">
+      <label class="form-label">Input OTP Verification</label><input id="otp" type="text" maxlength="6" placeholder="_ _ _ _ _ _" style="text-align:center; letter-spacing:10px; font-size:20px; font-weight:800;">
+      <button id="final-btn" onclick="submitLicense()">2. Finalise & Dispatch</button>
+    </div>
+    <script>
+      var trialData = []; var cRowID = null;
+      function setNote(t,e){var s=document.getElementById("status");s.innerText=t;s.className=e?"err":"ok";s.style.display="block";}
+      function fail(err){ alert("Critical Error: " + err); document.getElementById("final-btn").disabled = false; }
+
+      window.onload = function(){
+        google.script.run.withSuccessHandler(function(users){
+          trialData = users; document.getElementById("trial-count").innerText = users.length + " READY";
+          var sel = document.getElementById("trial-select");
+          users.forEach(function(u, i){ var o = document.createElement("option"); o.value = i; o.text = u.name + " (" + u.uid + ")"; sel.appendChild(o); });
+        }).withFailureHandler(fail).getTrialUsersForAdmin();
+      };
+      
+      function autoFill(){
+        var u = trialData[document.getElementById("trial-select").value]; if(!u) return;
+        document.getElementById("name").value = u.name; document.getElementById("uid").value = u.uid;
+        document.getElementById("email").value = u.email; document.getElementById("mobile").value = u.mobile;
+      }
+
+      function requestOTP(){
+        var p=document.getElementById("pass").value; if(!p)return;
+        google.script.run.withSuccessHandler(function(res){
+          if(res.success){ setNote("Sent!",false); document.getElementById("otp-section").style.display="block"; document.getElementById("otp").focus(); }
+          else setNote(res.message,true);
+        }).withFailureHandler(fail).sendAdminOTP(p);
+      }
+
+      function closeModal(approved){
+        document.getElementById("modal-overlay").style.display = "none";
+        document.getElementById("final-btn").disabled = false;
+        if(approved){
+            var resetPass = document.getElementById("m-reset-pass").checked;
+            executeSubmission(cRowID, resetPass); 
+        } else setNote("Aborted.", true);
+      }
+
+      function showSuccess(msg){
+        document.getElementById("m-icon").innerText = "✅"; document.getElementById("m-title").innerText = "SUCCESS";
+        document.getElementById("m-title").style.color = "#10b981"; document.getElementById("m-body").innerText = msg;
+        document.getElementById("m-controls").style.display = "none"; document.getElementById("m-extra").style.display = "none";
+        document.getElementById("modal-overlay").style.display = "block";
+        setTimeout(function(){ google.script.host.close(); }, 2500);
+      }
+
+      function submitLicense(){
+        var email = document.getElementById("email").value; var finalBtn = document.getElementById("final-btn");
+        finalBtn.disabled = true;
+        google.script.run.withSuccessHandler(function(conflict){
+            if(conflict.exists){
+                cRowID = conflict.row;
+                document.getElementById("m-icon").innerText = "⚠️";
+                document.getElementById("m-title").style.color = "#991b1b";
+                document.getElementById("m-body").innerText = "License for '" + conflict.name + "' already issued. Overwrite and reissue with new key? (Existing Password will be Retained)";
+                document.getElementById("m-controls").style.display = "flex";
+                document.getElementById("m-extra").style.display = "block";
+                document.getElementById("modal-overlay").style.display = "block";
+            } else { executeSubmission("NEW", true); }
+        }).withFailureHandler(fail).checkLicenseConflict(email);
+      }
+
+      function executeSubmission(row, resetPass){
+        var d={name:document.getElementById("name").value,uid:document.getElementById("uid").value,email:document.getElementById("email").value,mobile:document.getElementById("mobile").value,expiry:document.getElementById("expiry").value,limit:document.getElementById("limit").value,otp:document.getElementById("otp").value,existingRow:row, resetPass: resetPass};
+        var finalBtn = document.getElementById("final-btn"); finalBtn.disabled = true; finalBtn.innerText = "Processing...";
+        google.script.run.withSuccessHandler(function(res){
+          if(res.success) showSuccess(row === "NEW" ? "License Issued!" : "License Reissued!");
+          else { setNote(res.message,true); finalBtn.disabled = false; finalBtn.innerText = "2. Finalise & Dispatch"; }
+        }).withFailureHandler(fail).processLicenseIssuance(d);
+      }
+    </script></body></html>
+    `).setWidth(440).setHeight(700);
+    SpreadsheetApp.getUi().showModalDialog(html, 'BharatPay Pro Identity Center');
+}
+
+function processLicenseIssuance(d) {
+    try {
+        const storedOTP = PropertiesService.getScriptProperties().getProperty('ADMIN_OTP');
+        if (!storedOTP || d.otp !== storedOTP) return { success: false, message: "Invalid OTP Code." };
+        PropertiesService.getScriptProperties().deleteProperty('ADMIN_OTP');
+        const ss = SpreadsheetApp.openById(SPREADSHEET_ID); const sheet = ss.getSheetByName('BPP_APP_License');
+        const genBlock = () => Math.random().toString(36).substring(2, 6).toUpperCase();
+        const key = genBlock() + "-" + genBlock() + "-" + genBlock() + "-" + genBlock();
+        
+        let finalPass = generateHardenedPassword();
+        let isForcedNew = true;
+
+        if (!d.resetPass) {
+            if (d.existingRow && d.existingRow !== "NEW") {
+                const oldPass = sheet.getRange(parseInt(d.existingRow), 4).getValue();
+                if (oldPass) { finalPass = oldPass; isForcedNew = false; }
+            } else {
+                const trialSheet = ss.getSheetByName('Approved_Trial_Data');
+                if (trialSheet) {
+                    const tData = trialSheet.getDataRange().getValues();
+                    for (let j = 1; j < tData.length; j++) {
+                        if (String(tData[j][3]).toLowerCase() === d.email.toLowerCase()) {
+                            const trialPass = tData[j][2];
+                            if (trialPass) { finalPass = trialPass; isForcedNew = false; }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        const issueDate = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy");
+        const rowData = [key, d.name.toUpperCase(), d.uid, finalPass, d.mobile, d.email, issueDate, d.expiry, "", "PENDING", d.limit];
+        if (d.existingRow && d.existingRow !== "NEW") sheet.getRange(parseInt(d.existingRow), 1, 1, 11).setValues([rowData]);
+        else sheet.appendRow(rowData);
+        
+        sendEmailNotification(d.email, "BharatPay Pro License Details", "LICENSE_ISSUANCE", { userName: d.name, userID: d.uid, licenseKey: key, expiryDate: d.expiry, limit: d.limit, pass: finalPass, isNewPass: isForcedNew });
+        return { success: true };
+    } catch (e) { return { success: false, message: e.toString() }; }
+}
+
+function showPasswordResetForm() {
+    var html = HtmlService.createHtmlOutput(`<!DOCTYPE html><html><head><style>body{font-family:"Segoe UI",sans-serif;padding:25px;background:#f8fafc;}h3{border-bottom:3px solid #f43f5e;padding-bottom:10px;text-transform:uppercase;font-size:16px;}label{display:block;font-size:9px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:6px;}input,select{width:100%;padding:12px;margin-bottom:15px;border:1.5px solid #cbd5e1;border-radius:8px;font-size:13px;}button{width:100%;padding:13px;background:#f43f5e;color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer;}#status{display:none;padding:12px;text-align:center;border-radius:8px;font-size:11px;margin-bottom:15px;}.ok{background:#dcfce7;color:#166534;}.err{background:#fee2e2;color:#991b1b;}</style></head>
+    <body><h3>Password Reset</h3><div id="status"></div><label>Account</label><select id="user-select"><option value="">-- Syncing --</option></select><label>Master Key</label><input id="pass" type="password" placeholder="●●●●●●"><button onclick="reset()">Send Reset Link</button>
+    <script>window.onload=function(){ google.script.run.withSuccessHandler(function(users){ var sel=document.getElementById("user-select"); sel.innerHTML='<option value="">-- Select Contact --</option>'; users.forEach(function(u){ var o=document.createElement("option"); o.value=u.email+"|"+u.name; o.text=u.name+" ("+u.email+")"; sel.appendChild(o); }); }).withFailureHandler(function(err){alert(err);}).getAllUsersForAdmin(); };
+    function reset(){ var val=document.getElementById("user-select").value; var pass=document.getElementById("pass").value; if(!val||!pass)return; var p=val.split("|"); google.script.run.withSuccessHandler(function(res){ if(res.success){ document.getElementById("status").innerText="Success!"; document.getElementById("status").className="ok"; document.getElementById("status").style.display="block"; setTimeout(function(){google.script.host.close();},2000); } }).withFailureHandler(function(err){alert(err);}).processPasswordReset({email:p[0],name:p[1],masterPass:pass}); }
+    </script></body></html>`).setWidth(360).setHeight(400);
+    SpreadsheetApp.getUi().showModalDialog(html, 'Security Gateway');
+}
+
+function processPasswordReset(d) {
+    const ss  = SpreadsheetApp.openById(SPREADSHEET_ID); const dev = getDeveloperCredentials(ss); if (d.masterPass !== dev.devPass) return { success: false };
+    const code = generateHardenedPassword();
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(name) {
+        const sheet = ss.getSheetByName(name); if (!sheet) return; const data = sheet.getDataRange().getValues();
+        const eCol = name.includes('Trial') ? 3 : 5; const pCol = name.includes('Trial') ? 2 : 3;
+        for (let i = 1; i < data.length; i++) { if (String(data[i][eCol]).toLowerCase() === d.email.toLowerCase()) sheet.getRange(i+1, pCol+1).setValue(code); }
+    });
+    sendEmailNotification(d.email, "BharatPay Pro Reset Code", "PASSWORD_RESET", { userName: d.name, tempCode: code });
+    return { success: true };
+}
+
+function handleRequestOTPReset(ss, params) {
+    const email = String(params.email || "").trim().toLowerCase();
+    const userID = String(params.userID || "").trim().toLowerCase();
+    if (!email || !userID) return jsonResponse({ success: false, message: "Missing credentials." });
+
+    let foundUser = null;
+    let userName = "User";
+
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(name => {
+        if (foundUser) return;
+        const sheet = ss.getSheetByName(name);
+        if (!sheet) return;
+        const data = sheet.getDataRange().getValues();
+        const eCol = name.includes('Trial') ? 3 : 5;
+        const uCol = name.includes('Trial') ? 1 : 2;
+        const nCol = name.includes('Trial') ? 0 : 1;
+        
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][eCol]).toLowerCase() === email && String(data[i][uCol]).toLowerCase() === userID) {
+                foundUser = email;
+                userName = String(data[i][nCol]);
+                break;
+            }
+        }
+    });
+
+    if (!foundUser) return jsonResponse({ success: false, message: "Identity not found in database." });
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    PropertiesService.getScriptProperties().setProperty('OTP_' + foundUser, otp);
+    
+    sendEmailNotification(foundUser, "BharatPay Pro Reset Code", "PASSWORD_RESET", { userName: userName, tempCode: otp });
+    
+    return jsonResponse({ success: true, message: "OTP sent to " + email });
+}
+
+/**
+ * NEW: Securely sends a 6-digit OTP after verifying Master_Config credentials.
+ */
+function handleRequestDevOTP(ss, params) {
+    const devCreds = getDeveloperCredentials(ss);
+    const inputUsername = String(params.username || "").trim().toLowerCase();
+    const inputPassword = String(params.password || "").trim();
+    
+    if (inputUsername !== devCreds.devUser.toLowerCase() || inputPassword !== devCreds.devPass) {
+        return jsonResponse({ success: false, message: "Authentication Failed: Incorrect Developer Key." });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    const nowTs = new Date().getTime();
+    PropertiesService.getScriptProperties().setProperty('DEV_OTP_' + devCreds.devUser, otp);
+    PropertiesService.getScriptProperties().setProperty('DEV_OTP_TIME_' + devCreds.devUser, nowTs.toString());
+    
+    const html = buildProfessionalEmail(
+        "Developer Auth", 
+        "Two-Step Verification", 
+        "#0f172a", 
+        "Hello " + devCreds.devUser, 
+        `<p style="margin-bottom:20px;">Credentials matched for the Developer Portal. Use the secondary bypass code below to authorize access from any machine:</p>
+         <div style="background:#f1f5f9;padding:30px;text-align:center;border-radius:12px;">
+           <span style="font-size:36px;font-weight:900;letter-spacing:12px;color:#1e293b;font-family:monospace;">${otp}</span>
+         </div>
+         <p style="margin-top:20px;font-size:11px;color:#64748b;">This code is valid for <b>2 minutes</b>. If you did not initiate this, please secure your master key.</p>`
+    );
+    
+    try { 
+        MailApp.sendEmail({ to: "ilcbala.BharatPayRoll@gmail.com", subject: "🛠️ Dev Security Code: " + otp, htmlBody: html }); 
+        return jsonResponse({ success: true, message: "Two-step verification code sent to registered developer email (Valid for 2 Min)." }); 
+    } catch (e) { 
+        return jsonResponse({ success: false, message: "Failed to dispatch security notification." }); 
+    }
+}
+
+function handleVerifyDevOTP(ss, params) {
+    const devCreds = getDeveloperCredentials(ss);
+    const otp = String(params.otp || "").trim();
+    
+    const storedOTP = PropertiesService.getScriptProperties().getProperty('DEV_OTP_' + devCreds.devUser);
+    const storedTime = PropertiesService.getScriptProperties().getProperty('DEV_OTP_TIME_' + devCreds.devUser);
+    
+    if (!storedOTP || otp !== storedOTP) return jsonResponse({ success: false, message: "Invalid or expired Bypass Code." });
+    
+    const now = new Date().getTime();
+    if (!storedTime || (now - parseInt(storedTime)) > 120000) {
+        PropertiesService.getScriptProperties().deleteProperty('DEV_OTP_' + devCreds.devUser);
+        PropertiesService.getScriptProperties().deleteProperty('DEV_OTP_TIME_' + devCreds.devUser);
+        return jsonResponse({ success: false, message: "Bypass Code has EXPIRED (2-minute limit)." });
+    }
+    
+    PropertiesService.getScriptProperties().deleteProperty('DEV_OTP_' + devCreds.devUser);
+    PropertiesService.getScriptProperties().deleteProperty('DEV_OTP_TIME_' + devCreds.devUser);
+    return jsonResponse({ 
+        success: true, 
+        message: "Developer Verified",
+        data: {
+          devUser: devCreds.devUser,
+          devPass: devCreds.devPass,
+          name: devCreds.devUser + " (Developer)",
+          role: "Developer"
+        }
+    });
+}
+
+function handlePasswordUpdate(ss, params) {
+    const email = String(params.email || "").trim().toLowerCase();
+    const newPass = String(params.newPassword || "").trim();
+    const otp = String(params.otp || "").trim();
+    const machineId = String(params.machineId || "").trim();
+
+    if (!email || !newPass || !otp) return jsonResponse({ success: false, message: "Missing data." });
+
+    const storedOTP = PropertiesService.getScriptProperties().getProperty('OTP_' + email);
+    if (!storedOTP || otp !== storedOTP) return jsonResponse({ success: false, message: "Invalid or expired OTP." });
+
+    let updated = false;
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(name => {
+        if (updated) return;
+        const sheet = ss.getSheetByName(name);
+        if (!sheet) return;
+        const data = sheet.getDataRange().getValues();
+        const eCol = name.includes('Trial') ? 3 : 5;
+        const pCol = name.includes('Trial') ? 2 : 3;
+        const mCol = name.includes('Trial') ? 5 : 8;
+
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][eCol]).toLowerCase() === email) {
+                const rowMachine = String(data[i][mCol]);
+                if (!rowMachine || rowMachine === machineId) {
+                    sheet.getRange(i+1, pCol+1).setValue(newPass);
+                    updated = true;
+                    break;
+                }
+            }
+        }
+    });
+
+    if (updated) {
+        PropertiesService.getScriptProperties().deleteProperty('OTP_' + email);
+        return jsonResponse({ success: true, message: "Password updated successfully." });
+    }
+
+    return jsonResponse({ success: false, message: "Update failed. Account/Hardware mismatch." });
+}
+
+// ============================================================
+// 5. PROFESSIONAL EMAIL ENGINE
+// ============================================================
+
+function buildProfessionalEmail(title, subtitle, color, greeting, contentHtml) {
+    const year = new Date().getFullYear();
+    const logoUrl = "https://raw.githubusercontent.com/ilcbala/PMS/main/public/logo.png"; 
+    return `<div style="font-family:'Segoe UI',Arial,sans-serif;line-height:1.6;color:#1e293b;max-width:600px;margin:20px auto;border:1px solid #e2e8f0;border-radius:16px;background:#ffffff;overflow:hidden;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">
+      <div style="background:${color};padding:25px 30px;color:white;">
+        <table style="width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="width:60px;vertical-align:middle;"><img src="${logoUrl}" alt="BPP" style="height:45px;display:block;border-radius:6px;background:rgba(255,255,255,0.2);padding:2px;"></td>
+            <td style="padding-left:15px;vertical-align:middle;text-align:left;">
+              <h1 style="margin:0;font-size:22px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">${title}</h1>
+              <p style="margin:2px 0 0;font-size:12px;opacity:0.9;font-weight:600;">${subtitle}</p>
+            </td>
+          </tr>
+        </table>
+      </div>
+      <div style="padding:40px;">
+        <p style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:20px;">${greeting},</p>
+        ${contentHtml}
+        <div style="margin-top:40px;padding-top:20px;border-top:1px solid #f1f5f9;font-size:14px;color:#334155;">
+          <p style="margin:0;font-weight:700;">With Warm Regards,</p>
+          <p style="margin:0;font-weight:800;color:#1e40af;">BharatPay Pro Support Team</p>
+          <p style="margin:0;font-size:12px;color:#64748b;">ILCBala - Decoding Indian Labour laws</p>
+        </div>
+      </div>
+      <div style="padding:20px;background:#f8fafc;text-align:center;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;">
+        <p style="margin:0;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1px;">BharatPay Pro Ecosystem</p>
+        <p style="margin:0;">Copyright &copy; ${year} &bull; ILCbala Chennai</p>
+      </div></div>`;
+}
+
+function sendEmailNotification(to, subject, type, data) {
+    if (!to) return; let htmlContent = ""; let emailTitle = "BharatPay Pro"; let emailSub = "Official Identity Manager"; let headColor = "#1e40af";
+    let fGreeting = "Dear " + (data.userName || "User").toUpperCase();
+    if (type === "LICENSE_ISSUANCE") {
+        htmlContent = `<p>Your Enterprise Identity has been successfully updated. Your license details are as follows:</p>
+        <div style="margin:25px 0; border:2px solid #1e40af; border-radius:12px; overflow:hidden;">
+          <table style="width:100%; border-collapse:collapse; background:#ffffff;">
+            <tr><td style="padding:15px; background:#1e40af; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; width:35%; letter-spacing:1px;">USER IDENTITY</td><td style="padding:15px; background:#eff6ff; border-bottom:1px solid #dbeafe; color:#0f172a; font-weight:700; font-size:14px;">${data.userID}</td></tr>
+            <tr><td style="padding:15px; background:#1e40af; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">LICENSE KEY</td><td style="padding:15px; background:#f8fafc; border-bottom:1px solid #dbeafe; font-family:monospace; font-size:11px; color:#1e40af; font-weight:900;">${data.licenseKey}</td></tr>
+            <tr><td style="padding:15px; background:#1e40af; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">DATA SIZE</td><td style="padding:15px; background:#eff6ff; border-bottom:1px solid #dbeafe; color:#0f172a; font-weight:700; font-size:14px;">${data.limit || data.dataSize}</td></tr>
+            ${data.isNewPass ? `<tr><td style="padding:15px; background:#1e40af; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">TEMP PASS</td><td style="padding:15px; background:#f8fafc; border-bottom:1px solid #dbeafe; color:#dc2626; font-weight:700;">${data.pass}</td></tr>` : ''}
+            <tr><td style="padding:15px; background:#1e40af; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">EXPIRY DATE</td><td style="padding:15px; background:#eff6ff; color:#0f172a; font-weight:700; font-size:14px;">${data.expiryDate}</td></tr>
+          </table>
+        </div>`;
+    } else if (type === "PASSWORD_RESET") {
+        headColor = "#be123c"; htmlContent = `<div style="background:#fff1f2;border:2px solid #fecdd3;padding:30px;text-align:center;border-radius:12px;margin:25px 0;"><span style="font-size:32px;font-weight:900;letter-spacing:12px;color:#be123c;font-family:monospace;">${data.tempCode}</span></div>`;
+    } else if (type === "LICENSE_ACTIVATED") {
+        htmlContent = `<p>Your BharatPay Pro license has been <strong>successfully activated</strong> and linked to this hardware.</p>
+        <div style="margin:25px 0; border:2px solid #059669; border-radius:12px; overflow:hidden;">
+          <table style="width:100%; border-collapse:collapse; background:#ffffff;">
+            <tr><td style="padding:15px; background:#059669; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; width:35%; letter-spacing:1px;">USER IDENTITY</td><td style="padding:15px; background:#f0fdf4; border-bottom:1px solid #dcfce7; color:#065f46; font-weight:700; font-size:14px;">${data.userID}</td></tr>
+            <tr><td style="padding:15px; background:#059669; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">HARDWARE ID</td><td style="padding:15px; background:#f8fafc; border-bottom:1px solid #dcfce7; font-family:monospace; font-size:11px; color:#059669;">${data.attemptMachine}</td></tr>
+            <tr><td style="padding:15px; background:#059669; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">DATA SIZE</td><td style="padding:15px; background:#f0fdf4; border-bottom:1px solid #dcfce7; color:#065f46; font-weight:700; font-size:14px;">${data.dataSize}</td></tr>
+            <tr><td style="padding:15px; background:#059669; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">REGISTRATION</td><td style="padding:15px; background:#f8fafc; border-bottom:1px solid #dcfce7; color:#065f46; font-weight:700; font-size:14px;">${data.regDate}</td></tr>
+            <tr><td style="padding:15px; background:#059669; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">EXPIRY DATE</td><td style="padding:15px; background:#f0fdf4; color:#065f46; font-weight:700; font-size:14px;">${data.expiryDate}</td></tr>
+          </table>
+        </div>
+        <p style="font-size:13px;color:#1e40af;">You may now access all enterprise features. Thank you for choosing BharatPay Pro.</p>`;
+    } else if (type === "VIOLATION") {
+        headColor = "#991b1b"; emailTitle = "🚨 Security Alert";
+        htmlContent = `<div style="background:#fef2f2;border:1px solid #fee2e2;border-radius:12px;padding:25px;margin:20px 0;"><table style="width:100%;font-size:14px;"><tr><td style="padding:8px 0;color:#64748b;">Attempted ID</td><td style="font-weight:700;">${data.attemptID}</td></tr><tr><td style="padding:8px 0;color:#64748b;">Hardware</td><td>${data.attemptMachine}</td></tr></table></div>`;
+    }
+    if (htmlContent) {
+        const fullHtml = buildProfessionalEmail(emailTitle, emailSub, headColor, fGreeting, htmlContent);
+        try { MailApp.sendEmail({ to: to, subject: subject, htmlBody: fullHtml }); } catch (e) {}
+    }
+}
+
+function sendAdminOTP(p) {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID); const dev = getDeveloperCredentials(ss); if (p !== dev.devPass) return { success: false, message: "Incorrect Key." };
+    const otp = Math.floor(100000 + Math.random() * 900000).toString(); PropertiesService.getScriptProperties().setProperty('ADMIN_OTP', otp);
+    const html = buildProfessionalEmail("Admin Auth", "Secure Protocol", "#0c4a6e", "Hello Administrator", `<div style="background:#f0f9ff;padding:30px;text-align:center;border-radius:12px;"><span style="font-size:32px;font-weight:900;letter-spacing:10px;color:#0369a1;">${otp}</span></div>`);
+    try { MailApp.sendEmail({ to: "ilcbala.BharatPayRoll@gmail.com", subject: "🔑 Auth Code: " + otp, htmlBody: html }); return { success: true }; } catch (e) { return { success: false }; }
+}
+
+// ============================================================
+// 6. CORE LOGIC
+// ============================================================
+
+function getTrialUsersForAdmin() {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID); const sheet = ss.getSheetByName('Approved_Trial_Data'); if (!sheet) return [];
+    const data = sheet.getDataRange().getValues(); const users = [];
+    for (let i = 1; i < data.length; i++) { if (data[i][0]) users.push({ name: String(data[i][0]), uid: String(data[i][1]), email: String(data[i][3]), mobile: String(data[i][4]) }); }
+    return users;
+}
+
+function getAllUsersForAdmin() {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID); const users = [];
+    ['Approved_Trial_Data', 'BPP_APP_License'].forEach(function(n) {
+        const s = ss.getSheetByName(n); if (!s) return; const d = s.getDataRange().getValues();
+        const eC = n.includes('Trial') ? 3 : 5; const nC = n.includes('Trial') ? 0 : 1;
+        for (let i = 1; i < d.length; i++) { if (d[i][eC]) users.push({ name: String(d[i][nC]), email: String(d[i][eC]) }); }
+    });
+    return users;
+}
+
+function handleTrialRegistration(ss, params) {
+    const lock = LockService.getScriptLock();
+    try {
+        lock.waitLock(10000);
+        const idRegex = /^[A-Z0-9]{5,12}$/;
+        if (!params.userID || !idRegex.test(params.userID)) {
+            if (lock.hasLock()) lock.releaseLock();
+            return jsonResponse({ success: false, message: "Invalid User ID format (5-12 Alphanumeric characters required)." });
+        }
+        const sheet = ss.getSheetByName('Approved_Trial_Data'); 
+        if (!sheet) { if (lock.hasLock()) lock.releaseLock(); return jsonResponse({ success: false, message: "Trial database not found." }); }
+        
+        const data = sheet.getDataRange().getValues();
+        const today = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy");
+        
+        // V02.02.17 FIX: Search for email match first (existing pre-seeded record)
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][3]).toLowerCase() === params.email.toLowerCase()) {
+                const expDate = new Date(); expDate.setDate(expDate.getDate() + 90);
+                const expStr  = Utilities.formatDate(expDate, "GMT+5:30", "dd-MM-yyyy");
+                
+                // Preserve existing password if already set
+                const existingPass = String(data[i][2]).trim();
+                const finalPass = params.password || existingPass || generateHardenedPassword();
+                
+                const finalUserID = String(params.userID || "").toUpperCase().trim();
+                
+                sheet.getRange(i+1, 1, 1, 12).setValues([[
+                    params.userName.toUpperCase(), finalUserID, finalPass, data[i][3], data[i][4], 
+                    params.machineId, today, expStr, data[i][8], 'TRIAL ACTIVE', 0, today
+                ]]);
+                
+                // --- ADDED: Greetings & Developer Notifications on Success ---
+                const applicantEmail = String(params.email || "").trim();
+                const applicantName  = String(params.userName || "User").trim();
+                const devEmail       = "ilcbala.BharatPayRoll@gmail.com";
+
+                // 1. Greetings Email to User
+                const welcomeHtml = buildProfessionalEmail(
+                    "Welcome to BharatPay Pro",
+                    "Trial Registration Successful",
+                    "#059669",
+                    "Hello " + applicantName,
+                    `<p>Congratulations! Your trial for <strong>BharatPay Pro</strong> has been successfully activated on this machine.</p>
+                     <div style="margin:25px 0; border:2px solid #059669; border-radius:12px; overflow:hidden;">
+                       <table style="width:100%; border-collapse:collapse; background:#ffffff;">
+                         <tr><td style="padding:15px; background:#059669; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; width:35%; letter-spacing:1px;">USER IDENTITY</td><td style="padding:15px; background:#f0fdf4; border-bottom:1px solid #dcfce7; color:#065f46; font-weight:700; font-size:14px;">${String(params.userID).toUpperCase()}</td></tr>
+                         <tr><td style="padding:15px; background:#059669; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">INITIAL PASS</td><td style="padding:15px; background:#f8fafc; border-bottom:1px solid #dcfce7; color:#dc2626; font-weight:700; font-size:14px;">${finalPass}</td></tr>
+                         <tr><td style="padding:15px; background:#059669; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">DATA SIZE</td><td style="padding:15px; background:#f0fdf4; border-bottom:1px solid #dcfce7; color:#065f46; font-weight:700; font-size:14px;">${data[i][8]} Emps</td></tr>
+                         <tr><td style="padding:15px; background:#059669; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">REGISTRATION</td><td style="padding:15px; background:#f8fafc; border-bottom:1px solid #dcfce7; color:#065f46; font-weight:700; font-size:14px;">${today}</td></tr>
+                         <tr><td style="padding:15px; background:#059669; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">EXPIRY DATE</td><td style="padding:15px; background:#f0fdf4; color:#065f46; font-weight:700; font-size:14px;">${expStr}</td></tr>
+                       </table>
+                     </div>
+                     <p style="font-size:13px;color:#64748b;">Below are your initial login credentials. You will be prompted to set a permanent password in the application immediately. This trial is valid until <strong>${expStr}</strong>.</p>`
+                );
+                try {
+                    MailApp.sendEmail({ to: applicantEmail, subject: "Welcome to BharatPay Pro — Trial Activated", htmlBody: welcomeHtml });
+                } catch (e) {}
+
+                // 2. Notification to Developer
+                const devSuccessHtml = buildProfessionalEmail(
+                    "New Trial Registration",
+                    "BPP Admin Alert",
+                    "#1e40af",
+                    "Hello Developer",
+                    `<p>A new user has successfully registered for a BharatPay Pro trial.</p>
+                     <div style="background:#f8fafc;border:1px solid #e2e8f0;padding:20px;border-radius:12px;margin:20px 0;">
+                       <table style="width:100%;font-size:14px;">
+                         <tr><td style="color:#64748b;width:35%;">Name</td><td style="font-weight:700;">${applicantName}</td></tr>
+                         <tr><td style="color:#64748b;">Email</td><td style="font-weight:700;">${applicantEmail}</td></tr>
+                         <tr><td style="color:#64748b;">UserID</td><td style="font-weight:700;">${String(params.userID).toUpperCase()}</td></tr>
+                         <tr><td style="color:#64748b;">Machine ID</td><td style="font-family:monospace;font-size:12px;">${String(params.machineId || "N/A")}</td></tr>
+                       </table>
+                     </div>`
+                );
+                try {
+                    MailApp.sendEmail({ to: devEmail, subject: "✅ New Trial Active: " + applicantEmail, htmlBody: devSuccessHtml });
+                } catch (e) {}
+                
+                logSecurityAudit(ss, "TRIAL_REGISTRATION", "SUCCESS", "Trial Active for " + params.userID, params);
+                if (lock.hasLock()) lock.releaseLock();
+                return jsonResponse({ 
+                    success: true, 
+                    data: { status: 'TRIAL ACTIVE', expiryDate: expStr, password: finalPass } 
+                });
+            }
+        }
+        
+        // STRICT POLICY: Email NOT pre-seeded → BLOCK registration.
+        // Send a professional guidance email to the user AND notify the developer.
+        // The user must formally request access via email to get pre-seeded in the sheet.
+        {
+            const applicantEmail = String(params.email || "").trim();
+            const applicantName  = String(params.userName || "Applicant").trim();
+            const applicantMob   = String(params.mobile || "Not Provided").trim();
+            const devEmail       = "ilcbala.BharatPayRoll@gmail.com";
+
+            // 1. Send guidance email TO the applicant
+            const guidanceHtml = buildProfessionalEmail(
+                "Access Request Required",
+                "BharatPay Pro — Trial Registration",
+                "#1e40af",
+                "Hello " + applicantName,
+                `<p>Thank you for your interest in <strong>BharatPay Pro</strong>.</p>
+                 <p>Your email ID (<strong>${applicantEmail}</strong>) has not yet been approved for trial access. To request access, please send a formal email to our support team with the following details:</p>
+                 <div style="margin:20px 0; border:2px solid #1e40af; border-radius:12px; overflow:hidden;">
+                   <table style="width:100%; border-collapse:collapse; background:#ffffff;">
+                     <tr><td style="padding:15px; background:#1e40af; color:#ffffff; font-size:12px; font-weight:800; width:35%;">SUPPORT EMAIL</td><td style="padding:15px; background:#eff6ff; border-bottom:1px solid #dbeafe;"><a href="mailto:${devEmail}" style="color:#1e40af; font-weight:700; text-decoration:none;">${devEmail}</a></td></tr>
+                     <tr><td style="padding:15px; background:#1e40af; color:#ffffff; font-size:12px; font-weight:800;">SUBJECT</td><td style="padding:15px; background:#f8fafc; border-bottom:1px solid #dbeafe; color:#0f172a; font-weight:700;">Trial Access Request</td></tr>
+                     <tr><td style="padding:15px; background:#1e40af; color:#ffffff; font-size:12px; font-weight:800;">REQUIREMENTS</td><td style="padding:15px; background:#eff6ff; color:#0f172a; font-size:13px; font-weight:600;">Full Name, Registered Email, & Mobile Number</td></tr>
+                   </table>
+                 </div>
+                 <p style="font-size:13px;color:#64748b;">Once approved, you will receive a confirmation email and you may then proceed with registration in the application.</p>`
+            );
+            try {
+                MailApp.sendEmail({ to: applicantEmail, subject: "BharatPay Pro — Please Request Formal Access", htmlBody: guidanceHtml });
+            } catch (mailErr) {
+                console.warn("Guidance email to applicant failed:", mailErr.toString());
+            }
+
+            // 2. Notify developer of the unregistered attempt
+            const devNotifyHtml = buildProfessionalEmail(
+                "Unregistered Trial Attempt",
+                "BharatPay Pro — Admin Notification",
+                "#92400e",
+                "Hello Developer",
+                `<p>An unregistered user attempted to register for BharatPay Pro trial access.</p>
+                 <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:20px;margin:20px 0;">
+                   <table style="width:100%;font-size:14px;border-collapse:collapse;">
+                     <tr><td style="padding:6px 0;color:#92400e;width:35%;">Name Attempted</td><td style="font-weight:700;">${applicantName}</td></tr>
+                     <tr><td style="padding:6px 0;color:#92400e;">Email</td><td style="font-weight:700;">${applicantEmail}</td></tr>
+                     <tr><td style="padding:6px 0;color:#92400e;">Mobile</td><td style="font-weight:700;">${applicantMob}</td></tr>
+                     <tr><td style="padding:6px 0;color:#92400e;">Machine ID</td><td style="font-family:monospace;font-size:12px;">${String(params.machineId || "N/A")}</td></tr>
+                     <tr><td style="padding:6px 0;color:#92400e;">Timestamp</td><td>${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</td></tr>
+                   </table>
+                 </div>
+                 <p style="font-size:13px;color:#475569;">If this is a legitimate request, add their details to the <strong>Approved_Trial_Data</strong> sheet and notify the user to re-register.</p>`
+            );
+            try {
+                MailApp.sendEmail({ to: devEmail, subject: "📋 Trial Access Request: " + applicantEmail, htmlBody: devNotifyHtml });
+            } catch (mailErr) {
+                console.warn("Developer notification email failed:", mailErr.toString());
+            }
+
+            logSecurityAudit(ss, "TRIAL_REGISTRATION", "REJECTED_UNREGISTERED", "Unregistered email blocked. Guidance sent to " + applicantEmail, params);
+            if (lock.hasLock()) lock.releaseLock();
+            return jsonResponse({
+                success: false,
+                message: "Your email ID is not yet approved for trial access. A guidance email has been sent to " + applicantEmail + " with instructions on how to request formal access. Please check your inbox (including Spam)."
+            });
+        }
+        
+    } catch (e) {
+        if (lock.hasLock()) lock.releaseLock();
+        logSecurityAudit(ss, "TRIAL_REGISTRATION", "CRITICAL_ERROR", e.toString(), params);
+        return jsonResponse({ success: false, message: e.toString() });
+    }
+}
+
+function handleLicenseActivation(ss, params) {
+    const lock = LockService.getScriptLock();
+    try {
+        lock.waitLock(10000);
+        const sheet = ss.getSheetByName('BPP_APP_License'); if (!sheet) return jsonResponse({ success: false, message: "License database not found." });
+        const data = sheet.getDataRange().getValues();
+        
+        // V02.02.17 FIX: Case-insensitive userID comparison to prevent VENKY67 vs VENKY67 match failures
+        for (let i = 1; i < data.length; i++) {
+            const keyMatch = String(data[i][0]).replace(/-/g,"") === params.licenseKey.replace(/-/g,"");
+            const idMatch  = String(data[i][2]).toLowerCase() === String(params.userID || "").toLowerCase();
+            
+            if (keyMatch && idMatch) {
+                // --- V02.02.18: SYNC USER-SET PASSWORD DURING ACTIVATION ---
+                if (params.appPassword) {
+                    sheet.getRange(i+1, 4).setValue(params.appPassword); // Index 3 / Col D
+                }
+
+                sheet.getRange(i+1, 7).setValue(Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy")); 
+                
+                const secureMachineId = (params.machineId && params.machineId.toUpperCase() !== "EXPIRED") ? params.machineId : "";
+                if (secureMachineId) {
+                    sheet.getRange(i+1, COL_MACHINE_ID).setValue(secureMachineId); 
+                }
+                
+                sheet.getRange(i+1, COL_STATUS).setValue('LICENSE ACTIVE');
+                
+                logSecurityAudit(ss, "LICENSE_ACTIVATION", "SUCCESS", "License Activated for ID " + params.userID, params);
+                
+                // --- ADDED: Activation Success Emails ---
+                const activationData = {
+                  userName: data[i][1],
+                  userID: String(data[i][2]).toUpperCase(),
+                  attemptMachine: secureMachineId,
+                  regDate: data[i][6] || "N/A",
+                  dataSize: (data[i][10] || 5000) + " Emps",
+                  expiryDate: data[i][7]
+                };
+                sendEmailNotification(data[i][5], "✅ License Activated: BharatPay Pro", "LICENSE_ACTIVATED", activationData);
+                sendEmailNotification("ilcbala.BharatPayRoll@gmail.com", "🚀 License Activated: " + data[i][5], "LICENSE_ACTIVATED", activationData);
+
+                if (lock.hasLock()) lock.releaseLock();
+                return jsonResponse({ 
+                    success: true, 
+                    data: { 
+                        status: 'LICENSE ACTIVE', 
+                        expiryDate: data[i][7], 
+                        dataSize: data[i][10] || 5000,
+                        password: data[i][3]
+                    } 
+                });
+            }
+        }
+        logSecurityAudit(ss, "LICENSE_ACTIVATION", "FAILURE", "Key/ID mismatch for " + params.userID, params);
+        if (lock.hasLock()) lock.releaseLock();
+        return jsonResponse({ success: false, message: "Invalid Credentials. Please verify your License Key and User ID." });
+    } catch (e) {
+        if (lock.hasLock()) lock.releaseLock();
+        logSecurityAudit(ss, "LICENSE_ACTIVATION", "CRITICAL_ERROR", e.toString(), params);
+        return jsonResponse({ success: false, message: e.toString() });
+    }
+}
+
+function handleTrackLogin(ss, params) {
+    if (IsDeveloperRequest(ss, params)) return jsonResponse({ success: true, note: "Dev Isolation Mode" });
+
+    const now = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy HH:mm:ss");
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(name) {
+        const sheet = ss.getSheetByName(name); if (!sheet) return;
+        const isTrial = name.includes('Trial');
+        
+        const emailColIdx = isTrial ? 3 : 5;
+        const machColIdx  = isTrial ? 5 : 8;
+        
+        const data = sheet.getDataRange().getValues();
+        for (let i = 1; i < data.length; i++) {
+            const rowEmail = String(data[i][emailColIdx]).toLowerCase().trim();
+            const rowMach  = String(data[i][machColIdx]).toLowerCase().trim();
+            
+            if (rowEmail === params.email.toLowerCase().trim() && (rowMach === "" || rowMach === params.machineId.toLowerCase().trim())) {
+                const currentCount = parseInt(data[i][COL_LOGIN_COUNT - 1]) || 0;
+                const loginCell = sheet.getRange(i+1, COL_LOGIN_COUNT);
+                loginCell.setNumberFormat('0');
+                loginCell.setValue(currentCount + 1);
+                
+                const lastLoginCell = sheet.getRange(i+1, COL_LAST_LOGIN);
+                lastLoginCell.setValue(now);
+                
+                sheet.getRange(i+1, COL_TOTAL_HOURS).setNumberFormat('[h]:mm');
+                break;
+            }
+        }
+    });
+    return jsonResponse({ success: true });
+}
+
+function fetchLatestDeveloperMessages(ss) {
+    const sheet = ss.getSheetByName('Developer_Message'); const config = getAppConfig(ss);
+    const resp = { scrollNews: { message: "", date: "" }, statutory: { message: "", date: "", header: "ANNOUNCEMENT" }, flashPopup: { message: "", date: "", header: "FLASH ALERT" } };
+    if (sheet) {
+        const data = sheet.getDataRange().getValues();
+        for (let i = data.length - 1; i >= 1; i--) {
+            const type = String(data[i][3]).toUpperCase();
+            if (type === "NEWS" && !resp.scrollNews.message) resp.scrollNews = { message: data[i][2], date: data[i][1] };
+            else if (type === "MESSAGE" && !resp.statutory.message) resp.statutory = { message: data[i][2], date: data[i][1], header: data[i][5] };
+            else if (type === "FLASH" && !resp.flashPopup.message) resp.flashPopup = { message: data[i][2], date: data[i][1], header: data[i][5] };
+            else if (type === "ALERT" && !resp.loginAlert) resp.loginAlert = { message: data[i][2], date: data[i][1], enabled: data[i][7] !== "DISABLED" };
+        }
+    }
+    return jsonResponse({ success: true, messages: resp, latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7 });
+}
+
+function handleUpdateMessages(ss, params) { const s = ss.getSheetByName('Developer_Message'); if (!s) return jsonResponse({ success: false }); const now = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy HH:mm:ss"); s.appendRow([now, now, params.message, params.type, "ADMIN", params.header, params.alignment, params.key]); return jsonResponse({ success: true }); }
+
+
+function getAppConfig(ss) {
+    const sheet = ss.getSheetByName('App_Config');
+    if (!sheet) return { latestVersion: "02.02.17", launcherUrl: "" };
+    const d = sheet.getRange(2, 1, 1, 4).getValues()[0];
+    return { 
+      latestVersion: String(d[0] || "02.02.17"), 
+      downloadUrl: String(d[1] || ""), 
+      downloadUrlWin7: String(d[2] || ""),
+      launcherUrl: String(d[3] || "") // Cell D2
+    };
+}
+
+function getDeveloperCredentials(ss) { const sheet = ss.getSheetByName('Master_Config'); if (!sheet) return { devUser: "", devPass: "", devMachine: "" }; const row = sheet.getRange("A2:E2").getValues()[0]; return { devUser: String(row[0]), devPass: String(row[1]), devMachine: String(row[4]) }; }
+function getLicenceFeeData(ss) { const sheet = ss.getSheetByName('License Fee'); return sheet ? sheet.getDataRange().getValues() : []; }
+function isExpired(expStr) { if (!expStr) return false; const now = Utilities.formatDate(new Date(), "GMT+5:30", "yyyyMMdd"); const p = String(expStr).split("-"); return p.length === 3 ? (p[2]+p[1]+p[0] < now) : false; }
+function updateExpiryStatuses(ss) { 
+  const todayStr = Utilities.formatDate(new Date(), "GMT+5:30", "yyyyMMdd"); 
+  ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(name) { 
+    const sheet = ss.getSheetByName(name); if (!sheet) return; 
+    const data = sheet.getDataRange().getValues(); 
+    const isTrial = name.includes('Trial');
+    for (let i = 1; i < data.length; i++) { 
+      const expStr = String(data[i][7]); // Col H
+      const p = expStr.split("-"); 
+      if (p.length === 3 && (p[2]+p[1]+p[0] < todayStr)) {
+        const label = isTrial ? "TRIAL_EXPIRED" : "LICENSE_EXPIRED";
+        sheet.getRange(i+1, 10).setValue(label); 
+      }
+    } 
+  }); 
+}
+
+function normalizeMobile(m) {
+    const digits = String(m || "").replace(/\D/g, "");
+    return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+function repairLicenseDatabase() { 
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  cleanupStaleActiveUsers(ss);
+  updateExpiryStatuses(ss); 
+  
+  const todayStr = Utilities.formatDate(new Date(), "GMT+5:30", "yyyyMMdd");
+
+  ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(name) {
+    const sheet = ss.getSheetByName(name); if (!sheet) return;
+    const data = sheet.getDataRange().getValues();
+    const isTrial = name.includes('Trial');
+    const mColIdx = isTrial ? 5 : 8; // Audited: Trial=Col F(5), License=Col I(8)
+    const sColNum = 10; // Status=Col J
+    
+    sheet.getRange(2, COL_LOGIN_COUNT, sheet.getLastRow(), 1).setNumberFormat('0');
+    sheet.getRange(2, COL_TOTAL_HOURS, sheet.getLastRow(), 1).setNumberFormat('[h]:mm');
+    
+    for (let i = 1; i < data.length; i++) {
+        const rowData = data[i];
+        const rawMachine = String(rowData[mColIdx]).trim();
+        const expStr = String(rowData[7]);
+        const p = expStr.split("-");
+        const isCurrentlyExpired = (p.length === 3 && (p[2]+p[1]+p[0] < todayStr));
+
+        // 1. If Machine ID column mistakenly contains a status string, move it
+        const upperMach = rawMachine.toUpperCase();
+        if (upperMach === "EXPIRED" || upperMach === "PENDING" || upperMach.includes("ACTIVE")) {
+            sheet.getRange(i+1, mColIdx + 1).setValue(""); // Clear Machine ID Col
+            const finalStatus = isCurrentlyExpired ? (isTrial ? "TRIAL_EXPIRED" : "LICENSE_EXPIRED") : (isTrial ? "TRIAL ACTIVE" : "LICENSE ACTIVE");
+            sheet.getRange(i+1, sColNum).setValue(finalStatus);
+            continue;
+        }
+
+        // 2. Refresh based on existing Machine ID and Date
+        if (isCurrentlyExpired) {
+            sheet.getRange(i+1, sColNum).setValue(isTrial ? "TRIAL_EXPIRED" : "LICENSE_EXPIRED");
+        } else if (rawMachine === "" || rawMachine === "UNKNOWN-MACHINE-ID") {
+            sheet.getRange(i+1, sColNum).setValue("PENDING");
+        } else {
+            sheet.getRange(i+1, sColNum).setValue(isTrial ? "TRIAL ACTIVE" : "LICENSE ACTIVE");
+        }
+    }
+  });
+
+  const activeSheet = ss.getSheetByName('Active_Users');
+  if (activeSheet) {
+    const activeData = activeSheet.getDataRange().getValues();
+    const seenMachines = {};
+    const rowsToDelete = [];
+    for (let i = activeData.length - 1; i >= 1; i--) {
+      const mid = String(activeData[i][1]);
+      if (seenMachines[mid]) rowsToDelete.push(i + 1);
+      else seenMachines[mid] = true;
+    }
+    rowsToDelete.sort((a,b) => b-a).forEach(row => activeSheet.deleteRow(row));
+  }
+  SpreadsheetApp.getUi().alert("🛠️ Full Database Repair Complete: Status Labels & Column alignment restored."); 
+}
+
+function handleVerifyIdentityEmail(ss, params) {
+    const email = String(params.email || "").trim().toLowerCase();
+    let found = false;
+    let userName = "";
+    
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(name => {
+        if (found) return;
+        const sheet = ss.getSheetByName(name); if (!sheet) return;
+        const data = sheet.getDataRange().getValues();
+        const eColIdx = name.includes('Trial') ? 3 : 5;
+        const nColIdx = name.includes('Trial') ? 0 : 1;
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][eColIdx]).trim().toLowerCase() === email) {
+                found = true;
+                userName = String(data[i][nColIdx]);
+                break;
+            }
+        }
+    });
+    return jsonResponse({ success: found, message: found ? "Identity Verified" : "Email not found in database.", userName: userName });
+}
+
+function handleSyncIdentityRepair(ss, params) {
+    const email = String(params.email || "").trim().toLowerCase();
+    const newUID = String(params.newUserID || "").trim().toUpperCase();
+    const newPass = String(params.newPassword || "").trim();
+    const machineId = String(params.machineId || "").trim();
+    const idRegex = /^[A-Z0-9]{5,12}$/;
+
+    if (!newUID || !idRegex.test(newUID)) return jsonResponse({ success: false, message: "Invalid User ID format (5-12 Alphanumeric characters required)." });
+    if (!newPass || newPass.length < 9) return jsonResponse({ success: false, message: "Password must be at least 9 characters." });
+
+    let updated = false;
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(name => {
+        const sheet = ss.getSheetByName(name); if (!sheet) return;
+        const data = sheet.getDataRange().getValues();
+        const isTrial = name.includes('Trial');
+        const eColIdx = isTrial ? 3 : 5;
+        const uColIdx = isTrial ? 1 : 2;
+        const pColIdx = isTrial ? 2 : 3;
+
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][eColIdx]).trim().toLowerCase() === email) {
+                sheet.getRange(i+1, uColIdx + 1).setValue(newUID);
+                sheet.getRange(i+1, pColIdx + 1).setValue(newPass);
+                
+                if (isTrial) {
+                   sheet.getRange(i+1, 6).setValue(machineId);
+                   sheet.getRange(i+1, 10).setValue('TRIAL ACTIVE');
+                } else {
+                   sheet.getRange(i+1, 9).setValue(machineId);
+                   sheet.getRange(i+1, 10).setValue('LICENSE ACTIVE');
+                }
+                updated = true;
+                break;
+            }
+        }
+    });
+
+    return jsonResponse({ success: updated, message: updated ? "Identity Synced Successfully" : "Failed to update cloud database." });
+}
+
+function generateHardenedPassword() {
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const nums = "23456789";
+  const spec = "!@#$%^&*()_+";
+  const all = upper + lower + nums + spec;
+  
+  let pass = "";
+  pass += upper[Math.floor(Math.random() * upper.length)];
+  pass += lower[Math.floor(Math.random() * lower.length)];
+  pass += nums[Math.floor(Math.random() * nums.length)];
+  pass += spec[Math.floor(Math.random() * spec.length)];
+  
+  for (let i = 0; i < 5; i++) {
+    pass += all[Math.floor(Math.random() * all.length)];
+  }
+  
+  return pass.split('').sort(() => 0.5 - Math.random()).join('');
+}
+
+/**
+ * Cleans up 'Ghost' sessions in Active_Users sheet.
+ */
+function cleanupStaleActiveUsers(ss) {
+    const sheet = ss.getSheetByName('Active_Users');
+    if (!sheet) return;
+    const data = sheet.getDataRange().getValues();
+    const now = new Date().getTime();
+    const threshold = 10 * 60 * 1000; // 10 minutes
+
+    for (let i = 1; i < data.length; i++) {
+        const status = String(data[i][3]).toUpperCase();
+        if (status === 'LIVE') {
+            const lastActiveStr = String(data[i][4]);
+            const lastActiveDate = parseManualDate(lastActiveStr);
+            if (lastActiveDate && (now - lastActiveDate.getTime()) > threshold) {
+                sheet.getRange(i + 1, 4).setValue('DISCONNECTED')
+                    .setBackground("#fee2e2")
+                    .setFontColor("#991b1b")
+                    .setFontWeight("bold");
+            }
+        }
+    }
+}
+
+function parseManualDate(str) {
+    try {
+        const p = str.match(/(\d+)-(\d+)-(\d+) (\d+):(\d+):(\d+)/);
+        if (!p) return null;
+        const iso = p[3] + "-" + p[2] + "-" + p[1] + "T" + p[4] + ":" + p[5] + ":" + p[6] + "+05:30";
+        return new Date(iso);
+    } catch (e) { return null; }
+}
+
+/**
+ * Creates a recurring trigger to clean up ghosts every 10 minutes.
+ */
+function setupAutoCleanupTrigger() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => { if (t.getHandlerFunction() === 'automatedCleanupTask') ScriptApp.deleteTrigger(t); });
+  
+  ScriptApp.newTrigger('automatedCleanupTask')
+      .timeBased()
+      .everyMinutes(10)
+      .create();
+      
+  ss.toast("⚡ Background Auto-Cleanup Enabled Successfully!", "BPP Security", 5);
+}
+
+function automatedCleanupTask() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  cleanupStaleActiveUsers(ss);
+}
+
+/**
+ * Helper: Compares two version strings (e.g. "02.02.18" vs "01.01.12")
+ * Returns: 1 if v1 > v2, -1 if v1 < v2, 0 if equal.
+ */
+function compareVersions(v1, v2) {
+    var n1 = v1.replace(/^[vV]/, '').split('.').map(Number);
+    var n2 = v2.replace(/^[vV]/, '').split('.').map(Number);
+    for (var i = 0; i < Math.max(n1.length, n2.length); i++) {
+        var a = n1[i] || 0;
+        var b = n2[i] || 0;
+        if (a > b) return 1;
+        if (a < b) return -1;
+    }
+    return 0;
+}
+
+function jsonResponse(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
+
+/**
+ * Request OTP for Identity Restoration (Stage 2)
+ */
+function handleRequestRestoreOTP(ss, params) {
+    const uid = String(params.userID || "").trim().toUpperCase();
+    const mid = String(params.machineId || "").trim().toLowerCase();
+    const email = String(params.email || "").trim().toLowerCase();
+    const mobile = String(params.mobile || "").trim();
+
+    if (!uid || !mid || !email || !mobile) return jsonResponse({ success: false, message: "Missing required fields." });
+
+    let foundRow = null;
+    let userName = "";
+
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(name => {
+        if (foundRow) return;
+        const sheet = ss.getSheetByName(name); if (!sheet) return;
+        const data = sheet.getDataRange().getValues();
+        const isTrial = name.includes('Trial');
+        const uIdx = isTrial ? 1 : 2;
+        const eIdx = isTrial ? 3 : 5;
+        const mIdx = isTrial ? 4 : 4;
+        const hIdx = isTrial ? 5 : 8;
+        const nIdx = isTrial ? 0 : 1;
+
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][uIdx]).toUpperCase() === uid && String(data[i][hIdx]).toLowerCase() === mid) {
+                const sheetEmail = String(data[i][eIdx]).toLowerCase();
+                const sheetMobile = normalizeMobile(data[i][mIdx]);
+                
+                if (sheetEmail === email && sheetMobile === normalizeMobile(mobile)) {
+                    foundRow = data[i];
+                    userName = String(data[i][nIdx]);
+                    break;
+                }
+            }
+        }
+    });
+
+    if (!foundRow) return jsonResponse({ success: false, message: "Identity proof failed. Details do not match record for this machine." });
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const now = new Date().getTime();
+    PropertiesService.getScriptProperties().setProperty('RESTORE_OTP_' + email, otp);
+    PropertiesService.getScriptProperties().setProperty('RESTORE_OTP_TS_' + email, now.toString());
+
+    const html = buildProfessionalEmail("Identity Restoration", "Secure Profile Recovery", "#0f172a", "Dear " + userName, 
+      `<p>We received a request to restore your BharatPay Pro identity on this hardware. Use the verification code below to complete the process:</p>
+       <div style="background:#f1f5f9;padding:30px;text-align:center;border-radius:12px;margin:20px 0;">
+         <span style="font-size:36px;font-weight:900;letter-spacing:12px;color:#1e293b;font-family:monospace;">${otp}</span>
+       </div>
+       <p style="font-size:12px;color:#ef4444;">Warning: This code is valid for <b>120 seconds</b> only.</p>`);
+
+    try {
+        MailApp.sendEmail({ to: email, subject: "🔑 Restoration Code: " + otp, htmlBody: html });
+        return jsonResponse({ success: true, message: "OTP sent to your registered email." });
+    } catch (e) {
+        return jsonResponse({ success: false, message: "Failed to send email." });
+    }
+}
+
+/**
+ * Verify OTP and return the FULL user profile for reconstruction.
+ */
+function handleVerifyRestoreOTP(ss, params) {
+    const email = String(params.email || "").trim().toLowerCase();
+    const otp = String(params.otp || "").trim();
+    const uid = String(params.userID || "").trim().toUpperCase();
+    const mid = String(params.machineId || "").trim().toLowerCase();
+
+    const storedOTP = PropertiesService.getScriptProperties().getProperty('RESTORE_OTP_' + email);
+    const storedTS  = PropertiesService.getScriptProperties().getProperty('RESTORE_OTP_TS_' + email);
+
+    if (!storedOTP || otp !== storedOTP) return jsonResponse({ success: false, message: "Invalid or expired code." });
+
+    const now = new Date().getTime();
+    if (!storedTS || (now - parseInt(storedTS)) > 120000) {
+        return jsonResponse({ success: false, message: "OTP has expired (120s limit)." });
+    }
+
+    let fullData = null;
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(name => {
+        if (fullData) return;
+        const sheet = ss.getSheetByName(name); if (!sheet) return;
+        const data = sheet.getDataRange().getValues();
+        const isTrial = name.includes('Trial');
+        const uIdx = isTrial ? 1 : 2;
+        const hIdx = isTrial ? 5 : 8;
+
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][uIdx]).toUpperCase() === uid && String(data[i][hIdx]).toLowerCase() === mid) {
+                fullData = {
+                    isTrial: isTrial,
+                    licenseKey: isTrial ? "TRIAL" : data[i][0],
+                    userName: isTrial ? data[i][0] : data[i][1],
+                    userID: data[i][uIdx],
+                    password: isTrial ? data[i][2] : data[i][3],
+                    mobile: data[i][4],
+                    email: isTrial ? data[i][3] : data[i][5],
+                    startDate: data[i][6],
+                    expiryDate: data[i][7],
+                    dataSize: isTrial ? data[i][8] : data[i][10]
+                };
+                break;
+            }
+        }
+    });
+
+    if (fullData) {
+        PropertiesService.getScriptProperties().deleteProperty('RESTORE_OTP_' + email);
+        PropertiesService.getScriptProperties().deleteProperty('RESTORE_OTP_TS_' + email);
+        
+        logSecurityAudit(ss, "IDENTITY_RESTORE", "SUCCESS", "Profile recovered via OTP", params);
+        
+        try {
+            const devEmail = "ilcbala.BharatPayRoll@gmail.com";
+            const notifyHtml = buildProfessionalEmail("Recovery Alert", "Hardware Restoration Success", "#166534", "Developer Notification", 
+              `<p>User <b>${fullData.userName}</b> (${fullData.userID}) has successfully restored their identity on Machine ID: <b>${params.machineId}</b>.</p>
+               <p>This action was verified via Email OTP at ${new Date().toLocaleString()}.</p>`);
+            MailApp.sendEmail({ to: devEmail, subject: "🔑 Recovery Success: " + fullData.userName, htmlBody: notifyHtml });
+        } catch (e) {
+            console.warn("Dev Recovery Notification missed:", e.toString());
+        }
+
+        return jsonResponse({ success: true, data: fullData });
+    }
+    logSecurityAudit(ss, "IDENTITY_RESTORE", "FAILURE", "Critical hardware mismatch during retrieval", params);
+    return jsonResponse({ success: false, message: "Critical hardware mismatch during data retrieval." });
+}
+
+/**
+ * V02.02.15: SECURITY AUDIT ENGINE
+ */
+function logSecurityAudit(ss, action, status, details, params) {
+    try {
+        const sheetName = 'Security_Audit';
+        let sheet = ss.getSheetByName(sheetName);
+        
+        if (!sheet) {
+            sheet = ss.insertSheet(sheetName);
+            sheet.appendRow(['Timestamp', 'Action', 'Status', 'User ID', 'Machine ID', 'Email', 'Details']);
+            sheet.getRange(1, 1, 1, 7).setBackground('#1e293b').setFontColor('white').setFontWeight('bold');
+            sheet.setFrozenRows(1);
+            const protection = sheet.protect().setDescription('BPP Security Ledger');
+            protection.setWarningOnly(true);
+        }
+
+        const now = new Date();
+        const nowStr = Utilities.formatDate(now, "GMT+5:30", "dd-MM-yyyy HH:mm:ss");
+        
+        sheet.appendRow([
+            nowStr,
+            action,
+            status.toUpperCase(),
+            params.userID || "N/A",
+            params.machineId || "N/A",
+            params.email || "N/A",
+            details
+        ]);
+
+        const lastRow = sheet.getLastRow();
+        const statusCell = sheet.getRange(lastRow, 3);
+        if (status.toUpperCase() === 'SUCCESS' || status.toUpperCase() === 'SUCCESS_NEW' || status.toUpperCase() === 'UNREGISTERED') {
+            statusCell.setBackground('#dcfce7').setFontColor('#166534');
+        } else {
+            statusCell.setBackground('#fee2e2').setFontColor('#991b1b');
+        }
+    } catch (e) {
+        console.warn("Audit Log Sync failed:", e.toString());
+    }
+}
+
+// ============================================================
+// REGISTRATION EMAIL OTP — Step 1 Identity Pre-Check
+// ============================================================
+
+function handleSendRegOTP(ss, params) {
+    var email     = String(params.email     || "").trim().toLowerCase();
+    var machineId = String(params.machineId || "").trim().toLowerCase();
+
+    if (!email || email.indexOf('@') === -1) {
+        return jsonResponse({ success: false, message: "Invalid email address. Please enter a valid mail ID." });
+    }
+    if (!machineId) {
+        return jsonResponse({ success: false, message: "Machine ID not detected. Please restart the application." });
+    }
+
+    var sheetDefs = [
+        { name: 'BPP_APP_License',    emailCol: 5, machineCol: 8 },
+        { name: 'Approved_Trial_Data', emailCol: 3, machineCol: 5 }
+    ];
+
+    for (var s = 0; s < sheetDefs.length; s++) {
+        var def   = sheetDefs[s];
+        var sheet = ss.getSheetByName(def.name);
+        if (!sheet) continue;
+        var data  = sheet.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++) {
+            var rowEmail   = String(data[i][def.emailCol]).trim().toLowerCase();
+            var rowMachine = String(data[i][def.machineCol]).trim().toLowerCase();
+            if (rowEmail === email) {
+                if (rowMachine && rowMachine !== machineId) {
+                    return jsonResponse({
+                        success: false,
+                        message: "This email ID is already registered to another machine. Please use a different email, or contact ilcbala.BharatPayRoll@gmail.com to transfer your license."
+                    });
+                }
+                break;
+            }
+        }
+    }
+
+    var otp     = Math.floor(100000 + Math.random() * 900000).toString();
+    var nowTs   = new Date().getTime();
+    var otpKey  = 'REG_OTP_' + email;
+    var timeKey = 'REG_OTP_TIME_' + email;
+    PropertiesService.getScriptProperties().setProperty(otpKey,  otp);
+    PropertiesService.getScriptProperties().setProperty(timeKey, nowTs.toString());
+
+    var html = buildProfessionalEmail(
+        "Email Verification",
+        "BharatPay Pro — Initial Registration",
+        "#1e40af",
+        "Hello",
+        '<p style="margin-bottom:20px;">You are registering this email with <strong>BharatPay Pro</strong>. Enter the verification code below to confirm your identity:</p>' +
+        '<div style="background:#1e40af;padding:35px;text-align:center;border-radius:12px;margin:25px 0;box-shadow:inset 0 4px 6px rgba(0,0,0,0.1);">' +
+        '<span style="font-size:45px;font-weight:900;letter-spacing:18px;color:#ffffff;font-family:monospace;">' + otp + '</span>' +
+        '</div>' +
+        '<p style="margin-top:20px;font-size:11px;color:#64748b;">This code is valid for <b>10 minutes</b>. Do not share it with anyone. If you did not initiate this, please ignore.</p>'
+    );
+
+    try {
+        MailApp.sendEmail({ to: email, subject: "🔐 BharatPay Pro Verification Code: " + otp, htmlBody: html });
+        return jsonResponse({ success: true, message: "OTP dispatched to " + email + ". Check your inbox (including Spam folder)." });
+    } catch (e) {
+        PropertiesService.getScriptProperties().deleteProperty(otpKey);
+        PropertiesService.getScriptProperties().deleteProperty(timeKey);
+        return jsonResponse({ success: false, message: "Mail delivery failed. Please verify the email address is correct. (" + e.toString() + ")" });
+    }
+}
+
+function handleVerifyRegOTP(ss, params) {
+    var email  = String(params.email || "").trim().toLowerCase();
+    var mobile = String(params.mobile || "").trim();
+    var otp    = String(params.otp   || "").trim();
+
+    if (!email || !otp) {
+        return jsonResponse({ success: false, message: "Missing email or OTP." });
+    }
+
+    var otpKey     = 'REG_OTP_' + email;
+    var timeKey    = 'REG_OTP_TIME_' + email;
+    var storedOTP  = PropertiesService.getScriptProperties().getProperty(otpKey);
+    var storedTime = PropertiesService.getScriptProperties().getProperty(timeKey);
+
+    if (!storedOTP) {
+        return jsonResponse({ success: false, message: "No pending OTP for this email. Please click 'Send OTP' again." });
+    }
+
+    var now = new Date().getTime();
+    if (!storedTime || (now - parseInt(storedTime)) > 600000) {
+        PropertiesService.getScriptProperties().deleteProperty(otpKey);
+        PropertiesService.getScriptProperties().deleteProperty(timeKey);
+        return jsonResponse({ success: false, message: "OTP has expired (10-minute limit). Please click 'Send OTP' to receive a new code." });
+    }
+
+    if (otp !== storedOTP) {
+        return jsonResponse({ success: false, message: "Incorrect OTP. Please check your inbox and try again." });
+    }
+
+    // --- V02.02.18: IDENTITY REVEAL LOGIC ---
+    let foundIdentity = null;
+    let mobileMismatch = false;
+
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(name) {
+        if (foundIdentity || mobileMismatch) return;
+        const sheet = ss.getSheetByName(name);
+        if (!sheet) return;
+        const data = sheet.getDataRange().getValues();
+        const isTrial = name.includes('Trial');
+        
+        const eCol = isTrial ? 3 : 5; // Email: Trial=D(3), License=F(5)
+        const mCol = isTrial ? 4 : 4; // Mobile: Trial=E(4), License=E(4)
+        const uCol = isTrial ? 1 : 2; // UserID: Trial=B(1), License=C(2)
+        const nCol = isTrial ? 0 : 1; // Name: Trial=A(0), License=B(1)
+
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][eCol]).toLowerCase() === email) {
+                const dbMobile = String(data[i][mCol]).trim();
+                if (dbMobile === mobile) {
+                    foundIdentity = { 
+                        userID: String(data[i][uCol]).toUpperCase(), 
+                        userName: String(data[i][nCol]).toUpperCase() 
+                    };
+                } else if (mobile) {
+                    mobileMismatch = true;
+                }
+                break;
+            }
+        }
+    });
+
+    if (mobileMismatch && !foundIdentity) {
+        return jsonResponse({ success: false, message: "Security Mismatch: The provided Mobile Number does not match our registered records for this email." });
+    }
+
+    // Preserve OTP for the final activation step
+    PropertiesService.getScriptProperties().setProperty('OTP_' + email, otp);
+    PropertiesService.getScriptProperties().deleteProperty(otpKey);
+    PropertiesService.getScriptProperties().deleteProperty(timeKey);
+
+    return jsonResponse({ 
+        success: true, 
+        message: "Email and Identity Verified successfully.",
+        data: foundIdentity 
+    });
+}

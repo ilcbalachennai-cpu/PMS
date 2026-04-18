@@ -1,7 +1,9 @@
 {
   "name": "bharatpay-pro",
   "private": true,
-  "version": "02.02.18",
+  "version": "02.02.21",
+  "author": "ILCBala",
+  "description": "BharatPay Pro - Indian Payroll Management System",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -12,8 +14,8 @@
     "dev:electron": "concurrently \"npm run dev\" \"npm run electron:serve\"",
     "electron:serve": "wait-on tcp:3000 && node electron/check-version.cjs && npx tsc -p electron/tsconfig.json && node -e \"const fs=require('fs'); if(!fs.existsSync('dist-electron')) fs.mkdirSync('dist-electron'); fs.writeFileSync('dist-electron/package.json', '{\\\"type\\\": \\\"commonjs\\\"}')\" && cross-env NODE_ENV=development electron .",
     "build:electron": "npm run build && node electron/build.cjs && electron-builder",
-    "build:win10": "npm install electron@31.0.0 electron-builder@24.13.3 @types/node@22.14.0 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.02.18_Win10.exe && npm run build:restore",
-    "build:win7": "npm install electron@22.3.27 electron-builder@23.6.0 @types/node@18.11.18 better-sqlite3@9.6.0 && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.02.18_Win7.exe && npm run build:restore",
+    "build:win10": "npm install electron@31.0.0 electron-builder@24.13.3 @types/node@22.14.0 --no-save && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.02.21_Win10.exe && npm run build:restore",
+    "build:win7": "npm install electron@22.3.27 electron-builder@23.6.0 @types/node@18.11.18 better-sqlite3@9.6.0 && npm run build && node electron/build.cjs && electron-builder --config.nsis.artifactName=BPP_APP_V02.02.21_Win7.exe && npm run build:restore",
     "build:all": "npm run build:win10 && npm run build:win7 && npm run build:restore",
     "build:restore": "npm install electron@31.0.0 electron-builder@24.13.3 @types/node@22.14.0 better-sqlite3@^11.5.0",
     "generate:exe": "node scripts/build_all.cjs",
@@ -22,20 +24,23 @@
   },
   "build": {
     "appId": "com.ilcbala.bharatpaypro",
-    "productName": "BPP_APP",
+    "productName": "BharatPay Pro",
+    "copyright": "Copyright © 2026 ILCBala",
     "directories": {
       "output": "release"
     },
     "win": {
       "icon": "build/icon.png",
+      "publisherName": "ILCBala",
       "target": [
         "nsis"
-      ]
+      ],
+      "verifyUpdateCodeSignature": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "BPP_APP_V02.02.18_Win10.exe"
+      "artifactName": "BPP_APP_V02.02.21_Win10.exe"
     },
     "files": [
       "dist",

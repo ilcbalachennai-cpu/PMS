@@ -390,6 +390,7 @@ export interface User {
   name: string;
   role: 'Developer' | 'Administrator' | 'User';
   email: string;
+  mobile?: string; // Newly added for identity sync
 }
 
 export enum View {
@@ -408,7 +409,7 @@ export enum View {
 
 export interface LicenseData {
   key: string;
-  status: 'Active' | 'Inactive' | 'Expired' | 'Trial' | 'REGISTERED' | 'ACTIVE';
+  status: 'Active' | 'Inactive' | 'Expired' | 'Trial' | 'REGISTERED' | 'ACTIVE' | 'PENDING_RESTORE' | 'PENDING_SYNC';
   userName: string;
   userID: string;
   registeredTo: string; // Mail ID

@@ -22,7 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     initializeAppDirectory: (path: string) => ipcRenderer.invoke('initialize-app-directory', path),
     getAppDirectory: () => ipcRenderer.invoke('get-app-directory'),
     apiFetch: (url: string, options: any) => ipcRenderer.invoke('api-fetch', url, options),
-    startUpdateDownload: (url: string) => ipcRenderer.invoke('start-update-download', url),
+    startUpdateDownload: (url: string, expectedHash?: string) => ipcRenderer.invoke('start-update-download', url, expectedHash),
     backupAndInstall: () => ipcRenderer.invoke('backup-and-install'),
     findBPPApp: () => ipcRenderer.invoke('find-bpp-app'),
     openItemLocation: (filePath: string) =>
