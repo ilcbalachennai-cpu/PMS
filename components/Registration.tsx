@@ -35,9 +35,10 @@ interface RegistrationProps {
     onRestore: () => void;
     showAlert?: (type: 'success' | 'error' | 'info' | 'warning' | 'confirm', title: string, message: string, onConfirm?: () => void) => void;
     isResetMode?: boolean;
+    onSystemRepair?: () => void;
 }
 
-const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert, isResetMode }) => {
+const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert, isResetMode, onSystemRepair }) => {
     const [step, setStep] = useState(1);
     const [userName, setUserName] = useState('');
     const [userID, setUserID] = useState('');
@@ -49,6 +50,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     const [adminPassword, setAdminPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
+    const [isTrialUser, setIsTrialUser] = useState(false);
 
     // Email OTP Verification State
     type EmailVerifyState = 'idle' | 'sending' | 'otp_pending' | 'verifying' | 'verified';
@@ -122,8 +124,10 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     setIsFetchedIdentity(true);
                 }
                 if (result.data.userName) setUserName(result.data.userName);
+                if (result.data.isTrial) setIsTrialUser(true);
             } else {
                 setIsFetchedIdentity(false);
+                setIsTrialUser(false);
             }
         } else {
             setEmailVerifyState('otp_pending');
@@ -528,9 +532,31 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     {renderStepIndicator()}
 
                     {error && (
-                        <div className="mb-8 p-4 bg-red-900/20 border border-red-500/50 rounded-xl flex items-center gap-3 text-red-400 text-sm animate-in shake duration-300">
-                            <AlertCircle size={20} />
-                            {error}
+                        <div className="mb-6 p-5 bg-red-900/20 border border-red-500/40 rounded-2xl flex flex-col gap-4 animate-in shake duration-300 shadow-xl shadow-red-950/20">
+                            <div className="flex items-start gap-4">
+                                <div className="p-2 bg-red-500/20 rounded-lg">
+                                    <ShieldAlert size={20} className="text-red-400" />
+                                </div>
+                                <div className="space-y-1">
+                                    <h4 className="text-[10px] font-black text-red-400 uppercase tracking-[0.2em]">Security Alert / Validation Error</h4>
+                                    <p className="text-xs text-red-200 leading-relaxed font-medium">{error}</p>
+                                </div>
+                            </div>
+                            
+                            {(error.includes('Unauthorised') || error.includes('Security') || error.includes('Integrity')) && (
+                                <div className="pt-2 border-t border-red-500/20 flex flex-col gap-3">
+                                    <p className="text-[10px] text-red-300/70 font-bold uppercase tracking-wider text-center">
+                                        Possible system corruption or version mismatch detected.
+                                    </p>
+                                    <button 
+                                        onClick={() => onSystemRepair?.()}
+                                        className="w-full py-3 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl transition-all shadow-lg shadow-red-900/30 flex items-center justify-center gap-2 group"
+                                    >
+                                        <RotateCw size={14} className="group-hover:rotate-180 transition-transform duration-700" />
+                                        Self-Repair & Install Latest Version
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -668,7 +694,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                         />
                                                     </div>
                                                 </div>
-                                                <div className="space-y-2">
+                                                <div className={isTrialUser ? "hidden" : "space-y-2"}>
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">License Key (Optional)</label>
                                                     <input
                                                         type="text"

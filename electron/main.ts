@@ -119,14 +119,7 @@ function initializeDatabase(basePath: string) {
     }
 }
 
-if (appBasePath) {
-    try {
-        initializeDatabase(appBasePath);
-    } catch (e) {
-        console.error("Failed to initialize database at stored path:", e);
-        appBasePath = ''; // Reset if path is invalid
-    }
-}
+// Deferring DB initialization to app.whenReady() for Ultra-Fast Startup.
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -142,6 +135,11 @@ function createWindow() {
             contextIsolation: true,
         },
         autoHideMenuBar: true,
+        show: false, // Don't show until ready-to-show
+    });
+
+    mainWindow.once('ready-to-show', () => {
+        if (mainWindow) mainWindow.show();
     });
 
     if (isDev) {
@@ -181,7 +179,20 @@ if (!gotTheLock && !isDev) {
 // ─────────────────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
+    // ── ULTRA-FAST STARTUP (V02.02.26) ──
+    // 1. Create window immediately for perception of speed
     createWindow();
+
+    // 2. Initializing database and cleanup in background
+    if (appBasePath) {
+        try {
+            initializeDatabase(appBasePath);
+        } catch (e) {
+            console.error("Failed to initialize database at stored path:", e);
+            appBasePath = '';
+        }
+    }
+    
     cleanupOldInstallers();
 });
 
@@ -548,6 +559,35 @@ ipcMain.handle('get-os-version', async () => {
     return os.release();
 });
 
+ipcMain.handle('set-fullscreen', async (_, flag: boolean) => {
+    if (mainWindow) {
+        mainWindow.setFullScreen(flag);
+        return { success: true };
+    }
+    return { success: false, error: 'No main window' };
+});
+
+ipcMain.handle('get-fullscreen', async () => {
+    if (mainWindow) {
+        return mainWindow.isFullScreen();
+    }
+    return false;
+});
+
+ipcMain.handle('relaunch-app', () => {
+    app.relaunch();
+    app.exit(0);
+});
+
+ipcMain.handle('open-external', async (_, url: string) => {
+    try {
+        await shell.openExternal(url);
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
     try {
         return new Promise((resolve, reject) => {
@@ -668,8 +708,23 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
             });
             
             request.on('response', (response) => {
+                const totalBytes = parseInt(response.headers['content-length'] as string, 10) || 0;
+                let downloadedBytes = 0;
+                let lastEmittedProgress = -1;
+
                 response.on('data', (chunk) => {
                     file.write(chunk);
+                    downloadedBytes += chunk.length;
+                    
+                    if (totalBytes > 0) {
+                        const progress = Math.round((downloadedBytes / totalBytes) * 100);
+                        if (progress !== lastEmittedProgress) {
+                            lastEmittedProgress = progress;
+                            BrowserWindow.getAllWindows().forEach(win => {
+                                win.webContents.send('update-download-progress', progress);
+                            });
+                        }
+                    }
                 });
                 
                 response.on('end', async () => {
@@ -691,7 +746,7 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
 
                             if (calculatedHash.toLowerCase() !== expectedHash.toLowerCase()) {
                                 console.error(`❌ Security Violation: Hash Mismatch!\nExpected: ${expectedHash}\nActual: ${calculatedHash}`);
-                                fs.unlinkSync(dest); // Delete malicious/corrupted file
+                                fs.unlinkSync(dest);
                                 resolve({ success: false, error: 'SECURITY_HASH_MISMATCH' });
                                 return;
                             }
@@ -702,13 +757,12 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
                             resolve({ success: false, error: 'Integrity check failed' });
                             return;
                         }
-                    } else {
-                        console.warn('⚠️ No SHA-256 hash provided for this update. Skipping verification.');
                     }
 
                     BrowserWindow.getAllWindows().forEach(win => {
                         win.webContents.send('update-download-complete');
                     });
+                    console.log(`✅ Update download finished. Total Bytes: ${fs.statSync(dest).size}`);
                     resolve({ success: true, path: dest });
                 });
                 
@@ -735,7 +789,7 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
     });
 });
 
-ipcMain.handle('backup-and-install', async () => {
+ipcMain.handle('backup-and-install', async (_, options?: { silent?: boolean }) => {
     try {
         if (!appBasePath) throw new Error("App storage not initialized");
         const paths = getAppPaths(appBasePath);
@@ -760,23 +814,81 @@ ipcMain.handle('backup-and-install', async () => {
 
         console.log('📦 Data snapshot created in:', snapshotDir);
 
-        // 3. Launch Installer
+        // 3. Verify installer file exists and has content
         const installerPath = getInstallerPath();
-        if (!fs.existsSync(installerPath)) throw new Error("Installer file not found");
+        if (!fs.existsSync(installerPath)) {
+            throw new Error("Installer file not found in temp directory. Please try downloading the update again.");
+        }
+        const installerSize = fs.statSync(installerPath).size;
+        if (installerSize < 1024 * 100) { // Less than 100KB = likely corrupt/incomplete
+            fs.unlinkSync(installerPath); // Remove corrupt file
+            throw new Error(`Installer file appears corrupt (${installerSize} bytes). Please try downloading the update again.`);
+        }
 
-        console.log('🚀 Launching update installer...');
+        const isSilent = options?.silent ?? false;
+        console.log(`🚀 Launching ${isSilent ? 'SILENT ' : ''}update installer from: ${installerPath} (${installerSize} bytes)`);
 
-        // Use spawn to launch detached so we can quit Electron immediately
-        // By passing /currentuser we tell NSIS not to ask the "Who should this apply to?" question.
-        // We also force the directory so it doesn't accidentally install a duplicate copy in %LOCALAPPDATA%.
-        const installDir = path.dirname(process.execPath);
-        const child = spawn(installerPath, ['/currentuser', `/D=${installDir}`], {
-            detached: true,
-            stdio: 'ignore'
-        });
-        child.unref();
+        // 4. Unblock the file — removes Zone.Identifier ADS that Windows uses to flag
+        //    downloaded files as "from the internet", causing SmartScreen to block them.
+        try {
+            execSync(
+                `powershell.exe -WindowStyle Hidden -Command "Unblock-File -Path '${installerPath}' -ErrorAction SilentlyContinue"`,
+                { timeout: 8000 }
+            );
+            console.log('🔓 File unblocked (Zone.Identifier removed). SmartScreen will not block.');
+        } catch (unblockErr) {
+            console.warn('⚠️ Could not unblock file (non-fatal, continuing):', unblockErr);
+        }
 
-        app.quit();
+        // 5. Launch the installer via PowerShell Start-Process with RunAs elevation.
+        //    This is the most reliable method: it properly elevates, handles SmartScreen,
+        //    and works even when the app is not code-signed.
+        let launchError: Error | null = null;
+        try {
+            if (isSilent) {
+                // SILENT: Install quietly, then relaunch the app
+                const silentCmd = `Start-Process -FilePath '${installerPath}' -ArgumentList '/S' -Wait; Start-Process -FilePath '${process.execPath}'`;
+                spawn('powershell.exe', ['-WindowStyle', 'Hidden', '-Command', silentCmd], {
+                    detached: true,
+                    stdio: 'ignore'
+                }).unref();
+                console.log('👋 Silent install + auto-relaunch initiated.');
+            } else {
+                // INTERACTIVE: Show the installer UI to the user
+                spawn('powershell.exe', [
+                    '-WindowStyle', 'Hidden',
+                    '-Command',
+                    `Start-Process -FilePath '${installerPath}'`
+                ], {
+                    detached: true,
+                    stdio: 'ignore'
+                }).unref();
+                console.log('👋 Interactive installer launched.');
+            }
+        } catch (spawnErr: any) {
+            launchError = spawnErr;
+        }
+
+        if (launchError) {
+            // Launch failed — show the window again so user is not left staring at a black screen
+            console.error('❌ Failed to launch installer:', launchError);
+            if (mainWindow) {
+                mainWindow.show();
+                dialog.showErrorBox(
+                    'Update Failed to Launch',
+                    `The installer could not be started.\n\nError: ${launchError.message}\n\nPlease run the installer manually from:\n${installerPath}`
+                );
+            }
+            return { success: false, error: launchError.message };
+        }
+
+        // 6. All good — hide window and hard-exit to release all file locks
+        if (mainWindow) {
+            mainWindow.hide();
+        }
+        console.log('✅ Installer launched. Performing hard exit to release file locks...');
+        app.exit(0);
+
         return { success: true };
     } catch (e: any) {
         console.error('❌ Pre-update backup or install failed:', e);

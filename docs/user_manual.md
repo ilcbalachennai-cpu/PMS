@@ -113,7 +113,7 @@ Stay ahead of compliance with the proposed Social Security Code 2020:
 *   **"Sync Required"**: Triggered after 24 hours offline. Connect for 60 seconds to refresh.
 
 ### 10.2 Contacting Support
-📧 **Email**: ilcbala.BharatPayRoll@gmail.com
+📧 **Email**: ilcbala.Bharatpayroll@gmail.com
 📞 **Support**: Refer to your License Agreement for the dedicated helpdesk number.
 
 ---

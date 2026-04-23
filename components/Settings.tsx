@@ -872,11 +872,9 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                             <Megaphone size={14} /> DEVELOPER OPTIONS
                         </button>
                     )}
-                    {!isSetupMode && (
-                        <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'LICENSE' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
-                            <ShieldCheck size={14} /> LICENSE MANAGEMENT
-                        </button>
-                    )}
+                    <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'LICENSE' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                        <ShieldCheck size={14} /> LICENSE MANAGEMENT
+                    </button>
                     {(licenseInfo || !isSetupMode || appUsers.length > 0) && (
                         <button onClick={() => setActiveTab('USERS')} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'USERS' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                             <Users size={14} /> USER MANAGEMENT
@@ -2104,9 +2102,12 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                 )
             }
 
-            {
-                activeTab === 'LICENSE' && (
-                    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+            {activeTab === 'LICENSE' && (
+                (() => {
+                    const isRestoringTrial = licenseInfo?.status === 'PENDING_RESTORE' && (licenseInfo?.isTrial || licenseInfo?.key === 'TRIAL');
+                    
+                    return (
+                        <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                         {/* Header with Global Save Action */}
                         <div className="flex items-center justify-between border-b border-slate-800 pb-6">
                             <div className="flex items-center gap-3">
@@ -2208,7 +2209,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             tabIndex={-1}
                                         />
                                     </div>
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className={isRestoringTrial ? "space-y-4" : "grid grid-cols-2 gap-4"}>
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">User ID</label>
                                             <input
@@ -2220,16 +2221,18 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                                 tabIndex={-1}
                                             />
                                         </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">License Key (16-Digit)</label>
-                                            <input
-                                                type="text"
-                                                placeholder="XXXX-XXXX-XXXX-XXXX"
-                                                className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono uppercase outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
-                                                value={newLicenseKey}
-                                                onChange={e => setNewLicenseKey(e.target.value.toUpperCase())}
-                                            />
-                                        </div>
+                                        {!isRestoringTrial && (
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">License Key (16-Digit)</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="XXXX-XXXX-XXXX-XXXX"
+                                                    className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono uppercase outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                                    value={newLicenseKey}
+                                                    onChange={e => setNewLicenseKey(e.target.value.toUpperCase())}
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="grid grid-cols-[1.3fr,0.7fr] gap-4">
                                         <div className="space-y-1">
@@ -2259,12 +2262,29 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
 
                                 <button
                                     onClick={async () => {
-                                        if (!isValidKeyFormat(newLicenseKey)) {
+                                        const isRestoringTrial = licenseInfo?.status === 'PENDING_RESTORE' && (licenseInfo?.isTrial || licenseInfo?.key === 'TRIAL');
+                                        const bypassKeyCheck = isRestoringTrial && !newLicenseKey;
+
+                                        if (!bypassKeyCheck && !isValidKeyFormat(newLicenseKey)) {
                                             showAlert?.('warning', 'Invalid Key', 'Please enter a valid 16-digit license key.');
                                             return;
                                         }
+
                                         setIsActivating(true);
-                                        const result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile);
+                                        let result;
+
+                                        if (bypassKeyCheck) {
+                                            // --- TRIAL RESCUE PATH: Sync via Email/Mobile instead of Key ---
+                                            const syncRes = await validateLicenseStartup(true, newUserID, newRegEmail, newRegMobile);
+                                            result = {
+                                                success: syncRes.valid,
+                                                message: syncRes.valid ? '✅ Trial Identity Restored: Your system has been successfully verified and synchronized via cloud records.' : (syncRes.message || 'Identity verification failed.')
+                                            };
+                                        } else {
+                                            // --- FULL ACTIVATION PATH: Requires 16-Digit Key ---
+                                            result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile);
+                                        }
+
                                         setIsActivating(false);
                                         if (result.success) {
                                             // --- V02.02.21: HOT-SWAP DATA (Stay on page) ---
@@ -2277,9 +2297,9 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                             // Update global app state without reload
                                             if (verifyLicense) await verifyLicense();
 
-                                            showAlert?.('success', 'System Activated', '✅ Your license has been successfully activated and synchronized. All identity fields have been restored.');
+                                            showAlert?.('success', bypassKeyCheck ? 'Sync Successful' : 'System Activated', result.message);
                                         } else {
-                                            showAlert?.('danger', 'Activation Failed', result.message);
+                                            showAlert?.('danger', bypassKeyCheck ? 'Sync Failed' : 'Activation Failed', result.message);
                                         }
                                     }}
                                     disabled={isActivating}
@@ -2290,10 +2310,10 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 </button>
                             </div>
                         </div>
-
                     </div>
-                )
-            }
+                );
+            })()
+        )}
 
             {
                 activeTab === 'USERS' && (

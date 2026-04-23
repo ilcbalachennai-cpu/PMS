@@ -147,7 +147,7 @@ function handleStartupValidation(ss, params) {
             const rowMachineId = String(row[7]).trim().toLowerCase();
 
             if (rowUserID === params.userID?.trim().toLowerCase() && rowEmail === params.email?.trim().toLowerCase() && rowMachineId === params.machineId?.trim().toLowerCase()) {
-                if (isExpired(String(row[6]))) return jsonResponse({ success: false, message: "License Expired. Renew at ilcbala.BharatPayRoll@gmail.com" });
+                if (isExpired(String(row[6]))) return jsonResponse({ success: false, message: "License Expired. Renew at ilcbala.Bharatpayroll@gmail.com" });
 
                 return jsonResponse({
                     success: true,
@@ -307,7 +307,7 @@ function handleTrackLogin(ss, params) {
  */
 function sendEmailNotification(to, subject, type, data) {
     if (!to) return;
-    const supportEmail = "ilcbala.BharatPayRoll@gmail.com";
+    const supportEmail = "ilcbala.Bharatpayroll@gmail.com";
     const primary = "#1e293b";
     
     // Header & Footer
@@ -403,7 +403,7 @@ function trackFailedAttempt(ss, machineId, email, type) {
             if (data[i][1] === machineId && data[i][2] === email) {
                 let count = (data[i][4] || 0) + 1;
                 sheet.getRange(i + 1, 5).setValue(count);
-                if (count >= 3) sendEmailNotification("ilcbala.BharatPayRoll@gmail.com", "SECURITY ALERT", "SECURITY_ALERT", { machineId, email, type, count });
+                if (count >= 3) sendEmailNotification("ilcbala.Bharatpayroll@gmail.com", "SECURITY ALERT", "SECURITY_ALERT", { machineId, email, type, count });
                 return;
             }
         }

@@ -282,7 +282,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
 
         // 2. Mark Draft as Finalized
         if (setArrearHistory) {
-            setArrearHistory(prev => prev.map(b => b.month === currentMonth && b.year === currentYear && b.status === 'Draft' ? { ...b, status: 'Finalized' } : b));
+            setArrearHistory(prev => (prev || []).map(b => b.month === currentMonth && b.year === currentYear && b.status === 'Draft' ? { ...b, status: 'Finalized' } : b));
         }
 
         setIsProcessing(false);

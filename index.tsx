@@ -1,8 +1,8 @@
-
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
+import GlobalRescueUI from './components/Shared/GlobalRescueUI';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -12,6 +12,8 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <GlobalRescueUI>
+      <App />
+    </GlobalRescueUI>
   </React.StrictMode>
 );

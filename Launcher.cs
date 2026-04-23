@@ -5,6 +5,15 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using System.Reflection;
+
+[assembly: AssemblyTitle("BharatPay Pro Launcher")]
+[assembly: AssemblyDescription("Intelligent Bootstrap Launcher for BharatPay Pro")]
+[assembly: AssemblyCompany("ILCBala")]
+[assembly: AssemblyProduct("BharatPay Pro")]
+[assembly: AssemblyCopyright("© 2026 ILCBala. All rights reserved.")]
+[assembly: AssemblyFileVersion("1.0.0.9")]
+[assembly: AssemblyVersion("1.0.0.9")]
 
 namespace BharatPayLauncher
 {

@@ -36,7 +36,7 @@ export const useSync = (props: SyncProps) => {
 
   // Master Persistence Sync (Electron DB)
   useEffect(() => {
-    const syncToDB = async () => {
+    const handler = setTimeout(async () => {
       if ((window as any).electronAPI) {
         const allUsersRaw = localStorage.getItem('app_users');
         const allUsers = (() => { try { return allUsersRaw ? JSON.parse(allUsersRaw) : []; } catch { return []; } })();
@@ -64,8 +64,9 @@ export const useSync = (props: SyncProps) => {
           (window as any).electronAPI.dbSet(item.k, item.v);
         }
       }
-    };
-    syncToDB();
+    }, 1000); // Debounce database writes by 1 second
+
+    return () => clearTimeout(handler);
   }, [
     employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers,
     payrollHistory, fines, leavePolicy, arrearHistory, otRecords, logoUrl,

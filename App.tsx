@@ -25,6 +25,7 @@ import CustomModal from './components/Shared/CustomModal';
 import UpdatePortal from './components/Shared/UpdatePortal';
 import TrialNoticeModal from './components/Shared/TrialNoticeModal';
 import SocialSecurityCode from './components/SocialSecurityCode';
+import { signalApplicationReady } from './components/Shared/GlobalRescueUI';
 
 import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount } from './services/licenseService';
 import { parseExpiryDate, formatExpiryDate } from './utils/formatters';
@@ -125,16 +126,24 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod();
   const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
   const [isRetryingSync, setIsRetryingSync] = useState(false);
+  const { currentUser, handleLogin, logout, setCurrentUser } = useAuth();
   const { 
     latestAppVersion, setLatestAppVersion, 
+    latestPatchTimestamp, setLatestPatchTimestamp,
     setDownloadUrl,
     showUpdateNotice, setShowUpdateNotice,
     showBackgroundNotice, setShowBackgroundNotice,
+    isUpdateDownloading,
     isUpdatePreparing,
     updateDownloaded,
     updateError, setUpdateError,
+    downloadProgress,
+    isPatchNotice, isPatchMandatory, isSessionDismissed, patchSkipCount,
+    deploymentStep,
     handleUpdateNow, handleUpdateLater 
-  } = useAppUpdate(showAlert);
+  } = useAppUpdate(showAlert, currentUser?.role === 'Developer');
+
+  const [isInstalling, setIsInstalling] = useState(false);
   const {
     employees, setEmployees, config, setConfig, companyProfile, setCompanyProfile,
     leavePolicy, setLeavePolicy, attendances, setAttendances, leaveLedgers, setLeaveLedgers,
@@ -144,8 +153,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     safeSave, handleRollover, handleNuclearReset
   } = usePayrollData(showAlert);
   const { isAppDirectoryConfigured, setIsAppDirectoryConfigured } = useAppInitialization(verifyLicense);
-  const { currentUser, handleLogin, logout, setCurrentUser } = useAuth();
   const { activeView, setActiveView } = useNavigation(mainContentRef, currentUser);
+
+  const handleSystemRepair = () => {
+    setUpdateError('SECURITY_VIOLATION');
+  };
+
   const {
     settingsTab, setSettingsTab, isSidebarOpen, setIsSidebarOpen,
     showLoginMessage, setShowLoginMessage,
@@ -156,6 +169,27 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const [showFlashPopup, setShowFlashPopup] = useState(false);
   const [isSettingsDirty, setIsSettingsDirty] = useState(false);
   const [isRestorationForced, setIsRestorationForced] = useState(false);
+  const [isStartupTimerActive, setIsStartupTimerActive] = useState(true);
+
+  // --- V02.02.28: 5-Second Startup Branding Timer (Synchronized with Animation) ---
+  useEffect(() => {
+    const timer = setTimeout(() => setIsStartupTimerActive(false), 5000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // --- DEVELOPER UI TEST OVERRIDE ---
+  const [debugUI, setDebugUI] = useState<{isOpen: boolean, state: 'TOAST' | 'PREPARING' | 'BACKGROUND' | 'READY' | 'VIOLATION' | 'PATCH' | 'INSTALLING'} | null>(null);
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      const handleTestUI = (e: any) => {
+        const { state, open } = e.detail || {};
+        if (open === false) setDebugUI(null);
+        else setDebugUI({ isOpen: true, state });
+      };
+      window.addEventListener('BPP_DEV_TEST_UI', handleTestUI);
+      return () => window.removeEventListener('BPP_DEV_TEST_UI', handleTestUI);
+    }
+  }, []);
 
   // --- CONNECTIVITY MONITORING (Day 1/2/3 Logic) ---
   const [connStatus, setConnStatus] = useState<{
@@ -245,6 +279,40 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const [showTrialNotice, setShowTrialNotice] = useState(false);
   const [trialInfo, setTrialInfo] = useState<{ daysRemaining: number; expiryDate: string } | null>(null);
 
+  // --- V02.02.24: UNIVERSAL LEGAL ALERT ---
+  const [showLegalModal, setShowLegalModal] = useState(false);
+  const [hasAgreedLegal, setHasAgreedLegal] = useState(() => {
+    const lastAgreedDate = localStorage.getItem('app_legal_agreed_date');
+    const today = new Date().toISOString().split('T')[0];
+    return lastAgreedDate === today;
+  });
+
+  const handleAcceptLegal = () => {
+    const today = new Date().toISOString().split('T')[0];
+    setHasAgreedLegal(true);
+    setShowLegalModal(false);
+    localStorage.setItem('app_legal_agreed_date', today);
+    showAlert('success', 'Compliance Acknowledged', 'Legal terms accepted for today.');
+  };
+
+  const handleDisagreeLegal = () => {
+    const api = (window as any).electronAPI;
+    if (api) {
+      if (api.closeApp) api.closeApp();
+      else if (api.invoke) api.invoke('close-app');
+    } else {
+      window.close();
+    }
+  };
+
+  useEffect(() => {
+    // V02.02.24: Legal notice now appears POST-LOGIN for better reliability
+    if (currentUser && companyProfile?.loginAlertEnabled && companyProfile.loginAlertMessage && !hasAgreedLegal) {
+      const timer = setTimeout(() => setShowLegalModal(true), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [currentUser, companyProfile?.loginAlertEnabled, companyProfile?.loginAlertMessage, hasAgreedLegal]);
+
   // Persistence & Sync Hook
   useSync({
     employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers,
@@ -279,40 +347,37 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   }, []);
 
   useEffect(() => {
-    if (!licenseStatus.valid) return;
+    // Signal success to GlobalRescueUI (Watchdog) - Always signal once mounting is stable
+    signalApplicationReady();
 
     const syncMessages = async () => {
-      const updates = await checkNewMessages();
-      if (updates) {
-        // Sync news/statutory
-        setCompanyProfile(prev => ({
-          ...prev,
-          flashNews: updates.scrollNews || prev.flashNews,
-          postLoginMessage: updates.statutory || prev.postLoginMessage,
-          postLoginHeader: updates.header || prev.postLoginHeader,
-          postLoginAlignment: updates.alignment || prev.postLoginAlignment,
-          flashPopupMessage: updates.flashPopupMessage || prev.flashPopupMessage,
-          flashPopupHeader: updates.flashPopupHeader || prev.flashPopupHeader,
-          flashPopupId: updates.flashPopupId || prev.flashPopupId
-        }));
+      try {
+        const updates = await checkNewMessages();
+        if (updates) {
+          // Sync news/statutory
+          setCompanyProfile(prev => ({
+            ...prev,
+            flashNews: updates.scrollNews || prev.flashNews,
+            postLoginMessage: updates.statutory || prev.postLoginMessage,
+            postLoginHeader: updates.header || prev.postLoginHeader,
+            postLoginAlignment: updates.alignment || prev.postLoginAlignment,
+            flashPopupMessage: updates.flashPopupMessage || prev.flashPopupMessage,
+            flashPopupHeader: updates.flashPopupHeader || prev.flashPopupHeader,
+            flashPopupId: updates.flashPopupId || prev.flashPopupId,
+            loginAlertEnabled: updates.loginAlertEnabled !== undefined ? updates.loginAlertEnabled : prev.loginAlertEnabled,
+            loginAlertMessage: updates.loginAlertMessage || prev.loginAlertMessage
+          }));
 
-        // --- NEW: Refresh Global Update State ---
-        if (updates.latestVersion) setLatestAppVersion(updates.latestVersion);
-        if (updates.downloadUrl) setDownloadUrl(updates.downloadUrl);
-
-        // --- REFINED IMMEDIATE FLASH LOGIC ---
-        // Only show immediate popup if key is IMMEDIATE and it hasn't been seen
-        if (updates.key === 'IMMEDIATE' && updates.flashPopupId) {
-          const seenIdsRaw = localStorage.getItem('app_seen_flash_ids') || '[]';
-          let seenIds: string[] = [];
-          try { seenIds = JSON.parse(seenIdsRaw); } catch { seenIds = []; }
-
-          if (!seenIds.includes(updates.flashPopupId)) {
-            setShowFlashPopup(true);
-            seenIds.push(updates.flashPopupId);
-            localStorage.setItem('app_seen_flash_ids', JSON.stringify(seenIds));
+          // --- Refresh Global Update State ---
+          if (updates.latestVersion) setLatestAppVersion(updates.latestVersion);
+          if (updates.downloadUrl) setDownloadUrl(updates.downloadUrl);
+          
+          if (updates.patchTimestamp && updates.patchTimestamp !== latestPatchTimestamp) {
+            setLatestPatchTimestamp(updates.patchTimestamp);
           }
         }
+      } catch (err) {
+        console.error("Background message sync failed:", err);
       }
     };
 
@@ -322,7 +387,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     // Periodic check every 10 minutes
     const interval = setInterval(syncMessages, 600000);
     return () => clearInterval(interval);
-  }, [licenseStatus.valid, checkNewMessages, setCompanyProfile, setShowLoginMessage]);
+  }, [checkNewMessages, setCompanyProfile]);
 
   // --- NEW: Immediate Version Sync on Boot ---
   useEffect(() => {
@@ -503,6 +568,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   };
 
   const handleAuthLogin = (user: User) => {
+    // V02.02.25: Automatically exit full-screen mode upon successful login
+    const api = (window as any).electronAPI;
+    if (api && api.setFullScreen) {
+      api.setFullScreen(false).catch(() => {});
+    }
+
     handleLogin(user);
 
     // 1. Mandatory Security Check: Forced Reset Detection
@@ -655,9 +726,21 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }, undefined, 'YES, RESET IDENTITY', undefined, 'CANCEL');
   };
 
-  const toggleFullScreenMode = () => {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
-    else if (document.exitFullscreen) document.exitFullscreen();
+  const toggleFullScreenMode = async () => {
+    const api = (window as any).electronAPI;
+    
+    if (api && api.getIsFullScreen && api.setFullScreen) {
+      // Robust sync with Electron window state
+      const current = await api.getIsFullScreen();
+      api.setFullScreen(!current).catch(() => {
+        // Fallback to browser API if IPC fails
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+        else document.exitFullscreen();
+      });
+    } else {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else if (document.exitFullscreen) document.exitFullscreen();
+    }
   };
 
   const getFinancialYearLabel = () => {
@@ -670,7 +753,27 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const isSettingsAccessible = effectiveUser.role === 'Developer' || effectiveUser.role === 'Administrator';
   const isNavLocked = employees.length === 0;
 
-  if (isAppDirectoryConfigured === null) return <div className="min-h-screen bg-[#020617] flex items-center justify-center"><Loader2 className="animate-spin text-blue-500" size={48} /></div>;
+  if (isStartupTimerActive || isAppDirectoryConfigured === null || !licenseStatus.checked) return <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[1000] space-y-8 animate-in fade-in duration-700">
+    <div className="relative">
+      <div className="absolute -inset-4 bg-blue-500/20 blur-2xl rounded-full animate-pulse"></div>
+      <div className="relative w-36 h-36 rounded-full border-[6px] border-white overflow-hidden shadow-2xl bg-[#020617] flex items-center justify-center">
+        <img src="./logo3.png" alt="Startup Logo" className="w-full h-full object-cover" />
+      </div>
+    </div>
+    <div className="flex flex-col items-center gap-1.5 animate-slow-pulse">
+      <div className="flex items-center gap-3">
+         <div className="w-2.5 h-2.5 bg-blue-500 rounded-full shadow-[0_0_12px_#3b82f6]"></div>
+         <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">
+           Security Verification Underway Please Wait
+           <span className="inline-block w-8 text-left animate-ellipsis-wait">......</span>
+         </p>
+      </div>
+    </div>
+    {/* Progress Bar (Additional Feature) */}
+    <div className="w-48 h-1 bg-slate-900 rounded-full overflow-hidden">
+       <div className="h-full bg-blue-600 animate-loading-bar-5s rounded-full"></div>
+    </div>
+  </div>;
 
   // --- V02.02.10: ADVANCED SECURITY OVERLAYS ---
   const isExpired = licenseStatus.message === 'LICENSE EXPIRED' || (licenseStatus.data?.isExpired);
@@ -778,6 +881,16 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                       : licenseStatus.message}
                   </p>
                   
+                  {licenseStatus.status === 'BLOCK_LEGACY' && licenseStatus.launcherUrl && (
+                    <button 
+                      onClick={() => (window as any).electronAPI?.openExternal(licenseStatus.launcherUrl)}
+                      className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl uppercase tracking-widest transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2"
+                    >
+                      <RefreshCw size={20} className="animate-spin-slow" /> 
+                      Download Latest Launcher
+                    </button>
+                  )}
+                  
                   {licenseStatus.retryCount >= 3 ? (
                     <button 
                       onClick={() => setIsRestorationForced(true)} 
@@ -805,25 +918,13 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         </div>
       )}
 
-      {!licenseStatus.checked ? (
-        <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[1000] space-y-8 animate-in fade-in duration-700">
-          <div className="relative">
-            <div className="absolute -inset-4 bg-blue-500/20 blur-2xl rounded-full animate-pulse"></div>
-            <div className="relative w-36 h-36 rounded-full border-[6px] border-white overflow-hidden shadow-2xl bg-[#020617] flex items-center justify-center">
-              <img src="./logo3.png" alt="Startup Logo" className="w-full h-full object-cover" />
-            </div>
-          </div>
-          <div className="flex items-center gap-3 animate-slow-pulse">
-            <div className="w-2 h-2 bg-blue-500 rounded-full shadow-[0_0_8px_#3b82f6]"></div>
-            <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Security Verification Underway Please Wait.....</p>
-          </div>
-        </div>
-      ) : ((!getStoredLicense() || isRestorationForced) && (showRegistrationManual || isRestorationForced || (!isSetupComplete && employees.length === 0))) ? (
+      {((!getStoredLicense() || isRestorationForced) && (showRegistrationManual || isRestorationForced || (!isSetupComplete && employees.length === 0))) ? (
         <Registration
           onComplete={handleRegistrationComplete}
           onRestore={() => window.location.reload()}
           showAlert={showAlert}
           isResetMode={localStorage.getItem('app_is_reset_mode') === 'true'}
+          onSystemRepair={handleSystemRepair}
         />
       ) : !currentUser ? (
         <Login onLogin={handleAuthLogin} currentLogo={logoUrl} setLogo={handleUpdateLogo} companyProfile={companyProfile} />
@@ -1026,15 +1127,26 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
 
       <UpdatePortal 
-        isOpen={showUpdateNotice || isUpdatePreparing || showBackgroundNotice || updateDownloaded || updateError === 'SECURITY_VIOLATION'}
+        isOpen={debugUI?.isOpen || ((showUpdateNotice || isPatchNotice || isUpdatePreparing || showBackgroundNotice || updateDownloaded || updateError === 'SECURITY_VIOLATION' || isInstalling) && !isSessionDismissed) || updateError === 'SECURITY_VIOLATION' || isInstalling}
         state={
+          debugUI?.state || (
+          isInstalling ? 'INSTALLING' :
           updateError === 'SECURITY_VIOLATION' ? 'VIOLATION' :
+          isPatchNotice ? 'PATCH' : 
           updateDownloaded ? 'READY' :
-          showBackgroundNotice ? 'BACKGROUND' :
-          isUpdatePreparing ? 'PREPARING' : 'TOAST'
+          isUpdatePreparing ? 'PREPARING' :
+          showBackgroundNotice ? 'BACKGROUND' : 'TOAST'
+          )
         }
         version={latestAppVersion}
+        isMandatory={isPatchMandatory}
+        isDownloading={isUpdateDownloading}
+        isPreparing={isUpdatePreparing}
+        downloadProgress={downloadProgress}
+        patchSkipCount={patchSkipCount}
+        deploymentStep={deploymentStep}
         onUpdateNow={() => handleUpdateNow(async () => {
+          setIsInstalling(true);
           // Pre-install persistence
           const keysToPersist = ['app_users', 'app_license_secure', 'app_data_size', 'app_employees', 'app_setup_complete', 'app_logo'];
           for (const k of keysToPersist) {
@@ -1049,6 +1161,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
            setShowUpdateNotice(false);
            setShowBackgroundNotice(false);
            setUpdateError(null);
+           setIsInstalling(false);
         }}
       />
 
@@ -1095,6 +1208,62 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <p className="mt-8 text-[10px] text-slate-500 font-bold uppercase tracking-widest">
               Security Protocol V02.02.18 Enabled
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* --- V02.02.24: MANDATORY LEGAL ALERT OVERLAY --- */}
+      {showLegalModal && companyProfile?.loginAlertMessage && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-[#020617]/95 backdrop-blur-xl animate-in fade-in duration-500">
+          <div className="bg-[#1e293b] w-full max-w-2xl rounded-[2.5rem] border border-blue-500/30 shadow-[0_0_50px_rgba(37,99,235,0.2)] overflow-hidden flex flex-col animate-in zoom-in-95 duration-500">
+            <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 p-8 flex items-center gap-6 border-b border-white/10">
+              <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-md border border-white/10 shadow-lg">
+                <ShieldAlert className="text-white" size={32} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-2xl font-black text-white tracking-tight uppercase italic leading-none">Mandatory Legal Notice</h3>
+                <p className="text-blue-200 text-[10px] font-bold opacity-80 uppercase tracking-[0.3em]">Identity Verification & Compliance Board</p>
+              </div>
+            </div>
+
+            <div className="p-10 space-y-8 bg-[#1e293b] overflow-y-auto max-h-[60vh] custom-scrollbar">
+              <div className="p-6 px-12 bg-blue-500/5 border-l-4 border-blue-500 rounded-r-2xl">
+                <p className="text-[14px] leading-relaxed text-slate-100 font-medium italic whitespace-pre-wrap text-center">
+                  {companyProfile.loginAlertMessage}
+                </p>
+              </div>
+
+              <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700/50 space-y-4">
+                <div className="flex items-start gap-4">
+                  <div className="mt-1 w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0"></div>
+                  <p className="text-xs text-slate-400 leading-relaxed font-semibold">
+                    By clicking <span className="text-emerald-400 font-black">"I HAVE READ & ACCEPT"</span>, you acknowledge that you are authorized to access this system and agree to comply with all corporate and statutory regulations.
+                  </p>
+                </div>
+                <div className="flex items-start gap-4">
+                  <div className="mt-1 w-2 h-2 rounded-full bg-red-500 shrink-0"></div>
+                  <p className="text-xs text-slate-400 leading-relaxed font-semibold">
+                    Selection of <span className="text-rose-400 font-black underline">"I DISAGREE"</span> will immediately terminate this application session.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-8 bg-[#0f172a] border-t border-slate-800 flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={handleDisagreeLegal}
+                className="flex-1 py-4 bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 font-black rounded-2xl transition-all uppercase tracking-widest text-xs border border-slate-700 hover:border-rose-500/30 group"
+              >
+                I Disagree
+              </button>
+              <button
+                onClick={handleAcceptLegal}
+                className="flex-[2] py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-blue-900/40 uppercase tracking-widest text-xs group flex items-center justify-center gap-3 active:scale-95"
+              >
+                I Have Read & Accept
+                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -11,14 +11,13 @@ echo ========================================
 :: Check for 64-bit compiler
 set "CSC=C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if not exist "%CSC%" (
-    :: Check for 32-bit compiler
+    REM Check for 32-bit compiler
     set "CSC=C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
 )
 
 if not exist "%CSC%" (
     echo [ERROR] Microsoft C# Compiler (csc.exe) not found.
     echo Please install .NET Framework 4.5 or higher.
-    pause
     exit /b 1
 )
 

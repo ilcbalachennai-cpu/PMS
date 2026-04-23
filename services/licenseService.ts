@@ -3,7 +3,8 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.21";
+export const APP_VERSION = "02.02.32";
+export const APP_PATCH_TIMESTAMP = "22-04-2026 09:45:00"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -145,13 +146,7 @@ const unscramble = (scrambled: string, customKey?: string): string | null => {
 
 const generateChecksum = (data: any): string => {
   const { checksum, ...rest } = data; // Always exclude existing checksum from hash calculation
-  const str = JSON.stringify(rest);
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return hash.toString(36);
+  return CryptoJS.SHA256(JSON.stringify(rest)).toString();
 };
 
 // --- OFFLINE PROTECTION HELPERS ---
@@ -322,15 +317,21 @@ export const isValidKeyFormat = (key: string): boolean => {
 
 const fetchFromApi = async (url: string, options: any) => {
   try {
-    // --- V02.02.18: AUTOMATIC SECURITY & VERSION INJECTION ---
+    // --- V02.02.23: SECURE SHA-256 COMMUNICATION HANDSHAKE ---
     if (options.method === 'POST' && options.body) {
       try {
         const bodyObj = JSON.parse(options.body);
-        bodyObj.authSecret = AUTH_SECRET;
-        bodyObj.version = APP_VERSION; // Inject current app version for cloud sentry
+        bodyObj.version = APP_VERSION; // Version identification
+        bodyObj.authSecret = AUTH_SECRET; // Inject secret BEFORE signing for master verification
+        
+        // Generate SHA-256 Signature (HAS 256 Unique Code)
+        // This ensures the request is authentic and hasn't been tampered with.
+        const signature = CryptoJS.HmacSHA256(JSON.stringify(bodyObj), AUTH_SECRET).toString();
+        bodyObj.signature = signature;
+        
         options.body = JSON.stringify(bodyObj);
       } catch (e) {
-        console.warn("API Auth Injection failed: Body is not JSON.");
+        console.warn("API Security Injection failed: Body is not JSON.");
       }
     }
 
@@ -697,7 +698,7 @@ export const validateLicenseStartup = async (
     if (stored.machineId !== currentMachineId) {
       return {
         valid: false,
-        message: 'Unauthorised Access Attempted, BPP App will shut down contact ilcbala.BharatPayRoll@gmail.com'
+        message: 'Unauthorised Access Attempted, BPP App will shut down contact ilcbala.Bharatpayroll@gmail.com'
       };
     }
 
@@ -708,7 +709,7 @@ export const validateLicenseStartup = async (
     if (expiry < new Date()) {
       return {
         valid: false,
-        message: 'License Expired to renew Contact ilcbala.BharatPayRoll@gmail.com'
+        message: 'License Expired to renew Contact ilcbala.Bharatpayroll@gmail.com'
       };
     }
 
@@ -805,6 +806,47 @@ export const validateLicenseStartup = async (
             const errorMsg = "Registration Conflict: The Email/Mobile provided do not match our cloud records for this User ID. Please verify your registered details or contact Support.";
             console.warn(`⚠️ [SYNC] ${errorMsg}`);
 
+            // --- V02.02.24: STATUS SYNC & TRIAL OVERWRITE ---
+            // If the cloud response provides identity data (matches Trial or Full records), 
+            // we update the local status to match the Cloud's source of truth.
+            if (result.data) {
+              const cloudIsTrial = result.data.isTrial === true;
+              const currentLicense = getStoredLicense() || { 
+                key: cloudIsTrial ? 'TRIAL' : 'N/A',
+                userName: result.data.userName || 'Restoring User',
+                userID: result.data.userID || 'RESCUE',
+                machineId: currentMachineId,
+                status: 'PENDING_RESTORE',
+                dataSize: Number(result.data.dataSize) || (cloudIsTrial ? 50 : 5000),
+                isTrial: cloudIsTrial,
+                expiryDate: result.data.expiryDate || '',
+                startDate: result.data.startDate || '',
+                registeredTo: result.data.registeredTo || '',
+                registeredMobile: String(result.data.registeredMobile || '')
+              } as LicenseData;
+
+              // Force status to PENDING_RESTORE as required by the cloud
+              currentLicense.status = 'PENDING_RESTORE';
+              if (cloudIsTrial) {
+                currentLicense.isTrial = true;
+                currentLicense.key = 'TRIAL'; // Suppress key field in UI
+                currentLicense.dataSize = 50; // STRICT: Trial users are locked to 50
+              } else {
+                currentLicense.dataSize = Number(result.data.dataSize) || 5000;
+              }
+
+              localStorage.setItem('app_data_size', String(currentLicense.dataSize));
+              currentLicense.checksum = generateChecksum(currentLicense);
+              const scrambled = scramble(JSON.stringify(currentLicense));
+              localStorage.setItem('app_license_secure', scrambled);
+              // @ts-ignore
+              if (window.electronAPI) window.electronAPI.dbSet('app_license_secure', scrambled);
+              // @ts-ignore
+              if (window.electronAPI) window.electronAPI.dbSet('app_data_size', String(currentLicense.dataSize));
+              
+              console.log(`🏷️ [SYNC] Local status overwriten to PENDING_RESTORE (${cloudIsTrial ? 'TRIAL' : 'FULL'}). Data Limit: ${currentLicense.dataSize}`);
+            }
+
             incrementSyncRetryCount();
             return {
               valid: false,
@@ -838,7 +880,7 @@ export const validateLicenseStartup = async (
               expiryDate: cloudData.expiryDate || "",
               machineId: currentMachineId,
               status: cloudData.status || (cloudIsTrial ? "REGISTERED" : "ACTIVATED"),
-              dataSize: Number(cloudData.dataSize) || (cloudIsTrial ? 50 : 5000),
+              dataSize: cloudIsTrial ? 50 : (Number(cloudData.dataSize) || 5000),
               isTrial: cloudIsTrial,
               checksum: ""
             };
@@ -896,9 +938,9 @@ export const validateLicenseStartup = async (
               storageUpdated = true;
             }
             // ✅ FIX: Sync dataSize (Employee Data Limit) from cloud
-            const incomingDataSize = cloudData.dataSize ? Number(cloudData.dataSize) : 0;
-            if (incomingDataSize > 0 && incomingDataSize !== activeLicense.dataSize) {
-              console.log(`📊 Data Limit Update: ${activeLicense.dataSize} -> ${incomingDataSize}`);
+            const incomingDataSize = activeLicense.isTrial ? 50 : (cloudData.dataSize ? Number(cloudData.dataSize) : 5000);
+            if (incomingDataSize !== activeLicense.dataSize) {
+              console.log(`📊 Data Limit Sync: ${activeLicense.dataSize} -> ${incomingDataSize}`);
               activeLicense.dataSize = incomingDataSize;
               localStorage.setItem('app_data_size', String(incomingDataSize));
               // @ts-ignore
@@ -920,6 +962,8 @@ export const validateLicenseStartup = async (
               localStorage.setItem('app_latest_version', cloudData.latestVersion);
               if (cloudData.downloadUrl) localStorage.setItem('app_download_url', cloudData.downloadUrl);
               if (cloudData.downloadUrlWin7) localStorage.setItem('app_download_url_win7', cloudData.downloadUrlWin7);
+              if (cloudData.launcherUrl) localStorage.setItem('app_launcher_url', cloudData.launcherUrl);
+              if (cloudData.patchTimestamp) localStorage.setItem('app_latest_patch_timestamp', cloudData.patchTimestamp);
             }
 
             // 4. Smart Admin Recovery & Sync
@@ -1216,7 +1260,11 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
   loginAlertEnabled?: boolean,
   latestVersion?: string,
   downloadUrl?: string,
-  downloadUrlWin7?: string
+  downloadUrlWin7?: string,
+  sha256?: string,
+  sha256_win10?: string,
+  sha256_win7?: string,
+  patchTimestamp?: string
 } | null> => {
   try {
     const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
@@ -1253,7 +1301,7 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
         updated = true;
       }
 
-      const alert = result.alert; // { message, enabled, date }
+      const alert = result.alert || result.messages?.loginAlert; // Support both root and nested structures
       const lastAlertDate = localStorage.getItem('app_last_alert_date') || '';
 
       // 4. Update LOGIN ALERT (Legal Notice)
@@ -1270,9 +1318,13 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
         versionInfo = {
           latestVersion: result.latestVersion,
           downloadUrl: result.downloadUrl,
-          downloadUrlWin7: result.downloadUrlWin7
+          downloadUrlWin7: result.downloadUrlWin7,
+          launcherUrl: result.launcherUrl,
+          patchTimestamp: result.patchTimestamp
         };
         localStorage.setItem('app_latest_version', result.latestVersion);
+        if (result.launcherUrl) localStorage.setItem('app_launcher_url', result.launcherUrl);
+        if (result.patchTimestamp) localStorage.setItem('app_latest_patch_timestamp', result.patchTimestamp);
       }
 
       if (updated || force || versionInfo) {

@@ -46,7 +46,9 @@ export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
   flashPopupPriority: 'REGULAR',
   flashPopupId: '',
   externalAppUrl: '', // Default empty
-  securityPin: ''
+  securityPin: '',
+  loginAlertEnabled: false,
+  loginAlertMessage: ''
 };
 
 export const NATURE_OF_BUSINESS_OPTIONS = [

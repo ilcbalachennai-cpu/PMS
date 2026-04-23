@@ -7,6 +7,16 @@ const { execSync } = require('child_process');
 async function build() {
     console.log('--- Building Protected Electron Main Process ---');
 
+    const distPath = path.join(__dirname, '../dist-electron');
+
+    // 0. Mandatory Cleanup - DO THIS FIRST
+    if (fs.existsSync(distPath)) {
+        console.log('Step 0: Cleaning old build artifacts...');
+        fs.rmSync(distPath, { recursive: true, force: true });
+    }
+    // mkdir is not strictly needed as tsc will create it, but safer to have it
+    if (!fs.existsSync(distPath)) fs.mkdirSync(distPath, { recursive: true });
+
     // 1. Compile TS to JS
     console.log('Step 1: Compiling TypeScript...');
     try {
@@ -16,7 +26,6 @@ async function build() {
         process.exit(1);
     }
 
-    const distPath = path.join(__dirname, '../dist-electron');
     const mainJsPath = path.join(distPath, 'main.js');
     const mainJscPath = path.join(distPath, 'main.jsc');
 
@@ -48,7 +57,7 @@ async function build() {
         transformObjectKeys: false,
         unicodeEscapeSequence: false
     });
-    fs.writeFileSync(mainJsPath, obfuscationResult.getObfuscatedCode());
+    fs.writeFileSync(mainJsPath, obfuscationResult.getObfuscatedCode(), 'utf8');
 
     // 2.1 Obfuscate Preload
     const preloadJsPath = path.join(distPath, 'preload.js');
@@ -63,7 +72,7 @@ async function build() {
             stringArray: true,
             stringArrayEncoding: ['base64']
         });
-        fs.writeFileSync(preloadJsPath, preloadObfuscationResult.getObfuscatedCode());
+        fs.writeFileSync(preloadJsPath, preloadObfuscationResult.getObfuscatedCode(), 'utf8');
     }
 
     // 3. Compile to Bytecode (Bytenode) using exact Electron version
@@ -89,11 +98,10 @@ async function build() {
 require('bytenode');
 require('./main.jsc');
     `.trim();
-    fs.writeFileSync(mainJsPath, bootstrapCode);
+    fs.writeFileSync(mainJsPath, bootstrapCode, 'utf8');
 
-    // 5. Ensure dist-electron/package.json exists
-    if (!fs.existsSync(distPath)) fs.mkdirSync(distPath);
-    fs.writeFileSync(path.join(distPath, 'package.json'), JSON.stringify({ type: 'commonjs' }));
+    // 5. Ensure dist-electron/package.json exists with clean encoding
+    fs.writeFileSync(path.join(distPath, 'package.json'), JSON.stringify({ type: 'commonjs' }), 'utf8');
 
     console.log('--- Protection Complete! ---');
 }

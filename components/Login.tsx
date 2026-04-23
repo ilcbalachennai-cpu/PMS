@@ -32,12 +32,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
   const [isResetting, setIsResetting] = useState(false);
   const [resetError, setResetError] = useState('');
   const [showDevModal, setShowDevModal] = useState(false);
-  const [showLegalModal, setShowLegalModal] = useState(false);
-  const [hasAgreedLegal, setHasAgreedLegal] = useState(() => {
-    const lastAgreedDate = localStorage.getItem('app_legal_agreed_date');
-    const today = new Date().toISOString().split('T')[0];
-    return lastAgreedDate === today;
-  });
   const [devOTP, setDevOTP] = useState('');
   const [isVerifyingDev, setIsVerifyingDev] = useState(false);
   const [devError, setDevError] = useState('');
@@ -98,15 +92,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
     if (sessionStorage.getItem('logout_reason') === 'timeout') {
       setShowTimeoutMessage(true);
       sessionStorage.removeItem('logout_reason');
+
+      // V02.02.25: Automatically trigger Full Screen during session expiry
+      // to maximize vertical space and bring UI elements into focus.
+      const api = (window as any).electronAPI;
+      if (api && api.setFullScreen) {
+        api.setFullScreen(true).catch((err: any) => console.warn("Auto-fullscreen failed:", err));
+      } else if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {
+          console.warn("Auto-fullscreen blocked by browser policy (gesture required).");
+        });
+      }
     }
-    
-    // Check if legal alert should be shown
-    if (companyProfile?.loginAlertEnabled && companyProfile.loginAlertMessage && !hasAgreedLegal) {
-      // Small timeout to ensure app state is settled
-      const timer = setTimeout(() => setShowLegalModal(true), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [companyProfile?.loginAlertEnabled, companyProfile?.loginAlertMessage, hasAgreedLegal]);
+  }, []);
 
   // Monitor bridge status
   useEffect(() => {
@@ -505,13 +503,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
     }
   };
 
-  const handleAcceptLegal = () => {
-    const today = new Date().toISOString().split('T')[0];
-    setHasAgreedLegal(true);
-    setShowLegalModal(false);
-    localStorage.setItem('app_legal_agreed_date', today);
-  };
-
   const handleVerifySyncEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     setSyncError('');
@@ -608,22 +599,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
     }
   };
 
-  const handleDisagreeLegal = () => {
-    const api = (window as any).electronAPI;
-    if (api) {
-      try {
-        if (api.closeApp) api.closeApp();
-        else if (api.invoke) api.invoke('close-app');
-      } catch (err) {
-        console.error("LEGAL: Close failed", err);
-      }
-    } else {
-      window.close();
-    }
-  };
-
   return (
-    <div className="min-h-screen w-full bg-[#020617] flex items-center justify-center p-4 relative">
+    <div className="min-h-screen w-full bg-[#020617] flex flex-col items-center justify-center p-4 relative overflow-y-auto custom-scrollbar">
       {/* Full Screen Toggle Button */}
       <button
         onClick={toggleFullScreen}
@@ -666,7 +643,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
       <div className="w-full max-w-4xl relative z-10 bg-[#1e293b] border border-slate-700 rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row">
 
         {/* Left: Branding & Info */}
-        <div className="md:w-1/2 bg-[#0f172a] p-10 md:p-16 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 text-center relative overflow-hidden group">
+        <div className="md:w-1/2 bg-[#0f172a] p-8 md:p-10 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 text-center relative overflow-hidden group">
           {/* Subtle Glow Background for Logo */}
           <div className="absolute inset-0 bg-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
 
@@ -716,24 +693,30 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
         </div>
 
         {/* Right: Login Form */}
-        <div className="md:w-1/2 p-10 md:p-16 bg-[#1e293b] flex flex-col justify-center relative overflow-hidden">
+        <div className="md:w-1/2 p-8 md:p-10 bg-[#1e293b] flex flex-col justify-center relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 rounded-full blur-[80px] -mr-32 -mt-32"></div>
           <div className="relative z-10">
-            <div className="mb-10">
+            <div className="mb-6">
               <h2 className="text-3xl font-black text-white tracking-tight">Welcome Back</h2>
-              <p className="text-slate-400 text-sm mt-2 font-medium">Please sign in to your secure portal.</p>
+              <p className="text-slate-400 text-sm mt-1 font-medium">Please sign in to your secure portal.</p>
             </div>
 
             {showTimeoutMessage && (
-              <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-4 flex items-start gap-3 animate-in fade-in slide-in-from-top-2 mb-6">
-                <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={18} />
-                <p className="text-sm text-red-200">
-                  BPP_APP was inactive over 10 minutes, relogin to continue with App access
-                </p>
+              <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-4 flex items-start gap-4 animate-in fade-in slide-in-from-top-2 mb-4 shadow-lg shadow-red-950/20">
+                <div className="p-2 bg-red-500/20 rounded-lg shrink-0">
+                  <AlertCircle className="text-red-400" size={20} />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-[11px] font-black text-red-400 uppercase tracking-[0.2em]">Session Expired</h4>
+                  <p className="text-xs text-red-200 leading-relaxed font-medium">
+                    Session Inactive for over 10 minutes.<br /> 
+                    Please relogin to access the application.
+                  </p>
+                </div>
               </div>
             )}
 
-            <form onSubmit={handleLogin} className="space-y-6">
+            <form onSubmit={handleLogin} className="space-y-4">
               {error && (
                 <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
                   <div className="flex items-start gap-3">
@@ -805,7 +788,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
               </button>
 
               <div className="pt-2">
-                <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-3 text-center">Quick Access Roles</p>
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1 text-center">Quick Access Roles</p>
                 <div className={`grid grid-cols-3 gap-2 max-w-sm mx-auto`}>
                   {(() => {
                     const savedUsersRaw = localStorage.getItem('app_users');
@@ -892,65 +875,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
           &copy; 2025 {BRAND_CONFIG.companyName}. All rights reserved.
         </div>
       </div>
-
-      {/* Legal Notice Modal Gate */}
-      {showLegalModal && companyProfile?.loginAlertMessage && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-[#020617]/95 backdrop-blur-xl animate-in fade-in duration-500">
-          <div className="bg-[#1e293b] w-full max-w-2xl rounded-[2.5rem] border border-blue-500/30 shadow-[0_0_50px_rgba(37,99,235,0.2)] overflow-hidden flex flex-col animate-in zoom-in-95 duration-500">
-            {/* Header Section */}
-            <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 p-8 flex items-center gap-6 border-b border-white/10">
-              <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-md border border-white/10 shadow-lg">
-                <ShieldAlert className="text-white" size={32} />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-2xl font-black text-white tracking-tight uppercase italic leading-none">Mandatory Legal Notice</h3>
-                <p className="text-blue-200 text-[10px] font-bold opacity-80 uppercase tracking-[0.3em]">Identity Verification & Compliance Board</p>
-              </div>
-            </div>
-
-            {/* Content Section */}
-            <div className="p-10 space-y-8 bg-[#1e293b] overflow-y-auto max-h-[60vh] custom-scrollbar">
-              <div className="p-6 px-12 bg-blue-500/5 border-l-4 border-blue-500 rounded-r-2xl">
-                <p className="text-[14px] leading-relaxed text-slate-100 font-medium italic whitespace-pre-wrap text-center">
-                  {companyProfile.loginAlertMessage}
-                </p>
-              </div>
-
-              <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700/50 space-y-4">
-                <div className="flex items-start gap-4">
-                  <div className="mt-1 w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0"></div>
-                  <p className="text-xs text-slate-400 leading-relaxed font-semibold">
-                    By clicking <span className="text-emerald-400 font-black">"I HAVE READ & ACCEPT"</span>, you acknowledge that you are authorized to access this system and agree to comply with all corporate and statutory regulations.
-                  </p>
-                </div>
-                <div className="flex items-start gap-4">
-                  <div className="mt-1 w-2 h-2 rounded-full bg-red-500 shrink-0"></div>
-                  <p className="text-xs text-slate-400 leading-relaxed font-semibold">
-                    Selection of <span className="text-rose-400 font-black underline">"I DISAGREE"</span> will immediately terminate this application session.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer Action Bar */}
-            <div className="p-8 bg-[#0f172a] border-t border-slate-800 flex flex-col sm:flex-row gap-4">
-              <button
-                onClick={handleDisagreeLegal}
-                className="flex-1 py-4 bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 font-black rounded-2xl transition-all uppercase tracking-widest text-xs border border-slate-700 hover:border-rose-500/30 group"
-              >
-                I Disagree
-              </button>
-              <button
-                onClick={handleAcceptLegal}
-                className="flex-[2] py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-blue-900/40 uppercase tracking-widest text-xs group flex items-center justify-center gap-3 active:scale-95"
-              >
-                I Have Read & Accept
-                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Forgot Password Modal */}
       <CustomModal
@@ -1487,6 +1411,33 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
           </div>
         }
       />
+      {/* --- DEVELOPER UI TESTBED (HIDDEN IN PROD) --- */}
+      {import.meta.env.DEV && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex gap-4 px-6 py-3 bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-4">
+           <div className="flex items-center gap-2 pr-4 border-r border-white/10">
+              <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">UI Testbed</span>
+           </div>
+           <button 
+             onClick={() => window.dispatchEvent(new CustomEvent('BPP_DEV_TEST_UI', { detail: { state: 'READY' } }))}
+             className="px-4 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-[9px] font-black uppercase tracking-widest rounded-lg border border-blue-500/30 transition-all shadow-lg active:scale-95"
+           >
+             Test Version UI
+           </button>
+           <button 
+             onClick={() => window.dispatchEvent(new CustomEvent('BPP_DEV_TEST_UI', { detail: { state: 'PATCH' } }))}
+             className="px-4 py-1.5 bg-amber-600/20 hover:bg-amber-600 text-amber-500 hover:text-white text-[9px] font-black uppercase tracking-widest rounded-lg border border-amber-500/30 transition-all shadow-lg active:scale-95"
+           >
+             Test Patch UI
+           </button>
+           <button 
+             onClick={() => window.dispatchEvent(new CustomEvent('BPP_DEV_TEST_UI', { detail: { open: false } }))}
+             className="px-4 py-1.5 bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white text-[9px] font-black uppercase tracking-widest rounded-lg border border-white/5 transition-all active:scale-95"
+           >
+             Close Test
+           </button>
+        </div>
+      )}
     </div >
   );
 };

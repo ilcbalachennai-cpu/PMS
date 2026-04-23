@@ -23,7 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAppDirectory: () => ipcRenderer.invoke('get-app-directory'),
     apiFetch: (url: string, options: any) => ipcRenderer.invoke('api-fetch', url, options),
     startUpdateDownload: (url: string, expectedHash?: string) => ipcRenderer.invoke('start-update-download', url, expectedHash),
-    backupAndInstall: () => ipcRenderer.invoke('backup-and-install'),
+    backupAndInstall: (options?: { silent?: boolean }) => ipcRenderer.invoke('backup-and-install', options),
     findBPPApp: () => ipcRenderer.invoke('find-bpp-app'),
     openItemLocation: (filePath: string) =>
         ipcRenderer.invoke('open-item-location', filePath),
@@ -31,9 +31,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('open-item-path', filePath),
     openUserManual: () => ipcRenderer.invoke('open-user-manual'),
     getOSVersion: () => ipcRenderer.invoke('get-os-version'),
+    setFullScreen: (flag: boolean) => ipcRenderer.invoke('set-fullscreen', flag),
+    getIsFullScreen: () => ipcRenderer.invoke('get-fullscreen'),
     onUpdateDownloadComplete: (callback: () => void) => {
         ipcRenderer.on('update-download-complete', callback);
     },
+    onUpdateDownloadProgress: (callback: (progress: number) => void) => {
+        ipcRenderer.on('update-download-progress', (_, progress: number) => callback(progress));
+    },
+    relaunchApp: () => ipcRenderer.invoke('relaunch-app'),
+    openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
     getIsElectron: () => true,
     getIsDev: () => process.env.NODE_ENV === 'development'
 });

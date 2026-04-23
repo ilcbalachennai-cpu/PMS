@@ -1,7 +1,7 @@
 /**
- * BHARATPAY PRO - GOOGLE APPS SCRIPT (v02.02.21 PRODUCTION)
+ * BHARATPAY PRO - GOOGLE APPS SCRIPT (v02.02.22 PRODUCTION)
  * -----------------------------------------------------------
- * - Updated: 18-APR-2026 : 01.40 AM
+ * - Updated: 18-APR-2026 : 21.03 PM
  * - FIX 1: handleStartupValidation — STRICT 4-FIELD SYNC (ID, Pass, Machine, Email).
  * - FIX 2: Fixed Status Column displacement (EXPIRED moving to Machine ID Col).
  * - FIX 3: Audited Indices: 
@@ -57,8 +57,8 @@ function doPost(e) {
         const ss     = SpreadsheetApp.openById(SPREADSHEET_ID);
 
         // --- V02.02.21: SELECTIVE VERSION SENTRY (Hard Guard) ---
-        const SUPPORT_FLOOR = "01.01.12"; // Versions below this lack auto-update code
-        const currentVersion = params.version || "0.0.0";
+        const SUPPORT_FLOOR = "02.02.13"; // Versions below this are formally sunsetted
+        const currentVersion = params.version || "02.02.12";
         
         if (compareVersions(currentVersion, SUPPORT_FLOOR) < 0) {
             const config = getAppConfig(ss);
@@ -1319,7 +1319,7 @@ function fetchLatestDeveloperMessages(ss) {
             else if (type === "ALERT" && !resp.loginAlert) resp.loginAlert = { message: data[i][2], date: data[i][1], enabled: data[i][7] !== "DISABLED" };
         }
     }
-    return jsonResponse({ success: true, messages: resp, latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7 });
+    return jsonResponse({ success: true, messages: resp, latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, patchTimestamp: config.patchTimestamp });
 }
 
 function handleUpdateMessages(ss, params) { const s = ss.getSheetByName('Developer_Message'); if (!s) return jsonResponse({ success: false }); const now = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy HH:mm:ss"); s.appendRow([now, now, params.message, params.type, "ADMIN", params.header, params.alignment, params.key]); return jsonResponse({ success: true }); }
@@ -1327,13 +1327,15 @@ function handleUpdateMessages(ss, params) { const s = ss.getSheetByName('Develop
 
 function getAppConfig(ss) {
     const sheet = ss.getSheetByName('App_Config');
-    if (!sheet) return { latestVersion: "02.02.21", launcherUrl: "" };
-    const d = sheet.getRange(2, 1, 1, 4).getValues()[0];
+    if (!sheet) return { latestVersion: "02.02.22", launcherUrl: "" };
+    // Read 6 columns (A-F)
+    const d = sheet.getRange(2, 1, 1, 6).getValues()[0];
     return { 
-      latestVersion: String(d[0] || "02.02.21"), 
+      latestVersion: String(d[0] || "02.02.22"), 
       downloadUrl: String(d[1] || ""), 
       downloadUrlWin7: String(d[2] || ""),
       launcherUrl: String(d[3] || ""),
+      patchTimestamp: String(d[5] || ""), // Column F
       sha256: "AD329B57D8C9B3D56D3C9FADA17602D3B5D9E5BEC4BEB0D2E0FB54F44971565F",
       sha256Win7: "544972D5AB871359314C5F35DF8A2C66ADCFD23CEE8411C1498AD43AFB9079A3"
     };
@@ -1936,4 +1938,21 @@ function protectSensitiveSheets() {
   });
   
   ss.toast("🛡️ All sheets are now programmatically locked. Only you (" + userEmail + ") can edit.", "BPP Total Security", 7);
+}
+// ── AUTOMATIC HOT-PATCH TRIGGER ──
+// Updates Column F (Timestamp) whenever B (Win10 Link), C (Win7 Link), or E (Patch Context) changes.
+function onEdit(e) {
+  const sheet = e.source.getActiveSheet();
+  if (sheet.getName() !== 'App_Config') return;
+  
+  const range = e.range;
+  const col = range.getColumn();
+  const row = range.getRow();
+  
+  // Only watch row 2, columns B(2), C(3), and E(5)
+  if (row === 2 && (col === 2 || col === 3 || col === 5)) {
+    const timestamp = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy HH:mm:ss");
+    sheet.getRange(2, 6).setValue(timestamp); // Update Column F
+    console.log("🛠️ App_Config Timestamp Updated: " + timestamp);
+  }
 }
