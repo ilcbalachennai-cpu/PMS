@@ -3,7 +3,7 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.33";
+export const APP_VERSION = "02.02.38";
 export const APP_PATCH_TIMESTAMP = "22-04-2026 09:45:00"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
@@ -323,12 +323,12 @@ const fetchFromApi = async (url: string, options: any) => {
         const bodyObj = JSON.parse(options.body);
         bodyObj.version = APP_VERSION; // Version identification
         bodyObj.authSecret = AUTH_SECRET; // Inject secret BEFORE signing for master verification
-        
+
         // Generate SHA-256 Signature (HAS 256 Unique Code)
         // This ensures the request is authentic and hasn't been tampered with.
         const signature = CryptoJS.HmacSHA256(JSON.stringify(bodyObj), AUTH_SECRET).toString();
         bodyObj.signature = signature;
-        
+
         options.body = JSON.stringify(bodyObj);
       } catch (e) {
         console.warn("API Security Injection failed: Body is not JSON.");
@@ -811,7 +811,7 @@ export const validateLicenseStartup = async (
             // we update the local status to match the Cloud's source of truth.
             if (result.data) {
               const cloudIsTrial = result.data.isTrial === true;
-              const currentLicense = getStoredLicense() || { 
+              const currentLicense = getStoredLicense() || {
                 key: cloudIsTrial ? 'TRIAL' : 'N/A',
                 userName: result.data.userName || 'Restoring User',
                 userID: result.data.userID || 'RESCUE',
@@ -843,7 +843,7 @@ export const validateLicenseStartup = async (
               if (window.electronAPI) window.electronAPI.dbSet('app_license_secure', scrambled);
               // @ts-ignore
               if (window.electronAPI) window.electronAPI.dbSet('app_data_size', String(currentLicense.dataSize));
-              
+
               console.log(`🏷️ [SYNC] Local status overwriten to PENDING_RESTORE (${cloudIsTrial ? 'TRIAL' : 'FULL'}). Data Limit: ${currentLicense.dataSize}`);
             }
 
@@ -1427,7 +1427,7 @@ export const trackHeartbeat = async (email: string, machineId: string, userID: s
       method: 'POST',
       body: payload,
       // @ts-ignore
-      keepalive: isLogout 
+      keepalive: isLogout
     }).catch(e => console.error("Heartbeat Tracking Warning:", e));
   } catch (e) {
     console.warn("Heartbeat Tracking Error:", e);

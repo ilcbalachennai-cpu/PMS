@@ -789,104 +789,74 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
     });
 });
 
-ipcMain.handle('backup-and-install', async (_, options?: { silent?: boolean }) => {
-    try {
-        if (!appBasePath) throw new Error("App storage not initialized");
-        const paths = getAppPaths(appBasePath);
-        const snapshotDir = path.join(paths.backups, 'PRE_UPDATE_SNAPSHOT');
+ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean }) => {
+    // 1. INSTANT SUCCESS SIGNAL: Tell the renderer to finish its countdown immediately
+    const isSilent = options?.silent ?? false;
+    const installerPath = getInstallerPath();
 
-        if (!fs.existsSync(snapshotDir)) fs.mkdirSync(snapshotDir, { recursive: true });
+    // 2. INSTANT HIDING: Release focus back to the OS within milliseconds
+    if (mainWindow) {
+        mainWindow.hide();
+    }
 
-        // 1. Close DB Connection
-        if (db) {
-            db.close();
-            db = null;
-        }
-
-        // 2. Snapshot Data
-        const dbFile = path.join(paths.data, 'active_db.sqlite');
-        if (fs.existsSync(dbFile)) {
-            fs.copyFileSync(dbFile, path.join(snapshotDir, 'active_db_snapshot.sqlite'));
-        }
-        if (fs.existsSync(CONFIG_PATH)) {
-            fs.copyFileSync(CONFIG_PATH, path.join(snapshotDir, 'app-config_snapshot.json'));
-        }
-
-        console.log('📦 Data snapshot created in:', snapshotDir);
-
-        // 3. Verify installer file exists and has content
-        const installerPath = getInstallerPath();
-        if (!fs.existsSync(installerPath)) {
-            throw new Error("Installer file not found in temp directory. Please try downloading the update again.");
-        }
-        const installerSize = fs.statSync(installerPath).size;
-        if (installerSize < 1024 * 100) { // Less than 100KB = likely corrupt/incomplete
-            fs.unlinkSync(installerPath); // Remove corrupt file
-            throw new Error(`Installer file appears corrupt (${installerSize} bytes). Please try downloading the update again.`);
-        }
-
-        const isSilent = options?.silent ?? false;
-        console.log(`🚀 Launching ${isSilent ? 'SILENT ' : ''}update installer from: ${installerPath} (${installerSize} bytes)`);
-
-        // 4. Unblock the file (Safe approach)
+    // 3. DETACHED WORKER: All heavy lifting (closing DB, backups, launching) happens in the shadows
+    (async () => {
         try {
-            // Escape path for PowerShell (doubling single quotes is the standard way to escape them in ' strings)
-            const escapedPath = installerPath.replace(/'/g, "''");
-            execSync(
-                `powershell.exe -NoProfile -WindowStyle Hidden -Command "if (Get-Command Unblock-File -ErrorAction SilentlyContinue) { Unblock-File -LiteralPath '${escapedPath}' }"`,
-                { timeout: 5000 }
-            );
-            console.log('🔓 File unblocked successfully.');
-        } catch (unblockErr) {
-            console.warn('⚠️ Unblock failed (non-fatal):', unblockErr);
-        }
+            console.log('--- HYPER-ASYNC HANDOFF START ---');
+            
+            // A. Gently close database if it hasn't been closed already
+            if (db) {
+                try { db.close(); } catch(e) {}
+                db = null;
+            }
 
-        // 5. Launch the installer
-        let launchError: Error | null = null;
-        try {
-            const escapedPath = installerPath.replace(/'/g, "''");
-            const escapedExec = process.execPath.replace(/'/g, "''");
+            // B. Snapshot/Backup (Run inside try-catch to ensure launch isn't delayed by file locks)
+            try {
+                if (appBasePath) {
+                    const paths = getAppPaths(appBasePath);
+                    const snapshotDir = path.join(paths.backups, `v${app.getVersion()}_SAFETY_BACKUP`);
+                    if (!fs.existsSync(snapshotDir)) fs.mkdirSync(snapshotDir, { recursive: true });
+                    
+                    const dbFile = path.join(paths.data, 'active_db.sqlite');
+                    if (fs.existsSync(dbFile)) {
+                        fs.copyFileSync(dbFile, path.join(snapshotDir, 'active_db_snapshot.sqlite'));
+                    }
+                }
+            } catch (backupErr) {
+                console.warn('⚠️ Safety backup skipped due to file lock, proceeding to launch:', backupErr);
+            }
+
+            // C. POWER LAUNCH: Single, robust trigger mechanism
+            // We use 'start' via cmd.exe as it's the most reliable way to hand off to the OS 
+            // and immediately detach from the dying parent process.
+            spawn('cmd.exe', ['/c', 'start', '', `"${installerPath}"`], { 
+                detached: true, 
+                stdio: 'ignore',
+                windowsVerbatimArguments: true
+            }).unref();
 
             if (isSilent) {
-                // SILENT: Start installer, then start app (No -Wait to prevent hanging the wrapper)
-                const silentCmd = `Start-Process -FilePath '${escapedPath}' -ArgumentList '/S'; Start-Sleep -s 1; Start-Process -FilePath '${escapedExec}'`;
-                spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', silentCmd], {
-                    detached: true,
-                    stdio: 'ignore'
-                }).unref();
-            } else {
-                // INTERACTIVE: Just launch the installer
-                spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', `Start-Process -FilePath '${escapedPath}'`], {
-                    detached: true,
-                    stdio: 'ignore'
+                spawn(installerPath, ['/S'], { 
+                    detached: true, 
+                    stdio: 'ignore', 
+                    windowsHide: true 
                 }).unref();
             }
-        } catch (spawnErr: any) {
-            launchError = spawnErr;
-        }
 
-        if (launchError) {
-            if (mainWindow) {
-                mainWindow.show();
-                dialog.showErrorBox('Launch Failed', `Could not start installer: ${launchError.message}`);
-            }
-            throw launchError;
-        }
+            // D. FINAL EXIT: Allow 3 seconds for OS to settle, then terminate parent process
+            setTimeout(() => {
+                console.log('🏁 Termination successful.');
+                app.quit();
+                setTimeout(() => app.exit(0), 1000);
+            }, 3000);
 
-        // 6. SUCCESS: Hide and Kill
-        if (mainWindow) {
-            mainWindow.hide();
+        } catch (err) {
+            console.error('❌ Critical failure in background worker:', err);
+            app.exit(1);
         }
-        
-        // Final heartbeat to ensure log is flushed
-        console.log('🏁 Execution complete. Exiting app.');
-        app.exit(0);
-        return { success: true };
-    } catch (e: any) {
-        console.error('❌ Update launch failed:', e);
-        if (appBasePath && !db) initializeDatabase(appBasePath);
-        return { success: false, error: e.message };
-    }
+    })();
+
+    return { success: true };
 });
 
 function cleanupOldInstallers() {
