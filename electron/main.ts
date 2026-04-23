@@ -828,71 +828,62 @@ ipcMain.handle('backup-and-install', async (_, options?: { silent?: boolean }) =
         const isSilent = options?.silent ?? false;
         console.log(`🚀 Launching ${isSilent ? 'SILENT ' : ''}update installer from: ${installerPath} (${installerSize} bytes)`);
 
-        // 4. Unblock the file — removes Zone.Identifier ADS that Windows uses to flag
-        //    downloaded files as "from the internet", causing SmartScreen to block them.
+        // 4. Unblock the file (Safe approach)
         try {
+            // Escape path for PowerShell (doubling single quotes is the standard way to escape them in ' strings)
+            const escapedPath = installerPath.replace(/'/g, "''");
             execSync(
-                `powershell.exe -WindowStyle Hidden -Command "Unblock-File -Path '${installerPath}' -ErrorAction SilentlyContinue"`,
-                { timeout: 8000 }
+                `powershell.exe -NoProfile -WindowStyle Hidden -Command "if (Get-Command Unblock-File -ErrorAction SilentlyContinue) { Unblock-File -LiteralPath '${escapedPath}' }"`,
+                { timeout: 5000 }
             );
-            console.log('🔓 File unblocked (Zone.Identifier removed). SmartScreen will not block.');
+            console.log('🔓 File unblocked successfully.');
         } catch (unblockErr) {
-            console.warn('⚠️ Could not unblock file (non-fatal, continuing):', unblockErr);
+            console.warn('⚠️ Unblock failed (non-fatal):', unblockErr);
         }
 
-        // 5. Launch the installer via PowerShell Start-Process with RunAs elevation.
-        //    This is the most reliable method: it properly elevates, handles SmartScreen,
-        //    and works even when the app is not code-signed.
+        // 5. Launch the installer
         let launchError: Error | null = null;
         try {
+            const escapedPath = installerPath.replace(/'/g, "''");
+            const escapedExec = process.execPath.replace(/'/g, "''");
+
             if (isSilent) {
-                // SILENT: Install quietly, then relaunch the app
-                const silentCmd = `Start-Process -FilePath '${installerPath}' -ArgumentList '/S' -Wait; Start-Process -FilePath '${process.execPath}'`;
-                spawn('powershell.exe', ['-WindowStyle', 'Hidden', '-Command', silentCmd], {
+                // SILENT: Start installer, then start app (No -Wait to prevent hanging the wrapper)
+                const silentCmd = `Start-Process -FilePath '${escapedPath}' -ArgumentList '/S'; Start-Sleep -s 1; Start-Process -FilePath '${escapedExec}'`;
+                spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', silentCmd], {
                     detached: true,
                     stdio: 'ignore'
                 }).unref();
-                console.log('👋 Silent install + auto-relaunch initiated.');
             } else {
-                // INTERACTIVE: Show the installer UI to the user
-                spawn('powershell.exe', [
-                    '-WindowStyle', 'Hidden',
-                    '-Command',
-                    `Start-Process -FilePath '${installerPath}'`
-                ], {
+                // INTERACTIVE: Just launch the installer
+                spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', `Start-Process -FilePath '${escapedPath}'`], {
                     detached: true,
                     stdio: 'ignore'
                 }).unref();
-                console.log('👋 Interactive installer launched.');
             }
         } catch (spawnErr: any) {
             launchError = spawnErr;
         }
 
         if (launchError) {
-            // Launch failed — show the window again so user is not left staring at a black screen
-            console.error('❌ Failed to launch installer:', launchError);
             if (mainWindow) {
                 mainWindow.show();
-                dialog.showErrorBox(
-                    'Update Failed to Launch',
-                    `The installer could not be started.\n\nError: ${launchError.message}\n\nPlease run the installer manually from:\n${installerPath}`
-                );
+                dialog.showErrorBox('Launch Failed', `Could not start installer: ${launchError.message}`);
             }
-            return { success: false, error: launchError.message };
+            throw launchError;
         }
 
-        // 6. All good — hide window and hard-exit to release all file locks
+        // 6. SUCCESS: Hide and Kill
         if (mainWindow) {
             mainWindow.hide();
         }
-        console.log('✅ Installer launched. Performing hard exit to release file locks...');
+        
+        // Final heartbeat to ensure log is flushed
+        console.log('🏁 Execution complete. Exiting app.');
         app.exit(0);
-
         return { success: true };
     } catch (e: any) {
-        console.error('❌ Pre-update backup or install failed:', e);
-        // Attempt to re-init DB if failed
+        console.error('❌ Update launch failed:', e);
         if (appBasePath && !db) initializeDatabase(appBasePath);
         return { success: false, error: e.message };
     }

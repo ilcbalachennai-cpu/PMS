@@ -179,9 +179,13 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false) => {
 
         localStorage.removeItem('app_update_ready');
         // @ts-ignore - Pass silent flag for patches
-        await (window as any).electronAPI.backupAndInstall({ silent: isPatchNotice });
-      } catch (e) {
+        const result = await (window as any).electronAPI.backupAndInstall({ silent: isPatchNotice });
+        if (result && result.success === false) {
+           showAlert('error', 'Restart Failed', `The update was downloaded but the installer could not be launched automatically: ${result.error || 'Unknown error'}. Please try restarting the app manually.`);
+        }
+      } catch (e: any) {
         console.error("Update process error:", e);
+        showAlert('error', 'Update Error', `An error occurred during the update sequence: ${e.message || 'Unknown error'}`);
       } finally {
         setIsUpdateDownloading(false);
         setIsUpdatePreparing(false);
