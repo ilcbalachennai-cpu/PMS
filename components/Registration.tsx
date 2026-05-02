@@ -45,6 +45,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     const [licenseKey, setLicenseKey] = useState('');
     const [regEmail, setRegEmail] = useState('');
     const [regMobile, setRegMobile] = useState('');
+    const [showKeyInput, setShowKeyInput] = useState(false);
     const [_profile, setProfile] = useState<CompanyProfile>(INITIAL_COMPANY_PROFILE);
     const [_config] = useState<StatutoryConfig>(INITIAL_STATUTORY_CONFIG);
     const [adminPassword, setAdminPassword] = useState('');
@@ -719,20 +720,34 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 />
                                             </div>
                                         </div>
-                                        <div className={isTrialUser ? "hidden" : "space-y-2"}>
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">License Key (Optional)</label>
-                                            <input
-                                                type="text"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white font-mono text-center tracking-[0.2em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-700"
-                                                placeholder="XXXX-XXXX-XXXX-XXXX"
-                                                value={licenseKey}
-                                                onChange={e => {
-                                                    const val = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 16);
-                                                    const formatted = val.match(/.{1,4}/g)?.join('-') || val;
-                                                    setLicenseKey(formatted);
-                                                }}
-                                            />
-                                        </div>
+                                        {(!isTrialUser || showKeyInput) && (
+                                            <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">License Key (16-Digit)</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white font-mono text-center tracking-[0.2em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-700"
+                                                    placeholder="XXXX-XXXX-XXXX-XXXX"
+                                                    value={licenseKey}
+                                                    onChange={e => {
+                                                        const val = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 16);
+                                                        const formatted = val.match(/.{1,4}/g)?.join('-') || val;
+                                                        setLicenseKey(formatted);
+                                                    }}
+                                                />
+                                            </div>
+                                        )}
+                                        {isTrialUser && !showKeyInput && (
+                                            <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-xl flex flex-col items-center gap-3">
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Upgrade to Full System</p>
+                                                <button 
+                                                    onClick={() => setShowKeyInput(true)}
+                                                    className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-[9px] font-black uppercase tracking-[0.2em] rounded-lg border border-blue-500/30 transition-all flex items-center gap-2"
+                                                >
+                                                    <KeyRound size={12} />
+                                                    Activate License Key
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Password Setup */}

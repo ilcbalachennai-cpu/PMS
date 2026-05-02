@@ -731,6 +731,23 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
                     file.end();
                     console.log('✅ Update downloaded to:', dest);
 
+                    // --- V02.02.40: BINARY INTEGRITY CHECK ---
+                    // Verify the file is actually a Windows Executable (MZ Header)
+                    try {
+                        const buffer = new Uint8Array(2);
+                        const fd = fs.openSync(dest, 'r');
+                        fs.readSync(fd, buffer, 0, 2, 0);
+                        fs.closeSync(fd);
+                        if (String.fromCharCode(buffer[0], buffer[1]) !== 'MZ') {
+                            console.error('❌ Security Violation: Downloaded file is not a valid Windows Executable.');
+                            fs.unlinkSync(dest);
+                            resolve({ success: false, error: 'INVALID_BINARY_TYPE' });
+                            return;
+                        }
+                    } catch (e) {
+                        console.error('❌ Failed to verify binary header:', e);
+                    }
+
                     // ── SHA-256 INTEGRITY VERIFICATION ──
                     if (expectedHash && expectedHash.trim() !== "") {
                         console.log('🛡️ Verifying SHA-256 integrity...');

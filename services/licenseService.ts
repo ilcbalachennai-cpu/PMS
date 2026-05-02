@@ -3,8 +3,8 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.39";
-export const APP_PATCH_TIMESTAMP = "22-04-2026 09:45:00"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_VERSION = "02.02.41";
+export const APP_PATCH_TIMESTAMP = "02-05-2026 21:35:00"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -568,18 +568,21 @@ export const activateFullLicense = async (
 
       // --- V02.02.18: STRICT FIDELITY COMPARISON (Hardened) ---
       // We normalize everything: strip all whitespaces, lowercase emails, and strip all non-digits from mobile.
+      // --- V02.02.25: TOLERANT FIDELITY COMPARISON (Improved UX) ---
+      // We normalize everything: strip all whitespaces, lowercase emails.
+      // For mobile, we only compare the last 10 digits to ignore country codes (91/0).
       const cloudEmailRaw = String(syncResult.data?.registeredTo || syncResult.data?.email || "");
       const cloudMobileRaw = String(syncResult.data?.registeredMobile || syncResult.data?.mobile || "");
 
-      const cloudEmail = cloudEmailRaw.replace(/\s+/g, '').toLowerCase();
-      const cloudMobile = cloudMobileRaw.replace(/\D/g, '');
-      const typedEmail = email.replace(/\s+/g, '').toLowerCase();
-      const typedMobile = mobile.replace(/\D/g, '');
+      const cloudEmail = cloudEmailRaw.trim().replace(/\s+/g, '').toLowerCase();
+      const cloudMobile = cloudMobileRaw.replace(/\D/g, '').slice(-10);
+      const typedEmail = email.trim().replace(/\s+/g, '').toLowerCase();
+      const typedMobile = mobile.replace(/\D/g, '').slice(-10);
 
-      if (typedEmail !== cloudEmail || typedMobile !== cloudMobile) {
+      if (typedEmail !== cloudEmail || (typedMobile && cloudMobile && typedMobile !== cloudMobile)) {
         console.error(`❌ [FIDELITY] Identity Mismatch Detected!`);
-        console.log(`Cloud Data: Email[${cloudEmailRaw}] Mobile[${cloudMobileRaw}]`);
-        console.log(`Typed Data: Email[${email}] Mobile[${mobile}]`);
+        console.log(`Cloud Data: Email[${cloudEmailRaw}] Mobile[${cloudMobileRaw}] (Normalized: ${cloudEmail} / ${cloudMobile})`);
+        console.log(`Typed Data: Email[${email}] Mobile[${mobile}] (Normalized: ${typedEmail} / ${typedMobile})`);
 
         // Rollback
         if (prevLicense) {
@@ -811,6 +814,41 @@ export const validateLicenseStartup = async (
             // we update the local status to match the Cloud's source of truth.
             if (result.data) {
               const cloudIsTrial = result.data.isTrial === true;
+              const localIsTrial = stored?.isTrial === true;
+
+              // --- V02.02.40: SILENT PROMOTION (Bypass Restore Required for Upgraded Users) ---
+              if (localIsTrial && !cloudIsTrial && result.data.userName) {
+                console.log("🚀 [AUTO-PROMOTION] Trial user found with Full License. Performing silent upgrade...");
+                const cloudKey = result.data.licenseKey || result.data.key || "ACTIVATED";
+                const restoredLicense: LicenseData = {
+                  key: cloudKey,
+                  userName: result.data.userName,
+                  userID: result.data.userID || "RESCUE",
+                  registeredTo: result.data.registeredTo || result.data.email || "",
+                  registeredMobile: String(result.data.registeredMobile || result.data.mobile || ""),
+                  startDate: result.data.startDate || "",
+                  expiryDate: result.data.expiryDate || "",
+                  machineId: currentMachineId,
+                  status: result.data.status || "ACTIVATED",
+                  dataSize: Number(result.data.dataSize) || 5000,
+                  isTrial: false,
+                  checksum: ""
+                };
+
+                restoredLicense.checksum = generateChecksum(restoredLicense);
+                const scrambled = scramble(JSON.stringify(restoredLicense));
+                localStorage.setItem('app_license_secure', scrambled);
+                localStorage.setItem('app_data_size', String(restoredLicense.dataSize));
+
+                if ((window as any).electronAPI) {
+                  await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
+                  await (window as any).electronAPI.dbSet('app_data_size', String(restoredLicense.dataSize));
+                }
+                
+                clearSyncRetryCount();
+                return { valid: true, data: result.data, status: restoredLicense.status };
+              }
+
               const currentLicense = getStoredLicense() || {
                 key: cloudIsTrial ? 'TRIAL' : 'N/A',
                 userName: result.data.userName || 'Restoring User',
@@ -866,6 +904,8 @@ export const validateLicenseStartup = async (
           const cloudIsTrial = cloudData.isTrial === true;
           const localIsTrial = activeLicense?.isTrial === true;
 
+          // --- V02.02.40: AUTO-PROMOTION LOGIC ---
+          // If local is trial but cloud is full, we allow auto-upgrade even if UserID differs
           if ((!activeLicense || (localIsTrial && !cloudIsTrial)) && cloudData.userName) {
             console.log("🛠️ Syncing/Restoring Identity from Cloud (FORCE UPGRADE)...");
             const cloudKey = cloudData.licenseKey || cloudData.key;
@@ -964,6 +1004,11 @@ export const validateLicenseStartup = async (
               if (cloudData.downloadUrlWin7) localStorage.setItem('app_download_url_win7', cloudData.downloadUrlWin7);
               if (cloudData.launcherUrl) localStorage.setItem('app_launcher_url', cloudData.launcherUrl);
               if (cloudData.patchTimestamp) localStorage.setItem('app_latest_patch_timestamp', cloudData.patchTimestamp);
+              
+              // --- V02.02.40: SECURE HASH STORAGE ---
+              if (cloudData.updateHashWin10) localStorage.setItem('app_update_hash_win10', cloudData.updateHashWin10);
+              if (cloudData.updateHashWin7) localStorage.setItem('app_update_hash_win7', cloudData.updateHashWin7);
+              if (cloudData.sha256) localStorage.setItem('app_update_hash', cloudData.sha256);
             }
 
             // 4. Smart Admin Recovery & Sync

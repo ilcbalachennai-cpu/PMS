@@ -148,6 +148,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
     const [confirmPass, setConfirmPass] = useState('');
     const [isUpdatingPass, setIsUpdatingPass] = useState(false);
     const [showPassRules, setShowPassRules] = useState(false);
+    const [showUpgradeField, setShowUpgradeField] = useState(false);
     const [showPin, setShowPin] = useState(false);
     const [resetStep, setResetStep] = useState<'IDENTIFY' | 'OTP'>('IDENTIFY');
     const [resetOTP, setResetOTP] = useState('');
@@ -2221,8 +2222,8 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                                 tabIndex={-1}
                                             />
                                         </div>
-                                        {!isRestoringTrial && (
-                                            <div className="space-y-1">
+                                        {(!isRestoringTrial || showUpgradeField) && (
+                                            <div className="space-y-1 animate-in slide-in-from-top-2 duration-300">
                                                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">License Key (16-Digit)</label>
                                                 <input
                                                     type="text"
@@ -2231,6 +2232,18 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                                     value={newLicenseKey}
                                                     onChange={e => setNewLicenseKey(e.target.value.toUpperCase())}
                                                 />
+                                            </div>
+                                        )}
+                                        {isRestoringTrial && !showUpgradeField && (
+                                            <div className="flex flex-col items-center justify-center p-4 bg-pink-500/5 border border-pink-500/10 rounded-xl space-y-2">
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center">Trial Account Detected</p>
+                                                <button 
+                                                    onClick={() => setShowUpgradeField(true)}
+                                                    className="px-4 py-2 bg-pink-600/20 hover:bg-pink-600 text-pink-400 hover:text-white text-[9px] font-black uppercase tracking-[0.2em] rounded-lg border border-pink-500/30 transition-all flex items-center gap-2"
+                                                >
+                                                    <KeyRound size={12} />
+                                                    Activate Full License Key
+                                                </button>
                                             </div>
                                         )}
                                     </div>
@@ -2263,7 +2276,7 @@ const Settings: React.FC<SettingsProps> = ({ config, setConfig, companyProfile, 
                                 <button
                                     onClick={async () => {
                                         const isRestoringTrial = licenseInfo?.status === 'PENDING_RESTORE' && (licenseInfo?.isTrial || licenseInfo?.key === 'TRIAL');
-                                        const bypassKeyCheck = isRestoringTrial && !newLicenseKey;
+                                        const bypassKeyCheck = isRestoringTrial && !newLicenseKey && !showUpgradeField;
 
                                         if (!bypassKeyCheck && !isValidKeyFormat(newLicenseKey)) {
                                             showAlert?.('warning', 'Invalid Key', 'Please enter a valid 16-digit license key.');
