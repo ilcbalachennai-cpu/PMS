@@ -918,7 +918,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         </div>
       )}
 
-      {((!getStoredLicense() || isRestorationForced) && (showRegistrationManual || isRestorationForced || (!isSetupComplete && employees.length === 0))) ? (
+      {(showRegistrationManual || isRestorationForced || (!isSetupComplete && employees.length === 0)) ? (
         <Registration
           onComplete={handleRegistrationComplete}
           onRestore={() => window.location.reload()}

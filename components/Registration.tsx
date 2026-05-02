@@ -151,6 +151,13 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
     const nextStep = async () => {
         if (step === 1) {
+            if (emailVerifyState !== 'verified') {
+                setError('Please verify your email with OTP before proceeding.');
+                return;
+            }
+        }
+        
+        if (step === 2) {
             if (!userName) {
                 setError('Full Name is required.');
                 return;
@@ -164,16 +171,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 setError('User ID must be 5-12 alphanumeric characters with no spaces.');
                 return;
             }
-            if (!regEmail || !regEmail.includes('@')) {
-                setError('A valid registered email is required.');
-                return;
-            }
-            if (regMobile.length < 10) {
-                setError('A valid mobile number is required.');
-                return;
-            }
 
-            // --- V02.02.21: Password Validation moved to Step 1 ---
+            // --- V02.02.21: Password Validation ---
             const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{9,}$/;
 
             if (!adminPassword) {
@@ -212,12 +211,11 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
             setIsProcessing(false);
 
             if (!result.success) {
-                setError(result.message || 'Verification Failed.');
+                setError(result.message || 'Activation Failed.');
                 if (result.message?.includes('Unauthorised')) {
-                    // Force shutdown as per user request for unauthorized access
                     setTimeout(() => {
                         // @ts-ignore
-                        window.electronAPI.closeApp();
+                        if (window.electronAPI) window.electronAPI.closeApp();
                     }, 3000);
                 }
                 return;
@@ -227,7 +225,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 const isRestoration = result.message.includes('History Found') || result.message.includes('Trial Restored');
                 showAlert(
                     isRestoration ? 'info' : 'success', 
-                    isRestoration ? 'Trial Restored' : 'Verified', 
+                    isRestoration ? 'Identity Verified' : 'Security Activated', 
                     result.message
                 );
             }
@@ -436,7 +434,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
     const renderStepIndicator = () => (
         <div className="flex items-center justify-center gap-4 mb-4">
-            {[1, 2, 3].map((s) => (
+            {[1, 2, 3, 4].map((s) => (
                 <React.Fragment key={s}>
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all duration-300 ${step === s
                         ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30 scale-110 ring-4 ring-blue-900/10'
@@ -446,7 +444,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         }`}>
                         {step > s ? <CheckCircle2 size={20} /> : s}
                     </div>
-                    {s < 3 && <div className={`w-12 h-0.5 rounded ${step > s ? 'bg-emerald-500' : 'bg-slate-800'}`} />}
+                    {s < 4 && <div className={`w-12 h-0.5 rounded ${step > s ? 'bg-emerald-500' : 'bg-slate-800'}`} />}
                 </React.Fragment>
             ))}
         </div>
@@ -560,7 +558,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         </div>
                     )}
 
-                    {/* Step 1: License Activation / Identity Retrieval */}
+                    {/* Step 1: Identity Verification */}
                     {step === 1 && (
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                             <div className="bg-blue-900/10 border border-blue-500/20 p-6 rounded-2xl">
@@ -569,13 +567,10 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                     <h3 className="font-bold text-xl text-white">Identity Verification</h3>
                                 </div>
                                 <p className="text-sm text-slate-400 mb-6 leading-relaxed">
-                                    {emailVerifyState !== 'verified' 
-                                        ? "Enter your registered email and mobile number. A verification code will be sent to your email to confirm your identity."
-                                        : "Identity discovered. Please confirm the details below and set your secure system password."}
+                                    Enter your registered email and mobile number. A verification code will be sent to your email to confirm your identity before proceeding to password setup.
                                 </p>
 
                                 <div className="space-y-4">
-                                    {/* Primary Credentials Block */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="md:col-span-2 space-y-2">
                                             <div className="flex items-center justify-between pl-1">
@@ -619,7 +614,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                         </div>
 
                                         <div className="flex items-end">
-                                            {emailVerifyState === 'idle' && (
+                                            {emailVerifyState === 'idle' ? (
                                                 <button
                                                     type="button"
                                                     onClick={handleSendEmailOTP}
@@ -628,11 +623,14 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                 >
                                                     Send Verification OTP
                                                 </button>
-                                            )}
+                                            ) : emailVerifyState === 'verified' ? (
+                                                <div className="w-full py-3.5 bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 font-black uppercase text-xs rounded-xl flex items-center justify-center gap-2">
+                                                    <BadgeCheck size={16} /> Identity Confirmed
+                                                </div>
+                                            ) : null}
                                         </div>
                                     </div>
 
-                                    {/* OTP Verification Interactive Section */}
                                     {(emailVerifyState === 'otp_pending' || emailVerifyState === 'verifying') && (
                                         <div className="p-5 bg-blue-950/20 border border-blue-500/30 rounded-2xl space-y-4 animate-in fade-in zoom-in duration-300">
                                             <div className="flex items-center justify-between px-1">
@@ -662,120 +660,14 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                         </div>
                                     )}
 
-                                    {/* Revealed Identity Block (Visible Only After Verification) */}
                                     {emailVerifyState === 'verified' && (
-                                        <div className="space-y-6 pt-2 animate-in slide-in-from-top-4 duration-500">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <div className="md:col-span-2 space-y-2">
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Full Name / Authorized Person</label>
-                                                    <div className="relative">
-                                                        <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" size={18} />
-                                                        <input
-                                                            type="text"
-                                                            readOnly={isFetchedIdentity}
-                                                            className={`w-full bg-slate-900/50 border border-emerald-500/20 rounded-xl p-3.5 pl-10 text-emerald-100 outline-none uppercase font-black tracking-wide ${isFetchedIdentity ? 'cursor-not-allowed opacity-80' : 'focus:ring-2 focus:ring-blue-500/50'}`}
-                                                            value={userName}
-                                                            onChange={e => !isFetchedIdentity && setUserName(e.target.value.toUpperCase())}
-                                                            placeholder="Your Name"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">User ID</label>
-                                                    <div className="relative">
-                                                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" size={18} />
-                                                        <input
-                                                            type="text"
-                                                            readOnly={isFetchedIdentity}
-                                                            className={`w-full bg-slate-900/50 border border-emerald-500/20 rounded-xl p-3.5 pl-10 text-emerald-100 outline-none font-black tracking-widest ${isFetchedIdentity ? 'cursor-not-allowed opacity-80' : 'focus:ring-2 focus:ring-blue-500/50'}`}
-                                                            value={userID}
-                                                            onChange={e => !isFetchedIdentity && setUserID(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12))}
-                                                            placeholder="Login ID"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div className={isTrialUser ? "hidden" : "space-y-2"}>
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">License Key (Optional)</label>
-                                                    <input
-                                                        type="text"
-                                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white font-mono text-center tracking-[0.2em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-700"
-                                                        placeholder="XXXX-XXXX-XXXX-XXXX"
-                                                        value={licenseKey}
-                                                        onChange={e => {
-                                                            const val = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 16);
-                                                            const formatted = val.match(/.{1,4}/g)?.join('-') || val;
-                                                            setLicenseKey(formatted);
-                                                        }}
-                                                    />
-                                                </div>
-                                            </div>
-
-                                            {/* Final Security: Password Setup */}
-                                            <div className="p-6 bg-blue-900/10 border border-blue-500/20 rounded-2xl space-y-4">
-                                                <div className="flex items-center gap-3 mb-2">
-                                                    <div className="p-2.5 bg-blue-500/10 rounded-xl"><ShieldCheck className="text-blue-400" size={24} /></div>
-                                                    <div>
-                                                        <h4 className="text-sm font-black text-white uppercase tracking-tight">Set Secure System Password</h4>
-                                                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Must contain Uppers, Lowers, Numbers & Specials</p>
-                                                    </div>
-                                                </div>
-                                                
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Administrator Password *</label>
-                                                        <div className="relative">
-                                                            <input
-                                                                type="password"
-                                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono"
-                                                                placeholder="••••••••"
-                                                                value={adminPassword}
-                                                                onChange={e => setAdminPassword(e.target.value)}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Confirm Password *</label>
-                                                        <div className="relative">
-                                                            <input
-                                                                type="password"
-                                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono"
-                                                                placeholder="••••••••"
-                                                                value={confirmPassword}
-                                                                onChange={e => setConfirmPassword(e.target.value)}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 mt-2 px-1">
-                                                    <div className="flex items-center gap-2 text-[9px] font-bold">
-                                                        <div className={`w-1.5 h-1.5 rounded-full ${adminPassword.length >= 9 ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-slate-700'}`} />
-                                                        <span className={adminPassword.length >= 9 ? 'text-emerald-400' : 'text-slate-500'}>9+ Characters</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-[9px] font-bold">
-                                                        <div className={`w-1.5 h-1.5 rounded-full ${/[A-Z]/.test(adminPassword) && /[a-z]/.test(adminPassword) ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-slate-700'}`} />
-                                                        <span className={/[A-Z]/.test(adminPassword) && /[a-z]/.test(adminPassword) ? 'text-emerald-400' : 'text-slate-500'}>Mixed Case</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-[9px] font-bold">
-                                                        <div className={`w-1.5 h-1.5 rounded-full ${/\d/.test(adminPassword) ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-slate-700'}`} />
-                                                        <span className={/\d/.test(adminPassword) ? 'text-emerald-400' : 'text-slate-500'}>Numbers</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-[9px] font-bold">
-                                                        <div className={`w-1.5 h-1.5 rounded-full ${/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(adminPassword) ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-slate-700'}`} />
-                                                        <span className={/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(adminPassword) ? 'text-emerald-400' : 'text-slate-500'}>Symbol</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="flex justify-end pt-4">
-                                                <button
-                                                    onClick={nextStep}
-                                                    disabled={isProcessing}
-                                                    className="group px-12 py-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black uppercase tracking-widest rounded-xl transition-all shadow-xl shadow-blue-900/20 flex items-center gap-3"
-                                                >
-                                                    {isProcessing ? <Loader2 className="animate-spin" /> : <>Finalize Restoration <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" /></>}
-                                                </button>
-                                            </div>
+                                        <div className="flex justify-end pt-4">
+                                            <button
+                                                onClick={nextStep}
+                                                className="group px-12 py-4 bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-widest rounded-xl transition-all shadow-xl shadow-blue-900/20 flex items-center gap-3"
+                                            >
+                                                Set Credentials <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                                            </button>
                                         </div>
                                     )}
                                 </div>
@@ -783,8 +675,134 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         </div>
                     )}
 
-                    {/* Step 2: Administrator Identity Confirmation */}
+                    {/* Step 2: Set User ID and Password */}
                     {step === 2 && (
+                        <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
+                            <div className="bg-blue-900/10 border border-blue-500/20 p-6 rounded-2xl">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="p-2.5 bg-blue-500/10 rounded-xl">
+                                        <Lock className="text-blue-400" size={24} />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-xl text-white uppercase tracking-tight">Security Setup</h3>
+                                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Define your administrator profile and secure system password</p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="md:col-span-2 space-y-2">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Full Name / Authorized Person</label>
+                                            <div className="relative">
+                                                <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" size={18} />
+                                                <input
+                                                    type="text"
+                                                    readOnly={isFetchedIdentity}
+                                                    className={`w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white outline-none uppercase font-black tracking-wide ${isFetchedIdentity ? 'cursor-not-allowed opacity-80' : 'focus:ring-2 focus:ring-blue-500/50'}`}
+                                                    value={userName}
+                                                    onChange={e => !isFetchedIdentity && setUserName(e.target.value.toUpperCase())}
+                                                    placeholder="Your Name"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">User ID</label>
+                                            <div className="relative">
+                                                <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" size={18} />
+                                                <input
+                                                    type="text"
+                                                    readOnly={isFetchedIdentity}
+                                                    className={`w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white outline-none font-black tracking-widest ${isFetchedIdentity ? 'cursor-not-allowed opacity-80' : 'focus:ring-2 focus:ring-blue-500/50'}`}
+                                                    value={userID}
+                                                    onChange={e => !isFetchedIdentity && setUserID(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12))}
+                                                    placeholder="Login ID"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className={isTrialUser ? "hidden" : "space-y-2"}>
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">License Key (Optional)</label>
+                                            <input
+                                                type="text"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white font-mono text-center tracking-[0.2em] focus:ring-2 focus:ring-blue-500/50 outline-none transition-all placeholder:text-slate-700"
+                                                placeholder="XXXX-XXXX-XXXX-XXXX"
+                                                value={licenseKey}
+                                                onChange={e => {
+                                                    const val = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 16);
+                                                    const formatted = val.match(/.{1,4}/g)?.join('-') || val;
+                                                    setLicenseKey(formatted);
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Password Setup */}
+                                    <div className="p-6 bg-slate-950/50 border border-slate-800 rounded-2xl space-y-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Administrator Password *</label>
+                                                <div className="relative">
+                                                    <input
+                                                        type="password"
+                                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono"
+                                                        placeholder="••••••••"
+                                                        value={adminPassword}
+                                                        onChange={e => setAdminPassword(e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Confirm Password *</label>
+                                                <div className="relative">
+                                                    <input
+                                                        type="password"
+                                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono"
+                                                        placeholder="••••••••"
+                                                        value={confirmPassword}
+                                                        onChange={e => setConfirmPassword(e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 mt-2 px-1">
+                                            <div className="flex items-center gap-2 text-[9px] font-bold">
+                                                <div className={`w-1.5 h-1.5 rounded-full ${adminPassword.length >= 9 ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-slate-700'}`} />
+                                                <span className={adminPassword.length >= 9 ? 'text-emerald-400' : 'text-slate-500'}>9+ Characters</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-[9px] font-bold">
+                                                <div className={`w-1.5 h-1.5 rounded-full ${/[A-Z]/.test(adminPassword) && /[a-z]/.test(adminPassword) ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-slate-700'}`} />
+                                                <span className={/[A-Z]/.test(adminPassword) && /[a-z]/.test(adminPassword) ? 'text-emerald-400' : 'text-slate-500'}>Mixed Case</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-[9px] font-bold">
+                                                <div className={`w-1.5 h-1.5 rounded-full ${/\d/.test(adminPassword) ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-slate-700'}`} />
+                                                <span className={/\d/.test(adminPassword) ? 'text-emerald-400' : 'text-slate-500'}>Numbers</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-[9px] font-bold">
+                                                <div className={`w-1.5 h-1.5 rounded-full ${/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(adminPassword) ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-slate-700'}`} />
+                                                <span className={/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(adminPassword) ? 'text-emerald-400' : 'text-slate-500'}>Symbol</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-between pt-4">
+                                        <button onClick={prevStep} className="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all uppercase tracking-widest text-xs flex items-center gap-2">
+                                            <ArrowLeft size={16} /> Back
+                                        </button>
+                                        <button
+                                            onClick={nextStep}
+                                            disabled={isProcessing}
+                                            className="group px-12 py-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black uppercase tracking-widest rounded-xl transition-all shadow-xl shadow-blue-900/20 flex items-center gap-3"
+                                        >
+                                            {isProcessing ? <Loader2 className="animate-spin" /> : <>Activate Security <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" /></>}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Step 3: Administrator Identity Confirmation */}
+                    {step === 3 && (
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                             <div className="bg-emerald-900/5 border border-emerald-500/10 p-6 rounded-2xl">
                                 <div className="flex items-center gap-4 mb-6">
@@ -829,8 +847,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     )}
 
 
-                    {/* Step 3: Choice (Restore vs Manual) */}
-                    {step === 3 && (
+                    {/* Step 4: Choice (Restore vs Manual) */}
+                    {step === 4 && (
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                             {!showRestoreFields ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

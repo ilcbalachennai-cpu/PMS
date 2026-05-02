@@ -826,14 +826,23 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean }) => {
                 console.warn('⚠️ Safety backup skipped due to file lock, proceeding to launch:', backupErr);
             }
 
-            // C. POWER LAUNCH: Single, robust trigger mechanism
-            // We use 'start' via cmd.exe as it's the most reliable way to hand off to the OS 
-            // and immediately detach from the dying parent process.
-            spawn('cmd.exe', ['/c', 'start', '', `"${installerPath}"`], { 
-                detached: true, 
-                stdio: 'ignore',
-                windowsVerbatimArguments: true
-            }).unref();
+            // C. POWER LAUNCH: Direct Native Trigger
+            // We use shell.openPath as the primary choice because it handles UAC and paths perfectly.
+            // We also spawn a direct process as a backup.
+            
+            try {
+                shell.openPath(installerPath);
+                
+                spawn(installerPath, [], { 
+                    detached: true, 
+                    stdio: 'ignore',
+                    windowsHide: false 
+                }).unref();
+            } catch (launchErr) {
+                console.error('🚀 Primary launch failed, trying fallback:', launchErr);
+                // Last resort fallback
+                spawn('cmd.exe', ['/c', 'start', '', installerPath], { detached: true }).unref();
+            }
 
             if (isSilent) {
                 spawn(installerPath, ['/S'], { 
