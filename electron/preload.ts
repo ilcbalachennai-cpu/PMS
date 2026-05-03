@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('db-set', { key, value }),
     dbGet: (key: string) =>
         ipcRenderer.invoke('db-get', key),
+    dbGetAll: () =>
+        ipcRenderer.invoke('db-get-all'),
     sendEmail: (smtpConfig: any, mailOptions: any) =>
         ipcRenderer.invoke('send-email', { smtpConfig, mailOptions }),
     dbDelete: (key: string) =>

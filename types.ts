@@ -6,6 +6,7 @@ export interface ServiceRecord {
 }
 
 export interface LeaveLedger {
+  companyId?: string;
   employeeId: string;
   // Added 'availed' to el structure
   el: { opening: number; eligible: number; encashed: number; availed: number; balance: number };
@@ -14,6 +15,7 @@ export interface LeaveLedger {
 }
 
 export interface AdvanceLedger {
+  companyId?: string;
   employeeId: string;
   opening: number;          // Carry-forward from previous month
   totalAdvance: number;     // New advance given this month
@@ -27,6 +29,7 @@ export interface AdvanceLedger {
 
 
 export interface FineRecord {
+  companyId?: string;
   employeeId: string;
   month: string;
   year: number;
@@ -42,6 +45,7 @@ export interface LeavePolicy {
 }
 
 export interface Attendance {
+  companyId?: string;
   employeeId: string;
   month: string;
   year: number;
@@ -115,6 +119,7 @@ export interface StatutoryConfig {
 }
 
 export interface CompanyProfile {
+  id: string;
   establishmentName: string;
   tradeName: string;
   cin: string; // Corporate ID
@@ -169,6 +174,7 @@ export interface CompanyProfile {
 }
 
 export interface Employee {
+  companyId?: string;
   id: string;
   name: string;
   gender: 'Male' | 'Female' | 'Transgender' | 'Others'; // Added Gender
@@ -273,6 +279,7 @@ export interface Employee {
 }
 
 export interface PayrollResult {
+  companyId?: string;
   employeeId: string;
   month: string;
   year: number;
@@ -376,6 +383,7 @@ export interface ArrearRecord {
 }
 
 export interface ArrearBatch {
+  companyId?: string;
   month: string;
   year: number;
   effectiveMonth: string;
@@ -424,6 +432,7 @@ export interface LicenseData {
 }
 
 export interface OTRecord {
+  companyId?: string;
   employeeId: string;
   month: string;
   year: number;

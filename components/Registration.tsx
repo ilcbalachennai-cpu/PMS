@@ -12,18 +12,18 @@ import {
     Phone,
     Lock,
     IndianRupee,
-    AlertCircle,
     Database,
     Upload,
     Loader2,
     UserCircle,
     Power,
     BadgeCheck,
-    SendHorizonal
+    RotateCw,
+    KeyRound
 } from 'lucide-react';
 import { CompanyProfile, StatutoryConfig, User } from '../types';
 import { INITIAL_COMPANY_PROFILE, INITIAL_STATUTORY_CONFIG, BRAND_CONFIG } from '../constants';
-import { activateFullLicense, registerTrial, isValidKeyFormat, updateCloudPassword, sendRegistrationOTP, verifyRegistrationOTP } from '../services/licenseService';
+import { activateFullLicense, registerTrial, isValidKeyFormat, updateCloudPassword, sendRegistrationOTP, verifyRegistrationOTP, getStoredLicense } from '../services/licenseService';
 import CryptoJS from 'crypto-js';
 
 interface RegistrationProps {
@@ -36,9 +36,11 @@ interface RegistrationProps {
     showAlert?: (type: 'success' | 'error' | 'info' | 'warning' | 'confirm', title: string, message: string, onConfirm?: () => void) => void;
     isResetMode?: boolean;
     onSystemRepair?: () => void;
+    isNewCompany?: boolean;
+    activeCompanyId?: string;
 }
 
-const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert, isResetMode, onSystemRepair }) => {
+const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert, isResetMode, onSystemRepair, isNewCompany, activeCompanyId }) => {
     const [step, setStep] = useState(1);
     const [userName, setUserName] = useState('');
     const [userID, setUserID] = useState('');
@@ -53,6 +55,24 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     const [error, setError] = useState('');
     const [isTrialUser, setIsTrialUser] = useState(false);
 
+    // Reset profile for new company mode
+    useEffect(() => {
+        if (isNewCompany) {
+            const license = getStoredLicense();
+            if (license) {
+                setUserID(license.userID || '');
+                setUserName(license.userName || '');
+                setRegEmail(license.registeredTo || '');
+                setRegMobile(license.registeredMobile || '');
+                setIsFetchedIdentity(true);
+                setEmailVerifyState('verified');
+                setStep(4); // Skip to Choice (Restore vs Manual)
+            } else {
+                setProfile(INITIAL_COMPANY_PROFILE);
+            }
+        }
+    }, [isNewCompany]);
+
     // Email OTP Verification State
     type EmailVerifyState = 'idle' | 'sending' | 'otp_pending' | 'verifying' | 'verified';
     const [emailVerifyState, setEmailVerifyState] = useState<EmailVerifyState>('idle');
@@ -62,6 +82,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
     // Restore State
     const [showRestoreFields, setShowRestoreFields] = useState(false);
+    const [showCompanyInput, setShowCompanyInput] = useState(false);
+    const [companyName, setCompanyName] = useState('');
     const [encryptionKey, setEncryptionKey] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [isFetchedIdentity, setIsFetchedIdentity] = useState(false);
@@ -331,10 +353,15 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
                 // Surgical Clear: Remove only data keys, PROTECT system and identity keys
                 Object.keys(localStorage).forEach(key => {
-                    if (key.startsWith('app_')) {
+                    const isScoped = activeCompanyId && key.startsWith(`${activeCompanyId}_app_`);
+                    const isLegacy = key.startsWith('app_');
+
+                    if (isScoped || isLegacy) {
                         const isSystemKey = key.includes('license') ||
                             key === 'app_machine_id' ||
                             key === 'app_setup_complete' ||
+                            key === 'app_companies' ||
+                            key === 'app_active_company_id' ||
                             key === 'app_data_size';
                         if (!isSystemKey) {
                             localStorage.removeItem(key);
@@ -344,6 +371,12 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
                 // HELPER: Get value from unified or legacy key
                 const getVal = (key: string) => data[key] || data[`app_${key}`];
+
+                // HELPER: Get company-aware key
+                const getCKey = (key: string) => {
+                    if (!activeCompanyId || activeCompanyId === 'default') return key;
+                    return `${activeCompanyId}_${key}`;
+                };
 
                 // Restore Core Keys (Unified & Legacy Fallback)
                 const employees = getVal('employees');
@@ -358,24 +391,38 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 const arrearHistory = getVal('arrearHistory');
                 const logo = getVal('logo');
 
-                if (employees) localStorage.setItem('app_employees', JSON.stringify(employees));
-                if (config) localStorage.setItem('app_config', JSON.stringify(config));
-                if (profile) localStorage.setItem('app_company_profile', JSON.stringify(profile));
-                if (attendance) localStorage.setItem('app_attendance', JSON.stringify(attendance));
-                if (leaveLedgers) localStorage.setItem('app_leave_ledgers', JSON.stringify(leaveLedgers));
-                if (advanceLedgers) localStorage.setItem('app_advance_ledgers', JSON.stringify(advanceLedgers));
-                if (payrollHistory) localStorage.setItem('app_payroll_history', JSON.stringify(payrollHistory));
-                if (fines) localStorage.setItem('app_fines', JSON.stringify(fines));
-                if (leavePolicy) localStorage.setItem('app_leave_policy', JSON.stringify(leavePolicy));
-                if (arrearHistory) localStorage.setItem('app_arrear_history', JSON.stringify(arrearHistory));
-                if (logo) localStorage.setItem('app_logo', JSON.stringify(logo));
+                if (employees) localStorage.setItem(getCKey('app_employees'), JSON.stringify(employees));
+                if (config) localStorage.setItem(getCKey('app_config'), JSON.stringify(config));
+                if (profile) {
+                    localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(profile));
+                    // Also update the app_companies list if this profile is different
+                    const savedCos = localStorage.getItem('app_companies');
+                    if (savedCos) {
+                        try {
+                            const cos = JSON.parse(savedCos);
+                            const idx = cos.findIndex((c: any) => c.id === activeCompanyId);
+                            if (idx !== -1) {
+                                cos[idx] = { ...profile, id: activeCompanyId };
+                                localStorage.setItem('app_companies', JSON.stringify(cos));
+                            }
+                        } catch (e) {}
+                    }
+                }
+                if (attendance) localStorage.setItem(getCKey('app_attendance'), JSON.stringify(attendance));
+                if (leaveLedgers) localStorage.setItem(getCKey('app_leave_ledgers'), JSON.stringify(leaveLedgers));
+                if (advanceLedgers) localStorage.setItem(getCKey('app_advance_ledgers'), JSON.stringify(advanceLedgers));
+                if (payrollHistory) localStorage.setItem(getCKey('app_payroll_history'), JSON.stringify(payrollHistory));
+                if (fines) localStorage.setItem(getCKey('app_fines'), JSON.stringify(fines));
+                if (leavePolicy) localStorage.setItem(getCKey('app_leave_policy'), JSON.stringify(leavePolicy));
+                if (arrearHistory) localStorage.setItem(getCKey('app_arrear_history'), JSON.stringify(arrearHistory));
+                if (logo) localStorage.setItem(getCKey('app_logo'), JSON.stringify(logo));
 
                 const masters = data.masters || data.app_masters;
                 if (masters) {
-                    localStorage.setItem('app_master_designations', JSON.stringify(masters.designations));
-                    localStorage.setItem('app_master_divisions', JSON.stringify(masters.divisions));
-                    localStorage.setItem('app_master_branches', JSON.stringify(masters.branches));
-                    localStorage.setItem('app_master_sites', JSON.stringify(masters.sites));
+                    localStorage.setItem(getCKey('app_master_designations'), JSON.stringify(masters.designations));
+                    localStorage.setItem(getCKey('app_master_divisions'), JSON.stringify(masters.divisions));
+                    localStorage.setItem(getCKey('app_master_branches'), JSON.stringify(masters.branches));
+                    localStorage.setItem(getCKey('app_master_sites'), JSON.stringify(masters.sites));
                 }
 
                 // Ensure License and Machine identity are still correct (re-apply to be safe)
@@ -421,7 +468,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
         // Pre-fill empty data to bypass steps 4 and 5
         onComplete({
-            companyProfile: INITIAL_COMPANY_PROFILE,
+            companyProfile: { ...INITIAL_COMPANY_PROFILE, establishmentName: companyName },
             statutoryConfig: INITIAL_STATUTORY_CONFIG,
             adminUser: {
                 username: userID || 'admin',
@@ -526,6 +573,14 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     <div className="mb-4 text-center flex flex-col items-center">
                         <h2 className="text-xl font-black text-white mb-1 uppercase tracking-tight">System Initialization</h2>
                         <p className="text-xs text-slate-400 max-w-sm">Complete the following steps to personalize your BharatPay Pro environment.</p>
+                        {isNewCompany && (
+                            <button 
+                                onClick={() => window.location.reload()} 
+                                className="mt-2 text-[10px] font-black text-rose-500 uppercase tracking-widest hover:text-rose-400 transition-colors"
+                            >
+                                Cancel & Return to Dashboard
+                            </button>
+                        )}
                     </div>
 
                     {renderStepIndicator()}
@@ -865,7 +920,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     {/* Step 4: Choice (Restore vs Manual) */}
                     {step === 4 && (
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-                            {!showRestoreFields ? (
+                            {!showRestoreFields && !showCompanyInput ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {!isResetMode && (
                                         <div
@@ -882,7 +937,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                     )}
 
                                     <div
-                                        onClick={handleFreshSetup}
+                                        onClick={() => setShowCompanyInput(true)}
                                         className={`bg-[#0f172a] ${isResetMode ? 'md:col-span-2' : ''} p-8 rounded-2xl border-2 border-slate-800 hover:border-emerald-500/50 transition-all cursor-pointer group flex flex-col items-center text-center`}
                                     >
                                         <div className="w-16 h-16 rounded-full bg-emerald-900/20 text-emerald-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
@@ -891,6 +946,36 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                         <h3 className="text-xl font-bold mb-3 text-slate-100">Manual Configuration</h3>
                                         <p className="text-sm text-slate-400 leading-relaxed px-4">Start fresh by defining your establishment profile and statutory rules manually. Best for new installations.</p>
                                         <div className="mt-8 px-6 py-2 bg-emerald-600 group-hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors flex items-center gap-2">Start Fresh Setup <ArrowRight size={16} /></div>
+                                    </div>
+                                </div>
+                            ) : showCompanyInput ? (
+                                <div className="bg-[#1e293b]/50 border border-slate-800 p-8 rounded-2xl space-y-8 animate-in zoom-in-95 duration-200">
+                                    <div className="flex items-center gap-3">
+                                        <Building2 className="text-emerald-400" size={24} />
+                                        <h3 className="font-bold text-lg text-white uppercase tracking-tight">Create Establishment</h3>
+                                    </div>
+                                    <div className="space-y-4">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Company / Establishment Name *</label>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all font-black uppercase tracking-wide"
+                                            placeholder="ENTER COMPANY NAME"
+                                            value={companyName}
+                                            onChange={e => setCompanyName(e.target.value.toUpperCase())}
+                                            autoFocus
+                                        />
+                                    </div>
+                                    <div className="flex justify-between pt-4">
+                                        <button onClick={() => setShowCompanyInput(false)} className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all uppercase tracking-widest text-xs flex items-center gap-2">
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handleFreshSetup}
+                                            disabled={!companyName.trim() || isProcessing}
+                                            className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-2"
+                                        >
+                                            {isProcessing ? <Loader2 className="animate-spin" size={18} /> : 'Initialize Unit'}
+                                        </button>
                                     </div>
                                 </div>
                             ) : (

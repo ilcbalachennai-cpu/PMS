@@ -82,3 +82,18 @@ export const formatCurrency = (num: number | string | undefined | null, includeS
 
   return includeSymbol ? `₹ ${formatted}` : formatted;
 };
+
+/**
+ * Formats a 16-character license key into XXXX-XXXX-XXXX-XXXX
+ */
+export const formatLicenseKey = (key: string | undefined | null): string => {
+  if (!key || key === 'N/A' || key === 'TRIAL') return key || 'N/A';
+  
+  // Remove any existing hyphens and normalize
+  const clean = key.replace(/-/g, '').toUpperCase();
+  if (clean.length !== 16) return key; // Not a standard key or already formatted differently
+  
+  // Group into 4s with hyphens
+  const parts = clean.match(/.{1,4}/g);
+  return parts ? parts.join('-') : key;
+};

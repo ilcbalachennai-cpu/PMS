@@ -12,6 +12,7 @@ export const BRAND_CONFIG = {
 };
 
 export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
+  id: 'default',
   establishmentName: '',
   tradeName: '',
   cin: '',
@@ -20,6 +21,9 @@ export const INITIAL_COMPANY_PROFILE: CompanyProfile = {
   esiCode: '',
   gstNo: '',
   pan: '',
+  ptNo: '',
+  tan: '',
+  lwfRegNo: '',
   // Address
   doorNo: '',
   buildingName: '',
@@ -103,6 +107,7 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
     basic: true,
     da: true,
     retaining: true,
+    hra: false,
     conveyance: false,
     washing: false,
     attire: false,

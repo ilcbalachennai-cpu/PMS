@@ -24,6 +24,7 @@ interface SyncProps {
   sites: string[];
   isSetupComplete: boolean;
   safeSave: (key: string, data: any) => void;
+  activeCompanyId: string;
 }
 
 export const useSync = (props: SyncProps) => {
@@ -31,7 +32,7 @@ export const useSync = (props: SyncProps) => {
     employees, config, companyProfile, attendances, leaveLedgers,
     advanceLedgers, payrollHistory, fines, leavePolicy, arrearHistory, otRecords,
     logoUrl, designations, divisions, branches, sites, isSetupComplete,
-    safeSave
+    safeSave, activeCompanyId
   } = props;
 
   // Master Persistence Sync (Electron DB)
@@ -40,6 +41,9 @@ export const useSync = (props: SyncProps) => {
       if ((window as any).electronAPI) {
         const allUsersRaw = localStorage.getItem('app_users');
         const allUsers = (() => { try { return allUsersRaw ? JSON.parse(allUsersRaw) : []; } catch { return []; } })();
+        
+        const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${activeCompanyId}_${key}`;
+
         const keys = [
           { k: 'app_employees', v: employees },
           { k: 'app_config', v: config },
@@ -61,8 +65,15 @@ export const useSync = (props: SyncProps) => {
           { k: 'app_users', v: allUsers }
         ];
         for (const item of keys) {
-          (window as any).electronAPI.dbSet(item.k, item.v);
+          (window as any).electronAPI.dbSet(getCKey(item.k), item.v);
         }
+        
+        // Also save the master companies list
+        const companiesRaw = localStorage.getItem('app_companies');
+        if (companiesRaw) {
+          (window as any).electronAPI.dbSet('app_companies', JSON.parse(companiesRaw));
+        }
+        (window as any).electronAPI.dbSet('app_active_company_id', activeCompanyId);
       }
     }, 1000); // Debounce database writes by 1 second
 
@@ -70,7 +81,7 @@ export const useSync = (props: SyncProps) => {
   }, [
     employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers,
     payrollHistory, fines, leavePolicy, arrearHistory, otRecords, logoUrl,
-    designations, divisions, branches, sites, isSetupComplete
+    designations, divisions, branches, sites, isSetupComplete, activeCompanyId
   ]);
 
   // LocalStorage Direct Syncs

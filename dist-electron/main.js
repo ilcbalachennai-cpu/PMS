@@ -1,2 +1,935 @@
-require('bytenode');
-require('./main.jsc');
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const electron_1 = require("electron");
+const nodemailer_1 = __importDefault(require("nodemailer"));
+const path = __importStar(require("path"));
+const fs = __importStar(require("fs"));
+const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
+const crypto = __importStar(require("crypto"));
+const child_process_1 = require("child_process");
+const os = __importStar(require("os"));
+let mainWindow = null;
+const isDev = process.env.NODE_ENV === 'development';
+// ── CONFIGURATION & PERSISTENCE ──
+const CONFIG_PATH = path.join(electron_1.app.getPath('userData'), 'app-config.json');
+console.log(`🚀 Electron v${process.versions.electron} | Node ${process.versions.node} | Chrome ${process.versions.chrome}`);
+if (parseInt(process.versions.electron.split('.')[0]) < 30) {
+    console.warn('⚠️  LEGACY MODE DETECTED: This version is for Windows 7 applications.');
+}
+else {
+    console.log('✅ WIN10 MODE DETECTED: Layouts optimized for modern Windows environments.');
+}
+function getAppConfig() {
+    if (fs.existsSync(CONFIG_PATH)) {
+        try {
+            return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+        }
+        catch (e) {
+            return {};
+        }
+    }
+    return {};
+}
+function saveAppConfig(config) {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+}
+let appConfig = getAppConfig();
+let appBasePath = appConfig.appBasePath || '';
+// Helper to get structured paths
+const getAppPaths = (base) => {
+    // 🔍 SMART PATH RESOLUTION
+    // If the base folder already has 'Data' or 'BharatPP/Data', use it correctly.
+    let root = base;
+    const directDataPath = path.join(base, 'Data');
+    const nestedDataPath = path.join(base, 'BharatPP', 'Data');
+    if (fs.existsSync(nestedDataPath)) {
+        // Case: User selected the PARENT of BharatPP
+        root = path.join(base, 'BharatPP');
+    }
+    else if (fs.existsSync(directDataPath)) {
+        // Case: User selected the 'BharatPP' folder itself
+        root = base;
+    }
+    else {
+        // Case: New installation or empty folder, default to appending BharatPP
+        root = path.join(base, 'BharatPP');
+    }
+    return {
+        root,
+        data: path.join(root, 'Data'),
+        reports: path.join(root, 'Report files'),
+        backups: path.join(root, 'Data backup'),
+        templates: path.join(root, 'Templates')
+    };
+};
+// ── DATABASE INITIALIZATION ──
+let db = null;
+function initializeDatabase(basePath) {
+    const paths = getAppPaths(basePath);
+    // Ensure directories exist
+    [paths.data, paths.reports, paths.backups, paths.templates].forEach((dir) => {
+        try {
+            if (!fs.existsSync(dir))
+                fs.mkdirSync(dir, { recursive: true });
+        }
+        catch (err) {
+            console.error(`❌ Permission Error: Failed to create directory: ${dir}`, err);
+            throw new Error(`Permission Denied: Cannot create folder at ${dir}. Please ensure you have write access.`);
+        }
+    });
+    const DB_PATH = path.join(paths.data, 'active_db.sqlite');
+    const snapshotDir = path.join(paths.backups, 'PRE_UPDATE_SNAPSHOT');
+    const snapshotDb = path.join(snapshotDir, 'active_db_snapshot.sqlite');
+    // ── AUTO-RESTORE LOGIC ──
+    // If main DB is missing but snapshot exists, restore it.
+    if (!fs.existsSync(DB_PATH) && fs.existsSync(snapshotDb)) {
+        try {
+            console.log('🔄 Main DB missing. Restoring from pre-update snapshot...');
+            fs.copyFileSync(snapshotDb, DB_PATH);
+            const configSnapshot = path.join(snapshotDir, 'app-config_snapshot.json');
+            if (fs.existsSync(configSnapshot)) {
+                fs.copyFileSync(configSnapshot, CONFIG_PATH);
+            }
+            console.log('✅ Restoration complete.');
+        }
+        catch (e) {
+            console.error('❌ Auto-restore failed:', e);
+        }
+    }
+    try {
+        db = new better_sqlite3_1.default(DB_PATH);
+        db.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+    }
+    catch (e) {
+        console.error('❌ DB connection failed. Database might be corrupted.', e);
+        // If corrupted and snapshot exists, try a hail-mary restore
+        if (fs.existsSync(snapshotDb)) {
+            try {
+                if (db)
+                    db.close();
+                fs.copyFileSync(snapshotDb, DB_PATH);
+                db = new better_sqlite3_1.default(DB_PATH);
+                console.log('🛠️ Corrupted DB replaced with snapshot.');
+            }
+            catch (restoreErr) {
+                console.error('❌ Hail-mary restore failed.', restoreErr);
+            }
+        }
+    }
+}
+// Deferring DB initialization to app.whenReady() for Ultra-Fast Startup.
+function createWindow() {
+    mainWindow = new electron_1.BrowserWindow({
+        width: 1280,
+        height: 800,
+        backgroundColor: '#020617', // Match Slate-950/Slate-900 to prevent white flash on load
+        icon: path.join(__dirname, '../build/icon.png'),
+        webPreferences: {
+            preload: path.isAbsolute(path.join(__dirname, 'preload.js'))
+                ? path.join(__dirname, 'preload.js')
+                : path.resolve(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+        },
+        autoHideMenuBar: true,
+        show: false, // Don't show until ready-to-show
+    });
+    mainWindow.once('ready-to-show', () => {
+        if (mainWindow)
+            mainWindow.show();
+    });
+    if (isDev) {
+        mainWindow.loadURL('http://localhost:3000');
+    }
+    else {
+        mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    }
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
+}
+// ── SINGLE INSTANCE LOCK ──────────────────────────────────────────────────
+// Prevent multiple instances of BPP_APP from running simultaneously in production.
+const gotTheLock = electron_1.app.requestSingleInstanceLock();
+if (!gotTheLock && !isDev) {
+    // A second instance tried to launch — show a warning and quit.
+    electron_1.dialog.showErrorBox('⚠  BharatPay Pro — Already Running', 'BharatPay Pro is already open on this machine.\n\n' +
+        'Only one session is allowed at a time.\n\n' +
+        'Please switch to the existing window.\n' +
+        'If the app is unresponsive, close it from the Windows Taskbar and try again.');
+    electron_1.app.quit();
+}
+else {
+    // If a second instance attempts while we are the primary, focus our window (only in prod).
+    electron_1.app.on('second-instance', () => {
+        if (mainWindow && !isDev) {
+            if (mainWindow.isMinimized())
+                mainWindow.restore();
+            mainWindow.focus();
+        }
+    });
+}
+// ─────────────────────────────────────────────────────────────────────────
+electron_1.app.whenReady().then(() => {
+    // ── ULTRA-FAST STARTUP (V02.02.26) ──
+    // 1. Create window immediately for perception of speed
+    createWindow();
+    // 2. Initializing database and cleanup in background
+    if (appBasePath) {
+        try {
+            initializeDatabase(appBasePath);
+        }
+        catch (e) {
+            console.error("Failed to initialize database at stored path:", e);
+            appBasePath = '';
+        }
+    }
+    cleanupOldInstallers();
+});
+electron_1.app.on('window-all-closed', () => {
+    console.error("EVENT 'window-all-closed' WAS FIRED. STACK TRACE:");
+    console.trace();
+    if (process.platform !== 'darwin')
+        electron_1.app.quit();
+});
+// ── IPC HANDLERS ──
+// 1. Directory Setup
+electron_1.ipcMain.handle('select-app-directory', async () => {
+    if (!mainWindow)
+        return { success: false, error: 'No main window' };
+    const result = await electron_1.dialog.showOpenDialog(mainWindow, {
+        properties: ['openDirectory', 'createDirectory'],
+        title: 'Select Application Storage Location'
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, canceled: true };
+    }
+    return { success: true, path: result.filePaths[0] };
+});
+electron_1.ipcMain.handle('initialize-app-directory', async (_, selectedPath) => {
+    try {
+        initializeDatabase(selectedPath);
+        appBasePath = selectedPath;
+        saveAppConfig({ ...getAppConfig(), appBasePath });
+        return { success: true };
+    }
+    catch (e) {
+        console.error('Failed to initialize app directory:', e);
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('get-app-directory', async () => {
+    return appBasePath || null;
+});
+// 2. Report Saving
+electron_1.ipcMain.handle('save-report', async (_, { fileName, data, type }) => {
+    try {
+        console.log(`[IPC] save-report requested: ${fileName}.${type}`);
+        if (!appBasePath) {
+            console.error('[IPC] appBasePath is missing. App storage not initialized.');
+            throw new Error("App storage not initialized. Please select a storage location.");
+        }
+        const paths = getAppPaths(appBasePath);
+        // Ensure the reports directory exists
+        if (!fs.existsSync(paths.reports)) {
+            console.log(`[IPC] Creating missing reports directory: ${paths.reports}`);
+            fs.mkdirSync(paths.reports, { recursive: true });
+        }
+        const filePath = path.resolve(paths.reports, `${fileName}.${type}`);
+        console.log(`[IPC] Saving file to: ${filePath}`);
+        // Write the file
+        const buffer = Buffer.from(data);
+        fs.writeFileSync(filePath, new Uint8Array(buffer));
+        console.log(`[IPC] File written successfully. Size: ${buffer.length} bytes`);
+        return { success: true, path: filePath };
+    }
+    catch (e) {
+        console.error('[IPC] Save report failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+// 2b. Template Saving (routes to BharatPP/Templates instead of Report files)
+electron_1.ipcMain.handle('save-template', async (_, { fileName, data, type }) => {
+    try {
+        console.log(`[IPC] save-template requested: ${fileName}.${type}`);
+        if (!appBasePath)
+            throw new Error("App storage not initialized.");
+        const paths = getAppPaths(appBasePath);
+        if (!fs.existsSync(paths.templates)) {
+            fs.mkdirSync(paths.templates, { recursive: true });
+        }
+        const filePath = path.resolve(paths.templates, `${fileName}.${type}`);
+        console.log(`[IPC] Saving template to: ${filePath}`);
+        const buffer = Buffer.from(data);
+        fs.writeFileSync(filePath, new Uint8Array(buffer));
+        console.log(`[IPC] Template written successfully. Size: ${buffer.length} bytes`);
+        return { success: true, path: filePath };
+    }
+    catch (e) {
+        console.error('[IPC] Save template failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('open-item-location', async (_, filePath) => {
+    try {
+        if (filePath && fs.existsSync(filePath)) {
+            console.log(`[IPC] Opening location for item: ${filePath}`);
+            electron_1.shell.showItemInFolder(filePath);
+            return { success: true };
+        }
+        return { success: false, error: 'File not found' };
+    }
+    catch (e) {
+        console.error('[IPC] Open item location failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+// 2c. Open File Path (directly open the file)
+electron_1.ipcMain.handle('open-item-path', async (_, filePath) => {
+    try {
+        if (filePath && fs.existsSync(filePath)) {
+            console.log(`[IPC] Opening file path directly: ${filePath}`);
+            await electron_1.shell.openPath(filePath);
+            return { success: true };
+        }
+        return { success: false, error: 'File not found' };
+    }
+    catch (e) {
+        console.error('[IPC] Open item path failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+// 2d. Dedicated Open User Manual Handler
+electron_1.ipcMain.handle('open-user-manual', async () => {
+    try {
+        console.log(`[IPC] Received open-user-manual request`);
+        const isDev = !electron_1.app.isPackaged;
+        const appRoot = isDev ? process.cwd() : electron_1.app.getAppPath();
+        const manualPath = path.join(appRoot, 'docs', 'user_manual.html');
+        console.log(`[IPC] Resolved source manual path: ${manualPath}`);
+        if (fs.existsSync(manualPath)) {
+            if (isDev) {
+                await electron_1.shell.openPath(manualPath);
+                return { success: true };
+            }
+            else {
+                // In production, extract to temp to bypass asar shell restrictions
+                const tempDir = electron_1.app.getPath('temp');
+                const tempManualPath = path.join(tempDir, 'BPP_User_Manual.html');
+                const content = fs.readFileSync(manualPath);
+                fs.writeFileSync(tempManualPath, content);
+                console.log(`[IPC] Extracted manual to temp: ${tempManualPath}`);
+                await electron_1.shell.openPath(tempManualPath);
+                return { success: true };
+            }
+        }
+        // Fallback Strategy
+        const altPath = path.resolve(__dirname, '..', 'docs', 'user_manual.html');
+        if (fs.existsSync(altPath)) {
+            await electron_1.shell.openPath(altPath);
+            return { success: true };
+        }
+        throw new Error(`User manual not found. Please ensure 'docs/user_manual.html' exists.`);
+    }
+    catch (e) {
+        console.error('[IPC] Open user manual failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('send-email', async (_, { smtpConfig, mailOptions }) => {
+    try {
+        console.log(`[IPC] send-email requested to: ${mailOptions.to}`);
+        const transporter = nodemailer_1.default.createTransport({
+            host: smtpConfig.host,
+            port: smtpConfig.port,
+            secure: smtpConfig.secure === 'SSL', // true for 465, false for 587/other
+            auth: {
+                user: smtpConfig.user,
+                pass: smtpConfig.pass,
+            },
+            tls: {
+                rejectUnauthorized: false // Helps with self-signed certs or local servers
+            }
+        });
+        const info = await transporter.sendMail({
+            from: `"${smtpConfig.senderName}" <${smtpConfig.senderEmail}>`,
+            to: mailOptions.to,
+            subject: mailOptions.subject,
+            text: mailOptions.text,
+            html: mailOptions.html,
+            attachments: mailOptions.attachments ? mailOptions.attachments.map((at) => ({
+                filename: at.filename,
+                content: Buffer.from(at.content)
+            })) : []
+        });
+        console.log(`[IPC] Email sent. MessageId: ${info.messageId}`);
+        return { success: true, messageId: info.messageId };
+    }
+    catch (e) {
+        console.error('[IPC] send-email failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+// 3. Simple Key-Value Store
+electron_1.ipcMain.handle('db-set', async (_, { key, value }) => {
+    try {
+        if (!db)
+            throw new Error("Database not initialized");
+        const stmt = db.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+        stmt.run(key, JSON.stringify(value));
+        return { success: true };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('db-get', async (_, key) => {
+    try {
+        if (!db)
+            return { success: true, data: null };
+        const row = db.prepare('SELECT value FROM store WHERE key = ?').get(key);
+        return { success: true, data: row ? JSON.parse(row.value) : null };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('db-delete', async (_, key) => {
+    try {
+        if (!db)
+            return { success: true };
+        db.prepare('DELETE FROM store WHERE key = ?').run(key);
+        return { success: true };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('db-get-all', async () => {
+    try {
+        if (!db)
+            return { success: true, data: [] };
+        const rows = db.prepare('SELECT key, value FROM store').all();
+        return { success: true, data: rows.map(r => ({ key: r.key, value: JSON.parse(r.value) })) };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+// 4. Encrypted Manual Backup
+electron_1.ipcMain.handle('run-backup', async (_, encryptedData) => {
+    try {
+        if (!appBasePath)
+            throw new Error("App storage not initialized");
+        const paths = getAppPaths(appBasePath);
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T');
+        const fileName = `backup_${timestamp[0]}_${timestamp[1].slice(0, 8)}.enc`;
+        const filePath = path.join(paths.backups, fileName);
+        fs.writeFileSync(filePath, encryptedData);
+        return { success: true, fileName };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+// 5. Automatic Data Backup (triggered by payroll confirmation/rollover)
+electron_1.ipcMain.handle('create-data-backup', async (_, fileName) => {
+    try {
+        if (!db && appBasePath)
+            initializeDatabase(appBasePath);
+        if (!appBasePath || !db)
+            throw new Error("Database not initialized");
+        const paths = getAppPaths(appBasePath);
+        if (!fs.existsSync(paths.backups))
+            fs.mkdirSync(paths.backups, { recursive: true });
+        const tempPath = path.join(paths.backups, `${fileName}.sqlite.tmp`);
+        const finalPath = path.join(paths.backups, `${fileName}.enc`);
+        console.log(`[IPC] Performing Online SQL Snapshot...`);
+        await db.backup(tempPath);
+        // --- ENCRYPTION LAYER ---
+        console.log(`[IPC] Securing Archive with Machine Lock...`);
+        const machineId = await getInternalMachineId();
+        const cipher = crypto.createCipheriv('aes-256-cbc', crypto.scryptSync(machineId, 'salt', 32), Buffer.alloc(16, 0));
+        const input = fs.createReadStream(tempPath);
+        const output = fs.createWriteStream(finalPath);
+        await new Promise((resolve, reject) => {
+            input.pipe(cipher).pipe(output)
+                .on('finish', () => resolve(true))
+                .on('error', (err) => reject(err));
+        });
+        fs.unlinkSync(tempPath); // Remove the plain temporary file
+        console.log(`[IPC] Secure Automatic Backup Created: ${finalPath}`);
+        return { success: true, path: finalPath };
+    }
+    catch (e) {
+        console.error('[IPC] Automatic backup failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+// 5b. Restore from SQLite Backup (Directly Replace DB File)
+electron_1.ipcMain.handle('restore-sqlite-backup', async (_, backupFilePath) => {
+    try {
+        if (!appBasePath)
+            throw new Error("App storage not initialized");
+        const paths = getAppPaths(appBasePath);
+        const DB_PATH = path.join(paths.data, 'active_db.sqlite');
+        console.log(`[IPC] Restoring SQLite backup from: ${backupFilePath}`);
+        if (!fs.existsSync(backupFilePath)) {
+            throw new Error("Backup file not found at " + backupFilePath);
+        }
+        const tempRestorePath = path.join(paths.data, 'restore_temp.sqlite');
+        // Check if it's a plain SQLite file or encrypted
+        const fd = fs.openSync(backupFilePath, 'r');
+        const header = Buffer.alloc(16);
+        fs.readSync(fd, header, 0, 16, 0);
+        fs.closeSync(fd);
+        if (header.toString().startsWith('SQLite format 3')) {
+            console.log(`[IPC] Restoring plain SQLite file...`);
+            fs.copyFileSync(backupFilePath, tempRestorePath);
+        }
+        else {
+            console.log(`[IPC] Decrypting Secure SQLite Archive...`);
+            const machineId = await getInternalMachineId();
+            const decipher = crypto.createDecipheriv('aes-256-cbc', crypto.scryptSync(machineId, 'salt', 32), Buffer.alloc(16, 0));
+            const input = fs.createReadStream(backupFilePath);
+            const output = fs.createWriteStream(tempRestorePath);
+            await new Promise((resolve, reject) => {
+                input.pipe(decipher).pipe(output)
+                    .on('finish', () => resolve(true))
+                    .on('error', (err) => reject(err));
+            });
+        }
+        // 1. Close current connection
+        if (db) {
+            db.close();
+            db = null;
+        }
+        // 2. Perform the swap
+        fs.copyFileSync(tempRestorePath, DB_PATH);
+        fs.unlinkSync(tempRestorePath);
+        // 3. Re-initialize
+        initializeDatabase(appBasePath);
+        console.log(`[IPC] restoration successful.`);
+        return { success: true };
+    }
+    catch (e) {
+        console.error('[IPC] restoration failed:', e);
+        if (!db && appBasePath)
+            initializeDatabase(appBasePath);
+        return { success: false, error: e.message };
+    }
+});
+async function getInternalMachineId() {
+    try {
+        const output = (0, child_process_1.execSync)('wmic csproduct get uuid', { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).toString();
+        const lines = output.split(/\r?\n/).filter((line) => line.trim() && !line.includes('UUID'));
+        if (lines.length > 0 && lines[0].trim())
+            return lines[0].trim();
+    }
+    catch (e) { }
+    try {
+        const psOutput = (0, child_process_1.execSync)('powershell.exe -NoProfile -Command "(Get-CimInstance -Class Win32_ComputerSystemProduct).UUID"', { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).toString();
+        if (psOutput && psOutput.trim())
+            return psOutput.trim();
+    }
+    catch (e) { }
+    return 'FALLBACK-MACHINE-ID-SECURE';
+}
+// 6. App Closing
+electron_1.ipcMain.handle('close-app', async () => {
+    console.error("IPC 'close-app' WAS CALLED. STACK TRACE:");
+    console.trace();
+    electron_1.app.quit();
+});
+// 6. Machine ID Retrieval
+electron_1.ipcMain.handle('get-machine-id', async () => {
+    try {
+        try {
+            // Primary attempt: wmic
+            const output = (0, child_process_1.execSync)('wmic csproduct get uuid', { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).toString();
+            const lines = output.split(/\r?\n/).filter((line) => line.trim() && !line.includes('UUID') && !line.includes('wmic'));
+            if (lines.length > 0 && lines[0].trim()) {
+                return lines[0].trim();
+            }
+        }
+        catch (e) {
+            // Ignore WMIC failure, fallback to PowerShell
+        }
+        // Fallback: PowerShell (Modern Windows 11)
+        const psOutput = (0, child_process_1.execSync)('powershell.exe -NoProfile -Command "(Get-CimInstance -Class Win32_ComputerSystemProduct).UUID"', { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).toString();
+        if (psOutput && psOutput.trim()) {
+            return psOutput.trim();
+        }
+        return 'UNKNOWN-MACHINE-ID';
+    }
+    catch (e) {
+        console.error('Failed to get machine ID:', e);
+        return 'UNKNOWN-MACHINE-ID';
+    }
+});
+// 7. OS Version Retrieval
+electron_1.ipcMain.handle('get-os-version', async () => {
+    return os.release();
+});
+electron_1.ipcMain.handle('set-fullscreen', async (_, flag) => {
+    if (mainWindow) {
+        mainWindow.setFullScreen(flag);
+        return { success: true };
+    }
+    return { success: false, error: 'No main window' };
+});
+electron_1.ipcMain.handle('get-fullscreen', async () => {
+    if (mainWindow) {
+        return mainWindow.isFullScreen();
+    }
+    return false;
+});
+electron_1.ipcMain.handle('relaunch-app', () => {
+    electron_1.app.relaunch();
+    electron_1.app.exit(0);
+});
+electron_1.ipcMain.handle('open-external', async (_, url) => {
+    try {
+        await electron_1.shell.openExternal(url);
+        return { success: true };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('api-fetch', async (_, url, options) => {
+    try {
+        return new Promise((resolve, reject) => {
+            const request = electron_1.net.request({
+                url,
+                method: options?.method || 'GET',
+                redirect: 'follow'
+            });
+            const timeout = setTimeout(() => {
+                request.abort();
+                reject({ message: '🔌 API Request Timed Out (30s)' });
+            }, 30000);
+            if (options?.headers) {
+                for (const [key, value] of Object.entries(options.headers)) {
+                    request.setHeader(key, value);
+                }
+            }
+            request.on('response', (response) => {
+                let responseData = '';
+                response.on('data', (chunk) => {
+                    responseData += chunk.toString('utf8');
+                });
+                response.on('end', () => {
+                    clearTimeout(timeout);
+                    let responseBody;
+                    try {
+                        responseBody = JSON.parse(responseData);
+                    }
+                    catch {
+                        responseBody = responseData;
+                    }
+                    if (response.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
+                        console.error(`🔌 fetch failed [${response.statusCode}]:`, responseBody);
+                        reject({ message: `HTTP error! status: ${response.statusCode}` });
+                    }
+                    else {
+                        resolve(responseBody);
+                    }
+                });
+            });
+            request.on('error', (error) => {
+                clearTimeout(timeout);
+                console.error('🔌 Error in api-fetch:', error);
+                reject({ message: error.message });
+            });
+            if (options?.body) {
+                request.write(options.body);
+            }
+            request.end();
+        });
+    }
+    catch (error) {
+        throw { message: error.message };
+    }
+});
+// 8. Dynamic Folder Detection
+electron_1.ipcMain.handle('find-bpp-app', async () => {
+    try {
+        const potentialRoots = [];
+        // 1. Get all logical drives on Windows
+        try {
+            const output = (0, child_process_1.execSync)('wmic logicaldisk get name', { encoding: 'utf8' });
+            const drives = output.split(/\r?\n/)
+                .filter(line => line.trim() && line.includes(':'))
+                .map(line => line.trim());
+            drives.forEach(drive => {
+                potentialRoots.push(path.join(drive, 'BPP_APP'));
+                potentialRoots.push(path.join(drive, 'BPP', 'BPP_APP')); // Check subfolder too
+            });
+        }
+        catch (e) {
+            // Fallback if WMIC fails
+            ['C:', 'D:', 'E:', 'F:', 'G:', 'H:'].forEach(d => {
+                potentialRoots.push(path.join(d, '/', 'BPP_APP'));
+            });
+        }
+        // 2. Add User Home
+        potentialRoots.push(path.join(electron_1.app.getPath('home'), 'BPP_APP'));
+        // 3. Scan for first existing one
+        for (const p of potentialRoots) {
+            if (fs.existsSync(p)) {
+                // Verify it's actually our app directory (contains BharatPP or active_db.sqlite)
+                const dataPath = path.join(p, 'BharatPP', 'Data', 'active_db.sqlite');
+                if (fs.existsSync(dataPath)) {
+                    console.log('🔍 Dynamic Detection: Found BPP_APP at', p);
+                    return { success: true, path: p };
+                }
+            }
+        }
+        return { success: false, error: 'BPP_APP folder not found' };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+// ── 9. SMART AUTO-UPDATE HANDLERS ──
+const INSTALLER_NAME = 'bpp_installer.exe';
+const getInstallerPath = () => path.join(os.tmpdir(), INSTALLER_NAME);
+electron_1.ipcMain.handle('start-update-download', async (_, downloadUrl, expectedHash) => {
+    return new Promise((resolve) => {
+        try {
+            const dest = getInstallerPath();
+            const file = fs.createWriteStream(dest);
+            const request = electron_1.net.request({
+                url: downloadUrl,
+                redirect: 'follow'
+            });
+            request.on('response', (response) => {
+                const totalBytes = parseInt(response.headers['content-length'], 10) || 0;
+                let downloadedBytes = 0;
+                let lastEmittedProgress = -1;
+                response.on('data', (chunk) => {
+                    file.write(chunk);
+                    downloadedBytes += chunk.length;
+                    if (totalBytes > 0) {
+                        const progress = Math.round((downloadedBytes / totalBytes) * 100);
+                        if (progress !== lastEmittedProgress) {
+                            lastEmittedProgress = progress;
+                            electron_1.BrowserWindow.getAllWindows().forEach(win => {
+                                win.webContents.send('update-download-progress', progress);
+                            });
+                        }
+                    }
+                });
+                response.on('end', async () => {
+                    file.end();
+                    console.log('✅ Update downloaded to:', dest);
+                    // --- V02.02.40: BINARY INTEGRITY CHECK ---
+                    // Verify the file is actually a Windows Executable (MZ Header)
+                    try {
+                        const buffer = new Uint8Array(2);
+                        const fd = fs.openSync(dest, 'r');
+                        fs.readSync(fd, buffer, 0, 2, 0);
+                        fs.closeSync(fd);
+                        if (String.fromCharCode(buffer[0], buffer[1]) !== 'MZ') {
+                            console.error('❌ Security Violation: Downloaded file is not a valid Windows Executable.');
+                            fs.unlinkSync(dest);
+                            resolve({ success: false, error: 'INVALID_BINARY_TYPE' });
+                            return;
+                        }
+                    }
+                    catch (e) {
+                        console.error('❌ Failed to verify binary header:', e);
+                    }
+                    // ── SHA-256 INTEGRITY VERIFICATION ──
+                    if (expectedHash && expectedHash.trim() !== "") {
+                        console.log('🛡️ Verifying SHA-256 integrity...');
+                        try {
+                            const hash = crypto.createHash('sha256');
+                            const input = fs.createReadStream(dest);
+                            const calculatedHash = await new Promise((res, rej) => {
+                                input.on('data', chunk => hash.update(chunk));
+                                input.on('end', () => res(hash.digest('hex')));
+                                input.on('error', err => rej(err));
+                            });
+                            if (calculatedHash.toLowerCase() !== expectedHash.toLowerCase()) {
+                                console.error(`❌ Security Violation: Hash Mismatch!\nExpected: ${expectedHash}\nActual: ${calculatedHash}`);
+                                fs.unlinkSync(dest);
+                                resolve({ success: false, error: 'SECURITY_HASH_MISMATCH' });
+                                return;
+                            }
+                            console.log('✅ Integrity Verified successfully.');
+                        }
+                        catch (hashErr) {
+                            console.error('❌ Hash calculation failed:', hashErr);
+                            fs.unlinkSync(dest);
+                            resolve({ success: false, error: 'Integrity check failed' });
+                            return;
+                        }
+                    }
+                    electron_1.BrowserWindow.getAllWindows().forEach(win => {
+                        win.webContents.send('update-download-complete');
+                    });
+                    console.log(`✅ Update download finished. Total Bytes: ${fs.statSync(dest).size}`);
+                    resolve({ success: true, path: dest });
+                });
+                response.on('error', (err) => {
+                    file.end();
+                    fs.unlink(dest, () => { });
+                    console.error('❌ Update download stream failed:', err);
+                    resolve({ success: false, error: err.message });
+                });
+            });
+            request.on('error', (err) => {
+                file.end();
+                fs.unlink(dest, () => { });
+                console.error('❌ Update request failed:', err);
+                resolve({ success: false, error: err.message });
+            });
+            request.end();
+        }
+        catch (e) {
+            resolve({ success: false, error: e.message });
+        }
+    });
+});
+electron_1.ipcMain.handle('backup-and-install', (_, options) => {
+    // 1. INSTANT SUCCESS SIGNAL: Tell the renderer to finish its countdown immediately
+    const isSilent = options?.silent ?? false;
+    const installerPath = getInstallerPath();
+    // 2. INSTANT HIDING: Release focus back to the OS within milliseconds
+    if (mainWindow) {
+        mainWindow.hide();
+    }
+    // 3. DETACHED WORKER: All heavy lifting (closing DB, backups, launching) happens in the shadows
+    (async () => {
+        try {
+            console.log('--- HYPER-ASYNC HANDOFF START ---');
+            // A. Gently close database if it hasn't been closed already
+            if (db) {
+                try {
+                    db.close();
+                }
+                catch (e) { }
+                db = null;
+            }
+            // B. Snapshot/Backup (Run inside try-catch to ensure launch isn't delayed by file locks)
+            try {
+                if (appBasePath) {
+                    const paths = getAppPaths(appBasePath);
+                    const snapshotDir = path.join(paths.backups, `v${electron_1.app.getVersion()}_SAFETY_BACKUP`);
+                    if (!fs.existsSync(snapshotDir))
+                        fs.mkdirSync(snapshotDir, { recursive: true });
+                    const dbFile = path.join(paths.data, 'active_db.sqlite');
+                    if (fs.existsSync(dbFile)) {
+                        fs.copyFileSync(dbFile, path.join(snapshotDir, 'active_db_snapshot.sqlite'));
+                    }
+                }
+            }
+            catch (backupErr) {
+                console.warn('⚠️ Safety backup skipped due to file lock, proceeding to launch:', backupErr);
+            }
+            // C. POWER LAUNCH: Direct Native Trigger
+            // We use shell.openPath as the primary choice because it handles UAC and paths perfectly.
+            // We also spawn a direct process as a backup.
+            try {
+                electron_1.shell.openPath(installerPath);
+                (0, child_process_1.spawn)(installerPath, [], {
+                    detached: true,
+                    stdio: 'ignore',
+                    windowsHide: false
+                }).unref();
+            }
+            catch (launchErr) {
+                console.error('🚀 Primary launch failed, trying fallback:', launchErr);
+                // Last resort fallback
+                (0, child_process_1.spawn)('cmd.exe', ['/c', 'start', '', installerPath], { detached: true }).unref();
+            }
+            if (isSilent) {
+                (0, child_process_1.spawn)(installerPath, ['/S'], {
+                    detached: true,
+                    stdio: 'ignore',
+                    windowsHide: true
+                }).unref();
+            }
+            // D. FINAL EXIT: Allow 3 seconds for OS to settle, then terminate parent process
+            setTimeout(() => {
+                console.log('🏁 Termination successful.');
+                electron_1.app.quit();
+                setTimeout(() => electron_1.app.exit(0), 1000);
+            }, 3000);
+        }
+        catch (err) {
+            console.error('❌ Critical failure in background worker:', err);
+            electron_1.app.exit(1);
+        }
+    })();
+    return { success: true };
+});
+function cleanupOldInstallers() {
+    try {
+        const dest = getInstallerPath();
+        if (fs.existsSync(dest)) {
+            // Check if it's been there for more than a few minutes (avoid deleting during active download)
+            const stats = fs.statSync(dest);
+            const ageMinutes = (Date.now() - stats.mtimeMs) / (1000 * 60);
+            if (ageMinutes > 5) {
+                fs.unlinkSync(dest);
+                console.log('🧹 Cleaned up old installer file.');
+            }
+        }
+        // Also check if there are any orphaned EXEs in the app root
+        if (appBasePath) {
+            const rootFiles = fs.readdirSync(appBasePath);
+            rootFiles.forEach((file) => {
+                if (file.toLowerCase().endsWith('.exe') && file.toLowerCase().includes('bpp_app')) {
+                    // This might be an old version left behind. 
+                    // We don't delete immediately to be safe, but we log it.
+                    console.log(`ℹ️ Found potential legacy EXE in root: ${file}`);
+                }
+            });
+        }
+    }
+    catch (e) {
+        console.warn('⚠️ Cleanup check skipped:', e);
+    }
+}
+console.log("-----------------------------------------");
+console.log("ELECTRON MAIN PROCESS: HANDLERS READY");
+console.log("-----------------------------------------");

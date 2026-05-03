@@ -15,6 +15,7 @@ interface CustomModalProps {
     secondaryConfirmLabel?: string;
     cancelLabel?: string;
     autoCloseSecs?: number;
+    hideFooter?: boolean;
 }
 
 const CustomModal: React.FC<CustomModalProps> = ({
@@ -28,7 +29,8 @@ const CustomModal: React.FC<CustomModalProps> = ({
     confirmLabel = 'OK',
     secondaryConfirmLabel,
     cancelLabel = 'Cancel',
-    autoCloseSecs
+    autoCloseSecs,
+    hideFooter = false
 }) => {
     const [progress, setProgress] = useState(100);
     const progressBarRef = useRef<HTMLDivElement>(null);
@@ -140,7 +142,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     </div>
                 </div>
 
-                <div className="p-8 bg-slate-900/20">
+                <div className="p-8 bg-slate-900/20 overflow-y-auto max-h-[50vh] custom-scrollbar">
                     <div className="text-sm text-slate-300 leading-relaxed text-center font-medium">
                         {message}
                     </div>
@@ -160,7 +162,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     </div>
                 )}
 
-                {type !== 'loading' && (
+                {type !== 'loading' && !hideFooter && (
                     <div className="p-4 bg-[#1e293b] border-t border-slate-700/50 flex gap-3">
                         {(type === 'confirm' || type === 'danger') && (
                             <button

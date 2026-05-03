@@ -434,6 +434,16 @@ ipcMain.handle('db-delete', async (_, key) => {
     }
 });
 
+ipcMain.handle('db-get-all', async () => {
+    try {
+        if (!db) return { success: true, data: [] };
+        const rows = db.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
+        return { success: true, data: rows.map(r => ({ key: r.key, value: JSON.parse(r.value) })) };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
 // 4. Encrypted Manual Backup
 ipcMain.handle('run-backup', async (_, encryptedData) => {
     try {
@@ -452,33 +462,38 @@ ipcMain.handle('run-backup', async (_, encryptedData) => {
 // 5. Automatic Data Backup (triggered by payroll confirmation/rollover)
 ipcMain.handle('create-data-backup', async (_, fileName) => {
     try {
-        // Self-Healing Logic: Detect if DB was never initialized despite having a path
-        if (!db && appBasePath) {
-            console.log("🔄 Self-Healing: Re-initializing database connection before backup...");
-            initializeDatabase(appBasePath);
-        }
+        if (!db && appBasePath) initializeDatabase(appBasePath);
+        if (!appBasePath || !db) throw new Error("Database not initialized");
 
-        if (!appBasePath) {
-            throw new Error("App storage context is missing. Please select a storage location in Settings.");
-        }
-        if (!db) {
-            throw new Error("Database engine failed to initialize. Check if another instance is running or if the Data folder is read-only.");
-        }
         const paths = getAppPaths(appBasePath);
+        if (!fs.existsSync(paths.backups)) fs.mkdirSync(paths.backups, { recursive: true });
 
-        // Ensure backups directory exists
-        if (!fs.existsSync(paths.backups)) {
-            fs.mkdirSync(paths.backups, { recursive: true });
-        }
+        const tempPath = path.join(paths.backups, `${fileName}.sqlite.tmp`);
+        const finalPath = path.join(paths.backups, `${fileName}.enc`);
+        
+        console.log(`[IPC] Performing Online SQL Snapshot...`);
+        await db.backup(tempPath);
 
-        const filePath = path.join(paths.backups, `${fileName}.enc`);
-        console.log(`[IPC] Creating automatic backup: ${filePath}`);
+        // --- ENCRYPTION LAYER ---
+        console.log(`[IPC] Securing Archive with Machine Lock...`);
+        const machineId = await getInternalMachineId();
+        const cipher = crypto.createCipheriv('aes-256-cbc', 
+            crypto.scryptSync(machineId, 'salt', 32), 
+            Buffer.alloc(16, 0)
+        );
+        
+        const input = fs.createReadStream(tempPath);
+        const output = fs.createWriteStream(finalPath);
+        
+        await new Promise((resolve, reject) => {
+            input.pipe(cipher).pipe(output)
+                 .on('finish', () => resolve(true))
+                 .on('error', (err) => reject(err));
+        });
 
-        // db.backup() is a better-sqlite3 method that performs an online backup
-        await db.backup(filePath);
-
-        console.log(`[IPC] Automatic backup created successfully.`);
-        return { success: true, path: filePath };
+        fs.unlinkSync(tempPath); // Remove the plain temporary file
+        console.log(`[IPC] Secure Automatic Backup Created: ${finalPath}`);
+        return { success: true, path: finalPath };
     } catch (e: any) {
         console.error('[IPC] Automatic backup failed:', e);
         return { success: false, error: e.message };
@@ -498,6 +513,35 @@ ipcMain.handle('restore-sqlite-backup', async (_, backupFilePath) => {
             throw new Error("Backup file not found at " + backupFilePath);
         }
 
+        const tempRestorePath = path.join(paths.data, 'restore_temp.sqlite');
+
+        // Check if it's a plain SQLite file or encrypted
+        const fd = fs.openSync(backupFilePath, 'r');
+        const header = Buffer.alloc(16);
+        fs.readSync(fd, header, 0, 16, 0);
+        fs.closeSync(fd);
+
+        if (header.toString().startsWith('SQLite format 3')) {
+            console.log(`[IPC] Restoring plain SQLite file...`);
+            fs.copyFileSync(backupFilePath, tempRestorePath);
+        } else {
+            console.log(`[IPC] Decrypting Secure SQLite Archive...`);
+            const machineId = await getInternalMachineId();
+            const decipher = crypto.createDecipheriv('aes-256-cbc', 
+                crypto.scryptSync(machineId, 'salt', 32), 
+                Buffer.alloc(16, 0)
+            );
+            
+            const input = fs.createReadStream(backupFilePath);
+            const output = fs.createWriteStream(tempRestorePath);
+            
+            await new Promise((resolve, reject) => {
+                input.pipe(decipher).pipe(output)
+                     .on('finish', () => resolve(true))
+                     .on('error', (err) => reject(err));
+            });
+        }
+
         // 1. Close current connection
         if (db) {
             db.close();
@@ -505,20 +549,35 @@ ipcMain.handle('restore-sqlite-backup', async (_, backupFilePath) => {
         }
 
         // 2. Perform the swap
-        fs.copyFileSync(backupFilePath, DB_PATH);
+        fs.copyFileSync(tempRestorePath, DB_PATH);
+        fs.unlinkSync(tempRestorePath);
 
         // 3. Re-initialize
         initializeDatabase(appBasePath);
 
-        console.log(`[IPC] SQLite restoration successful.`);
+        console.log(`[IPC] restoration successful.`);
         return { success: true };
     } catch (e: any) {
-        console.error('[IPC] SQLite restoration failed:', e);
-        // Attempt to re-init if closed
+        console.error('[IPC] restoration failed:', e);
         if (!db && appBasePath) initializeDatabase(appBasePath);
         return { success: false, error: e.message };
     }
 });
+
+async function getInternalMachineId() {
+    try {
+        const output = execSync('wmic csproduct get uuid', { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).toString();
+        const lines = output.split(/\r?\n/).filter((line: string) => line.trim() && !line.includes('UUID'));
+        if (lines.length > 0 && lines[0].trim()) return lines[0].trim();
+    } catch (e) { }
+
+    try {
+        const psOutput = execSync('powershell.exe -NoProfile -Command "(Get-CimInstance -Class Win32_ComputerSystemProduct).UUID"', { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).toString();
+        if (psOutput && psOutput.trim()) return psOutput.trim();
+    } catch (e) { }
+
+    return 'FALLBACK-MACHINE-ID-SECURE';
+}
 
 // 6. App Closing
 ipcMain.handle('close-app', async () => {

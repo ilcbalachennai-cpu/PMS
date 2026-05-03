@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, ShieldCheck, Maximize, Minimize, Power } from 'lucide-react';
-import { User as UserType, CompanyProfile } from '../types';
+import { User as UserType } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
-import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense, requestResetOTP, updateCloudPassword, requestDeveloperOTP, verifyDeveloperOTP, verifyIdentityEmail, syncIdentityRepair } from '../services/licenseService';
+import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense, requestResetOTP, updateCloudPassword, requestDeveloperOTP, verifyDeveloperOTP, verifyIdentityEmail, syncIdentityRepair, requestRestoreOTP, verifyRestoreOTP } from '../services/licenseService';
 import CustomModal from './Shared/CustomModal';
 import { Mail, CheckCircle2, ShieldAlert, Loader2 } from 'lucide-react';
 
@@ -10,10 +10,9 @@ interface LoginProps {
   onLogin: (user: UserType) => void;
   currentLogo: string;
   setLogo: (url: string) => void;
-  companyProfile?: CompanyProfile;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, companyProfile }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -1042,6 +1041,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
         onClose={() => !isVerifyingDev && setShowDevModal(false)}
         type="info"
         title="Developer Portal"
+        hideFooter={true}
         message={
           <div className="py-2 space-y-6">
             <div className="flex flex-col items-center justify-center text-center space-y-3 mb-4">
@@ -1104,6 +1104,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
         onClose={() => !isSyncing && setShowSyncModal(false)}
         type={syncStep === 'SUCCESS' ? 'success' : 'info'}
         title="Identity Sync Portal"
+        hideFooter={true}
         message={
           <div className="py-2">
             {syncNotice && (
@@ -1264,6 +1265,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
         onClose={() => !isRestoring && setShowRestoreModal(false)}
         type={restoreStep === 'SUCCESS' ? 'success' : 'info'}
         title="Identity Restoration"
+        hideFooter={true}
         message={
           <div className="py-2">
             {restoreStep === 'INPUT' && (
@@ -1399,8 +1401,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
                   onClick={() => {
                     setShowRestoreModal(false);
                     // Force a direct login attempt now that profile is synced
-                    const targetU = username.trim().toUpperCase();
-                    handleLogin({ preventDefault: () => {} } as React.FormEvent);
+                    handleLogin({ preventDefault: () => { } } as React.FormEvent);
                   }}
                   className="w-full bg-slate-800 hover:bg-slate-700 text-white font-black py-4 rounded-xl transition-all uppercase tracking-widest text-xs border border-slate-700"
                 >
@@ -1411,33 +1412,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, compa
           </div>
         }
       />
-      {/* --- DEVELOPER UI TESTBED (HIDDEN IN PROD) --- */}
-      {import.meta.env.DEV && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex gap-4 px-6 py-3 bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-4">
-           <div className="flex items-center gap-2 pr-4 border-r border-white/10">
-              <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">UI Testbed</span>
-           </div>
-           <button 
-             onClick={() => window.dispatchEvent(new CustomEvent('BPP_DEV_TEST_UI', { detail: { state: 'READY' } }))}
-             className="px-4 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-[9px] font-black uppercase tracking-widest rounded-lg border border-blue-500/30 transition-all shadow-lg active:scale-95"
-           >
-             Test Version UI
-           </button>
-           <button 
-             onClick={() => window.dispatchEvent(new CustomEvent('BPP_DEV_TEST_UI', { detail: { state: 'PATCH' } }))}
-             className="px-4 py-1.5 bg-amber-600/20 hover:bg-amber-600 text-amber-500 hover:text-white text-[9px] font-black uppercase tracking-widest rounded-lg border border-amber-500/30 transition-all shadow-lg active:scale-95"
-           >
-             Test Patch UI
-           </button>
-           <button 
-             onClick={() => window.dispatchEvent(new CustomEvent('BPP_DEV_TEST_UI', { detail: { open: false } }))}
-             className="px-4 py-1.5 bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white text-[9px] font-black uppercase tracking-widest rounded-lg border border-white/5 transition-all active:scale-95"
-           >
-             Close Test
-           </button>
-        </div>
-      )}
     </div >
   );
 };

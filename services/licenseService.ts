@@ -3,7 +3,7 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.41";
+export const APP_VERSION = "02.02.44";
 export const APP_PATCH_TIMESTAMP = "02-05-2026 21:35:00"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
@@ -258,7 +258,9 @@ export const clearSyncRetryCount = () => {
 
 export const getStoredLicense = (): LicenseData | null => {
   try {
-    const scrambled = localStorage.getItem('app_license_secure');
+    const key = 'app_license_secure';
+    const scrambled = localStorage.getItem(key);
+    
     if (!scrambled) {
       try {
         const raw = localStorage.getItem('app_license');
@@ -276,7 +278,6 @@ export const getStoredLicense = (): LicenseData | null => {
     const calculatedChecksum = generateChecksum(rest);
     if (checksum !== calculatedChecksum) {
       console.error("License Integrity Compromised! Expected:", checksum, "Got:", calculatedChecksum);
-      console.error("Data payload that failed:", JSON.stringify(rest));
       return null;
     }
 
@@ -449,14 +450,17 @@ export const registerTrial = async (
 
       licenseData.checksum = generateChecksum(licenseData);
       const scrambled = scramble(JSON.stringify(licenseData));
-      localStorage.setItem('app_license_secure', scrambled);
-      localStorage.setItem('app_data_size', String(licenseData.dataSize));
+      const storageKey = 'app_license_secure';
+      const dataSizeKey = 'app_data_size';
+
+      localStorage.setItem(storageKey, scrambled);
+      localStorage.setItem(dataSizeKey, String(licenseData.dataSize));
       localStorage.setItem('app_machine_id', licenseData.machineId);
 
       // Sync to electron DB
       if ((window as any).electronAPI) {
-        await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
-        await (window as any).electronAPI.dbSet('app_data_size', String(licenseData.dataSize));
+        await (window as any).electronAPI.dbSet(storageKey, scrambled);
+        await (window as any).electronAPI.dbSet(dataSizeKey, String(licenseData.dataSize));
         await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
       }
       localStorage.setItem('app_license_last_check', new Date().toISOString().split('T')[0]);
@@ -532,14 +536,17 @@ export const activateFullLicense = async (
 
       licenseData.checksum = generateChecksum(licenseData);
       const scrambled = scramble(JSON.stringify(licenseData));
-      localStorage.setItem('app_license_secure', scrambled);
-      localStorage.setItem('app_data_size', String(licenseData.dataSize));
+      const storageKey = 'app_license_secure';
+      const dataSizeKey = 'app_data_size';
+
+      localStorage.setItem(storageKey, scrambled);
+      localStorage.setItem(dataSizeKey, String(licenseData.dataSize));
       localStorage.setItem('app_machine_id', licenseData.machineId);
 
       // Sync to electron DB
       if ((window as any).electronAPI) {
-        await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
-        await (window as any).electronAPI.dbSet('app_data_size', String(licenseData.dataSize));
+        await (window as any).electronAPI.dbSet(storageKey, scrambled);
+        await (window as any).electronAPI.dbSet(dataSizeKey, String(licenseData.dataSize));
         await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
       }
       localStorage.setItem('app_license_last_check', new Date().toISOString().split('T')[0]);
@@ -628,6 +635,8 @@ export const validateLicenseStartup = async (
   console.log(`[LICENSE] Hardware ID for Sync: ${currentMachineId}`);
 
   const stored = getStoredLicense();
+  const storageKey = 'app_license_secure';
+  const dataSizeKey = 'app_data_size';
 
   // 1. OFFLINE ENFORCEMENT (Strict)
   if (stored) {
@@ -837,12 +846,12 @@ export const validateLicenseStartup = async (
 
                 restoredLicense.checksum = generateChecksum(restoredLicense);
                 const scrambled = scramble(JSON.stringify(restoredLicense));
-                localStorage.setItem('app_license_secure', scrambled);
-                localStorage.setItem('app_data_size', String(restoredLicense.dataSize));
+                localStorage.setItem(storageKey, scrambled);
+                localStorage.setItem(dataSizeKey, String(restoredLicense.dataSize));
 
                 if ((window as any).electronAPI) {
-                  await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
-                  await (window as any).electronAPI.dbSet('app_data_size', String(restoredLicense.dataSize));
+                  await (window as any).electronAPI.dbSet(storageKey, scrambled);
+                  await (window as any).electronAPI.dbSet(dataSizeKey, String(restoredLicense.dataSize));
                 }
                 
                 clearSyncRetryCount();
@@ -873,14 +882,14 @@ export const validateLicenseStartup = async (
                 currentLicense.dataSize = Number(result.data.dataSize) || 5000;
               }
 
-              localStorage.setItem('app_data_size', String(currentLicense.dataSize));
+              localStorage.setItem(dataSizeKey, String(currentLicense.dataSize));
               currentLicense.checksum = generateChecksum(currentLicense);
               const scrambled = scramble(JSON.stringify(currentLicense));
-              localStorage.setItem('app_license_secure', scrambled);
+              localStorage.setItem(storageKey, scrambled);
               // @ts-ignore
-              if (window.electronAPI) window.electronAPI.dbSet('app_license_secure', scrambled);
+              if (window.electronAPI) window.electronAPI.dbSet(storageKey, scrambled);
               // @ts-ignore
-              if (window.electronAPI) window.electronAPI.dbSet('app_data_size', String(currentLicense.dataSize));
+              if (window.electronAPI) window.electronAPI.dbSet(dataSizeKey, String(currentLicense.dataSize));
 
               console.log(`🏷️ [SYNC] Local status overwriten to PENDING_RESTORE (${cloudIsTrial ? 'TRIAL' : 'FULL'}). Data Limit: ${currentLicense.dataSize}`);
             }
@@ -927,12 +936,12 @@ export const validateLicenseStartup = async (
 
             restoredLicense.checksum = generateChecksum(restoredLicense);
             const scrambled = scramble(JSON.stringify(restoredLicense));
-            localStorage.setItem('app_license_secure', scrambled);
-            localStorage.setItem('app_data_size', String(restoredLicense.dataSize));
+            localStorage.setItem(storageKey, scrambled);
+            localStorage.setItem(dataSizeKey, String(restoredLicense.dataSize));
 
             if ((window as any).electronAPI) {
-              await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
-              await (window as any).electronAPI.dbSet('app_data_size', String(restoredLicense.dataSize));
+              await (window as any).electronAPI.dbSet(storageKey, scrambled);
+              await (window as any).electronAPI.dbSet(dataSizeKey, String(restoredLicense.dataSize));
             }
             activeLicense = restoredLicense;
             console.log("✅ Identity Forced to Enterprise successfully.");
@@ -965,6 +974,11 @@ export const validateLicenseStartup = async (
             if (cloudData.status && cloudData.status !== activeLicense.status) {
               activeLicense.status = cloudData.status;
               storageUpdated = true;
+            } else if (!cloudData.status && activeLicense.status === 'PENDING_RESTORE') {
+              // V02.02.41: Auto-Clear PENDING_RESTORE if cloud sync is successful but status is missing
+              activeLicense.status = activeLicense.isTrial ? 'REGISTERED' : 'ACTIVATED';
+              storageUpdated = true;
+              console.log(`🔓 [SYNC] Identity verified. Promoting status: PENDING_RESTORE -> ${activeLicense.status}`);
             }
             // --- V02.02.18: IDENTITY FIDELITY SYNC ---
             if (cloudData.registeredTo && cloudData.registeredTo !== activeLicense.registeredTo) {
@@ -991,9 +1005,9 @@ export const validateLicenseStartup = async (
             if (storageUpdated) {
               activeLicense.checksum = generateChecksum(activeLicense);
               const scrambled = scramble(JSON.stringify(activeLicense));
-              localStorage.setItem('app_license_secure', scrambled);
+              localStorage.setItem(storageKey, scrambled);
               // @ts-ignore
-              if (window.electronAPI) window.electronAPI.dbSet('app_license_secure', scrambled);
+              if (window.electronAPI) window.electronAPI.dbSet(storageKey, scrambled);
               console.log("✅ License successfully sync-updated from cloud.");
             }
 
@@ -1185,6 +1199,9 @@ export const verifyDeveloperOTP = async (username: string, otp: string): Promise
       localStorage.setItem('app_developer_secure', scrambled);
       // @ts-ignore
       if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambled);
+      
+      // V02.02.30: Return mapped user object to ensure structural integrity in App State
+      result.data = devObj;
     }
 
     return result;
