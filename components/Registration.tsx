@@ -11,6 +11,8 @@ import {
     Mail,
     Phone,
     Lock,
+    Eye,
+    EyeOff,
     IndianRupee,
     Database,
     Upload,
@@ -84,7 +86,10 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     const [showRestoreFields, setShowRestoreFields] = useState(false);
     const [showCompanyInput, setShowCompanyInput] = useState(false);
     const [companyName, setCompanyName] = useState('');
+    const [companyPass, setCompanyPass] = useState('');
+    const [showPin, setShowPin] = useState(false);
     const [encryptionKey, setEncryptionKey] = useState('');
+
     const [isProcessing, setIsProcessing] = useState(false);
     const [isFetchedIdentity, setIsFetchedIdentity] = useState(false);
     const backupFileRef = React.useRef<HTMLInputElement>(null);
@@ -468,8 +473,9 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
         // Pre-fill empty data to bypass steps 4 and 5
         onComplete({
-            companyProfile: { ...INITIAL_COMPANY_PROFILE, establishmentName: companyName },
+            companyProfile: { ...INITIAL_COMPANY_PROFILE, establishmentName: companyName, dashboardPassword: companyPass },
             statutoryConfig: INITIAL_STATUTORY_CONFIG,
+
             adminUser: {
                 username: userID || 'admin',
                 password: adminPassword,
@@ -524,8 +530,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     <span className="text-[10px] font-black uppercase tracking-widest px-1 hidden md:block">Quit Application</span>
                 </button>
 
-                {/* Left: Branding & Info */}
-                <div className="md:w-5/12 bg-[#0f172a] p-8 md:p-10 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 text-center relative overflow-hidden group shrink-0">
+                {/* Left: Branding & Info (50/50) */}
+                <div className="md:w-1/2 bg-[#0f172a] p-8 md:p-10 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 text-center relative overflow-hidden group shrink-0">
                     <div className="absolute inset-0 bg-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
 
                     <div className="relative z-10 flex flex-col items-center gap-8">
@@ -544,9 +550,9 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                         {/* App Title Section */}
                         <div className="space-y-3">
                             <div className="flex flex-col items-center gap-1">
-                                <div className="inline-flex items-center gap-3 px-4 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full mb-2">
-                                    <IndianRupee size={16} className="text-[#FF9933]" />
-                                    <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">Enterprise Payroll Solutions</span>
+                                <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full mb-2">
+                                    <IndianRupee size={14} className="text-[#FF9933]" />
+                                    <span className="text-[9px] font-black text-blue-400 uppercase tracking-[0.2em]">Enterprise Payroll Solutions</span>
                                 </div>
                                 <h1 className="text-4xl font-black tracking-tighter leading-none">
                                     <span className="text-[#FF9933] drop-shadow-sm">Bharat</span>
@@ -954,17 +960,40 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                         <Building2 className="text-emerald-400" size={24} />
                                         <h3 className="font-bold text-lg text-white uppercase tracking-tight">Create Establishment</h3>
                                     </div>
-                                    <div className="space-y-4">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Company / Establishment Name *</label>
-                                        <input
-                                            type="text"
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all font-black uppercase tracking-wide"
-                                            placeholder="ENTER COMPANY NAME"
-                                            value={companyName}
-                                            onChange={e => setCompanyName(e.target.value.toUpperCase())}
-                                            autoFocus
-                                        />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div className="space-y-3">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Establishment Name *</label>
+                                            <input
+                                                type="text"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all font-black uppercase tracking-wide"
+                                                placeholder="ENTER COMPANY NAME"
+                                                value={companyName}
+                                                onChange={e => setCompanyName(e.target.value.toUpperCase())}
+                                                autoFocus
+                                            />
+                                        </div>
+                                        <div className="space-y-3">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Database Access Password (Optional)</label>
+                                            <div className="relative">
+                                                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                                                <input
+                                                    type={showPin ? "text" : "password"}
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 pl-12 pr-12 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-bold"
+                                                    placeholder="Leave blank for no password"
+                                                    value={companyPass}
+                                                    onChange={e => setCompanyPass(e.target.value)}
+                                                />
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => setShowPin(!showPin)}
+                                                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-blue-400 transition-colors"
+                                                >
+                                                    {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
+
                                     <div className="flex justify-between pt-4">
                                         <button onClick={() => setShowCompanyInput(false)} className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all uppercase tracking-widest text-xs flex items-center gap-2">
                                             Cancel

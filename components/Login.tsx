@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, ShieldCheck, Maximize, Minimize, Power } from 'lucide-react';
+import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, ShieldCheck, Maximize, Minimize, Power, Eye, EyeOff, Clock, Timer } from 'lucide-react';
 import { User as UserType } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
 import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense, requestResetOTP, updateCloudPassword, requestDeveloperOTP, verifyDeveloperOTP, verifyIdentityEmail, syncIdentityRepair, requestRestoreOTP, verifyRestoreOTP } from '../services/licenseService';
@@ -10,12 +10,14 @@ interface LoginProps {
   onLogin: (user: UserType) => void;
   currentLogo: string;
   setLogo: (url: string) => void;
+  isLocked?: boolean;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLocked }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showTimeoutMessage, setShowTimeoutMessage] = useState(false);
@@ -34,6 +36,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
   const [devOTP, setDevOTP] = useState('');
   const [isVerifyingDev, setIsVerifyingDev] = useState(false);
   const [devError, setDevError] = useState('');
+  const [devTimer, setDevTimer] = useState(0);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncStep, setSyncStep] = useState<'EMAIL' | 'FORM' | 'SUCCESS'>('EMAIL');
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -85,6 +88,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       if (btn) btn.focus();
     }
   }, [restoreOTP]);
+
+  // Dev Timer Effect
+  useEffect(() => {
+    let interval: any;
+    if (devTimer > 0 && showDevModal) {
+      interval = setInterval(() => {
+        setDevTimer(prev => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [devTimer, showDevModal]);
 
   // Check for auto-logout timeout
   useEffect(() => {
@@ -146,7 +160,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
 
       // If we think setup is done but have no admin, something is wrong
       if (isSetupComplete && !hasLocalAdmin) {
-        console.warn("🚫 LOCKOUT DETECTED: Setup marked complete but no local Admin found. Attempting Cloud Recovery...");
+        console.warn("≡ƒÜ½ LOCKOUT DETECTED: Setup marked complete but no local Admin found. Attempting Cloud Recovery...");
         // Skip reload, let them try cloud sync or register
       }
     };
@@ -162,7 +176,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
             const idRegex = /^[A-Z0-9]{5,12}$/;
             // Auto-trigger if ID is generic 'ADMIN' or doesn't meet 5-12 char criteria
             if (id === 'ADMIN' || !idRegex.test(id)) {
-              console.log("🚩 Mandatory Security Migration Triggered: Legacy ID detected.");
+              console.log("≡ƒÜ⌐ Mandatory Security Migration Triggered: Legacy ID detected.");
               setSyncStep('EMAIL');
               setShowSyncModal(true);
             }
@@ -204,7 +218,24 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
 
     try {
       // Get registered users from localStorage
-      const savedUsersRaw = localStorage.getItem('app_users');
+      let savedUsersRaw = localStorage.getItem('app_users');
+      
+      // --- RECOVERY: If app_users missing from localStorage (after rebuild/reset), try SQLite ---
+      if (!savedUsersRaw && window.electronAPI?.dbGet) {
+        try {
+          console.warn("[LOGIN] app_users missing from localStorage. Attempting SQLite recovery...");
+          const dbRes = await window.electronAPI.dbGet('app_users');
+          if (dbRes.success && dbRes.data) {
+            const recovered = typeof dbRes.data === 'string' ? dbRes.data : JSON.stringify(dbRes.data);
+            localStorage.setItem('app_users', recovered);
+            savedUsersRaw = recovered;
+            console.log("[LOGIN] ✅ app_users recovered from SQLite.");
+          }
+        } catch (e) {
+          console.warn("[LOGIN] SQLite recovery failed:", e);
+        }
+      }
+      
       let allUsers = [...MOCK_USERS];
 
       // 1. Add cloud-synced Developer account if it exists
@@ -212,10 +243,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       if (cloudDev) {
         allUsers.push(cloudDev);
       } else if (!import.meta.env.PROD) {
-        // Fallback for local dev if sync hasn't happened yet
+        // Fallback for local dev if sync hasn't happened yet.
+        // Uses the correct credentials from Master_Config.
+        // IMPORTANT: This only applies in DEV mode — in PROD, getAppDeveloper() must succeed.
+        console.warn("[DEV] Developer cache miss — using local fallback. Trigger a cloud sync to populate.");
         allUsers.push({
           username: 'VRANGA',
-          password: 'password', // Default local fallback
+          password: 'Basupra@74',
           role: 'Developer',
           name: 'VRANGA (Developer)',
           email: 'developer@bharatpay.com'
@@ -242,12 +276,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       // This ensures that 'VRANGA' always triggers a cloud credential check + OTP
       const isDev = cleanUsername.toLowerCase() === 'vranga';
       if (isDev) {
-        console.log("🛠️ Developer high-priority bypass initiated:", cleanUsername);
+        console.log("≡ƒ¢á∩╕Å Developer high-priority bypass initiated:", cleanUsername);
         try {
           // Step 1: Request OTP (GAS will verify cleanPassword vs Master_Config sheet)
           const res = await requestDeveloperOTP(cleanUsername, cleanPassword);
           if (res.success) {
             setShowDevModal(true);
+            setDevTimer(60);
             setIsLoading(false);
             return;
           } else {
@@ -267,22 +302,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       // --- V02.02.07: IDENTITY-AWARE LOOKUP (Standard Users) ---
       const license = getStoredLicense();
       const user = allUsers.find((u) => {
-        const uNameStr = String(u.username).trim();
-        const inputUNameStr = cleanUsername;
+        const uNameStr = String(u.username).trim().toUpperCase();
+        const inputUNameStr = cleanUsername; // Already uppercased above
 
-        // Match 1: Direct username match (STRICT CASE)
+        // Match 1: Direct username match (Case-Insensitive)
         const isDirectMatch = uNameStr === inputUNameStr;
 
-        // Match 2: Registered Identity Alias (For Admin) - STRICT CASE
+        // Match 2: Registered Identity Alias (For Admin) - Case-Insensitive
         const isIdentityAlias = (u.role === 'Administrator' &&
           license && license.userID &&
-          String(license.userID).trim() === inputUNameStr);
+          String(license.userID).trim().toUpperCase() === inputUNameStr);
 
         return (isDirectMatch || isIdentityAlias) && String(u.password).trim() === cleanPassword;
       });
 
       if (user) {
-        console.log("✅ Login successful for:", cleanUsername);
+        console.log("Γ£à Login successful for:", cleanUsername);
         setFailedAttempts(0); // Reset on success
 
         // --- V01.0.11: CLOUD LOGIN TRACKING ---
@@ -301,23 +336,23 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
         // --- EMERGENCY REDIRECT IF NO ADMINS ---
         const hasAdmin = allUsers.some(u => u.role === 'Administrator');
         if (!hasAdmin && !import.meta.env.PROD) {
-          console.warn("🚫 NO ADMINISTRATOR FOUND: System requires local admin character. Resetting...");
+          console.warn("≡ƒÜ½ NO ADMINISTRATOR FOUND: System requires local admin character. Resetting...");
           localStorage.removeItem('app_setup_complete');
           window.location.reload();
           return;
         }
 
         // --- CLOUD FALLBACK ---
-        console.log("⚠️ Local login failed. Attempting cloud sync fallback...");
+        console.log("ΓÜá∩╕Å Local login failed. Attempting cloud sync fallback...");
         const syncResult = await validateLicenseStartup(true, cleanUsername);
 
         // 1. ADVANCED DEVELOPER BYPASS (Check this FIRST before license validity)
         let freshDev = getAppDeveloper();
         if (freshDev) {
-          console.log("🛠️ Cloud Developer synced:", freshDev.username);
+          console.log("≡ƒ¢á∩╕Å Cloud Developer synced:", freshDev.username);
           if (String(freshDev.username).trim() === cleanUsername &&
             String(freshDev.password).trim() === cleanPassword) {
-            console.log("✅ Login successful via Cloud Sync (Developer Bypass) for:", cleanUsername);
+            console.log("Γ£à Login successful via Cloud Sync (Developer Bypass) for:", cleanUsername);
             setFailedAttempts(0);
             onLogin(freshDev);
             return;
@@ -326,7 +361,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
 
         // --- V02.02.16: IDENTITY RESTORATION TRIGGER ---
         if (syncResult.status === 'PENDING_RESTORE') {
-          console.log("🛠️ Identity Restoration Required for:", syncResult.data?.userName);
+          console.log("≡ƒ¢á∩╕Å Identity Restoration Required for:", syncResult.data?.userName);
           setRestoreTargetName(syncResult.data?.userName || 'User');
           setRestoreStep('INPUT');
           setShowRestoreModal(true);
@@ -355,7 +390,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
             );
 
             if (syncedUser) {
-              console.log("✅ Login successful via Cloud Sync for:", cleanUsername);
+              console.log("Γ£à Login successful via Cloud Sync for:", cleanUsername);
 
               // --- V01.0.11: CLOUD LOGIN TRACKING ---
               try {
@@ -470,8 +505,32 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
     try {
       const res = await updateCloudPassword(resetEmail, newPass, resetOTP);
       if (res.success) {
+        // --- CRITICAL: Update local app_users with new password IMMEDIATELY ---
+        // If we don't do this before validateLicenseStartup, the sync will send
+        // the OLD password to GAS → GAS sees mismatch → returns IDENTITY_RESTORE_REQUIRED
+        // → local password never gets updated → deadlock on next login.
+        try {
+          const savedUsersRaw = localStorage.getItem('app_users');
+          if (savedUsersRaw) {
+            const savedUsers = JSON.parse(savedUsersRaw);
+            const adminIndex = savedUsers.findIndex((u: any) =>
+              u.role === 'Administrator' ||
+              String(u.username).toUpperCase() === resetUserID.toUpperCase()
+            );
+            if (adminIndex !== -1) {
+              savedUsers[adminIndex].password = newPass;
+              localStorage.setItem('app_users', JSON.stringify(savedUsers));
+              // @ts-ignore
+              if (window.electronAPI) window.electronAPI.dbSet('app_users', savedUsers);
+              console.log('[RESET] ✅ Local password updated before sync.');
+            }
+          }
+        } catch (e) {
+          console.warn('[RESET] Could not pre-update local password:', e);
+        }
+
         setResetStep('SUCCESS');
-        // Force a sync to repair local database with new cloud password
+        // Now sync — local password matches sheet, so GAS will return SUCCESS
         await validateLicenseStartup(true, resetUserID);
       } else {
         setResetError(res.message);
@@ -497,6 +556,28 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       }
     } catch (err: any) {
       setDevError(err.message);
+    } finally {
+      setIsVerifyingDev(false);
+    }
+  };
+
+  const handleResendDevOTP = async () => {
+    setDevError('');
+    setIsVerifyingDev(true);
+    try {
+      const res = await requestDeveloperOTP(username.trim().toUpperCase(), password.trim());
+      if (res.success) {
+        setDevTimer(60);
+        setDevOTP('');
+        setDevError('New Bypass Code sent to your mail.');
+        setTimeout(() => {
+          if (otpInputRef.current) otpInputRef.current.focus();
+        }, 100);
+      } else {
+        setDevError(res.message);
+      }
+    } catch (e: any) {
+      setDevError("Resend failed: " + e.message);
     } finally {
       setIsVerifyingDev(false);
     }
@@ -599,7 +680,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#020617] flex flex-col items-center justify-center p-4 relative overflow-y-auto custom-scrollbar">
+    <div className="h-[100dvh] w-full bg-[#020617] flex flex-col items-center justify-center p-4 relative overflow-y-auto custom-scrollbar">
       {/* Full Screen Toggle Button */}
       <button
         onClick={toggleFullScreen}
@@ -639,18 +720,18 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
       </div>
 
       {/* Login Card - High Z-Index */}
-      <div className="w-full max-w-4xl relative z-10 bg-[#1e293b] border border-slate-700 rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row">
-
-        {/* Left: Branding & Info */}
+      <div className="w-full max-w-4xl relative z-10 bg-[#1e293b] border border-slate-700 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col md:flex-row animate-in fade-in zoom-in duration-500">
+        
+        {/* Left Section: Branding (50/50) */}
         <div className="md:w-1/2 bg-[#0f172a] p-8 md:p-10 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 text-center relative overflow-hidden group">
           {/* Subtle Glow Background for Logo */}
           <div className="absolute inset-0 bg-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
 
-          <div className="relative z-10 flex flex-col items-center gap-2">
+          <div className="relative z-10 flex flex-col items-center gap-6">
             {/* Logo Section */}
             <div className="relative">
               <div className="absolute -inset-4 bg-gradient-to-tr from-blue-600 to-emerald-600 rounded-full blur-xl opacity-20 group-hover:opacity-40 transition-opacity duration-700"></div>
-              <div className="relative flex items-center justify-center w-40 h-40 rounded-full bg-transparent shadow-2xl overflow-hidden border-4 border-white transform group-hover:scale-105 transition-transform duration-500">
+              <div className="relative flex items-center justify-center w-36 h-36 rounded-full bg-transparent shadow-2xl overflow-hidden border-4 border-white transform group-hover:scale-105 transition-transform duration-500">
                 <img
                   src={BRAND_CONFIG.logoUrl}
                   alt={BRAND_CONFIG.companyName}
@@ -660,42 +741,42 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
             </div>
 
             {/* App Title Section */}
-            <div className="space-y-1">
+            <div className="space-y-2">
               <div className="flex flex-col items-center gap-1">
                 <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-900/30 border border-blue-500/30 rounded-full mb-1">
                   <IndianRupee size={14} className="text-[#FF9933]" />
                   <span className="text-[9px] font-black text-blue-400 uppercase tracking-[0.2em]">Enterprise Payroll Solutions</span>
                 </div>
-                <h1 className="text-5xl font-black flex items-center justify-center gap-0 drop-shadow-2xl">
-                  <span className="text-[#FF9933]">Bharat</span>
-                  <span className="text-white">Pay</span>
-                  <span className="text-[#34d399] tracking-tighter">{BRAND_CONFIG.appNameSuffix}</span>
+                <h1 className="text-4xl font-black tracking-tighter leading-none">
+                  <span className="text-[#FF9933] drop-shadow-sm">Bharat</span>
+                  <span className="text-white drop-shadow-md">Pay</span>
+                  <span className="text-[#4ADE80]">{BRAND_CONFIG.appNameSuffix}</span>
                 </h1>
               </div>
               <div className="h-1 w-24 bg-gradient-to-r from-transparent via-blue-500 to-transparent mx-auto rounded-full opacity-50"></div>
             </div>
 
-              {/* Branding Footer */}
-              <div className="pt-0 flex flex-col items-center gap-2">
-                <span className="text-[9px] text-slate-600 font-bold tracking-widest uppercase mb-0">Architected & Engineered by</span>
-                <div className="px-6 py-2 bg-slate-900/40 border border-slate-800 rounded-2xl">
-                  <span className="text-xs font-black text-[#FF9933] tracking-wider uppercase">{BRAND_CONFIG.companyName}</span>
-                </div>
-                <p className="text-slate-500 text-[8px] font-bold uppercase tracking-[0.2em] mt-0">{BRAND_CONFIG.tagline}</p>
-  
-                {/* Version Pill */}
-                <div className="mt-4 px-4 py-1 bg-slate-800/80 border border-slate-700/50 rounded-full shadow-lg">
-                  <span className="text-[9px] font-black tracking-widest text-[#FFD700] uppercase">Version {APP_VERSION}</span>
-                </div>
+            {/* Branding Footer */}
+            <div className="pt-0 flex flex-col items-center gap-2">
+              <span className="text-[9px] text-slate-600 font-bold tracking-widest uppercase mb-0">Architected & Engineered by</span>
+              <div className="px-6 py-2 bg-slate-900/40 border border-slate-800 rounded-2xl">
+                <span className="text-xs font-black text-[#FF9933] tracking-wider uppercase">{BRAND_CONFIG.companyName}</span>
               </div>
+              <p className="text-slate-500 text-[8px] font-bold uppercase tracking-[0.2em] mt-0">{BRAND_CONFIG.tagline}</p>
+              
+              {/* Version Pill */}
+              <div className="mt-4 px-4 py-1 bg-slate-800/80 border border-slate-700/50 rounded-full shadow-lg">
+                <span className="text-[9px] font-black tracking-widest text-[#FFD700] uppercase">Version {APP_VERSION}</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Right: Login Form */}
-        <div className="md:w-1/2 p-8 md:p-10 bg-[#1e293b] flex flex-col justify-center relative overflow-hidden">
+        {/* Right Section: Login Form (50/50) */}
+        <div className="md:w-1/2 p-8 md:p-12 bg-[#1e293b] flex flex-col justify-center relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 rounded-full blur-[80px] -mr-32 -mt-32"></div>
           <div className="relative z-10">
-            <div className="mb-6">
+            <div className="mb-8">
               <h2 className="text-3xl font-black text-white tracking-tight">Welcome Back</h2>
               <p className="text-slate-400 text-sm mt-1 font-medium">Please sign in to your secure portal.</p>
             </div>
@@ -734,9 +815,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value.toUpperCase())}
+                    disabled={isLoading || isLocked}
                     title="Username"
                     aria-label="Username"
-                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm uppercase"
+                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm uppercase disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="ENTER USERNAME"
                   />
                 </div>
@@ -747,24 +829,33 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                 <div className="relative group">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    disabled={isLoading || isLocked}
                     title="Password"
                     aria-label="Password"
-                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm"
+                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="••••••••"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-blue-400 transition-colors"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
                 <div className="flex flex-col gap-2 pt-1">
                   <div className="flex justify-end pr-1">
                     <button
                       type="button"
+                      disabled={isLocked}
                       onClick={() => {
                         setShowResetModal(true);
                         setResetStep('IDENTIFY');
                       }}
-                      className="text-[10px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest transition-colors"
+                      className="text-[10px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest transition-colors disabled:opacity-50"
                     >
                       Forgot Password?
                     </button>
@@ -773,8 +864,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
               </div>
               <button
                 type="submit"
-                disabled={isLoading}
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl shadow-lg hover:shadow-blue-500/25 transition-all flex items-center justify-center gap-3 group disabled:opacity-70 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98]"
+                disabled={isLoading || isLocked}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl shadow-lg hover:shadow-blue-500/25 transition-all flex items-center justify-center gap-3 group disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98]"
               >
                 {isLoading ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -817,7 +908,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                             autofill(bestID);
                           }
                         }}
-                        disabled={!admin}
+                        disabled={!admin || isLocked}
                         type="button"
                         title={admin ? `Login as ${admin.name}` : 'Admin user not active'}
                         aria-label={admin ? `Login as ${admin.name}` : 'Admin user not active'}
@@ -835,7 +926,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                       <button
                         key="user"
                         onClick={() => payrollUser && autofill(payrollUser.username)}
-                        disabled={!payrollUser}
+                        disabled={!payrollUser || isLocked}
                         type="button"
                         title={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
                         aria-label={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
@@ -854,7 +945,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                         key="dev"
                         onClick={() => autofill('VRANGA')}
                         type="button"
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30 ${!import.meta.env.DEV ? 'hidden' : ''}`}
+                        disabled={isLocked}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30 ${(!import.meta.env.DEV && !isLocked) ? 'hidden' : ''} disabled:opacity-50`}
                         title="Developer Quick Access"
                       >
                         <Lock className="text-amber-500 mb-1 group-hover:rotate-12 transition-transform" size={16} />
@@ -881,6 +973,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
         onClose={() => !isResetting && setShowResetModal(false)}
         type={resetStep === 'SUCCESS' ? 'success' : 'info'}
         title="Security Gateway"
+        hideFooter={true}
         message={
           <div className="py-2">
             {resetStep === 'IDENTIFY' && (
@@ -977,7 +1070,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                         value={newPass}
                         onChange={(e) => setNewPass(e.target.value)}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-xs font-mono outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                        placeholder="••••••••"
+                        placeholder="ΓÇóΓÇóΓÇóΓÇóΓÇóΓÇóΓÇóΓÇó"
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -988,7 +1081,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                         value={confirmPass}
                         onChange={(e) => setConfirmPass(e.target.value)}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-xs font-mono outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                        placeholder="••••••••"
+                        placeholder="********"
                       />
                     </div>
                   </div>
@@ -1043,14 +1136,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
         title="Developer Portal"
         hideFooter={true}
         message={
-          <div className="py-2 space-y-6">
-            <div className="flex flex-col items-center justify-center text-center space-y-3 mb-4">
-              <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center">
-                <ShieldCheck className="text-amber-400" size={32} />
+          <div className="py-0.5 space-y-2">
+            <div className="flex flex-col items-center justify-center text-center space-y-1 mb-1">
+              <div className="w-10 h-10 bg-amber-500/10 rounded-full flex items-center justify-center">
+                <ShieldCheck className="text-amber-400" size={20} />
               </div>
               <div>
-                <h3 className="text-lg font-black text-white uppercase tracking-tight">Developer Auth</h3>
-                <p className="text-xs text-slate-400 mt-1">Pass Code sent to developer Mail ID</p>
+                <h3 className="text-sm font-black text-white uppercase tracking-tight">Developer Auth</h3>
+                <p className="text-[9px] text-slate-500 mt-0">Verification Code Required</p>
               </div>
             </div>
 
@@ -1061,9 +1154,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
               </div>
             )}
 
-            <form onSubmit={handleDevVerify} className="space-y-6">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1 text-center block">6-Digit Bypass Code</label>
+            <form onSubmit={handleDevVerify} className="space-y-2">
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1 text-center block">6-Digit Bypass Code</label>
                 <input
                   ref={otpInputRef}
                   type="text"
@@ -1071,25 +1164,45 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                   maxLength={6}
                   value={devOTP}
                   onChange={(e) => setDevOTP(e.target.value.replace(/[^0-9]/g, ''))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-4 px-4 text-white text-2xl font-black text-center tracking-[1em] outline-none focus:ring-2 focus:ring-amber-500 transition-all font-mono"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-4 text-xl font-black text-center tracking-[1em] outline-none focus:ring-2 focus:ring-amber-500 transition-all font-mono"
                   placeholder="000000"
                   autoComplete="one-time-code"
                 />
-                <p className="text-[10px] font-black text-amber-500 text-center tracking-widest uppercase mt-2 flex items-center justify-center gap-1">
-                  <span>⏱</span> OTP is valid only for 2 minutes
-                </p>
+                <div className="flex flex-col items-center gap-1.5 mt-1.5">
+                  <div className="flex flex-col items-center">
+                    <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-1">Security Countdown</p>
+                    <div className="flex items-center gap-2 px-3 py-1 bg-slate-950 border border-slate-800 rounded-xl shadow-inner">
+                      <Clock size={14} className={`${devTimer > 0 ? 'text-amber-500' : 'text-red-500'}`} />
+                      <span className={`text-sm font-black font-mono ${devTimer > 0 ? 'text-white' : 'text-red-500'} tracking-tight`}>
+                        {devTimer > 0 ? `${Math.floor(devTimer / 60).toString().padStart(2, '0')}:${(devTimer % 60).toString().padStart(2, '0')}` : '00:00'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {devTimer <= 0 ? (
+                    <button 
+                      type="button"
+                      onClick={handleResendDevOTP}
+                      disabled={isVerifyingDev}
+                      className="text-[9px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest transition-all flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl hover:scale-105 active:scale-95"
+                    >
+                      <Timer size={14} /> Request New Bypass Code
+                    </button>
+                  ) : (
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest opacity-60">OTP is valid for 60 seconds</p>
+                  )}
+                </div>
               </div>
 
-              <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl space-y-2">
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center">Safety Protocol Active</p>
-                <p className="text-[9px] text-slate-500 text-center uppercase leading-relaxed font-black">Success grants full app access without affecting any cloud license rows or tracking.</p>
+              <div className="p-2 bg-slate-900/40 border border-slate-800 rounded-lg">
+                <p className="text-[9px] text-slate-500 text-center uppercase leading-tight font-black">Safety Protocol Active: Hardware Isolated Session</p>
               </div>
 
               <button
                 id="btn-dev-auth"
                 type="submit"
                 disabled={isVerifyingDev}
-                className="w-full bg-amber-600 hover:bg-amber-500 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
+                className="w-full bg-amber-600 hover:bg-amber-500 text-white font-black py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
               >
                 {isVerifyingDev ? <Loader2 className="animate-spin" size={18} /> : "Authorize Developer Session"}
               </button>
@@ -1201,7 +1314,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                         value={syncNewPass}
                         onChange={(e) => setSyncNewPass(e.target.value)}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-xs outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                        placeholder="••••••••"
+                        placeholder="ΓÇóΓÇóΓÇóΓÇóΓÇóΓÇóΓÇóΓÇó"
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -1212,7 +1325,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                         value={syncConfirmPass}
                         onChange={(e) => setSyncConfirmPass(e.target.value)}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-xs outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                        placeholder="••••••••"
+                        placeholder="ΓÇóΓÇóΓÇóΓÇóΓÇóΓÇóΓÇóΓÇó"
                       />
                     </div>
                   </div>
@@ -1372,7 +1485,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                       placeholder="000000"
                     />
                     <p className="text-[10px] font-black text-amber-500 text-center tracking-widest uppercase mt-2 flex items-center justify-center gap-1">
-                      <span>⏱</span> Restoration code valid for 120s
+                      <Clock size={10} className="text-amber-500" /> Restoration code valid for 120s
                     </p>
                   </div>
 
@@ -1401,7 +1514,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
                   onClick={() => {
                     setShowRestoreModal(false);
                     // Force a direct login attempt now that profile is synced
-                    handleLogin({ preventDefault: () => { } } as React.FormEvent);
+                    handleLogin({ preventDefault: () => {} } as React.FormEvent);
                   }}
                   className="w-full bg-slate-800 hover:bg-slate-700 text-white font-black py-4 rounded-xl transition-all uppercase tracking-widest text-xs border border-slate-700"
                 >
@@ -1412,6 +1525,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo }) => 
           </div>
         }
       />
+
     </div >
   );
 };

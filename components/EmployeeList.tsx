@@ -167,7 +167,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     };
 
     const handleAuthSubmit = () => {
-        if (authModal.password === 'admin123') { // Simple check for now
+        const usersStr = localStorage.getItem('app_users');
+        const users: User[] = usersStr ? JSON.parse(usersStr) : [];
+        
+        // Check current user OR any admin/developer in the system
+        const isValid = (currentUser && (currentUser.role === 'Administrator' || currentUser.role === 'Developer') && currentUser.password === authModal.password) ||
+                       users.some(u => (u.role === 'Administrator' || u.role === 'Developer') && u.password === authModal.password);
+
+        if (isValid) {
             if (authModal.mode === 'DELETE' && authModal.targetEmp) {
                 setDeleteModal({ isOpen: true, employee: authModal.targetEmp });
             } else if (authModal.mode === 'UNLOCK_SEPARATION') {
@@ -223,11 +230,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     const handleExportSubmit = async () => {
         try {
             const usersStr = localStorage.getItem('app_users');
-            const users = usersStr ? JSON.parse(usersStr) : [];
-            const isValid = users.some((u: User) =>
-                (u.role === 'Administrator' || u.role === 'Developer') &&
-                u.password === exportModal.password
-            );
+            const users: User[] = usersStr ? JSON.parse(usersStr) : [];
+            
+            // Comprehensive check: Current User OR stored Admin/Developer OR global fallback
+            const isValid = (currentUser && (currentUser.role === 'Administrator' || currentUser.role === 'Developer') && currentUser.password === exportModal.password) ||
+                           users.some(u => (u.role === 'Administrator' || u.role === 'Developer') && u.password === exportModal.password);
 
             if (isValid) {
                 const dataToExport = filteredEmployees.map(emp => {

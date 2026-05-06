@@ -250,7 +250,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
 
     // 2. Persist Attendance
     try {
-      localStorage.setItem('app_attendance', JSON.stringify(attendances));
+      const getCKey = (key: string) => companyProfile.id === 'default' ? key : `${companyProfile.id}_${key}`;
+      localStorage.setItem(getCKey('app_attendance'), JSON.stringify(attendances));
       setTimeout(() => {
         setIsSaving(false);
         setJustSaved(true);
@@ -280,7 +281,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Attendance");
     const fileName = getStandardFileName('Attendance_Template', companyProfile, month, year);
-    await generateTemplateWorkbook(wb, fileName);
+    await generateTemplateWorkbook(wb, fileName, companyProfile.establishmentName);
+
   };
 
   const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -301,6 +303,8 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
 
         const newAttendances = [...attendances];
         let updateCount = 0;
+        let skipCount = 0;
+        const skippedEmps: string[] = [];
 
         data.forEach((row: any) => {
           // Flexible key matching helper
@@ -321,10 +325,27 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
           };
 
           const empId = getStr(['Employee ID', 'ID', 'Emp ID']);
-          if (!empId) return;
+          if (!empId) {
+            skipCount++;
+            return;
+          }
+
+          const empNameRaw = String(row['Name'] || row['Employee Name'] || '').trim();
+          
+          // STRICT MULTI-COMPANY IDENTITY CHECK
+          const emp = employees.find(e => 
+            e.id.toLowerCase() === empId.toLowerCase() && 
+            e.name.toLowerCase() === empNameRaw.toLowerCase()
+          );
+          
+          if (!emp) {
+            skipCount++;
+            if (empId) skippedEmps.push(`${empId} (${empNameRaw || 'No Name'})`);
+            return;
+          }
 
           // Update existing or create new for THIS MONTH/YEAR
-          const existingIdx = newAttendances.findIndex(a => a.employeeId === empId && a.month === month && a.year === year);
+          const existingIdx = newAttendances.findIndex(a => a.employeeId === emp.id && a.month === month && a.year === year);
 
           // Clean inputs
           const present = Math.min(getVal(['Present Days', 'Present', 'Paid Days']) || 0, daysInMonth);
@@ -335,7 +356,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
           const lop = getVal(['LOP', 'Loss of Pay', 'Absent']);
 
           const attRecord: Attendance = {
-            employeeId: empId,
+            employeeId: emp.id, 
             month,
             year,
             presentDays: present,
@@ -354,13 +375,35 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
           updateCount++;
         });
 
+        if (updateCount === 0) {
+          setModalState({
+            isOpen: true,
+            type: 'error',
+            title: 'Import Failed',
+            message: `No matching employees found in the active company. \n\nPlease ensure 'Employee ID' AND 'Name' exactly match the system records. \n\nChecked ${data.length} rows.`
+          });
+          return;
+        }
+
         setAttendances(newAttendances);
         setJustSaved(false); // Reset saved status as data changed
+        
         setModalState({
           isOpen: true,
           type: 'success',
           title: 'Import Successful',
-          message: `Updated attendance records for ${updateCount} employees.\n\nPlease review and click 'Update Attendance' to save.`
+          message: (
+            <div className="space-y-2">
+              <p>Updated attendance records for <strong className="text-emerald-400">{updateCount}</strong> employees.</p>
+              {skipCount > 0 && (
+                <div className="p-2 bg-amber-900/20 border border-amber-800 rounded text-[10px] text-amber-300">
+                  <p className="font-bold mb-1">Skipped {skipCount} entries (ID/Name Mismatch or Empty ID):</p>
+                  <p className="opacity-80 italic truncate">{skippedEmps.slice(0, 3).join(', ')}{skippedEmps.length > 3 ? '...' : ''}</p>
+                </div>
+              )}
+              <p className="text-[10px] text-slate-400 mt-2 italic">Please review the table and click 'Save Attendance' to finalize.</p>
+            </div>
+          )
         });
 
       } catch (error: any) {
@@ -369,7 +412,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
           isOpen: true,
           type: 'error',
           title: 'Import Failed',
-          message: 'Could not parse Excel file. Please use the template.'
+          message: 'Could not parse Excel file. Please use the standard template.'
         });
       } finally {
         setIsUploading(false);

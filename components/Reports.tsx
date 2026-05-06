@@ -45,6 +45,7 @@ interface ReportsProps {
     arrearHistory: any[];
     showAlert: any;
     latestFrozenPeriod: { month: string; year: number } | null;
+    onNavigate: (view: any, tab?: string) => void;
 }
 
 const Reports: React.FC<ReportsProps> = ({
@@ -64,7 +65,8 @@ const Reports: React.FC<ReportsProps> = ({
     onRollover,
     arrearHistory,
     showAlert: _showAlert,
-    latestFrozenPeriod
+    latestFrozenPeriod,
+    onNavigate
 }) => {
     const [reportType, setReportType] = useState<string>('Pay Sheet');
     const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
@@ -114,6 +116,7 @@ const Reports: React.FC<ReportsProps> = ({
     const [pinError, setPinError] = useState('');
     const [pinPurpose, setPinPurpose] = useState<'BEFORE_BACKUP' | 'FINAL_FREEZE'>('BEFORE_BACKUP');
     const [pinShow, setPinShow] = useState(false);
+    const pinVerifyBtnRef = useRef<HTMLButtonElement>(null);
 
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -156,14 +159,17 @@ const Reports: React.FC<ReportsProps> = ({
         setSelectedEmployeeId('all');
     }, [month, year, reportType]);
 
-    // Initial Jump to Latest Relevant Month (Saved Draft or Frozen)
+    // Initial Jump to Latest Relevant Month (Prioritize Frozen for Reports)
     useEffect(() => {
         if (!hasInitialJumped.current) {
-            // Check if current month already has data
-            const currentHasData = savedRecords.some(r => r.month === month && r.year === year);
-
-            if (!currentHasData && savedRecords.length > 0) {
-                // Find the absolute latest saved period (Draft OR Finalized)
+            if (latestFrozenPeriod) {
+                // If we have frozen data, reports should ALMOST ALWAYS default to it
+                if (latestFrozenPeriod.month !== month || latestFrozenPeriod.year !== year) {
+                    setMonth(latestFrozenPeriod.month);
+                    setYear(latestFrozenPeriod.year);
+                }
+            } else if (savedRecords.length > 0) {
+                // Fallback: Find the absolute latest saved period (Draft)
                 let latest = savedRecords[0];
                 let maxVal = (latest.year * 12) + months.indexOf(latest.month);
 
@@ -179,10 +185,6 @@ const Reports: React.FC<ReportsProps> = ({
                     setMonth(latest.month);
                     setYear(latest.year);
                 }
-            } else if (!currentHasData && latestFrozenPeriod) {
-                // Fallback to latest frozen if no records are found in history slice
-                setMonth(latestFrozenPeriod.month);
-                setYear(latestFrozenPeriod.year);
             }
             hasInitialJumped.current = true;
         }
@@ -251,7 +253,7 @@ const Reports: React.FC<ReportsProps> = ({
         setPinError('');
         const actualPin = companyProfile.securityPin || '';
         if (pinInput !== actualPin) {
-            setPinError('Invalid Security PIN. Access Denied.');
+            setPinError('Invalid Security Password / PIN. Access Denied.');
             return;
         }
 
@@ -280,6 +282,20 @@ const Reports: React.FC<ReportsProps> = ({
     };
 
     const initiatePreFreezeBackup = async () => {
+        // --- V02.02.41: Pre-validation of storage location ---
+        // @ts-ignore
+        const currentDir = await window.electronAPI.getAppDirectory();
+        if (!currentDir) {
+            setModalState({
+                isOpen: true,
+                type: 'error',
+                title: 'Storage Not Configured',
+                message: "Automatic backup cannot be performed because a storage location has not been selected. Please go to 'Configuration' and select an application data folder.",
+                onClose: () => setModalState({ isOpen: false, type: 'loading', title: '', message: '' })
+            });
+            return;
+        }
+
         // --- NEW: AUTOMATIC BACKUP (BC - Before Confirmation) ---
         setModalState({
             isOpen: true,
@@ -289,10 +305,16 @@ const Reports: React.FC<ReportsProps> = ({
         });
 
         try {
+
             await new Promise(resolve => setTimeout(resolve, 1500));
             const backupFileName = getBackupFileName('BC', companyProfile, month, year);
-            // @ts-ignore
-            const backupRes = await window.electronAPI.createDataBackup(backupFileName);
+            const encryptionKey = companyProfile.securityPin || 'INITIAL_PMS_KEY';
+            const backupRes = await window.electronAPI.createDataBackup({
+                fileName: backupFileName,
+                subfolder: companyProfile.establishmentName,
+                encryptionKey: encryptionKey
+            });
+
 
             if (!backupRes.success) {
                 setModalState({
@@ -498,14 +520,29 @@ const Reports: React.FC<ReportsProps> = ({
         if (!companyProfile.securityPin) {
             setModalState({
                 isOpen: true,
-                type: 'error',
-                title: 'Security PIN Required',
+                type: 'confirm',
+                title: 'Security Password Required',
                 message: (
-                    <div className="space-y-2">
-                        <p>A separate Security PIN must be set before you can freeze payroll.</p>
-                        <p className="text-[10px] text-amber-400 font-bold uppercase">Please go to Settings &gt; Company Profile to configure your PIN.</p>
+                    <div className="space-y-3">
+                        <p className="text-slate-300">A separate Security Password / PIN must be set before you can freeze payroll for security reasons.</p>
+                        <p className="text-[10px] text-amber-400 font-black uppercase tracking-widest leading-relaxed">
+                            Would you like to go to Settings &gt; Company Profile to set your Password now?
+                        </p>
                     </div>
-                )
+                ),
+                onConfirm: () => {
+                    handleModalClose();
+                    onNavigate('settings', 'COMPANY');
+                    // Focus the PIN field after navigation delay
+                    setTimeout(() => {
+                        const pinInput = document.getElementById('security-pin-input');
+                        if (pinInput) {
+                            pinInput.focus();
+                            // Optional: Smooth scroll if needed, though Settings should mount at top
+                            pinInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }, 500);
+                }
             });
             return;
         }
@@ -652,12 +689,20 @@ const Reports: React.FC<ReportsProps> = ({
                     let customPDFFileName = undefined;
                     if (paySheetFilter !== 'all') {
                         subtitle = `${paySheetFilter === 'site' ? 'Site' : paySheetFilter === 'branch' ? 'Branch' : 'Division'}: ${paySheetFilterValue}`;
-                        const monthAbbr = getMonthAbbr(month);
-                        customPDFFileName = `${paySheetFilterValue} PaySheet ${monthAbbr} ${year}`;
+                        customPDFFileName = getStandardFileName(paySheetFilterValue, companyProfile, month, year);
+                    }
+
+                    if (paySheetFilter === 'all') {
+                        if (useLegacyDesign) {
+                            customPDFFileName = getStandardFileName('Legacy Pay Sheet', companyProfile, month, year);
+                        } else {
+                            customPDFFileName = getStandardFileName('Summary Pay Sheet', companyProfile, month, year);
+                        }
+                        subtitle = 'Site: CONSOLIDATED';
                     }
 
                     if (useLegacyDesign) {
-                        savedPath = await generateLegacyFormB(validToExport, employees, month, year, companyProfile);
+                        savedPath = await generateLegacyFormB(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName);
                     } else {
                         savedPath = await generateSimplePaySheetPDF(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName);
                     }
@@ -811,7 +856,8 @@ const Reports: React.FC<ReportsProps> = ({
                 const wb = (await import('xlsx')).utils.book_new();
                 const ws = (await import('xlsx')).utils.json_to_sheet(employees);
                 (await import('xlsx')).utils.book_append_sheet(wb, ws, 'Employees');
-                savedPath = await generateTemplateWorkbook(wb, fileName);
+                savedPath = await generateTemplateWorkbook(wb, fileName, companyProfile.establishmentName);
+
             }
 
             if (savedPath) {
@@ -1166,9 +1212,9 @@ const Reports: React.FC<ReportsProps> = ({
                                 <h3 className="text-xl font-black text-white uppercase tracking-tighter">Security Authorization</h3>
                                 <p className="text-xs text-slate-400 font-medium mt-1 px-4 leading-relaxed">
                                     {pinPurpose === 'BEFORE_BACKUP' ? (
-                                        <>Enter your Security PIN to initiate the <span className="text-white font-black whitespace-nowrap">'Before Confirmation'</span> data backup.</>
+                                        <>Enter your Security Password / PIN to initiate the <span className="text-white font-black whitespace-nowrap">'Before Confirmation'</span> data backup.</>
                                     ) : (
-                                        <>Enter your Security PIN to authorize the <span className="text-white font-black whitespace-nowrap">'After Freezing'</span> process and rollover.</>
+                                        <>Enter your Security Password / PIN to authorize the <span className="text-white font-black whitespace-nowrap">'After Freezing'</span> process and rollover.</>
                                     )}
                                 </p>
                             </div>
@@ -1176,17 +1222,24 @@ const Reports: React.FC<ReportsProps> = ({
 
                         <div className="space-y-4">
                             <div className="relative">
-                                <label className="text-[10px] font-bold text-amber-500/50 uppercase tracking-widest mb-1.5 block">ENTER SECURITY PIN</label>
+                                <label className="text-[10px] font-bold text-amber-500/50 uppercase tracking-widest mb-1.5 block">ENTER SECURITY PASSWORD / PIN</label>
                                 <div className="relative">
                                     <input
                                         type={pinShow ? "text" : "password"}
                                         autoFocus
                                         className={`w-full bg-slate-950 border ${pinError ? 'border-red-500/50' : 'border-slate-700'} rounded-xl p-4 text-center text-lg font-mono tracking-[0.5em] text-white outline-none focus:border-amber-500 transition-all`}
                                         value={pinInput}
-                                        onChange={e => { setPinInput(e.target.value); setPinError(''); }}
+                                        onChange={e => { 
+                                            const val = e.target.value;
+                                            setPinInput(val); 
+                                            setPinError(''); 
+                                            if (val.length === 6) {
+                                                pinVerifyBtnRef.current?.focus();
+                                            }
+                                        }}
                                         onKeyDown={e => e.key === 'Enter' && handlePinVerify()}
                                         placeholder="••••••"
-                                        title="Enter your Payroll Security PIN"
+                                        title="Enter your Payroll Security Password / PIN"
                                     />
                                     <button
                                         onClick={() => setPinShow(!pinShow)}
@@ -1205,8 +1258,9 @@ const Reports: React.FC<ReportsProps> = ({
 
                             <div className="flex flex-col gap-3">
                                 <button
+                                    ref={pinVerifyBtnRef}
                                     onClick={handlePinVerify}
-                                    className="w-full py-3.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-sm rounded-xl shadow-lg shadow-amber-900/30 transition-all uppercase tracking-widest transform hover:scale-[1.02] active:scale-95"
+                                    className="w-full py-3.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-sm rounded-xl shadow-lg shadow-amber-900/30 transition-all uppercase tracking-widest transform hover:scale-[1.02] active:scale-95 focus:ring-4 focus:ring-amber-500/50 outline-none"
                                 >
                                     Verify & Proceed
                                 </button>

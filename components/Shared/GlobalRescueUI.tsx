@@ -1,5 +1,5 @@
-import React, { Component, ErrorInfo, ReactNode, useState, useEffect } from 'react';
-import { ShieldAlert, RefreshCw, Download, Loader2, Wrench } from 'lucide-react';
+import { Component, ErrorInfo, ReactNode } from 'react';
+import { ShieldAlert, RefreshCw, Download, Wrench } from 'lucide-react';
 
 interface Props {
   children: ReactNode;

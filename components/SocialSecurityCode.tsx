@@ -25,7 +25,6 @@ interface SocialSecurityCodeProps {
 const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
     payrollHistory,
     employees,
-    config,
     companyProfile,
     globalMonth,
     setGlobalMonth,

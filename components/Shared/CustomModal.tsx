@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { X, CheckCircle2, AlertCircle, Info, AlertTriangle, Loader2, FolderOpen } from 'lucide-react';
+import { X, CheckCircle2, AlertCircle, Info, AlertTriangle, Loader2 } from 'lucide-react';
 
 export type ModalType = 'success' | 'error' | 'info' | 'warning' | 'confirm' | 'danger' | 'loading';
 
@@ -15,6 +15,8 @@ interface CustomModalProps {
     secondaryConfirmLabel?: string;
     cancelLabel?: string;
     autoCloseSecs?: number;
+    autoClose?: boolean;
+    progressText?: string;
     hideFooter?: boolean;
 }
 
@@ -30,9 +32,11 @@ const CustomModal: React.FC<CustomModalProps> = ({
     secondaryConfirmLabel,
     cancelLabel = 'Cancel',
     autoCloseSecs,
+    autoClose = true,
+    progressText,
     hideFooter = false
 }) => {
-    const [progress, setProgress] = useState(100);
+    const [progress, setProgress] = useState(0);
     const progressBarRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -43,7 +47,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
     useEffect(() => {
         if (!isOpen || type !== 'success' || !autoCloseSecs) {
-            setProgress(100);
+            setProgress(0);
             return;
         }
 
@@ -51,18 +55,19 @@ const CustomModal: React.FC<CustomModalProps> = ({
         const intervalMs = 50;
         const step = (intervalMs / totalMs) * 100;
 
-        setProgress(100);
+        setProgress(0);
         const timer = setInterval(() => {
             setProgress(prev => {
-                const next = prev - step;
-                if (next <= 0) {
+                const next = prev + step;
+                if (next >= 100) {
                     clearInterval(timer);
-                    // Fire onConfirm (open folder/preview) then close
-                    setTimeout(() => {
-                        onClose();
-                        if (onConfirm) onConfirm();
-                    }, 60);
-                    return 0;
+                    if (autoClose) {
+                        setTimeout(() => {
+                            onClose();
+                            if (onConfirm) onConfirm();
+                        }, 60);
+                    }
+                    return 100;
                 }
                 return next;
             });
@@ -77,49 +82,49 @@ const CustomModal: React.FC<CustomModalProps> = ({
         switch (type) {
             case 'success':
                 return {
-                    icon: <CheckCircle2 className="text-emerald-400" size={32} />,
+                    icon: <CheckCircle2 className="text-emerald-400" size={24} />,
                     border: 'border-emerald-500/50',
                     bg: 'bg-emerald-900/20',
                     button: 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-900/20'
                 };
             case 'error':
                 return {
-                    icon: <AlertCircle className="text-red-400" size={32} />,
+                    icon: <AlertCircle className="text-red-400" size={24} />,
                     border: 'border-red-500/50',
                     bg: 'bg-red-900/20',
                     button: 'bg-red-600 hover:bg-red-700 shadow-red-900/20'
                 };
             case 'warning':
                 return {
-                    icon: <AlertTriangle className="text-amber-400" size={32} />,
+                    icon: <AlertTriangle className="text-amber-400" size={24} />,
                     border: 'border-amber-500/50',
                     bg: 'bg-amber-900/20',
                     button: 'bg-amber-600 hover:bg-amber-700 shadow-amber-900/20'
                 };
             case 'confirm':
                 return {
-                    icon: <AlertTriangle className="text-blue-400" size={32} />,
+                    icon: <AlertTriangle className="text-blue-400" size={24} />,
                     border: 'border-blue-500/50',
                     bg: 'bg-blue-900/20',
                     button: 'bg-blue-600 hover:bg-blue-700 shadow-blue-900/20'
                 };
             case 'danger':
                 return {
-                    icon: <AlertTriangle className="text-red-400" size={32} />,
+                    icon: <AlertTriangle className="text-red-400" size={24} />,
                     border: 'border-red-500/50',
                     bg: 'bg-red-900/20',
                     button: 'bg-red-600 hover:bg-red-700 shadow-red-900/20'
                 };
             case 'loading':
                 return {
-                    icon: <Loader2 className="text-blue-400 animate-spin" size={32} />,
+                    icon: <Loader2 className="text-blue-400 animate-spin" size={24} />,
                     border: 'border-blue-500/30',
                     bg: 'bg-blue-900/10',
                     button: ''
                 };
             default:
                 return {
-                    icon: <Info className="text-blue-400" size={32} />,
+                    icon: <Info className="text-blue-400" size={24} />,
                     border: 'border-blue-500/50',
                     bg: 'bg-blue-900/20',
                     button: 'bg-blue-600 hover:bg-blue-700 shadow-blue-900/20'
@@ -130,19 +135,19 @@ const CustomModal: React.FC<CustomModalProps> = ({
     const styles = getTypeStyles();
 
     return (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/90 animate-in fade-in duration-300">
-            <div className={`bg-[#1e293b] w-full max-w-sm rounded-2xl border ${styles.border} shadow-2xl p-0 flex flex-col relative overflow-hidden animate-in zoom-in-95 duration-200`}>
-                <div className={`${styles.bg} p-6 pb-4 border-b ${styles.border} flex flex-col items-center text-center gap-4`}>
-                    <div className="p-3 rounded-full bg-slate-900/50 border border-slate-800 shadow-inner">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+            <div className={`bg-[#1e293b] w-full max-w-[340px] max-h-[90vh] rounded-2xl border ${styles.border} shadow-2xl p-0 flex flex-col relative overflow-hidden animate-in zoom-in-95 duration-200`}>
+                <div className={`${styles.bg} pt-1.5 pb-2 px-4 border-b ${styles.border} flex flex-col items-center text-center shrink-0 gap-1`}>
+                    <div className="p-1.5 rounded-full bg-slate-900/50 border border-slate-800 shadow-inner">
                         {styles.icon}
                     </div>
                     <div>
-                        <h3 className="text-lg font-black text-white uppercase tracking-tight">{title}</h3>
-                        <div className="h-0.5 w-12 bg-white/10 mx-auto mt-2 rounded-full" />
+                        <h3 className="text-xs font-black text-white uppercase tracking-tight">{title}</h3>
+                        <div className="h-0.5 w-12 bg-white/10 mx-auto mt-1 rounded-full" />
                     </div>
                 </div>
 
-                <div className="p-8 bg-slate-900/20 overflow-y-auto max-h-[50vh] custom-scrollbar">
+                <div className="p-2.5 bg-slate-900/20 overflow-hidden flex-1">
                     <div className="text-sm text-slate-300 leading-relaxed text-center font-medium">
                         {message}
                     </div>
@@ -157,13 +162,14 @@ const CustomModal: React.FC<CustomModalProps> = ({
                             />
                         </div>
                         <p className="text-[10px] text-slate-500 text-center mt-1 font-medium tracking-wider">
-                            Opening report & folder in {Math.ceil(progress / 100 * autoCloseSecs)}s…
+                            {progressText || 'Processing...'}{' '}
+                            {progress < 100 ? `${Math.ceil(((100 - progress) / 100) * autoCloseSecs)}s…` : 'Complete'}
                         </p>
                     </div>
                 )}
 
                 {type !== 'loading' && !hideFooter && (
-                    <div className="p-4 bg-[#1e293b] border-t border-slate-700/50 flex gap-3">
+                    <div className="p-3 bg-[#1e293b] border-t border-slate-700/50 flex gap-3 shrink-0">
                         {(type === 'confirm' || type === 'danger') && (
                             <button
                                 onClick={onClose}
@@ -184,15 +190,17 @@ const CustomModal: React.FC<CustomModalProps> = ({
                             </button>
                         )}
                         <button
+                            type="button"
+                            disabled={type === 'success' && !!autoCloseSecs && progress < 100}
                             onClick={() => {
                                 onClose();
                                 if (onConfirm) onConfirm();
                             }}
-                            className={`flex-1 px-4 py-2.5 ${styles.button} text-white font-black uppercase tracking-widest rounded-xl shadow-lg transition-all active:scale-95 text-xs flex items-center justify-center gap-2`}
+                            className={`flex-1 px-4 py-2.5 ${styles.button} text-white font-black uppercase tracking-widest rounded-xl shadow-lg transition-all active:scale-95 text-xs flex items-center justify-center gap-2 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed`}
                         >
-                            {type === 'success' && <FolderOpen size={14} />}
                             {confirmLabel}
                         </button>
+
                     </div>
                 )}
 

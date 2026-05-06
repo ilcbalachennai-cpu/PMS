@@ -13,6 +13,8 @@ export interface AlertConfig {
   secondaryConfirmLabel?: string;
   cancelLabel?: string;
   autoCloseSecs?: number;
+  autoClose?: boolean;
+  progressText?: string;
 }
 
 export const useAlerts = () => {
@@ -32,7 +34,9 @@ export const useAlerts = () => {
     confirmLabel?: string,
     secondaryConfirmLabel?: string,
     cancelLabel?: string,
-    autoCloseSecs?: number
+    autoCloseSecs?: number,
+    autoClose?: boolean,
+    progressText?: string
   ) => {
     setAlertConfig({
       isOpen: true,
@@ -44,7 +48,9 @@ export const useAlerts = () => {
       confirmLabel,
       secondaryConfirmLabel,
       cancelLabel,
-      autoCloseSecs
+      autoCloseSecs,
+      autoClose,
+      progressText
     });
   }, []);
 

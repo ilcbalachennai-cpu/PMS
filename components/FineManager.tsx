@@ -116,7 +116,8 @@ const FineManager: React.FC<FineManagerProps> = ({
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Tax_Fine_Register");
         const fileName = getStandardFileName('Tax_Fine_Template', companyProfile, month, year);
-        await generateTemplateWorkbook(wb, fileName);
+        await generateTemplateWorkbook(wb, fileName, companyProfile.establishmentName);
+
     };
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {

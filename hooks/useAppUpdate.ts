@@ -3,13 +3,38 @@ import { useState, useEffect, useCallback } from 'react';
 import { APP_VERSION, APP_PATCH_TIMESTAMP } from '../services/licenseService';
 
   const parseDateTime = (str: string | null): number => {
-    if (!str) return 0;
+    if (!str || typeof str !== 'string') return 0;
     try {
-      const [datePart, timePart] = str.split(' ');
-      const [day, month, year] = datePart.split('-').map(Number);
-      const [hour, minute, second] = (timePart || '00:00:00').split(':').map(Number);
-      return new Date(year, month - 1, day, hour, minute, second).getTime();
-    } catch (e) { return 0; }
+      // Clean the string from any leading/trailing whitespace including non-breaking spaces
+      const cleanStr = str.trim().replace(/\u00a0/g, ' ');
+      
+      // OPTION 1: Try native parsing first (handles full JS date strings like in the screenshot)
+      const nativeDate = new Date(cleanStr);
+      if (!isNaN(nativeDate.getTime()) && cleanStr.includes(':')) {
+        return nativeDate.getTime();
+      }
+
+      // OPTION 2: Manual parsing for dd-MM-yyyy HH:mm:ss
+      const parts = cleanStr.split(/[\sT]+/).filter(Boolean);
+      const datePart = parts[0];
+      const timePart = parts[1] || '00:00:00';
+      
+      const dateSep = datePart.includes('-') ? '-' : '/';
+      const [day, month, year] = datePart.split(dateSep).map(Number);
+      
+      let [hour, minute, second] = timePart.split(':').map(s => parseInt(s, 10) || 0);
+      const isPM = cleanStr.toLowerCase().includes('pm');
+      const isAM = cleanStr.toLowerCase().includes('am');
+      
+      if (isPM && hour < 12) hour += 12;
+      if (isAM && hour === 12) hour = 0;
+      
+      const d = new Date(year, month - 1, day, hour, minute, second);
+      return isNaN(d.getTime()) ? 0 : d.getTime();
+    } catch (e) { 
+      console.warn("Patch Timestamp Parsing Failed for:", str, e);
+      return 0; 
+    }
   };
 
   const isVersionHigher = (latest: string, current: string): boolean => {
@@ -43,6 +68,13 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false) => {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [deploymentStep, setDeploymentStep] = useState<number>(3); // 3=EXTRACT, 4=VALIDATE, 5=APPLY, 6=SUCCESS
+  const [now, setNow] = useState(Date.now());
+
+  // --- V03.01.02: Clock for update cooldown ---
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 10000); // Refresh every 10 seconds for tighter patch sync
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     // @ts-ignore
@@ -261,15 +293,31 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false) => {
     // ── PHASE 2: Patch Update (Only if no new version) ──
     const latestTs = parseDateTime(latestPatchTimestamp);
     const activeTs = parseDateTime(activePatchTs);
+    const delayMs = 5 * 60 * 1000; // 5 Minute Cooldown for Developer Verification
 
-    console.log(`[PatchSync] Cloud: ${latestPatchTimestamp} (${latestTs}) | Local X: ${activePatchTs} (${activeTs}) | Dismissed: ${isSessionDismissed}`);
+    console.log(`[PatchSync] Cloud: ${latestPatchTimestamp} (${latestTs}) | Local X: ${activePatchTs} (${activeTs}) | Now: ${now} | Diff: ${now - latestTs}ms | Delay: ${delayMs}ms`);
     
+    // Check if patch is newer AND if the 5-minute grace period has passed
     if (latestTs > activeTs && !isSessionDismissed) {
-       setIsPatchNotice(true);
-       setIsPatchMandatory(patchSkipCount >= 3);
-       setShowUpdateNotice(true);
+       if (now >= (latestTs + delayMs)) {
+         console.log("🚀 [PatchSync] Grace period expired. Triggering update notice.");
+         setIsPatchNotice(true);
+         setIsPatchMandatory(patchSkipCount >= 3);
+         setShowUpdateNotice(true);
+       } else {
+         const remainingSecs = Math.ceil(((latestTs + delayMs) - now) / 1000);
+         console.log(`⏳ [PatchSync] Patch detected but in 5-min cooldown. Waiting ${remainingSecs}s more for developer verification...`);
+         setIsPatchNotice(false);
+         setShowUpdateNotice(false);
+       }
+    } else {
+       setIsPatchNotice(false);
+       // Only hide if we aren't showing a VERSION update
+       if (!latestAppVersion || !isVersionHigher(latestAppVersion, APP_VERSION)) {
+          setShowUpdateNotice(false);
+       }
     }
-  }, [latestAppVersion, latestPatchTimestamp, activePatchTs, isSessionDismissed, patchSkipCount, updateDownloaded]);
+  }, [latestAppVersion, latestPatchTimestamp, activePatchTs, isSessionDismissed, patchSkipCount, updateDownloaded, now]);
 
   useEffect(() => {
     // @ts-ignore

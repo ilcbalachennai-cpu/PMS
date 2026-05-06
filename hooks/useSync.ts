@@ -25,6 +25,8 @@ interface SyncProps {
   isSetupComplete: boolean;
   safeSave: (key: string, data: any) => void;
   activeCompanyId: string;
+  isHydrating: boolean;
+  isResetting: boolean;
 }
 
 export const useSync = (props: SyncProps) => {
@@ -32,17 +34,19 @@ export const useSync = (props: SyncProps) => {
     employees, config, companyProfile, attendances, leaveLedgers,
     advanceLedgers, payrollHistory, fines, leavePolicy, arrearHistory, otRecords,
     logoUrl, designations, divisions, branches, sites, isSetupComplete,
-    safeSave, activeCompanyId
+    safeSave, activeCompanyId, isHydrating, isResetting
   } = props;
 
   // Master Persistence Sync (Electron DB)
   useEffect(() => {
+    if (isHydrating || isResetting) return;
+    
     const handler = setTimeout(async () => {
       if ((window as any).electronAPI) {
         const allUsersRaw = localStorage.getItem('app_users');
         const allUsers = (() => { try { return allUsersRaw ? JSON.parse(allUsersRaw) : []; } catch { return []; } })();
         
-        const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${activeCompanyId}_${key}`;
+        const getCKey = (key: string) => key;
 
         const keys = [
           { k: 'app_employees', v: employees },
@@ -81,23 +85,24 @@ export const useSync = (props: SyncProps) => {
   }, [
     employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers,
     payrollHistory, fines, leavePolicy, arrearHistory, otRecords, logoUrl,
-    designations, divisions, branches, sites, isSetupComplete, activeCompanyId
+    designations, divisions, branches, sites, isSetupComplete, activeCompanyId,
+    isHydrating, isResetting
   ]);
 
-  // LocalStorage Direct Syncs
-  useEffect(() => { safeSave('app_employees', employees); }, [employees, safeSave]);
-  useEffect(() => { safeSave('app_config', config); }, [config, safeSave]);
-  useEffect(() => { safeSave('app_company_profile', companyProfile); }, [companyProfile, safeSave]);
-  useEffect(() => { safeSave('app_attendance', attendances); }, [attendances, safeSave]);
-  useEffect(() => { safeSave('app_leave_ledgers', leaveLedgers); }, [leaveLedgers, safeSave]);
-  useEffect(() => { safeSave('app_advance_ledgers', advanceLedgers); }, [advanceLedgers, safeSave]);
-  useEffect(() => { safeSave('app_payroll_history', payrollHistory); }, [payrollHistory, safeSave]);
-  useEffect(() => { safeSave('app_leave_policy', leavePolicy); }, [leavePolicy, safeSave]);
-  useEffect(() => { safeSave('app_master_designations', designations); }, [designations, safeSave]);
-  useEffect(() => { safeSave('app_master_divisions', divisions); }, [divisions, safeSave]);
-  useEffect(() => { safeSave('app_master_branches', branches); }, [branches, safeSave]);
-  useEffect(() => { safeSave('app_master_sites', sites); }, [sites, safeSave]);
-  useEffect(() => { safeSave('app_fines', fines); }, [fines, safeSave]);
-  useEffect(() => { safeSave('app_arrear_history', arrearHistory); }, [arrearHistory, safeSave]);
-  useEffect(() => { safeSave('app_ot_records', otRecords); }, [otRecords, safeSave]);
+  // LocalStorage Direct Syncs (Shielded during Reset)
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_employees', employees); }, [employees, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_config', config); }, [config, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_company_profile', companyProfile); }, [companyProfile, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_attendance', attendances); }, [attendances, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_leave_ledgers', leaveLedgers); }, [leaveLedgers, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_advance_ledgers', advanceLedgers); }, [advanceLedgers, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_payroll_history', payrollHistory); }, [payrollHistory, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_leave_policy', leavePolicy); }, [leavePolicy, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_master_designations', designations); }, [designations, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_master_divisions', divisions); }, [divisions, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_master_branches', branches); }, [branches, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_master_sites', sites); }, [sites, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_fines', fines); }, [fines, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_arrear_history', arrearHistory); }, [arrearHistory, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting) return; safeSave('app_ot_records', otRecords); }, [otRecords, safeSave, isHydrating, isResetting]);
 };

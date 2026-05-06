@@ -4,6 +4,7 @@ import { Save, Upload, Download, Lock, AlertTriangle, CheckCircle2, X, Wallet, C
 import * as XLSX from 'xlsx';
 import { Employee, LeaveLedger, AdvanceLedger, PayrollResult, LeavePolicy, CompanyProfile } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
+import { formatIndianNumber } from '../utils/formatters';
 
 interface LedgerManagerProps {
     employees: Employee[];
@@ -246,7 +247,8 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
         }
 
         const fileName = getStandardFileName(`${viewMode}_Ledger_Template`, companyProfile, month, year);
-        await generateTemplateWorkbook(wb, fileName);
+        await generateTemplateWorkbook(wb, fileName, companyProfile.establishmentName);
+
     };
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {

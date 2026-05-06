@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, Table, Download, BookOpen, ScrollText, HandCoins, ReceiptText, Info } from 'lucide-react';
+import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, BookOpen, ScrollText, ReceiptText, Info } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
 import { INDIAN_STATES } from '../constants';
 import {
@@ -74,10 +74,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     globalYear,
     setGlobalYear,
     attendances = [],
-    leaveLedgers = [],
     advanceLedgers = [],
     arrearHistory = [],
-    latestFrozenPeriod,
     showAlert: _showAlert
 }) => {
     const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -112,7 +110,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 if (reportName === 'PT Report') savedPath = await generateConsolidatedPTReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
                 else if (reportName === 'TDS Report') savedPath = await generateConsolidatedTDSReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
                 else if (reportName === 'Bonus') savedPath = await generateConsolidatedBonusReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
-                else if (reportName === 'Gratuity') savedPath = await generateConsolidatedGratuityReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                else if (reportName === 'Gratuity') savedPath = await generateConsolidatedGratuityReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile);
                 else if (reportName === 'LWF Report') savedPath = await generateConsolidatedLWFReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
             } else {
                 if (currentData.length === 0 && !['Employees Joined', 'Employees Left'].includes(reportName)) {
@@ -120,11 +118,11 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     return;
                 }
                 if (reportName.includes('PF ECR')) {
-                    savedPath = await generatePFECR(currentData, employees, config, format as 'Excel' | 'Text', fileName);
+                    savedPath = await generatePFECR(currentData, employees, config, format as 'Excel' | 'Text', fileName, companyProfile);
                 } else if (reportName === 'PF ECR Arrears') {
                     const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
                     if (!batch) throw new Error(`No arrears processed for ${globalMonth} ${globalYear}`);
-                    savedPath = format === 'Excel' ? await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName) : await generateArrearECRText(batch, payrollHistory, employees, config, fileName);
+                    savedPath = format === 'Excel' ? await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName, companyProfile) : await generateArrearECRText(batch, payrollHistory, employees, config, fileName, companyProfile);
                 } else if (reportName.includes('ESI Monthly')) {
                     savedPath = await generateESIReturn(currentData, employees, 'Excel', fileName, companyProfile);
                 } else if (reportName.includes('Form 12A')) {
@@ -146,7 +144,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     }
                     savedPath = format === 'PDF' ? await generateEmployeesLeftPDF(employees, globalMonth, globalYear, companyProfile) : await generateLeftEmployeesReport(employees, globalMonth, globalYear, companyProfile);
                 } else if (reportName.includes('Gratuity')) {
-                    savedPath = await generateGratuityReport(employees, companyProfile, format as any);
+                    savedPath = await generateGratuityReport(employees, companyProfile);
                 } else if (reportName.includes('Bonus')) {
                     savedPath = await generateBonusReport(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, companyProfile, format as 'PDF' | 'Excel');
                 } else if (reportName.includes('PT Report')) {

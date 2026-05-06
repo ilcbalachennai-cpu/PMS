@@ -122,7 +122,8 @@ const OTManager: React.FC<OTManagerProps> = ({
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Overtime");
         const fileName = getStandardFileName('OT_Template', companyProfile, month, year);
-        await generateTemplateWorkbook(wb, fileName);
+        await generateTemplateWorkbook(wb, fileName, companyProfile.establishmentName);
+
     };
 
     const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {

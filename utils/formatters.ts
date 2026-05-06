@@ -97,3 +97,43 @@ export const formatLicenseKey = (key: string | undefined | null): string => {
   const parts = clean.match(/.{1,4}/g);
   return parts ? parts.join('-') : key;
 };
+
+/**
+ * Generates a standard Company ID based on the establishment name.
+ * Pattern: FIRST6CHARS_RANDOM6DIGITS (e.g., NKEFLO_476704)
+ */
+export const generateCompanyId = (establishmentName: string): string => {
+  const cleanName = (establishmentName || 'COMPANY')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .substring(0, 6)
+    .toUpperCase();
+  
+  const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+  return `${cleanName}_${randomSuffix}`;
+};
+
+/**
+ * Generates a standard backup filename based on company name, data month/year, and current date.
+ * Pattern: [FirstWordOfCompany]_[DataMonth]_[Year]_[DateOfBackup].enc
+ * Example: NKE_DEC_2025_04May2026.enc
+ */
+export const generateBackupFilename = (establishmentName: string, dataMonth: string, dataYear: number): string => {
+  const firstWord = (establishmentName || 'COMPANY')
+    .trim()
+    .split(/\s+/)[0]
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toUpperCase();
+  
+  const monthLabel = String(dataMonth || 'UNK').substring(0, 3).toUpperCase();
+  
+  const today = new Date();
+  const day = String(today.getDate()).padStart(2, '0');
+  // Use manual array to ensure consistency across locales
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthName = months[today.getMonth()];
+  const year = today.getFullYear();
+  const backupDateStr = `${day}${monthName}${year}`; // e.g., 04May2026
+
+  return `${firstWord}_${monthLabel}_${dataYear}_${backupDateStr}.enc`;
+};
+

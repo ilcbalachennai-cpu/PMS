@@ -62,25 +62,32 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         );
     }, [props.attendances, props.month, props.year]);
 
-    const TabButton = ({ id, label, icon: Icon, disabled = false }: { id: typeof activeTab, label: string, icon: any, disabled?: boolean }) => (
-        <button
-            onClick={() => !disabled && setActiveTab(id)}
-            title={disabled ? "Complete attendance data entry first" : `Switch to ${label} tab`}
-            aria-label={disabled ? "Tab Disabled: Attendance Required" : `Switch to ${label} tab`}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black transition-all text-xs whitespace-nowrap relative group ${activeTab === id
-                ? (isWin7 
-                    ? 'bg-blue-600/50 text-white shadow-[0_0_20px_rgba(37,99,235,0.25)] border border-blue-400/50' 
-                    : 'bg-blue-600 text-white shadow-lg')
-                : (disabled ? 'text-slate-600 cursor-not-allowed grayscale' : 'text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent')
-                }`}
-        >
-            {activeTab === id && isWin7 && (
-                <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-1 bg-blue-500 rounded-t-full shadow-[0_0_12px_#3b82f6]"></div>
-            )}
-            <Icon size={16} className={`${activeTab === id ? (isWin7 ? 'text-blue-400' : 'text-white') : 'text-slate-500'} group-hover:text-blue-400 transition-colors`} />
-            {label}
-        </button>
-    );
+    const TabButton = ({ id, label, icon: Icon, disabled = false }: { id: typeof activeTab, label: string, icon: any, disabled?: boolean }) => {
+        const getDisabledMessage = () => {
+            if (id === 'payroll') return "No Attendance Data is available to process";
+            return "Complete attendance data entry first";
+        };
+
+        return (
+            <button
+                onClick={() => !disabled && setActiveTab(id)}
+                title={disabled ? getDisabledMessage() : `Switch to ${label} tab`}
+                aria-label={disabled ? getDisabledMessage() : `Switch to ${label} tab`}
+                className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black transition-all text-xs whitespace-nowrap relative group ${activeTab === id
+                    ? (isWin7 
+                        ? 'bg-blue-600/50 text-white shadow-[0_0_20px_rgba(37,99,235,0.25)] border border-blue-400/50' 
+                        : 'bg-blue-600 text-white shadow-lg')
+                    : (disabled ? 'text-slate-600 cursor-not-allowed grayscale' : 'text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent')
+                    }`}
+            >
+                {activeTab === id && isWin7 && (
+                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-1 bg-blue-500 rounded-t-full shadow-[0_0_12px_#3b82f6]"></div>
+                )}
+                <Icon size={16} className={`${activeTab === id ? (isWin7 ? 'text-blue-400' : 'text-white') : 'text-slate-500'} group-hover:text-blue-400 transition-colors`} />
+                {label}
+            </button>
+        );
+    };
 
     const downloadMasterTemplate = async () => {
         const headers = [
@@ -122,7 +129,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Master_Input");
         const fileName = getStandardFileName('Master_Payroll_Template', props.companyProfile, props.month, props.year);
-        await generateTemplateWorkbook(wb, fileName);
+        await generateTemplateWorkbook(wb, fileName, props.companyProfile.establishmentName);
+
     };
 
     const handleMasterImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -149,12 +157,21 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
 
                 const daysInMonth = new Date(props.year, ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].indexOf(props.month) + 1, 0).getDate();
 
+                let updateCount = 0;
                 data.forEach((row: any) => {
-                    const empId = String(row['Employee ID'] || row['ID'] || '').trim();
-                    if (!empId) return;
+                    const empIdRaw = String(row['Employee ID'] || row['ID'] || '').trim();
+                    const empNameRaw = String(row['Name'] || row['Employee Name'] || '').trim();
+                    if (!empIdRaw) return;
 
-                    const emp = props.employees.find(e => e.id === empId);
+                    const emp = props.employees.find(e => 
+                        e.id.toLowerCase() === empIdRaw.toLowerCase() &&
+                        e.name.toLowerCase() === empNameRaw.toLowerCase()
+                    );
+                    
                     if (!emp) return;
+                    
+                    const empId = emp.id; // Use official system ID
+                    updateCount++;
 
                     // 1. OT PROCESSING
                     const otDays = Number(row['OT Days'] || 0);
@@ -212,8 +229,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         ledger.totalAdvance = totalAdvance;
                         ledger.emiCount = monthlyEMI;
                         ledger.manualPayment = paidManual;
-                        ledger.paidAmount = paidManual; // Sync with legacy field
-                        ledger.monthlyInstallment = monthlyEMI; // Sync with legacy field
+                        ledger.paidAmount = paidManual; 
+                        ledger.monthlyInstallment = monthlyEMI; 
 
                         const totalBal = opening + totalAdvance;
                         let recovery = 0;
@@ -269,6 +286,12 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     }
                 });
 
+                if (updateCount === 0) {
+                    props.showAlert('error', 'Master Import Failed', `No matching employees found in the active company. Checked ${data.length} rows. Please verify both 'Employee ID' and 'Name' columns.`);
+                    return;
+                }
+
+                // Update State (useSync will handle persistence automatically)
                 props.setAttendances(newAttendances);
                 props.setAdvanceLedgers(newAdvanceLedgers);
                 props.setFines(newFines);
@@ -277,9 +300,9 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 setActiveTab('payroll');
                 setShowSuccessModal(true);
 
-            } catch (error) {
+            } catch (error: any) {
                 console.error(error);
-                alert("Error processing Master Import. Please check the file format.");
+                props.showAlert('error', 'Import Error', error.message || "Error processing Master Import. Please check the file format.");
             } finally {
                 setIsImporting(false);
                 if (masterFileInputRef.current) masterFileInputRef.current.value = "";

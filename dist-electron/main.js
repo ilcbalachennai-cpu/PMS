@@ -67,7 +67,17 @@ function getAppConfig() {
     return {};
 }
 function saveAppConfig(config) {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+    try {
+        const dir = path.dirname(CONFIG_PATH);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+        console.log(`✅ App config saved to: ${CONFIG_PATH}`);
+    }
+    catch (e) {
+        console.error(`❌ Failed to save app config:`, e);
+    }
 }
 let appConfig = getAppConfig();
 let appBasePath = appConfig.appBasePath || '';
@@ -100,58 +110,140 @@ const getAppPaths = (base) => {
 };
 // ── DATABASE INITIALIZATION ──
 let db = null;
-function initializeDatabase(basePath) {
+let activeCompanyId = null;
+function initializeDatabase(basePath, companyId) {
+    if (!basePath) {
+        console.error('❌ Cannot initialize database: basePath is empty');
+        return;
+    }
+    appBasePath = basePath;
     const paths = getAppPaths(basePath);
+    // V03.01.03: Direct Silo Provisioning
+    activeCompanyId = companyId || activeCompanyId || null;
+    let dataDir = paths.data;
+    if (activeCompanyId && activeCompanyId !== 'default' && activeCompanyId !== 'null') {
+        dataDir = path.join(paths.data, activeCompanyId);
+        // FORCE CREATE THE SILO FOLDER
+        if (!fs.existsSync(dataDir)) {
+            console.log(`[DB] Provisioning silo folder: ${dataDir}`);
+            fs.mkdirSync(dataDir, { recursive: true });
+        }
+    }
+    // DEBUG TRACER: Write current state to a file for diagnosis
+    try {
+        const debugInfo = `[${new Date().toISOString()}] ID: ${activeCompanyId} | DIR: ${dataDir}\n`;
+        fs.appendFileSync(path.join(paths.data, 'silo_debug.txt'), debugInfo);
+    }
+    catch (e) { }
+    const DB_PATH = path.join(dataDir, 'active_db.sqlite');
     // Ensure directories exist
-    [paths.data, paths.reports, paths.backups, paths.templates].forEach((dir) => {
+    const dirsToCreate = [dataDir, paths.reports, paths.backups, paths.templates];
+    dirsToCreate.forEach((dir) => {
         try {
-            if (!fs.existsSync(dir))
+            if (!fs.existsSync(dir)) {
+                console.log(`📁 Creating directory: ${dir}`);
                 fs.mkdirSync(dir, { recursive: true });
+            }
         }
         catch (err) {
             console.error(`❌ Permission Error: Failed to create directory: ${dir}`, err);
-            throw new Error(`Permission Denied: Cannot create folder at ${dir}. Please ensure you have write access.`);
+            throw new Error(`Permission Denied: Cannot create folder at ${dir}. Please ensure you have write access to this location.`);
         }
     });
-    const DB_PATH = path.join(paths.data, 'active_db.sqlite');
     const snapshotDir = path.join(paths.backups, 'PRE_UPDATE_SNAPSHOT');
     const snapshotDb = path.join(snapshotDir, 'active_db_snapshot.sqlite');
-    // ── AUTO-RESTORE LOGIC ──
-    // If main DB is missing but snapshot exists, restore it.
-    if (!fs.existsSync(DB_PATH) && fs.existsSync(snapshotDb)) {
-        try {
-            console.log('🔄 Main DB missing. Restoring from pre-update snapshot...');
-            fs.copyFileSync(snapshotDb, DB_PATH);
-            const configSnapshot = path.join(snapshotDir, 'app-config_snapshot.json');
-            if (fs.existsSync(configSnapshot)) {
-                fs.copyFileSync(configSnapshot, CONFIG_PATH);
-            }
-            console.log('✅ Restoration complete.');
-        }
-        catch (e) {
-            console.error('❌ Auto-restore failed:', e);
-        }
-    }
     try {
-        db = new better_sqlite3_1.default(DB_PATH);
+        console.log(`🗄️ Opening isolated database: ${DB_PATH}`);
+        if (db) {
+            try {
+                db.close();
+            }
+            catch (e) { }
+            db = null;
+        }
+        db = new better_sqlite3_1.default(DB_PATH, { timeout: 15000 }); // Increased timeout for slow drives
+        db.pragma('journal_mode = WAL');
         db.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+        // V03.01.01: Sync the global appBasePath to ensure persistence
+        appBasePath = basePath;
+        console.log('✅ Database initialized successfully.');
     }
     catch (e) {
-        console.error('❌ DB connection failed. Database might be corrupted.', e);
-        // If corrupted and snapshot exists, try a hail-mary restore
+        console.error('❌ DB connection failed:', e);
+        const errorLog = `[${new Date().toISOString()}] DB connection failed at ${DB_PATH}: ${e.message}\n`;
+        fs.appendFileSync(path.join(electron_1.app.getPath('userData'), 'electron_errors.txt'), errorLog);
         if (fs.existsSync(snapshotDb)) {
             try {
-                if (db)
-                    db.close();
+                console.log('🛠️ Attempting recovery from snapshot...');
+                if (db) {
+                    try {
+                        db.close();
+                    }
+                    catch (err) { }
+                }
                 fs.copyFileSync(snapshotDb, DB_PATH);
                 db = new better_sqlite3_1.default(DB_PATH);
-                console.log('🛠️ Corrupted DB replaced with snapshot.');
+                console.log('✅ Recovery successful.');
             }
             catch (restoreErr) {
-                console.error('❌ Hail-mary restore failed.', restoreErr);
+                throw new Error(`Database Error: ${e.message}. Recovery failed: ${restoreErr.message}`);
             }
         }
+        else {
+            throw new Error(`Database Error: ${e.message}. Path: ${DB_PATH}`);
+        }
     }
+}
+/**
+ * 🛡️ DATABASE HEALTH CHECK
+ */
+function isDatabaseHealthy() {
+    try {
+        if (!db)
+            return false;
+        db.prepare('SELECT 1').get();
+        return true;
+    }
+    catch (e) {
+        console.error('❌ Database health check failed:', e);
+        return false;
+    }
+}
+/**
+ * 🛡️ ENSURE DATABASE IS READY
+ * Centralized helper to prevent "Database not initialized" errors.
+ * Attempts to re-initialize from config if db is null.
+ */
+function ensureDatabase() {
+    if (db && appBasePath && isDatabaseHealthy())
+        return true;
+    console.log('🔍 Database check failed or unhealthy. Attempting on-demand recovery...');
+    const config = getAppConfig();
+    const savedPath = config.appBasePath || appBasePath;
+    if (savedPath) {
+        try {
+            // If DB exists but is unhealthy, close it first
+            if (db) {
+                try {
+                    db.close();
+                }
+                catch (e) { }
+                db = null;
+            }
+            initializeDatabase(savedPath);
+            return db !== null && isDatabaseHealthy();
+        }
+        catch (e) {
+            console.error('❌ On-demand initialization failed:', e);
+            const errorLog = `[${new Date().toISOString()}] On-demand recovery failed: ${e.message}\n`;
+            try {
+                fs.appendFileSync(path.join(electron_1.app.getPath('userData'), 'electron_errors.txt'), errorLog);
+            }
+            catch (err) { }
+            return false;
+        }
+    }
+    return false;
 }
 // Deferring DB initialization to app.whenReady() for Ultra-Fast Startup.
 function createWindow() {
@@ -213,12 +305,21 @@ electron_1.app.whenReady().then(() => {
     // 2. Initializing database and cleanup in background
     if (appBasePath) {
         try {
+            console.log(`🔄 Auto-initializing database from config: ${appBasePath}`);
             initializeDatabase(appBasePath);
         }
         catch (e) {
-            console.error("Failed to initialize database at stored path:", e);
-            appBasePath = '';
+            console.error("❌ Failed to initialize database at stored path:", e);
+            // V03.01.02: Don't clear appBasePath immediately if it exists on disk but failed to open (e.g. locked)
+            // Only clear if the path itself is invalid/missing
+            if (!fs.existsSync(appBasePath)) {
+                appBasePath = '';
+                saveAppConfig({ ...getAppConfig(), appBasePath: '' });
+            }
         }
+    }
+    else {
+        console.warn("⚠️ No stored appBasePath found in config.");
     }
     cleanupOldInstallers();
 });
@@ -257,26 +358,59 @@ electron_1.ipcMain.handle('initialize-app-directory', async (_, selectedPath) =>
 electron_1.ipcMain.handle('get-app-directory', async () => {
     return appBasePath || null;
 });
-// 2. Report Saving
-electron_1.ipcMain.handle('save-report', async (_, { fileName, data, type }) => {
+electron_1.ipcMain.handle('switch-company-data', async (_, companyId) => {
     try {
-        console.log(`[IPC] save-report requested: ${fileName}.${type}`);
+        if (!appBasePath)
+            throw new Error("Storage path not set");
+        console.log(`[IPC] Switching to company data silo: ${companyId}`);
+        // 1. Force provision the folder if it's a real company (not 'default')
+        if (companyId && companyId !== 'default') {
+            const paths = getAppPaths(appBasePath);
+            const siloPath = path.join(paths.data, companyId);
+            if (!fs.existsSync(siloPath)) {
+                console.log(`[IPC] Provisioning new physical silo at: ${siloPath}`);
+                fs.mkdirSync(siloPath, { recursive: true });
+            }
+        }
+        // 2. Flush and close current connection
+        if (db) {
+            try {
+                db.close();
+            }
+            catch (e) { }
+            db = null;
+        }
+        // 3. Re-initialize with scope
+        initializeDatabase(appBasePath, companyId);
+        return { success: true };
+    }
+    catch (e) {
+        console.error('[IPC] Company data switch failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+// 2. Report Saving
+electron_1.ipcMain.handle('save-report', async (_, { fileName, data, type, subfolder }) => {
+    try {
+        console.log(`[IPC] save-report requested: ${fileName}.${type} in subfolder: ${subfolder}`);
         if (!appBasePath) {
-            console.error('[IPC] appBasePath is missing. App storage not initialized.');
             throw new Error("App storage not initialized. Please select a storage location.");
         }
         const paths = getAppPaths(appBasePath);
-        // Ensure the reports directory exists
-        if (!fs.existsSync(paths.reports)) {
-            console.log(`[IPC] Creating missing reports directory: ${paths.reports}`);
-            fs.mkdirSync(paths.reports, { recursive: true });
+        let targetDir = paths.reports;
+        if (subfolder) {
+            const folderName = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+            targetDir = path.join(paths.reports, folderName);
         }
-        const filePath = path.resolve(paths.reports, `${fileName}.${type}`);
+        // Ensure the reports directory exists
+        if (!fs.existsSync(targetDir)) {
+            fs.mkdirSync(targetDir, { recursive: true });
+        }
+        const filePath = path.resolve(targetDir, `${fileName}.${type}`);
         console.log(`[IPC] Saving file to: ${filePath}`);
         // Write the file
         const buffer = Buffer.from(data);
         fs.writeFileSync(filePath, new Uint8Array(buffer));
-        console.log(`[IPC] File written successfully. Size: ${buffer.length} bytes`);
         return { success: true, path: filePath };
     }
     catch (e) {
@@ -285,20 +419,24 @@ electron_1.ipcMain.handle('save-report', async (_, { fileName, data, type }) => 
     }
 });
 // 2b. Template Saving (routes to BharatPP/Templates instead of Report files)
-electron_1.ipcMain.handle('save-template', async (_, { fileName, data, type }) => {
+electron_1.ipcMain.handle('save-template', async (_, { fileName, data, type, subfolder }) => {
     try {
-        console.log(`[IPC] save-template requested: ${fileName}.${type}`);
+        console.log(`[IPC] save-template requested: ${fileName}.${type} in subfolder: ${subfolder}`);
         if (!appBasePath)
             throw new Error("App storage not initialized.");
         const paths = getAppPaths(appBasePath);
-        if (!fs.existsSync(paths.templates)) {
-            fs.mkdirSync(paths.templates, { recursive: true });
+        let targetDir = paths.templates;
+        if (subfolder) {
+            const folderName = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+            targetDir = path.join(paths.templates, folderName);
         }
-        const filePath = path.resolve(paths.templates, `${fileName}.${type}`);
+        if (!fs.existsSync(targetDir)) {
+            fs.mkdirSync(targetDir, { recursive: true });
+        }
+        const filePath = path.resolve(targetDir, `${fileName}.${type}`);
         console.log(`[IPC] Saving template to: ${filePath}`);
         const buffer = Buffer.from(data);
         fs.writeFileSync(filePath, new Uint8Array(buffer));
-        console.log(`[IPC] Template written successfully. Size: ${buffer.length} bytes`);
         return { success: true, path: filePath };
     }
     catch (e) {
@@ -409,8 +547,9 @@ electron_1.ipcMain.handle('send-email', async (_, { smtpConfig, mailOptions }) =
 // 3. Simple Key-Value Store
 electron_1.ipcMain.handle('db-set', async (_, { key, value }) => {
     try {
-        if (!db)
-            throw new Error("Database not initialized");
+        if (!ensureDatabase()) {
+            throw new Error("Storage not configured. Database unavailable.");
+        }
         const stmt = db.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
         stmt.run(key, JSON.stringify(value));
         return { success: true };
@@ -421,7 +560,7 @@ electron_1.ipcMain.handle('db-set', async (_, { key, value }) => {
 });
 electron_1.ipcMain.handle('db-get', async (_, key) => {
     try {
-        if (!db)
+        if (!ensureDatabase())
             return { success: true, data: null };
         const row = db.prepare('SELECT value FROM store WHERE key = ?').get(key);
         return { success: true, data: row ? JSON.parse(row.value) : null };
@@ -452,40 +591,104 @@ electron_1.ipcMain.handle('db-get-all', async () => {
         return { success: false, error: e.message };
     }
 });
-// 4. Encrypted Manual Backup
-electron_1.ipcMain.handle('run-backup', async (_, encryptedData) => {
+electron_1.ipcMain.handle('db-set-global', async (_, { key, value }) => {
     try {
-        if (!appBasePath)
-            throw new Error("App storage not initialized");
-        const paths = getAppPaths(appBasePath);
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T');
-        const fileName = `backup_${timestamp[0]}_${timestamp[1].slice(0, 8)}.enc`;
-        const filePath = path.join(paths.backups, fileName);
-        fs.writeFileSync(filePath, encryptedData);
-        return { success: true, fileName };
+        // Always write to the ROOT database (Registry)
+        const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+        const rootDb = new better_sqlite3_1.default(rootDbPath);
+        rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+        const stmt = rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+        stmt.run(key, JSON.stringify(value));
+        rootDb.close();
+        return { success: true };
     }
     catch (e) {
         return { success: false, error: e.message };
     }
 });
-// 5. Automatic Data Backup (triggered by payroll confirmation/rollover)
-electron_1.ipcMain.handle('create-data-backup', async (_, fileName) => {
+electron_1.ipcMain.handle('wipe-all-data', async () => {
     try {
-        if (!db && appBasePath)
-            initializeDatabase(appBasePath);
-        if (!appBasePath || !db)
-            throw new Error("Database not initialized");
+        if (db) {
+            db.close();
+            db = null;
+        }
+        if (fs.existsSync(appBasePath)) {
+            // Safety: Only delete within the app data dir
+            fs.rmSync(appBasePath, { recursive: true, force: true });
+            fs.mkdirSync(appBasePath, { recursive: true });
+        }
+        return { success: true };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('run-backup', async (_, arg1, arg2, arg3) => {
+    try {
+        let data, fileName, subfolder;
+        // Handle object wrapping from preload.ts or positional arguments
+        if (typeof arg1 === 'object' && arg1 !== null && arg1.data !== undefined) {
+            ({ data, fileName, subfolder } = arg1);
+        }
+        else {
+            data = arg1;
+            fileName = arg2;
+            subfolder = arg3;
+        }
+        if (!ensureDatabase())
+            throw new Error("Database not ready");
         const paths = getAppPaths(appBasePath);
-        if (!fs.existsSync(paths.backups))
-            fs.mkdirSync(paths.backups, { recursive: true });
-        const tempPath = path.join(paths.backups, `${fileName}.sqlite.tmp`);
-        const finalPath = path.join(paths.backups, `${fileName}.enc`);
+        let targetDir = paths.backups;
+        if (subfolder) {
+            const folderName = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+            targetDir = path.join(paths.backups, folderName);
+            if (!fs.existsSync(targetDir))
+                fs.mkdirSync(targetDir, { recursive: true });
+        }
+        const filePath = path.join(targetDir, fileName || `backup_${Date.now()}.enc`);
+        fs.writeFileSync(filePath, data);
+        return { success: true, fileName, filePath };
+    }
+    catch (e) {
+        console.error('[IPC] run-backup failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+// 5. Automatic Data Backup (triggered by payroll confirmation/rollover)
+electron_1.ipcMain.handle('create-data-backup', async (_, arg) => {
+    try {
+        const fileName = typeof arg === 'string' ? arg : arg.fileName;
+        const subfolder = typeof arg === 'object' ? arg.subfolder : '';
+        console.log(`[IPC] create-data-backup requested: ${fileName} in subfolder: ${subfolder}`);
+        // 1. Proactive Self-Check / Initialization
+        if (!ensureDatabase()) {
+            console.warn('⚠️ Manual recovery attempt failed. Returning diagnostic error.');
+        }
+        if (!appBasePath)
+            throw new Error("Storage folder not set. Please select a data location in Settings.");
+        if (!db) {
+            // Last ditch effort to recover
+            ensureDatabase();
+            if (!db)
+                throw new Error(`Database connection failed at ${appBasePath}. Please restart the application.`);
+        }
+        const paths = getAppPaths(appBasePath);
+        let targetDir = paths.backups;
+        if (subfolder) {
+            // Use only the first word and sanitize
+            const folderName = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+            targetDir = path.join(paths.backups, folderName);
+        }
+        if (!fs.existsSync(targetDir))
+            fs.mkdirSync(targetDir, { recursive: true });
+        const tempPath = path.join(targetDir, `${fileName}.sqlite.tmp`);
+        const finalPath = path.join(targetDir, `${fileName}.enc`);
         console.log(`[IPC] Performing Online SQL Snapshot...`);
         await db.backup(tempPath);
         // --- ENCRYPTION LAYER ---
-        console.log(`[IPC] Securing Archive with Machine Lock...`);
-        const machineId = await getInternalMachineId();
-        const cipher = crypto.createCipheriv('aes-256-cbc', crypto.scryptSync(machineId, 'salt', 32), Buffer.alloc(16, 0));
+        const encryptionKey = (typeof arg === 'object' && arg.encryptionKey) ? arg.encryptionKey : await getInternalMachineId();
+        console.log(`[IPC] Securing Archive with ${(typeof arg === 'object' && arg.encryptionKey) ? 'Custom Identity Key' : 'Machine Lock'}...`);
+        const cipher = crypto.createCipheriv('aes-256-cbc', crypto.scryptSync(encryptionKey, 'salt', 32), Buffer.alloc(16, 0));
         const input = fs.createReadStream(tempPath);
         const output = fs.createWriteStream(finalPath);
         await new Promise((resolve, reject) => {
@@ -503,17 +706,21 @@ electron_1.ipcMain.handle('create-data-backup', async (_, fileName) => {
     }
 });
 // 5b. Restore from SQLite Backup (Directly Replace DB File)
-electron_1.ipcMain.handle('restore-sqlite-backup', async (_, backupFilePath) => {
+electron_1.ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
     try {
+        const backupFilePath = typeof arg === 'string' ? arg : arg.path;
         if (!appBasePath)
             throw new Error("App storage not initialized");
         const paths = getAppPaths(appBasePath);
-        const DB_PATH = path.join(paths.data, 'active_db.sqlite');
-        console.log(`[IPC] Restoring SQLite backup from: ${backupFilePath}`);
-        if (!fs.existsSync(backupFilePath)) {
-            throw new Error("Backup file not found at " + backupFilePath);
+        // Use active company silo if available
+        let dataDir = paths.data;
+        if (activeCompanyId && activeCompanyId !== 'default') {
+            dataDir = path.join(paths.data, activeCompanyId);
+            if (!fs.existsSync(dataDir))
+                fs.mkdirSync(dataDir, { recursive: true });
         }
-        const tempRestorePath = path.join(paths.data, 'restore_temp.sqlite');
+        const DB_PATH = path.join(dataDir, 'active_db.sqlite');
+        const tempRestorePath = path.join(dataDir, 'restore_temp.sqlite');
         // Check if it's a plain SQLite file or encrypted
         const fd = fs.openSync(backupFilePath, 'r');
         const header = Buffer.alloc(16);
@@ -525,15 +732,87 @@ electron_1.ipcMain.handle('restore-sqlite-backup', async (_, backupFilePath) => 
         }
         else {
             console.log(`[IPC] Decrypting Secure SQLite Archive...`);
+            // --- FORMAT GUARD: Detect CryptoJS/Base64 text files before attempting binary decryption ---
+            const formatCheckBuf = Buffer.alloc(256);
+            const formatFd = fs.openSync(backupFilePath, 'r');
+            const bytesRead = fs.readSync(formatFd, formatCheckBuf, 0, 256, 0);
+            fs.closeSync(formatFd);
+            const sampleBytes = formatCheckBuf.slice(0, bytesRead);
+            const isBase64TextFormat = sampleBytes.every((b) => b >= 32 && b <= 126);
+            if (isBase64TextFormat) {
+                throw new Error("This backup was created with the legacy PIN-based format. Please use the 'Import Data' option with your original PIN to restore this file.");
+            }
+            // Try decryption with provided key, stored license key, or fall back to machineId.
+            let dbLicenseKey = '';
+            if (db) {
+                try {
+                    const row = db.prepare('SELECT value FROM store WHERE key = ?').get('app_license_data');
+                    if (row) {
+                        const data = JSON.parse(row.value);
+                        dbLicenseKey = data.key || '';
+                        console.log(`[IPC] Extracted license identity for fallback: ${dbLicenseKey.substring(0, 4)}...`);
+                    }
+                }
+                catch (e) { }
+            }
             const machineId = await getInternalMachineId();
-            const decipher = crypto.createDecipheriv('aes-256-cbc', crypto.scryptSync(machineId, 'salt', 32), Buffer.alloc(16, 0));
-            const input = fs.createReadStream(backupFilePath);
-            const output = fs.createWriteStream(tempRestorePath);
-            await new Promise((resolve, reject) => {
-                input.pipe(decipher).pipe(output)
-                    .on('finish', () => resolve(true))
-                    .on('error', (err) => reject(err));
-            });
+            const keysToTry = [];
+            if (typeof arg === 'object' && arg.encryptionKey)
+                keysToTry.push(arg.encryptionKey);
+            if (dbLicenseKey)
+                keysToTry.push(dbLicenseKey);
+            keysToTry.push('INITIAL_PMS_KEY'); // Universal safety fallback
+            keysToTry.push(machineId);
+            let success = false;
+            // Filter out empty keys and trim them to ensure exact matching
+            const sanitizedKeys = Array.from(new Set(keysToTry.filter(k => !!k).map(k => k.trim())));
+            for (const key of sanitizedKeys) {
+                console.log(`[IPC] Attempting decryption with: ${key === machineId ? 'Machine ID' : (key === dbLicenseKey ? 'License Identity' : (key === 'INITIAL_PMS_KEY' ? 'Safety Fallback' : 'Provided PIN'))}...`);
+                const tryDecrypt = async (k) => {
+                    return new Promise((resolve) => {
+                        try {
+                            const derivedKey = crypto.scryptSync(k, 'salt', 32);
+                            const iv = Buffer.alloc(16, 0);
+                            const decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, iv);
+                            const input = fs.createReadStream(backupFilePath);
+                            const output = fs.createWriteStream(tempRestorePath);
+                            const onError = (err) => {
+                                console.warn(`[IPC] Decryption attempt failed: ${err.message}`);
+                                try {
+                                    output.destroy();
+                                }
+                                catch (_) { }
+                                try {
+                                    if (fs.existsSync(tempRestorePath))
+                                        fs.unlinkSync(tempRestorePath);
+                                }
+                                catch (_) { }
+                                resolve(false);
+                            };
+                            input.on('error', onError);
+                            decipher.on('error', onError);
+                            output.on('error', onError);
+                            output.on('finish', () => resolve(true));
+                            input.pipe(decipher).pipe(output);
+                        }
+                        catch (e) {
+                            resolve(false);
+                        }
+                    });
+                };
+                success = await tryDecrypt(key);
+                if (success) {
+                    console.log(`[IPC] Decryption successful with ${key === machineId ? 'Machine ID' : 'Provided Key'}.`);
+                    break;
+                }
+            }
+            if (!success) {
+                throw new Error("Decryption failed. Invalid key or unauthorized hardware.");
+            }
+            // Final safety check: ensure the temp file actually exists before proceeding
+            if (!fs.existsSync(tempRestorePath)) {
+                throw new Error("Restoration Error: Decrypted temporary file not found on disk.");
+            }
         }
         // 1. Close current connection
         if (db) {
@@ -830,26 +1109,29 @@ electron_1.ipcMain.handle('start-update-download', async (_, downloadUrl, expect
     });
 });
 electron_1.ipcMain.handle('backup-and-install', (_, options) => {
-    // 1. INSTANT SUCCESS SIGNAL: Tell the renderer to finish its countdown immediately
     const isSilent = options?.silent ?? false;
     const installerPath = getInstallerPath();
-    // 2. INSTANT HIDING: Release focus back to the OS within milliseconds
-    if (mainWindow) {
-        mainWindow.hide();
-    }
-    // 3. DETACHED WORKER: All heavy lifting (closing DB, backups, launching) happens in the shadows
+    // 1. INSTANT TERMINATION SIGNAL: Destroy windows immediately
+    electron_1.BrowserWindow.getAllWindows().forEach(win => {
+        try {
+            win.destroy();
+        }
+        catch (e) { }
+    });
+    // 2. DETACHED WORKER: Using a Wait-and-Kill strategy to clear locks before installer check
     (async () => {
         try {
-            console.log('--- HYPER-ASYNC HANDOFF START ---');
-            // A. Gently close database if it hasn't been closed already
+            console.log('--- DEFENSIVE RELAUNCHER START ---');
+            // A. Flush and Close Database
             if (db) {
                 try {
+                    db.pragma('wal_checkpoint(TRUNCATE)');
                     db.close();
                 }
                 catch (e) { }
                 db = null;
             }
-            // B. Snapshot/Backup (Run inside try-catch to ensure launch isn't delayed by file locks)
+            // B. Snapshot/Backup
             try {
                 if (appBasePath) {
                     const paths = getAppPaths(appBasePath);
@@ -863,40 +1145,32 @@ electron_1.ipcMain.handle('backup-and-install', (_, options) => {
                 }
             }
             catch (backupErr) {
-                console.warn('⚠️ Safety backup skipped due to file lock, proceeding to launch:', backupErr);
+                console.warn('⚠️ Safety backup skipped:', backupErr);
             }
-            // C. POWER LAUNCH: Direct Native Trigger
-            // We use shell.openPath as the primary choice because it handles UAC and paths perfectly.
-            // We also spawn a direct process as a backup.
+            // C. POWER LAUNCH: Wait 2s -> Kill BPP_APP -> Launch Installer
+            // This ensures no 'Already Running' warning pops up.
             try {
-                electron_1.shell.openPath(installerPath);
-                (0, child_process_1.spawn)(installerPath, [], {
+                // Determine binary name for taskkill
+                const exeName = electron_1.app.isPackaged ? 'BPP_APP.exe' : 'electron.exe';
+                // Chain: Delay -> Taskkill -> Delay -> Start Installer
+                const command = `timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}" ${isSilent ? '/S' : ''}`;
+                (0, child_process_1.spawn)('cmd', ['/c', command], {
                     detached: true,
                     stdio: 'ignore',
-                    windowsHide: false
+                    windowsHide: true,
+                    shell: true
                 }).unref();
+                console.log('🚀 Defensive sequence triggered via CMD.');
             }
             catch (launchErr) {
                 console.error('🚀 Primary launch failed, trying fallback:', launchErr);
-                // Last resort fallback
-                (0, child_process_1.spawn)('cmd.exe', ['/c', 'start', '', installerPath], { detached: true }).unref();
+                electron_1.shell.openPath(installerPath);
             }
-            if (isSilent) {
-                (0, child_process_1.spawn)(installerPath, ['/S'], {
-                    detached: true,
-                    stdio: 'ignore',
-                    windowsHide: true
-                }).unref();
-            }
-            // D. FINAL EXIT: Allow 3 seconds for OS to settle, then terminate parent process
-            setTimeout(() => {
-                console.log('🏁 Termination successful.');
-                electron_1.app.quit();
-                setTimeout(() => electron_1.app.exit(0), 1000);
-            }, 3000);
+            // D. FINAL EXIT
+            electron_1.app.exit(0);
         }
         catch (err) {
-            console.error('❌ Critical failure in background worker:', err);
+            console.error('❌ Critical failure in relauncher:', err);
             electron_1.app.exit(1);
         }
     })();

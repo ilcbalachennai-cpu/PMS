@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Building, MapPin, Briefcase, Network, Search } from 'lucide-react';
+import { Plus, Trash2, Building, MapPin, Briefcase, Network, Search, Download, Upload } from 'lucide-react';
+import { generateMasterTemplateXLSX, parseMasterXLSX } from '../services/excelService';
 
 
 interface MasterManagerProps {
@@ -117,13 +118,67 @@ const Utilities: React.FC<UtilitiesProps> = (props) => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="bg-blue-900/10 border border-blue-800/30 p-6 rounded-2xl flex gap-4 items-center">
-        <div className="bg-blue-600 p-3 rounded-xl text-white shadow-lg shadow-blue-900/40">
-          <Network size={28} />
+      <div className="bg-blue-900/10 border border-blue-800/30 p-6 rounded-2xl flex flex-col md:flex-row gap-6 items-center justify-between">
+        <div className="flex gap-4 items-center">
+          <div className="bg-blue-600 p-3 rounded-xl text-white shadow-lg shadow-blue-900/40">
+            <Network size={28} />
+          </div>
+          <div>
+            <h2 className="text-xl font-black text-white">Organizational Hierarchy & Utilities</h2>
+            <p className="text-sm text-slate-400">Manage master data used across the Employee and Payroll modules.</p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-xl font-black text-white">Organizational Hierarchy & Utilities</h2>
-          <p className="text-sm text-slate-400">Manage master data used across the Employee and Payroll modules.</p>
+
+        <div className="flex gap-3">
+          <button
+            onClick={async () => {
+              await generateMasterTemplateXLSX();
+              props.showAlert('success', 'Template Downloaded', 'Master data template has been saved to your reports folder.');
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 text-xs font-bold transition-all"
+          >
+            <Download size={14} /> Download Template
+          </button>
+          <button
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = '.xlsx';
+              input.onchange = async (e: any) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                try {
+                  const results = await parseMasterXLSX(file);
+                  
+                  // Merge with existing masters (avoid duplicates)
+                  if (results.designations.length > 0) {
+                    const merged = Array.from(new Set([...props.designations, ...results.designations]));
+                    props.setDesignations(merged);
+                  }
+                  if (results.divisions.length > 0) {
+                    const merged = Array.from(new Set([...props.divisions, ...results.divisions]));
+                    props.setDivisions(merged);
+                  }
+                  if (results.branches.length > 0) {
+                    const merged = Array.from(new Set([...props.branches, ...results.branches]));
+                    props.setBranches(merged);
+                  }
+                  if (results.sites.length > 0) {
+                    const merged = Array.from(new Set([...props.sites, ...results.sites]));
+                    props.setSites(merged);
+                  }
+                  
+                  props.showAlert('success', 'Import Successful', 'Organizational masters have been updated successfully.');
+                } catch (err) {
+                  props.showAlert('error', 'Import Failed', 'Failed to parse the Excel file. Please use the correct template.');
+                }
+              };
+              input.click();
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-lg text-xs font-bold transition-all"
+          >
+            <Upload size={14} /> Import Masters
+          </button>
         </div>
       </div>
 

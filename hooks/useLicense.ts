@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { 
   validateLicenseStartup, getStoredLicense, fetchLatestMessages,
-  getSyncRetryCount, incrementSyncRetryCount, clearSyncRetryCount
+  getSyncRetryCount, clearSyncRetryCount
 } from '../services/licenseService';
 import { LicenseData } from '../types';
 

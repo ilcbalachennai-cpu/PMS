@@ -27,16 +27,16 @@ export const getMonthAbbr = (month: string): string => {
 };
 
 export const getStandardFileName = (baseName: string, company: CompanyProfile, month: string, year: number | string): string => {
-    const tradeName = (company.tradeName || 'BPP').toUpperCase().substring(0, 7).trim();
+    const firstWord = (company.establishmentName?.split(' ')[0] || 'Company').toUpperCase();
     const monthAbbr = getMonthAbbr(month);
-    const sanitizedBase = baseName.replace(/\s+/g, '_');
-    return `${sanitizedBase}_${tradeName}_${monthAbbr}_${year}`;
+    const readableBase = baseName.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+    return `${readableBase}_${firstWord}_${monthAbbr}_${year}`;
 };
 
 export const getBackupFileName = (type: 'BC' | 'AC', company: CompanyProfile, month: string, year: number): string => {
-    const tradeName = (company.tradeName || 'BPP').toUpperCase().substring(0, 7).trim();
+    const firstWord = (company.establishmentName?.split(' ')[0] || 'Company').toUpperCase();
     const monthAbbr = getMonthAbbr(month);
-    return `${tradeName}_${type}_Backup_${monthAbbr}_${year}`;
+    return `${firstWord}_${type}_Backup_${monthAbbr}_${year}`;
 };
 
 export const numberToWords = (num: number): string => {
@@ -70,16 +70,14 @@ export const openSavedReport = async (path: string | undefined | null) => {
     }
 };
 
-const electronSaveReport = async (fileName: string, data: Uint8Array, type: string): Promise<{ success: boolean; path?: string; error?: string }> => {
+const electronSaveReport = async (fileName: string, data: Uint8Array, type: string, subfolder?: string): Promise<{ success: boolean; path?: string; error?: string }> => {
     // @ts-ignore
     if (window.electronAPI && window.electronAPI.saveReport) {
         try {
             // @ts-ignore
-            const res = await window.electronAPI.saveReport(fileName, data, type);
+            const res = await window.electronAPI.saveReport(fileName, data, type, subfolder);
             if (res.success) {
                 console.log(`Report saved to ${res.path}`);
-                // NOTE: openSavedReport is intentionally NOT called here.
-                // The UI layer will call it after the success toast auto-closes.
                 return { success: true, path: res.path };
             } else {
                 return { success: false, error: res.error || 'Unknown Error' };
@@ -91,6 +89,7 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
     }
     return { success: false, error: 'Electron API not found' };
 };
+
 
 /**
  * Utility to automatically adjust column widths based on the content of the worksheet.
@@ -152,7 +151,8 @@ export const generateExcelReport = async (data: any[], sheetName: string, fileNa
     XLSX.utils.book_append_sheet(wb, ws, sheetName.substring(0, 31));
 
     const u8 = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    const res = await electronSaveReport(fileName, u8, 'xlsx');
+    const res = await electronSaveReport(fileName, u8, 'xlsx', headerInfo?.company);
+
 
     if (!res.success) {
         XLSX.writeFile(wb, `${fileName}.xlsx`);
@@ -162,7 +162,7 @@ export const generateExcelReport = async (data: any[], sheetName: string, fileNa
     return res.path || null;
 };
 
-export const generateExcelWorkbook = async (wb: XLSX.WorkBook, fileName: string): Promise<string | null> => {
+export const generateExcelWorkbook = async (wb: XLSX.WorkBook, fileName: string, subfolder?: string): Promise<string | null> => {
     // Apply auto-sizing to all sheets that don't already have explicit column widths
     wb.SheetNames.forEach(name => {
         const ws = wb.Sheets[name];
@@ -172,7 +172,7 @@ export const generateExcelWorkbook = async (wb: XLSX.WorkBook, fileName: string)
     });
 
     const u8 = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    const res = await electronSaveReport(fileName, u8, 'xlsx');
+    const res = await electronSaveReport(fileName, u8, 'xlsx', subfolder);
 
     if (!res.success) {
         XLSX.writeFile(wb, `${fileName}.xlsx`);
@@ -186,12 +186,12 @@ export const generateExcelWorkbook = async (wb: XLSX.WorkBook, fileName: string)
 // Saves to BharatPP/Templates (separate from Report files).
 // Opens the Templates folder for the user after save.
 
-const electronSaveTemplate = async (fileName: string, data: Uint8Array, type: string): Promise<{ success: boolean; path?: string; error?: string }> => {
+const electronSaveTemplate = async (fileName: string, data: Uint8Array, type: string, subfolder?: string): Promise<{ success: boolean; path?: string; error?: string }> => {
     // @ts-ignore
     if (window.electronAPI && window.electronAPI.saveTemplate) {
         try {
             // @ts-ignore
-            const res = await window.electronAPI.saveTemplate(fileName, data, type);
+            const res = await window.electronAPI.saveTemplate(fileName, data, type, subfolder);
             if (res.success) {
                 console.log(`Template saved to ${res.path}`);
                 return { success: true, path: res.path };
@@ -206,11 +206,13 @@ const electronSaveTemplate = async (fileName: string, data: Uint8Array, type: st
     return { success: false, error: 'Electron API not found' };
 };
 
+
 /**
  * Saves an XLSX workbook to BharatPP/Templates and opens the folder.
  * Use this for all "Download Template" actions instead of generateExcelWorkbook.
  */
-export const generateTemplateWorkbook = async (wb: XLSX.WorkBook, fileName: string): Promise<string | null> => {
+export const generateTemplateWorkbook = async (wb: XLSX.WorkBook, fileName: string, subfolder?: string): Promise<string | null> => {
+
     // Apply auto-sizing to all sheets that don't already have explicit column widths
     wb.SheetNames.forEach(name => {
         const ws = wb.Sheets[name];
@@ -220,7 +222,8 @@ export const generateTemplateWorkbook = async (wb: XLSX.WorkBook, fileName: stri
     });
 
     const u8 = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    const res = await electronSaveTemplate(fileName, u8, 'xlsx');
+    const res = await electronSaveTemplate(fileName, u8, 'xlsx', subfolder);
+
 
     if (!res.success) {
         // Fallback: browser download
@@ -294,7 +297,8 @@ export const generatePDFTableReport = async (title: string, headers: string[], d
     });
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', company.establishmentName);
+
 
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
@@ -413,7 +417,7 @@ export const generateDynamicReportPDF = async (
     const safeTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
     const cleanFileName = fileName || getStandardFileName(safeTitle, company, toPeriod.split(' ')[0], toPeriod.split(' ')[1] || new Date().getFullYear());
 
-    const res = await electronSaveReport(cleanFileName, u8, 'pdf');
+    const res = await electronSaveReport(cleanFileName, u8, 'pdf', company.establishmentName);
     if (res.success) {
 
         return res.path || null;
@@ -460,7 +464,12 @@ export const generateArrearReport = async (
             'Arrear Months': r.months,
             'Total Arrear Payable': r.totalArrear
         }));
-        return await generateExcelReport(exportData, 'Arrears', fileName);
+        return await generateExcelReport(exportData, 'Arrears', fileName, {
+            company: companyProfile.establishmentName,
+            type: 'Arrear Salary Report',
+            period: `Batch: ${currentMonth} ${currentYear}`
+        });
+
     } else {
         // --- Custom PDF Generation for Arrear Report ---
         const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -573,7 +582,8 @@ export const generateArrearReport = async (
         doc.text(footnote3, 14, currentY); currentY += 4;
         doc.text(footnote4, 14, currentY); currentY += 4;
         const u8 = new Uint8Array(doc.output('arraybuffer'));
-        const res = await electronSaveReport(fileName, u8, 'pdf');
+        const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+
         if (!res.success) {
             doc.save(`${fileName}.pdf`);
             return null;
@@ -707,7 +717,7 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
     doc.setTextColor(150); doc.text('Generated by BharatPay Pro', 14, finalY + 5);
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const fileName = customFilename || getStandardFileName('PaySheet', companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -801,7 +811,7 @@ export const generatePaySlipsPDF = async (results: PayrollResult[], employees: E
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const fileName = customFilename || getStandardFileName('PaySlips', companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -932,10 +942,16 @@ export const generateLeaveLedgerReport = async (_results: PayrollResult[], emplo
 
 export const generateAdvanceShortfallReport = async (data: any[], month: string, year: number, format: 'PDF' | 'Excel', companyProfile: CompanyProfile): Promise<string | null> => {
     const fileName = getStandardFileName('Advance_Shortfall', companyProfile, month, year);
-    if (format === 'Excel') { return await generateExcelReport(data, 'Shortfall', fileName); } else { const headers = ['ID', 'Name', 'Target EMI', 'Recovered', 'Shortfall']; const rows = data.map(d => [d.id, d.name, d.target, d.recovered, d.shortfall]); return await generatePDFTableReport(`Advance Shortfall Report - ${month} ${year}`, headers, rows, fileName, 'p', '', companyProfile, { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }); }
+    if (format === 'Excel') {
+        return await generateExcelReport(data, 'Shortfall', fileName, {
+            company: companyProfile.establishmentName,
+            type: 'Advance Shortfall Report',
+            period: `For the Month of: ${month} ${year}`
+        });
+    } else { const headers = ['ID', 'Name', 'Target EMI', 'Recovered', 'Shortfall']; const rows = data.map(d => [d.id, d.name, d.target, d.recovered, d.shortfall]); return await generatePDFTableReport(`Advance Shortfall Report - ${month} ${year}`, headers, rows, fileName, 'p', '', companyProfile, { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }); }
 };
 
-export const generatePFECR = async (results: PayrollResult[], employees: Employee[], _config: StatutoryConfig, format: 'Excel' | 'Text', fileName: string): Promise<string | null> => {
+export const generatePFECR = async (results: PayrollResult[], employees: Employee[], _config: StatutoryConfig, format: 'Excel' | 'Text', fileName: string, companyProfile: CompanyProfile): Promise<string | null> => {
     // Build one row per employee
     const allRows = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
@@ -994,7 +1010,7 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
         );
         const content = lines.join('\r\n');
         const u8 = new TextEncoder().encode(content);
-        const savedLocally = await electronSaveReport(fileName, u8, 'txt');
+        const savedLocally = await electronSaveReport(fileName, u8, 'txt', companyProfile.establishmentName);
 
         if (!savedLocally) {
             const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -1079,7 +1095,7 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'PF ECR');
         const u8 = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-        const res = await electronSaveReport(fileName, u8, 'xlsx');
+        const res = await electronSaveReport(fileName, u8, 'xlsx', companyProfile.establishmentName);
         if (!res.success) {
             XLSX.writeFile(wb, `${fileName}.xlsx`);
             return null;
@@ -1272,7 +1288,7 @@ export const generatePFForm12A = async (results: PayrollResult[], employees: Emp
 
     const fileName = getStandardFileName('PFForm12A_Revised', companyProfile, month, year);
     const u8 = new Uint8Array(doc.output('arraybuffer'));
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -1432,7 +1448,7 @@ export const generateForm16PartBPDF = async (
 
         const u8 = new Uint8Array(doc.output('arraybuffer'));
         const fileName = `${getStandardFileName('Form16_PartB', company, sM, sY)}_${emp.id}_to_${eM}_${eY}`;
-        const res = await electronSaveReport(fileName, u8, 'pdf');
+        const res = await electronSaveReport(fileName, u8, 'pdf', company.establishmentName);
         if (!res.success) {
             doc.save(`${fileName}.pdf`);
             return null;
@@ -1526,7 +1542,7 @@ export const generateFormB = async (results: PayrollResult[], employees: Employe
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const fileName = getStandardFileName('FormB_WageRegister', companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -1535,12 +1551,17 @@ export const generateFormB = async (results: PayrollResult[], employees: Employe
 };
 
 
-export const generateLegacyFormB = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateLegacyFormB = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, subtitle?: string, customFilename?: string): Promise<string | null> => {
     const doc = new jsPDF('l', 'mm', 'a4');
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
+
+    // Detect multi-site presence
+    const sites = new Set(results.map(r => employees.find(e => e.id === r.employeeId)?.site).filter(Boolean));
+    const isMultiSite = sites.size > 1;
+    const overallSiteName = subtitle || (isMultiSite ? "CONSOLIDATED" : (results.length > 0 ? (employees.find(e => e.id === results[0].employeeId)?.site || companyProfile.city) : companyProfile.city));
     
-    const drawHeader = (doc: jsPDF, pageNum: number) => {
+    const drawHeader = (doc: jsPDF, _pageNum: number) => {
         let y = 10;
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
@@ -1565,8 +1586,7 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
         
         // Right Column
         doc.setFontSize(12);
-        const siteName = results.length > 0 ? (employees.find(e => e.id === results[0].employeeId)?.site || companyProfile.city) : companyProfile.city;
-        doc.text(`Site:  ${siteName.toUpperCase()}`, pageWidth - 14, y-5, { align: 'right' });
+        doc.text(`Site:  ${overallSiteName.toUpperCase()}`, pageWidth - 14, y-5, { align: 'right' });
         
         doc.setFontSize(9);
         doc.text(`For the Month of          ${month}          ${year}`, pageWidth / 2 + 30, y, { align: 'center' });
@@ -1640,14 +1660,40 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
         totalDeductions: 0, netPay: 0, otAmount: 0
     };
 
-    results.forEach((r, idx) => {
+    // Group results by site for consolidated reports
+    const sortedResults = [...results].sort((a, b) => {
+        const empA = employees.find(e => e.id === a.employeeId);
+        const empB = employees.find(e => e.id === b.employeeId);
+        const siteA = empA?.site || '';
+        const siteB = empB?.site || '';
+        if (siteA !== siteB) return siteA.localeCompare(siteB);
+        return a.employeeId.toString().localeCompare(b.employeeId.toString());
+    });
+
+    let lastSite = '';
+    sortedResults.forEach((r) => {
         const emp = employees.find(e => e.id === r.employeeId);
         if (!emp) return;
 
         // Check for page break
-        if (y > pageHeight - 40) {
+        const currentSite = emp.site || 'Other';
+        const siteChanged = isMultiSite && currentSite !== lastSite;
+
+        if (y > pageHeight - 45 || (siteChanged && y > pageHeight - 60)) {
             doc.addPage();
             y = drawHeader(doc, doc.internal.pages.length - 1);
+        }
+
+        // Draw Site Header if site changed
+        if (siteChanged) {
+            y += 2;
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(0, 51, 153); // Deep Blue
+            doc.text(`>> LOCATION / SITE: ${currentSite.toUpperCase()}`, 14, y);
+            y += 10;
+            doc.setTextColor(0);
+            lastSite = currentSite;
         }
 
         // Highlighted Header for Employee
@@ -1662,7 +1708,10 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(150, 0, 0); // Maroon
 
-        doc.text(`: TokenNo:      ${emp.id}    Name:  ${emp.name.toUpperCase()}      ESI_No:           ${emp.esiNumber || '0'}      UAN_ID${emp.uanc || '0'}`, 14, y);
+        const namePart = `Name: ${emp.name.toUpperCase()}`.padEnd(45, ' ');
+        const sitePart = isMultiSite ? `Site: ${emp.site || 'N/A'}`.padEnd(30, ' ') : '';
+        
+        doc.text(`: TokenNo: ${emp.id.toString().padEnd(8, ' ')}  ${namePart}  ${sitePart}  ESI: ${emp.esiNumber || '0'}    UAN: ${emp.uanc || '0'}`, 14, y);
         doc.text(":", pageWidth - 16, y);
         y += 2.5;
         doc.setDrawColor(200, 200, 200);
@@ -1867,10 +1916,9 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
     doc.line(14, y + 1.2, pageWidth - 14, y + 1.2);
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
-    const siteName = results.length > 0 ? (employees.find(e => e.id === results[0].employeeId)?.site || 'G.Total') : 'G.Total';
-    const sitePrefix = siteName.replace(/\s+/g, '_').toUpperCase();
-    const fileName = getStandardFileName(`${sitePrefix}_FormB_Legacy`, companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const sitePrefix = overallSiteName.replace(/\s+/g, '_').replace(/[:]/g, '').toUpperCase();
+    const fileName = customFilename || getStandardFileName(`${sitePrefix}_FormB_Legacy`, companyProfile, month, year);
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -1929,7 +1977,7 @@ export const generateFormC = async (results: PayrollResult[], employees: Employe
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const fileName = getStandardFileName('FormC_MusterRoll', companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -2069,7 +2117,7 @@ export const generatePFForm3A = async (
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const fileName = getStandardFileName('PF_Form3A', company, 'Annual', fyStart);
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', company.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -2245,7 +2293,7 @@ export const generatePFForm6A = async (
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const fileName = getStandardFileName('PF_Form6A', company, 'Annual', fyStart);
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', company.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -2363,7 +2411,7 @@ export const generateESIExitReport = async (results: PayrollResult[], employees:
     XLSX.utils.book_append_sheet(wb, ws, 'ESI Exit');
     const u8 = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     const fileName = getStandardFileName('ESI_Going_Out_Of_Coverage', companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'xlsx');
+    const res = await electronSaveReport(fileName, u8, 'xlsx', companyProfile.establishmentName);
     if (!res.success) {
         XLSX.writeFile(wb, `${fileName}.xlsx`);
         return null;
@@ -2623,7 +2671,7 @@ export const generateESIForm5 = async (payrollHistory: PayrollResult[], employee
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const fileName = getStandardFileName(`ESI_Form_5_${halfYearPeriod}`, companyProfile, 'SemiAnnual', year);
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -2697,7 +2745,7 @@ export const generateESIReturn = async (results: PayrollResult[], employees: Emp
 
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-        return await generateExcelWorkbook(wb, fileName);
+        return await generateExcelWorkbook(wb, fileName, _companyProfile.establishmentName);
     }
     return null;
 };
@@ -2809,7 +2857,11 @@ export const generateESICodeWagesReport = async (results: PayrollResult[], emplo
             'Gross': r.gross, 'Base Wage': r.baseWage, 'Code Wage': r.codeWage,
             'Old Value': r.oldValue, 'New Value': r.newValue, 'Diff': r.diff, 'Impact': r.impact
         }));
-        return await generateExcelReport(excelData, 'ESI Code Impact', fileName);
+        return await generateExcelReport(excelData, 'ESI Code Impact', fileName, {
+            company: companyProfile.establishmentName,
+            type: 'ESI Social Security Code Impact Analysis',
+            period: `For the Month of: ${month} ${year}`
+        });
     }
 
     // ── PDF output ──────────────────────────────────────────────────────────
@@ -2899,7 +2951,7 @@ export const generateESICodeWagesReport = async (results: PayrollResult[], emplo
     doc.text('Note: "Old Value" = (Basic+DA+Retaining+HRA)*0.75%. "New Value" = Actual ESI Deduction (Pay Sheet).', 14, finalY);
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -2972,7 +3024,11 @@ export const generateEPFCodeImpactReport = async (results: PayrollResult[], empl
             'Gross': r.gross, 'Base Wage': r.baseWage, 'Code Wage': r.codeWage,
             'Old Value': r.oldValue, 'New Value': r.newValue, 'Diff': r.diff, 'Impact': r.impact
         }));
-        return await generateExcelReport(excelData, 'EPF Code Impact', fileName);
+        return await generateExcelReport(excelData, 'EPF Code Impact', fileName, {
+            company: companyProfile.establishmentName,
+            type: 'EPF Social Security Code Impact Analysis',
+            period: `For the Month of: ${month} ${year}`
+        });
     }
 
     // ── PDF output ──────────────────────────────────────────────────────────
@@ -3069,7 +3125,7 @@ export const generateEPFCodeImpactReport = async (results: PayrollResult[], empl
     (doc as any).lastAutoTable.finalY; // end of table reference
     doc.setFontSize(7.5); doc.setFont('helvetica', 'italic'); doc.setTextColor(80);
     const u8 = new Uint8Array(doc.output('arraybuffer'));
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -3082,7 +3138,8 @@ export const generateArrearECRText = async (
     payrollHistory: PayrollResult[],
     employees: Employee[],
     config: StatutoryConfig,
-    fileName: string
+    fileName: string,
+    companyProfile: CompanyProfile
 ): Promise<string | null> => {
     // 1. Determine the months covered by the arrear batch
     const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -3205,7 +3262,7 @@ export const generateArrearECRText = async (
 
     const content = lines.join('\r\n');
     const u8 = new TextEncoder().encode(content);
-    const res = await electronSaveReport(fileName, u8, 'txt');
+    const res = await electronSaveReport(fileName, u8, 'txt', companyProfile.establishmentName);
     if (!res.success) {
         const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -3226,7 +3283,8 @@ export const generateArrearECRExcel = async (
     payrollHistory: PayrollResult[],
     employees: Employee[],
     config: StatutoryConfig,
-    fileName: string
+    fileName: string,
+    companyProfile: CompanyProfile
 ): Promise<string | null> => {
     // 1. Determine the months covered by the arrear batch
     const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -3400,7 +3458,7 @@ export const generateArrearECRExcel = async (
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Arrear ECR details');
-    return await generateExcelWorkbook(wb, fileName);
+    return await generateExcelWorkbook(wb, fileName, companyProfile.establishmentName);
 };
 
 export const generateJoinedEmployeesReport = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
@@ -3435,7 +3493,11 @@ export const generateJoinedEmployeesReport = async (employees: Employee[], month
     }));
 
     const fileName = getStandardFileName('Employees_Joined', companyProfile, month, year);
-    return await generateExcelReport(data, 'Joined_Employees', fileName);
+    return await generateExcelReport(data, 'Joined_Employees', fileName, {
+        company: companyProfile.establishmentName,
+        type: 'Employees Joined Report',
+        period: `For the Month of: ${month} ${year}`
+    });
 };
 
 export const generateLeftEmployeesReport = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
@@ -3472,12 +3534,16 @@ export const generateLeftEmployeesReport = async (employees: Employee[], month: 
     }));
 
     const fileName = getStandardFileName('Employees_Left', companyProfile, month, year);
-    return await generateExcelReport(data, 'Left_Employees', fileName);
+    return await generateExcelReport(data, 'Left_Employees', fileName, {
+        company: companyProfile.establishmentName,
+        type: 'Employees Left Report',
+        period: `For the Month of: ${month} ${year}`
+    });
 };
 
 export const generateConsolidatedPTReport = async (history: PayrollResult[], employees: Employee[], fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile, format: 'Excel' | 'PDF' = 'Excel'): Promise<string | null> => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const range = [];
+    const range: { m: string; y: number }[] = [];
     const start = fromY * 12 + months.indexOf(fromM);
     const end = toY * 12 + months.indexOf(toM);
     for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
@@ -3545,7 +3611,7 @@ export const generateConsolidatedPTReport = async (history: PayrollResult[], emp
 
 export const generateConsolidatedTDSReport = async (history: PayrollResult[], employees: Employee[], fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile, format: 'Excel' | 'PDF' = 'Excel'): Promise<string | null> => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const range = [];
+    const range: { m: string; y: number }[] = [];
     const start = fromY * 12 + months.indexOf(fromM);
     const end = toY * 12 + months.indexOf(toM);
     for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
@@ -3597,9 +3663,9 @@ export const generateConsolidatedTDSReport = async (history: PayrollResult[], em
     });
 };
 
-export const generateConsolidatedBonusReport = async (history: PayrollResult[], employees: Employee[], config: StatutoryConfig, fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile, format: 'Excel' | 'PDF' = 'Excel'): Promise<string | null> => {
+export const generateConsolidatedBonusReport = async (history: PayrollResult[], employees: Employee[], config: StatutoryConfig, fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile, _format: 'Excel' | 'PDF' = 'Excel'): Promise<string | null> => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const range = [];
+    const range: { m: string; y: number }[] = [];
     const start = fromY * 12 + months.indexOf(fromM);
     const end = toY * 12 + months.indexOf(toM);
     for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
@@ -3652,7 +3718,7 @@ export const generateConsolidatedBonusReport = async (history: PayrollResult[], 
 
 export const generateConsolidatedGratuityReport = async (history: PayrollResult[], employees: Employee[], config: StatutoryConfig, fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile): Promise<string | null> => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const range = [];
+    const range: { m: string; y: number }[] = [];
     const start = fromY * 12 + months.indexOf(fromM);
     const end = toY * 12 + months.indexOf(toM);
     for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
@@ -3756,7 +3822,7 @@ export const generateLWFReport = async (results: PayrollResult[], employees: Emp
 
 export const generateConsolidatedLWFReport = async (history: PayrollResult[], employees: Employee[], fromM: string, fromY: number, toM: string, toY: number, company: CompanyProfile, format: 'Excel' | 'PDF' = 'Excel'): Promise<string | null> => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const range = [];
+    const range: { m: string; y: number }[] = [];
     const start = fromY * 12 + months.indexOf(fromM);
     const end = toY * 12 + months.indexOf(toM);
     for (let i = start; i <= end; i++) range.push({ m: months[i % 12], y: Math.floor(i / 12) });
@@ -3886,7 +3952,8 @@ export const generateJoinedEmployeesPDF = async (employees: Employee[], month: s
 
     const fileName = getStandardFileName('Employees_Joined', companyProfile, month, year);
     const u8 = new Uint8Array(doc.output('arraybuffer'));
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;
@@ -3939,7 +4006,8 @@ export const generateEmployeesLeftPDF = async (employees: Employee[], month: str
 
     const fileName = getStandardFileName('Employees_Left', companyProfile, month, year);
     const u8 = new Uint8Array(doc.output('arraybuffer'));
-    const res = await electronSaveReport(fileName, u8, 'pdf');
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+
     if (!res.success) {
         doc.save(`${fileName}.pdf`);
         return null;

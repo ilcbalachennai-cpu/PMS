@@ -1,13 +1,15 @@
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-export const usePayrollPeriod = () => {
+export const usePayrollPeriod = (activeCompanyId: string = 'default') => {
+  const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${activeCompanyId}_${key}`;
+
   const getDefaultPeriod = () => {
     try {
-      const historyData = localStorage.getItem('app_payroll_history');
-      const attendanceData = localStorage.getItem('app_attendance');
+      const historyData = localStorage.getItem(getCKey('app_payroll_history'));
+      const attendanceData = localStorage.getItem(getCKey('app_attendance'));
 
       const history = historyData ? JSON.parse(historyData) : [];
       const attendance = attendanceData ? JSON.parse(attendanceData) : [];
@@ -59,10 +61,17 @@ export const usePayrollPeriod = () => {
   const [globalMonth, setGlobalMonth] = useState<string>(initialPeriod.month);
   const [globalYear, setGlobalYear] = useState<number>(initialPeriod.year);
 
+  // Sync with activeCompanyId changes
+  useEffect(() => {
+    const period = getDefaultPeriod();
+    setGlobalMonth(period.month);
+    setGlobalYear(period.year);
+  }, [activeCompanyId]);
+
   // Helper to find the absolute latest frozen period regardless of the initial period logic
-  const getLatestFrozen = () => {
+  const latestFrozenPeriod = useMemo(() => {
     try {
-      const historyData = localStorage.getItem('app_payroll_history');
+      const historyData = localStorage.getItem(getCKey('app_payroll_history'));
       const history = historyData ? JSON.parse(historyData) : [];
       if (Array.isArray(history) && history.length > 0) {
         const frozen = history.filter((h: any) => h.status === 'Finalized');
@@ -83,9 +92,8 @@ export const usePayrollPeriod = () => {
       console.error("Error getting latest frozen period:", e);
     }
     return null;
-  };
-
-  const latestFrozenPeriod = getLatestFrozen();
+  }, [activeCompanyId]);
 
   return { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod };
 };
+

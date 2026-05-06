@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef, FC } from 'react';
+import { useState, useEffect, useRef, FC } from 'react'; // V03.01.03 STABLE SILO REBORN
 import {
   LayoutDashboard, Users, Calculator, FileText, Settings as SettingsIcon,
   LogOut, Bot, ShieldCheck,
-  Loader2, Lock, Wrench,
+  Loader2, Lock, Unlock, Wrench,
   CalendarClock, IndianRupee, Megaphone, Maximize, Minimize,
   ArrowRight, RefreshCw, Database,
-  ChevronLeft, ChevronRight, X,
+  ChevronLeft, ChevronRight, X, Eye, EyeOff,
   ShieldAlert, CalendarX, WifiOff, Wifi, Scale, Building2, Plus, Trash2
 } from 'lucide-react';
 import Login from './components/Login';
@@ -28,7 +28,7 @@ import SocialSecurityCode from './components/SocialSecurityCode';
 import { signalApplicationReady } from './components/Shared/GlobalRescueUI';
 
 import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount } from './services/licenseService';
-import { parseExpiryDate, formatExpiryDate } from './utils/formatters';
+import { parseExpiryDate, formatExpiryDate, generateCompanyId } from './utils/formatters';
 import { View, User, Employee, PayrollResult, CompanyProfile, StatutoryConfig } from './types';
 import { BRAND_CONFIG } from './constants';
 
@@ -123,8 +123,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   // --- Initialize Hooks ---
   const { alertConfig, showAlert, closeAlert } = useAlerts();
-  const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod();
   const { currentUser, handleLogin, logout, setCurrentUser } = useAuth();
+  
+  const {
+    employees, setEmployees, config, setConfig, companyProfile, setCompanyProfile,
+    leavePolicy, setLeavePolicy, attendances, setAttendances, leaveLedgers, setLeaveLedgers,
+    advanceLedgers, setAdvanceLedgers, payrollHistory, setPayrollHistory, fines, setFines,
+    arrearHistory, setArrearHistory, otRecords, setOTRecords, designations, setDesignations, divisions, setDivisions,
+    branches, setBranches, sites, setSites, logoUrl, setLogoUrl,
+    safeSave, handleRollover, handlePayrollReset, handleDeepReset, handleNuclearReset,
+    companies, activeCompanyId, switchCompany, addCompany, deleteCompany, isHydrating, isResetting
+  } = usePayrollData(showAlert);
+
+  const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod(activeCompanyId);
+
   const { 
     latestAppVersion, setLatestAppVersion, 
     latestPatchTimestamp, setLatestPatchTimestamp,
@@ -143,19 +155,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const [isInstalling, setIsInstalling] = useState(false);
   const [isAddingNewCompany, setIsAddingNewCompany] = useState(false);
-  const {
-    employees, setEmployees, config, setConfig, companyProfile, setCompanyProfile,
-    leavePolicy, setLeavePolicy, attendances, setAttendances, leaveLedgers, setLeaveLedgers,
-    advanceLedgers, setAdvanceLedgers, payrollHistory, setPayrollHistory, fines, setFines,
-    arrearHistory, setArrearHistory, otRecords, setOTRecords, designations, setDesignations, divisions, setDivisions,
-    branches, setBranches, sites, setSites, logoUrl, setLogoUrl,
-    safeSave, handleRollover, handleNuclearReset,
-    companies, activeCompanyId, switchCompany, addCompany, deleteCompany
-  } = usePayrollData(showAlert);
+
 
   const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
   const [isRetryingSync, setIsRetryingSync] = useState(false);
-  const { isAppDirectoryConfigured, setIsAppDirectoryConfigured } = useAppInitialization(verifyLicense);
+  const { isAppDirectoryConfigured } = useAppInitialization(verifyLicense);
   const { activeView, setActiveView } = useNavigation(mainContentRef, currentUser);
 
   const handleSystemRepair = () => {
@@ -167,21 +171,86 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     showLoginMessage, setShowLoginMessage,
     showRegistrationManual, setShowRegistrationManual, setSkipSetupRedirect,
     isSetupComplete, setIsSetupComplete
-  } = useUIState(employees.length, activeView, setActiveView);
+  } = useUIState(activeCompanyId, employees.length);
 
-  const [isCompanyGateOpen, setIsCompanyGateOpen] = useState(true);
+  // --- V03.01.02: SMART GATE INITIALIZATION ---
+  // If there's exactly one company, start with the gate CLOSED to avoid selection flash.
+  const [isCompanyGateOpen, setIsCompanyGateOpen] = useState(() => {
+     try {
+       const saved = localStorage.getItem('app_companies');
+       if (saved) {
+         const list = JSON.parse(saved);
+         return list.length !== 1; 
+       }
+     } catch (e) {}
+     return true;
+  });
+
+  // --- V03.01.02: AUTO-SELECT SINGLE COMPANY (Safety Sync) ---
+  useEffect(() => {
+    if (currentUser && companies.length === 1 && isCompanyGateOpen) {
+      console.log("Auto-selecting single organization and closing gate...");
+      switchCompany(companies[0].id);
+      setIsCompanyGateOpen(false);
+    }
+  }, [currentUser, companies.length, isCompanyGateOpen, switchCompany]);
+
   const [isPurgeMode, setIsPurgeMode] = useState(false);
   const [showPurgeAuthModal, setShowPurgeAuthModal] = useState(false);
   const [purgeTargetId, setPurgeTargetId] = useState<string | null>(null);
   const [purgePassword, setPurgePassword] = useState('');
   const [purgeAuthError, setPurgeAuthError] = useState('');
 
+  // --- Database Access Password Gate States ---
+  const [showDbGateModal, setShowDbGateModal] = useState(false);
+  const [dbGateTargetId, setDbGateTargetId] = useState<string | null>(null);
+  const [dbGatePassword, setDbGatePassword] = useState('');
+  const [dbGateError, setDbGateError] = useState('');
+  const [dbGateShowPass, setDbGateShowPass] = useState(false);
+
+  // --- Database Access Password Gate Logic ---
+  const handleSwitchCompanyWithGate = (id: string, closeSelectionGate = false) => {
+    if (id === activeCompanyId && !isCompanyGateOpen) return;
+    
+    const targetComp = companies.find(c => c.id === id);
+    if (targetComp?.dashboardPassword) {
+      setDbGateTargetId(id);
+      setDbGatePassword('');
+      setDbGateError('');
+      setDbGateShowPass(false);
+      setShowDbGateModal(true);
+    } else {
+      switchCompany(id);
+      if (closeSelectionGate) {
+        setIsCompanyGateOpen(false);
+        setIsPurgeMode(false);
+      }
+    }
+  };
+
+  const verifyDbGatePassword = () => {
+    if (!dbGateTargetId) return;
+    const targetComp = companies.find(c => c.id === dbGateTargetId);
+    
+    if (targetComp?.dashboardPassword === dbGatePassword) {
+      switchCompany(dbGateTargetId);
+      setShowDbGateModal(false);
+      setDbGateTargetId(null);
+      if (isCompanyGateOpen) {
+        setIsCompanyGateOpen(false);
+        setIsPurgeMode(false);
+      }
+    } else {
+      setDbGateError('Incorrect Database Password');
+    }
+  };
+
   const [showFlashPopup, setShowFlashPopup] = useState(false);
   const [isSettingsDirty, setIsSettingsDirty] = useState(false);
   const [isRestorationForced, setIsRestorationForced] = useState(false);
   const [isStartupTimerActive, setIsStartupTimerActive] = useState(true);
 
-  // --- V02.02.41: ID Format Migration (Add Underscore to 12-char IDs) ---
+  // --- V03.01.01: ID Format Migration (Add Underscore to 12-char IDs) ---
   useEffect(() => {
     const companiesRaw = localStorage.getItem('app_companies');
     if (!companiesRaw) return;
@@ -305,6 +374,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         () => { /* Stay - Do nothing */ },
         () => {
           setIsSettingsDirty(false);
+          // Set latest frozen period if navigating to Reports or Statutory views
+          const isReportView = [View.Reports, View.Statutory, View.MIS, View.SSCode].includes(view);
+          if (isReportView && latestFrozenPeriod) {
+            setGlobalMonth(latestFrozenPeriod.month);
+            setGlobalYear(latestFrozenPeriod.year);
+          }
           setActiveView(view);
           if (tab) setSettingsTab(tab as any);
         },
@@ -313,6 +388,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       );
       return;
     }
+
+    // Set latest frozen period if navigating to Reports or Statutory views
+    const isReportView = [View.Reports, View.Statutory, View.MIS, View.SSCode].includes(view);
+    if (isReportView && latestFrozenPeriod) {
+      setGlobalMonth(latestFrozenPeriod.month);
+      setGlobalYear(latestFrozenPeriod.year);
+    }
+
     setActiveView(view);
     if (tab) setSettingsTab(tab as any);
   };
@@ -371,7 +454,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers,
     payrollHistory, fines, leavePolicy, arrearHistory, otRecords, logoUrl,
     designations, divisions, branches, sites, isSetupComplete, safeSave,
-    activeCompanyId
+    activeCompanyId, isHydrating, isResetting
   });
 
   // --- Specialized Effects ---
@@ -462,8 +545,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     if (licenseStatus.valid && licenseStatus.data) {
       if (licenseStatus.data.latestVersion) setLatestAppVersion(licenseStatus.data.latestVersion);
       if (licenseStatus.data.downloadUrl) setDownloadUrl(licenseStatus.data.downloadUrl);
+      if (licenseStatus.data.patchTimestamp) setLatestPatchTimestamp(licenseStatus.data.patchTimestamp);
     }
-  }, [licenseStatus.valid, licenseStatus.data, setLatestAppVersion, setDownloadUrl]);
+  }, [licenseStatus.valid, licenseStatus.data, setLatestAppVersion, setDownloadUrl, setLatestPatchTimestamp]);
 
 
   useEffect(() => {
@@ -691,8 +775,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       setActiveView(View.Settings);
       setSettingsTab('COMPANY');
     } else {
-      setTimeout(() => { showAlert('success', 'System Secured', `Welcome back, ${user.name || user.username}. Connected to local database successfully.`); }, 500);
+      setTimeout(() => { 
+        showAlert('success', 'System Secured', `Welcome back, ${user.name || user.username}. Connected to local database successfully.`, undefined, undefined, 'Proceed', undefined, undefined, 2); 
+      }, 500);
     }
+
   };
 
   const executePurge = () => {
@@ -712,16 +799,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
 
   const handleRegistrationComplete = async (data: { companyProfile: CompanyProfile; statutoryConfig: StatutoryConfig; adminUser: User; }) => {
-    if (isAddingNewCompany) {
-      let namePrefix = (data.companyProfile.establishmentName || 'COMPANY').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      if (namePrefix.length < 6) namePrefix = namePrefix.padEnd(6, 'X');
-      else namePrefix = namePrefix.substring(0, 6);
-      const randomNum = Math.floor(100000 + Math.random() * 900000);
-      const newId = `${namePrefix}_${randomNum}`;
+    // V03.01.02: Determine if this is a sub-company addition to stabilize state transitions
+    const isAddingNew = isAddingNewCompany;
+
+    if (isAddingNew) {
+      const newId = generateCompanyId(data.companyProfile.establishmentName);
       const newCompany = { ...data.companyProfile, id: newId };
-      addCompany(newCompany, data.statutoryConfig);
+      
+      // CRITICAL: Update visibility flags BEFORE calling addCompany to prevent 
+      // redundant Registration mount during the ensuing re-render/context switch
       setIsAddingNewCompany(false);
       setShowRegistrationManual(false);
+      
+      // Then trigger the data switch and re-hydration
+      addCompany(newCompany, data.statutoryConfig);
       return;
     }
 
@@ -729,11 +820,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     let requiresReload = false;
     
     if (profileToSave.id === 'default') {
-      let namePrefix = (profileToSave.establishmentName || 'COMPANY').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      if (namePrefix.length < 6) namePrefix = namePrefix.padEnd(6, 'X');
-      else namePrefix = namePrefix.substring(0, 6);
-      const randomNum = Math.floor(100000 + Math.random() * 900000);
-      const firstId = `${namePrefix}_${randomNum}`;
+      const firstId = generateCompanyId(profileToSave.establishmentName);
       
       profileToSave.id = firstId;
       localStorage.setItem('app_active_company_id', firstId);
@@ -748,14 +835,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     const adminIdx = savedUsers.findIndex(u => u.username === data.adminUser.username);
     if (adminIdx >= 0) savedUsers[adminIdx] = data.adminUser; else savedUsers.push(data.adminUser);
     localStorage.setItem('app_users', JSON.stringify(savedUsers));
-    localStorage.setItem('app_setup_complete', 'true');
+    safeSave('app_setup_complete', 'true');
 
     // Check for Post-Reset Enrollment Mode
     const isResetMode = localStorage.getItem('app_is_reset_mode') === 'true';
 
     if ((window as any).electronAPI) {
       (window as any).electronAPI.dbSet('app_users', savedUsers);
-      (window as any).electronAPI.dbSet('app_setup_complete', 'true');
+      (window as any).electronAPI.dbSet(`${profileToSave.id}_app_setup_complete`, 'true');
     }
     await verifyLicense();
     setIsSetupComplete(true);
@@ -868,87 +955,83 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const isSettingsAccessible = effectiveUser.role === 'Developer' || effectiveUser.role === 'Administrator';
   const isNavLocked = employees.length === 0;
 
-  if (isStartupTimerActive || isAppDirectoryConfigured === null || !licenseStatus.checked) return <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[1000] space-y-8 animate-in fade-in duration-700">
-    <div className="relative">
-      <div className="absolute -inset-4 bg-blue-500/20 blur-2xl rounded-full animate-pulse"></div>
-      <div className="relative w-36 h-36 rounded-full border-[6px] border-white overflow-hidden shadow-2xl bg-[#020617] flex items-center justify-center">
-        <img src="./logo3.png" alt="Startup Logo" className="w-full h-full object-cover" />
-      </div>
-    </div>
-    <div className="flex flex-col items-center gap-1.5 animate-slow-pulse">
-      <div className="flex items-center gap-3">
-         <div className="w-2.5 h-2.5 bg-blue-500 rounded-full shadow-[0_0_12px_#3b82f6]"></div>
-         <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">
-           Security Verification Underway Please Wait
-           <span className="inline-block w-8 text-left animate-ellipsis-wait">......</span>
-         </p>
-      </div>
-    </div>
-    {/* Progress Bar (Additional Feature) */}
-    <div className="w-48 h-1 bg-slate-900 rounded-full overflow-hidden">
-       <div className="h-full bg-blue-600 animate-loading-bar-5s rounded-full"></div>
-    </div>
-  </div>;
-
-  // --- V02.02.10: ADVANCED SECURITY OVERLAYS ---
+  // --- V03.01.02: Normalizing Render Path to Prevent Hook Violations ---
   const isExpired = licenseStatus.message === 'LICENSE EXPIRED' || (licenseStatus.data?.isExpired);
   const isTampered = licenseStatus.message === 'SECURITY VIOLATION' || (licenseStatus.data?.isTampered);
   const isSyncBlocked = licenseStatus.data?.isSyncBlocked;
   const syncMessage = licenseStatus.message;
   const isSyncWarning = !isSyncBlocked && syncMessage?.includes('uninterrupted use');
 
-  if (licenseStatus.checked && (isExpired || isTampered || isSyncBlocked)) {
-    return (
-      <div className="fixed inset-0 z-[9999] bg-slate-950 flex items-center justify-center p-6 text-center">
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-10 shadow-2xl relative overflow-hidden">
-          {/* Decorative Glow */}
-          <div className={`absolute -top-24 -left-24 w-48 h-48 ${isTampered ? 'bg-rose-600/20' : 'bg-amber-600/20'} blur-3xl rounded-full animate-pulse`}></div>
-
-          <div className="relative z-10">
-            <div className={`w-20 h-20 mx-auto mb-6 rounded-2xl flex items-center justify-center ${isTampered ? 'bg-rose-500/10 text-rose-500' : 'bg-amber-500/10 text-amber-500'}`}>
-              {isTampered ? <ShieldAlert size={40} /> : isExpired ? <CalendarX size={40} /> : <WifiOff size={40} />}
-            </div>
-
-            <h1 className="text-2xl font-black text-white mb-3 tracking-tight uppercase">
-              {isTampered ? 'Security Violation' : isExpired ? 'License Expired' : 'Action Required'}
-            </h1>
-
-            <p className="text-slate-400 text-sm leading-relaxed mb-8">
-              {isTampered
-                ? 'System clock tampering detected. Access has been permanently suspended for security reasons. Please contact support to restore your identity.'
-                : isExpired
-                  ? 'Your BharatPay Pro license has reached its expiry date. Please contact ilcbala.BharatPayRoll@gmail.com to proceed with renewal.'
-                  : syncMessage || 'A mandatory internet connection is required to verify your license status.'}
-            </p>
-
-            <div className="space-y-3">
-              <button
-                onClick={handleRetryVerification}
-                disabled={isRetryingSync}
-                className={`w-full py-3.5 rounded-xl font-bold transition-all shadow-lg flex items-center justify-center gap-2 ${isTampered ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'
-                  } ${isRetryingSync ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                {isRetryingSync ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" /> Verifying...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw size={18} /> Retry Verification
-                  </>
-                )}
-              </button>
-
-              <p className="text-[10px] text-slate-500 font-bold tracking-widest uppercase opacity-60">Security Engine v{licenseStatus.data?.latestVersion || '02.02.19'}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const showStartupOverlay = isStartupTimerActive || isAppDirectoryConfigured === null || !licenseStatus.checked;
+  const showLicenseGate = licenseStatus.checked && (isExpired || isTampered || isSyncBlocked);
 
   return (
     <div className={`flex h-[100dvh] overflow-hidden bg-[#020617] text-white ${isWin7 ? 'is-win7' : ''}`}>
+      
+      {showStartupOverlay ? (
+        <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[1000] space-y-8 animate-in fade-in duration-700">
+          <div className="relative">
+            <div className="absolute -inset-4 bg-blue-500/20 blur-2xl rounded-full animate-pulse"></div>
+            <div className="relative w-36 h-36 rounded-full border-[6px] border-white overflow-hidden shadow-2xl bg-[#020617] flex items-center justify-center">
+              <img src="./logo3.png" alt="Startup Logo" className="w-full h-full object-cover" />
+            </div>
+          </div>
+          <div className="flex flex-col items-center gap-1.5 animate-slow-pulse">
+            <div className="flex items-center gap-3">
+               <div className="w-2.5 h-2.5 bg-blue-500 rounded-full shadow-[0_0_12px_#3b82f6]"></div>
+               <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">
+                 Security Verification Underway Please Wait
+                 <span className="inline-block w-8 text-left animate-ellipsis-wait">......</span>
+               </p>
+            </div>
+          </div>
+          <div className="w-48 h-1 bg-slate-900 rounded-full overflow-hidden">
+             <div className="h-full bg-blue-600 animate-loading-bar-5s rounded-full"></div>
+          </div>
+        </div>
+      ) : showLicenseGate ? (
+        <div className="fixed inset-0 z-[9999] bg-slate-950 flex items-center justify-center p-6 text-center">
+          <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-10 shadow-2xl relative overflow-hidden">
+            <div className={`absolute -top-24 -left-24 w-48 h-48 ${isTampered ? 'bg-rose-600/20' : 'bg-amber-600/20'} blur-3xl rounded-full animate-pulse`}></div>
+            <div className="relative z-10">
+              <div className={`w-20 h-20 mx-auto mb-6 rounded-2xl flex items-center justify-center ${isTampered ? 'bg-rose-500/10 text-rose-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                {isTampered ? <ShieldAlert size={40} /> : isExpired ? <CalendarX size={40} /> : <WifiOff size={40} />}
+              </div>
+              <h1 className="text-2xl font-black text-white mb-3 tracking-tight uppercase">
+                {isTampered ? 'Security Violation' : isExpired ? 'License Expired' : 'Action Required'}
+              </h1>
+              <p className="text-slate-400 text-sm leading-relaxed mb-8">
+                {isTampered
+                  ? 'System clock tampering detected. Access has been permanently suspended for security reasons. Please contact support to restore your identity.'
+                  : isExpired
+                    ? 'Your BharatPay Pro license has reached its expiry date. Please contact ilcbala.BharatPayRoll@gmail.com to proceed with renewal.'
+                    : syncMessage || 'A mandatory internet connection is required to verify your license status.'}
+              </p>
+              <div className="space-y-3">
+                <button
+                  onClick={handleRetryVerification}
+                  disabled={isRetryingSync}
+                  className={`w-full py-3.5 rounded-xl font-bold transition-all shadow-lg flex items-center justify-center gap-2 ${isTampered ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'
+                    } ${isRetryingSync ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isRetryingSync ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Verifying...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={18} /> Retry Verification
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-slate-500 font-bold tracking-widest uppercase opacity-60">Security Engine v{licenseStatus.data?.latestVersion || '02.02.19'}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+
       {/* Sync Countdown (Day 3 Grace Period) */}
       {licenseStatus.data?.isSyncGracePeriod && licenseStatus.data.graceRemaining > 0 && (
         <SyncCountdownBanner 
@@ -968,8 +1051,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       )}
 
       <CustomModal {...alertConfig} onClose={closeAlert} autoCloseSecs={alertConfig.autoCloseSecs} />
-
-      {isAppDirectoryConfigured === false && <AppSetup onComplete={() => setIsAppDirectoryConfigured(true)} />}
 
       {licenseStatus.checked && !licenseStatus.valid && !showRegistrationManual && isAppDirectoryConfigured && (
         <div className="fixed inset-0 z-[500] bg-[#020617] flex items-center justify-center p-2 md:p-4 overflow-hidden">
@@ -1044,12 +1125,42 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           activeCompanyId={activeCompanyId}
         />
       ) : !currentUser ? (
-        <Login onLogin={handleAuthLogin} currentLogo={logoUrl} setLogo={handleUpdateLogo} />
+        <div className="flex flex-col md:flex-row w-full h-full min-h-screen bg-[#020617] overflow-y-auto custom-scrollbar">
+          {isAppDirectoryConfigured === false && (
+            <div className="md:w-1/3 flex items-center justify-center p-4 border-r border-slate-800/30 bg-[#020617]">
+               <AppSetup onComplete={() => window.location.reload()} />
+            </div>
+          )}
+          <div className={`flex-1 flex items-center justify-center p-4 ${isAppDirectoryConfigured === false ? 'md:bg-slate-900/10' : ''}`}>
+            <Login 
+              onLogin={handleAuthLogin} 
+              currentLogo={logoUrl} 
+              setLogo={handleUpdateLogo} 
+              isLocked={isAppDirectoryConfigured === false}
+            />
+          </div>
+        </div>
       ) : (
         <>
           {/* --- V02.02.29: MULTI-COMPANY SELECTION GATE --- */}
           {isCompanyGateOpen && (
-            <div className="fixed inset-0 z-[600] bg-[#020617] flex flex-col items-center justify-start pt-32 pb-12 px-6 animate-in fade-in duration-500 overflow-y-auto custom-scrollbar">
+            <div className="fixed inset-0 z-[600] bg-[#020617] flex flex-col items-center justify-center p-6 animate-in fade-in duration-500 overflow-y-auto custom-scrollbar">
+              {/* Floating Application Logo (Top Left) */}
+              <div className="fixed top-6 left-8 z-[1000] flex items-center gap-3 bg-slate-900/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-800/50 shadow-2xl pointer-events-none select-none group/floating-logo transition-all hover:bg-slate-900/60">
+                <div className="relative">
+                  <div className="absolute -inset-1.5 bg-blue-500/20 blur-md rounded-full group-hover/floating-logo:bg-blue-500/30 transition-all"></div>
+                  <img src="./logo3.png" alt="BPP Logo" className="relative w-8 h-8 rounded-full border border-slate-700 shadow-lg" />
+                </div>
+                <div className="flex flex-col leading-tight">
+                  <span className="text-sm font-black tracking-tighter uppercase italic">
+                    <span className="text-[#FF9933]">Bharat</span>Pay<span className="text-[#4ADE80]"> Pro</span>
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse"></div>
+                    <span className="text-[8px] font-bold text-slate-500 uppercase tracking-[0.2em]">Premium Payroll Silo</span>
+                  </div>
+                </div>
+              </div>
               {/* Animated Background Glows */}
               <div className="absolute top-0 left-1/4 w-[400px] h-[400px] bg-blue-600/10 blur-[100px] rounded-full animate-pulse pointer-events-none"></div>
               <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-emerald-600/10 blur-[100px] rounded-full animate-pulse delay-700 pointer-events-none"></div>
@@ -1084,17 +1195,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         <button 
                           className="absolute inset-0 z-0"
                           title={`Load ${c.establishmentName}`}
-                          onClick={() => {
-                            switchCompany(c.id);
-                            setIsCompanyGateOpen(false);
-                            setIsPurgeMode(false);
-                          }}
+                          onClick={() => handleSwitchCompanyWithGate(c.id, true)}
                         ></button>
 
                         <Building2 size={80} className="absolute -bottom-4 -right-4 text-white/[0.02] group-hover:text-blue-500/5 transition-colors pointer-events-none" />
                         
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base mb-4 transition-all duration-300 pointer-events-none ${activeCompanyId === c.id ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-800 text-slate-500 group-hover:bg-blue-600 group-hover:text-white'}`}>
-                          {c.establishmentName?.substring(0, 1).toUpperCase() || 'C'}
+                        <div className="flex items-center justify-between mb-4 relative z-10 pointer-events-none">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base transition-all duration-300 ${activeCompanyId === c.id ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-800 text-slate-500 group-hover:bg-blue-600 group-hover:text-white'}`}>
+                            {c.establishmentName?.substring(0, 1).toUpperCase() || 'C'}
+                          </div>
+                          {c.dashboardPassword && (
+                            <div className="p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 animate-pulse">
+                              <Lock size={14} />
+                            </div>
+                          )}
                         </div>
 
                         <div className="mt-auto relative z-10 pointer-events-none">
@@ -1372,8 +1486,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
             <header className="bg-[#0f172a]/95 backdrop-blur-md border-b border-slate-800 h-16 flex items-center justify-between px-8 shrink-0 z-30">
               <div className="flex items-center gap-4 shrink-0 mr-4">
-                <div className="relative group/company">
-                  <button className="flex items-center gap-3 bg-[#1e293b] hover:bg-[#2d3b50] px-4 py-2 rounded-xl border border-slate-700 transition-all group-hover/company:border-blue-500/50">
+                <div className={`relative ${activeView === View.Dashboard ? 'group/company' : 'cursor-not-allowed opacity-80'}`}>
+                  <button 
+                    disabled={activeView !== View.Dashboard}
+                    className={`flex items-center gap-3 bg-[#1e293b] px-4 py-2 rounded-xl border border-slate-700 transition-all ${activeView === View.Dashboard ? 'hover:bg-[#2d3b50] group-hover/company:border-blue-500/50' : ''}`}
+                    title={activeView !== View.Dashboard ? "Switching organizations is restricted while working in this module. Return to Dashboard to change company." : "Switch Organization"}
+                  >
                     <img src={logoUrl} alt="Logo" className="w-8 h-8 rounded-full border border-slate-600 shadow-lg object-cover shrink-0" />
                     <div className="flex flex-col items-start leading-tight">
                       <span className="text-sm font-black text-white tracking-tight truncate max-w-[220px]">{companyProfile.establishmentName || "Select Organization"}</span>
@@ -1407,49 +1525,57 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         </div>
                       </div>
                     </div>
-                    <ChevronRight size={16} className="text-slate-500 rotate-90 group-hover/company:text-white transition-all" />
+                    {activeView === View.Dashboard ? (
+                      <ChevronRight size={16} className="text-slate-500 rotate-90 group-hover/company:text-white transition-all" />
+                    ) : (
+                      <Lock size={14} className="text-slate-600" />
+                    )}
                   </button>
                   
-                  {/* Company Switcher Dropdown */}
-                  <div className="absolute top-full left-0 mt-2 w-72 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl opacity-0 invisible group-hover/company:opacity-100 group-hover/company:visible transition-all z-[100] overflow-hidden">
-                    <div className="p-4 bg-[#0f172a] border-b border-slate-800">
-                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Select Organization</span>
-                    </div>
-                    <div className="max-h-64 overflow-y-auto custom-scrollbar">
-                      {companies.map(c => (
-                        <button 
-                          key={c.id}
-                          onClick={() => switchCompany(c.id)}
-                          className={`w-full flex items-center gap-3 p-4 text-left hover:bg-blue-900/20 transition-all border-b border-slate-800/50 last:border-0 ${activeCompanyId === c.id ? 'bg-blue-900/40 border-l-4 border-l-blue-500' : ''}`}
-                        >
-                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${activeCompanyId === c.id ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                            {c.establishmentName?.substring(0, 2).toUpperCase() || 'CO'}
-                          </div>
-                          <div className="flex flex-col overflow-hidden">
-                            <span className={`text-sm font-bold truncate ${activeCompanyId === c.id ? 'text-white' : 'text-slate-300'}`}>{c.establishmentName}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-slate-500 font-mono tracking-tighter truncate">{c.cin || 'No CIN Registered'}</span>
-                              <span className="text-[8px] px-1.5 py-0.5 bg-slate-800 text-amber-500 rounded font-black uppercase tracking-tighter border border-slate-700 shrink-0">{c.id}</span>
+                  {/* Company Switcher Dropdown - Only Rendered/Visible on Dashboard */}
+                  {activeView === View.Dashboard && (
+                    <div className="absolute top-full left-0 mt-2 w-72 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl opacity-0 invisible group-hover/company:opacity-100 group-hover/company:visible transition-all z-[100] overflow-hidden">
+                      <div className="p-4 bg-[#0f172a] border-b border-slate-800">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Select Organization</span>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                        {companies.map(c => (
+                          <button 
+                            key={c.id}
+                            onClick={() => handleSwitchCompanyWithGate(c.id)}
+                            className={`w-full flex items-center gap-3 p-4 text-left hover:bg-blue-900/20 transition-all border-b border-slate-800/50 last:border-0 ${activeCompanyId === c.id ? 'bg-blue-900/40 border-l-4 border-l-blue-500' : ''}`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${activeCompanyId === c.id ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                              {c.establishmentName?.substring(0, 2).toUpperCase() || 'CO'}
                             </div>
-                          </div>
+                            <div className="flex-1 flex flex-col overflow-hidden">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`text-sm font-bold truncate ${activeCompanyId === c.id ? 'text-white' : 'text-slate-300'}`}>{c.establishmentName}</span>
+                                {c.dashboardPassword && <Lock size={12} className="text-blue-400 shrink-0" />}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-500 font-mono tracking-tighter truncate">{c.cin || 'No CIN Registered'}</span>
+                                <span className="text-[8px] px-1.5 py-0.5 bg-slate-800 text-amber-500 rounded font-black uppercase tracking-tighter border border-slate-700 shrink-0">{c.id}</span>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="p-3 bg-[#0f172a] border-t border-slate-800">
+                        <button 
+                          onClick={() => {
+                            setIsAddingNewCompany(true);
+                            setShowRegistrationManual(true);
+                          }}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+                        >
+                          <RefreshCw size={14} /> Add New Company
                         </button>
-                      ))}
+                      </div>
                     </div>
-                    <div className="p-3 bg-[#0f172a] border-t border-slate-800">
-                      <button 
-                        onClick={() => {
-                          setIsAddingNewCompany(true);
-                          setShowRegistrationManual(true);
-                        }}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all"
-                      >
-                        <RefreshCw size={14} /> Add New Company
-                      </button>
-                    </div>
-                  </div>
+                  )}
                 </div>
-
-                </div>
+              </div>
               <div className="flex-1 px-4 min-w-[200px] max-w-lg mx-auto">
                 <div className="flex items-center gap-0 bg-[#020617] rounded-xl border border-slate-800 overflow-hidden h-10 shadow-2xl">
                   <div className="bg-slate-900 border-r border-slate-800 h-full px-4 flex items-center justify-center shrink-0">
@@ -1494,16 +1620,74 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={safeNavigate} />}
                 {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} />}
                 {activeView === View.PayProcess && <PayProcess employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} />}
-                {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} />}
+                {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} onNavigate={safeNavigate} />}
                 {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} />}
                 {activeView === View.MIS && <MISDashboard payrollHistory={payrollHistory} employees={employees} companyProfile={companyProfile} showAlert={showAlert} />}
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                 {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} />}
-                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={onRefresh} initialTab={settingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onNuclearReset={handleNuclearReset} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onDeleteCompany={deleteCompany} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} />}
+                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={onRefresh} initialTab={settingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
-            </main>
+              {/* --- Database Password Gate Modal --- */}
+          {showDbGateModal && (
+            <div className="fixed inset-0 z-[800] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+              <div className="bg-[#1e293b] w-full max-w-sm rounded-3xl border border-blue-500/30 shadow-2xl p-8 flex flex-col gap-6 relative overflow-hidden">
+                {/* Visual Background Element */}
+                <div className="absolute -top-12 -right-12 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl"></div>
+                
+                <button onClick={() => setShowDbGateModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors" title="Close Verification"><X size={20} /></button>
+                
+                <div className="flex flex-col items-center gap-4 relative z-10">
+                  <div className="p-5 bg-blue-900/20 text-blue-400 rounded-2xl border border-blue-500/30 shadow-inner">
+                    <Unlock size={36} />
+                  </div>
+                  <div className="text-center">
+                    <h3 className="text-xl font-black text-white uppercase tracking-tighter">Database Locked</h3>
+                    <p className="text-[10px] text-blue-400 font-black uppercase tracking-widest mt-1 mb-2">
+                      {companies.find(c => c.id === dbGateTargetId)?.establishmentName || "Secured Organization"}
+                    </p>
+                    <div className="h-0.5 w-12 bg-blue-500/30 mx-auto rounded-full mb-3"></div>
+                    <p className="text-[9px] text-blue-300 font-bold uppercase tracking-widest">
+                      Verification required for access
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-5 relative z-10">
+                  <div>
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1 mb-2 block">Company Access Password</label>
+                    <div className="relative group">
+                      <input 
+                        type={dbGateShowPass ? "text" : "password"} 
+                        placeholder="••••••••" 
+                        autoFocus 
+                        className={`w-full bg-[#0f172a] border ${dbGateError ? 'border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'border-slate-700 group-hover:border-blue-500/50'} rounded-2xl px-5 py-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono`} 
+                        value={dbGatePassword} 
+                        onChange={(e) => { setDbGatePassword(e.target.value); setDbGateError(''); }} 
+                        onKeyDown={(e) => e.key === 'Enter' && verifyDbGatePassword()} 
+                      />
+                      <button 
+                        onClick={() => setDbGateShowPass(!dbGateShowPass)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-blue-400 transition-colors"
+                      >
+                        {dbGateShowPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                    {dbGateError && <p className="text-[10px] text-red-400 font-bold mt-2.5 text-center animate-pulse flex items-center justify-center gap-1.5"><ShieldAlert size={12} /> {dbGateError}</p>}
+                  </div>
+                  
+                  <button 
+                    onClick={verifyDbGatePassword}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl shadow-xl shadow-blue-900/20 transition-all flex items-center justify-center gap-2 uppercase tracking-[0.15em] text-xs active:scale-[0.98]"
+                  >
+                    <ShieldCheck size={18} /> Unlock Database
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
           </div>
         </>
       )}
@@ -1649,6 +1833,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         </div>
       )}
 
+        </>
+      )}
     </div>
   );
 };

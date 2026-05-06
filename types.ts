@@ -161,8 +161,10 @@ export interface CompanyProfile {
   externalAppUrl?: string; // New field for External App Link
   loginAlertMessage?: string; // New field for Dynamic Login Screen Alert
   loginAlertEnabled?: boolean; // New field to Toggle Login Alert
+  dashboardPassword?: string; // Optional password to open company database
 
   // SMTP Configuration
+
   smtpHost?: string;
   smtpPort?: number;
   smtpSecurity?: 'None' | 'SSL' | 'TLS';

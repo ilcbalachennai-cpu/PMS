@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { IndianRupee, Users, Building, TrendingUp, Database, Calendar, Calculator, ArrowRight, ExternalLink, Sparkles, FileText } from 'lucide-react';
+import { IndianRupee, Users, Building, TrendingUp, Calendar, Calculator, ArrowRight, ExternalLink, Sparkles, FileText, Upload } from 'lucide-react';
 import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, View, CompanyProfile, PayrollResult } from '../types';
 import { formatIndianNumber } from '../utils/formatters';
 
@@ -136,33 +136,6 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
     </div>
   );
 
-  if (employees.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)] space-y-8 animate-in fade-in duration-700 py-10">
-        <div className="relative">
-          <div className="absolute inset-0 bg-blue-500/20 blur-2xl rounded-full"></div>
-          <div className="relative p-8 bg-[#1e293b] rounded-full border border-slate-700 shadow-2xl">
-            <Database size={64} className="text-slate-500" />
-          </div>
-        </div>
-
-        <div className="text-center space-y-4 max-w-xl px-4">
-          <h2 className="text-3xl font-black text-white tracking-tight">System Ready</h2>
-          <div className="p-6 bg-[#1e293b]/50 border border-slate-800 rounded-xl shadow-xl backdrop-blur-sm">
-            <div className="text-slate-300 text-lg font-medium leading-relaxed">
-              Data is empty. Go to Data Management under <button title="Navigate to Data Management" aria-label="Navigate to Data Management" onClick={() => onNavigate(View.Settings, 'DATA')} className="text-blue-400 font-bold hover:text-blue-300 border-b border-blue-500/50 hover:border-blue-400 transition-colors inline-block cursor-pointer">Configuration</button> section to restore Data else <button title="Navigate to Employees to start afresh" aria-label="Navigate to Employees to start afresh" onClick={() => onNavigate(View.Employees)} className="text-emerald-400 font-bold hover:text-emerald-300 border-b border-emerald-500/50 hover:border-emerald-400 transition-colors inline-block cursor-pointer">start afresh</button>.
-            </div>
-          </div>
-        </div>
-
-        <div className="w-full flex flex-col items-center gap-4 mt-8 pt-8 border-t border-slate-800/50 opacity-40 grayscale pointer-events-none">
-          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Quick Access Tools (Inactive)</h3>
-          <QuickLinks centered={true} />
-        </div>
-      </div>
-    );
-  }
-
   // ── Derive all overview stats from payrollHistory (last saved batch) ───────
 
   // Find the most recent finalized batch; fall back to any saved batch for the selected local month/year
@@ -176,6 +149,66 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
     );
     return sorted.filter(r => r.month === sorted[0]?.month && r.year === sorted[0]?.year);
   }, [payrollHistory, localMonth, localYear]);
+
+  if (employees.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)] space-y-12 animate-in fade-in duration-700 py-10 px-4">
+        <div className="text-center space-y-4 max-w-2xl">
+          <div className="inline-flex p-4 bg-blue-500/10 rounded-2xl border border-blue-500/20 mb-4 animate-bounce">
+            <Sparkles size={40} className="text-blue-400" />
+          </div>
+          <h2 className="text-4xl font-black text-white tracking-tight">Organization Initialized</h2>
+          <p className="text-slate-400 text-lg font-medium">
+            The profile and statutory rules for <span className="text-white font-bold">{companyProfile.establishmentName}</span> are now active. 
+            Choose your next step to begin payroll processing.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
+          {/* Action Card: Start Fresh */}
+          <button 
+            onClick={() => onNavigate(View.Employees)}
+            className="group p-8 bg-[#1e293b] rounded-3xl border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-800/80 transition-all text-left shadow-2xl relative overflow-hidden"
+          >
+            <div className="absolute -right-8 -top-8 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl group-hover:bg-emerald-500/20 transition-all" />
+            <div className="p-4 bg-emerald-600 rounded-2xl text-white shadow-lg shadow-emerald-900/50 mb-6 w-fit group-hover:scale-110 transition-transform">
+              <Users size={32} />
+            </div>
+            <h3 className="text-2xl font-black text-white mb-2 uppercase tracking-tighter">Start Afresh</h3>
+            <p className="text-slate-400 text-sm leading-relaxed mb-6 font-medium">
+              Manually add your employees or perform a bulk Excel import to build your workforce from scratch.
+            </p>
+            <div className="flex items-center gap-2 text-emerald-400 font-black text-xs uppercase tracking-widest">
+              Go to Employee Master <ArrowRight size={16} />
+            </div>
+          </button>
+
+          {/* Action Card: Restore Backup */}
+          <button 
+            onClick={() => onNavigate(View.Settings, 'DATA')}
+            className="group p-8 bg-[#1e293b] rounded-3xl border border-slate-800 hover:border-blue-500/50 hover:bg-slate-800/80 transition-all text-left shadow-2xl relative overflow-hidden"
+          >
+            <div className="absolute -right-8 -top-8 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all" />
+            <div className="p-4 bg-blue-600 rounded-2xl text-white shadow-lg shadow-blue-900/50 mb-6 w-fit group-hover:scale-110 transition-transform">
+              <Upload size={32} />
+            </div>
+            <h3 className="text-2xl font-black text-white mb-2 uppercase tracking-tighter">Restore Backup</h3>
+            <p className="text-slate-400 text-sm leading-relaxed mb-6 font-medium">
+              Import existing data from a previously saved (.enc) backup file to quickly resume operations.
+            </p>
+            <div className="flex items-center gap-2 text-blue-400 font-black text-xs uppercase tracking-widest">
+              Open Data Management <ArrowRight size={16} />
+            </div>
+          </button>
+        </div>
+
+        <div className="w-full flex flex-col items-center gap-4 mt-8 pt-8 border-t border-slate-800/50 opacity-40 grayscale pointer-events-none">
+          <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">Quick Access Tools (Pending Data)</h3>
+          <QuickLinks centered={true} />
+        </div>
+      </div>
+    );
+  }
 
   const sourceLabel = sourceRecords.length > 0
     ? `${sourceRecords[0].month} ${sourceRecords[0].year}`

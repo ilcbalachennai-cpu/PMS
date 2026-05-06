@@ -56,5 +56,5 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
     initApp();
   }, []);
 
-  return { isAppDirectoryConfigured, setIsAppDirectoryConfigured };
+  return { isAppDirectoryConfigured };
 };

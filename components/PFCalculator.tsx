@@ -122,7 +122,7 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
 
     const handleDownloadECR = () => {
         if (currentRecords.length === 0) return;
-        generatePFECR(currentRecords, employees, config, 'Text', `PF_ECR_${month}_${year}`);
+        generatePFECR(currentRecords, employees, config, 'Text', `PF_ECR_${month}_${year}`, companyProfile);
     };
 
     const handleDownloadChallan = () => {

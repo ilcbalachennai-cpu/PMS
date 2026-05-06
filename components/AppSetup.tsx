@@ -66,7 +66,7 @@ const AppSetup: React.FC<AppSetupProps> = ({ onComplete }) => {
     };
 
     return (
-        <div className="min-h-screen bg-[#020617] flex items-center justify-center p-4">
+        <div className="w-full flex items-center justify-center p-0">
             <div className="max-w-md w-full space-y-8 animate-in fade-in zoom-in duration-500">
                 {/* Logo & Branding */}
                 <div className="text-center space-y-4">

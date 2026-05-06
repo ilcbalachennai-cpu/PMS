@@ -366,3 +366,70 @@ export const generateImportFailureReport = (importSummary: any, format: 'PDF' | 
         );
     }
 };
+
+/**
+ * Generates an Excel Template for Master Data Import (Designations, Sites, etc.)
+ */
+export const generateMasterTemplateXLSX = async (company?: CompanyProfile) => {
+    try {
+        const headers = ["Master Type", "Item Name"];
+        const samples = [
+            ["Designation", "Software Engineer"],
+            ["Division", "Engineering"],
+            ["Branch", "Chennai"],
+            ["Site", "Main Plant"]
+        ];
+
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...samples]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "MasterTemplate");
+        
+        const fileName = getStandardFileName('Master_Data_Template', company || {} as any, 'Any', 2024);
+        await generateTemplateWorkbook(wb, fileName, company?.establishmentName);
+    } catch (err) {
+        console.error("Master Template Error:", err);
+    }
+};
+
+/**
+ * Parses Master Data XLSX
+ */
+export const parseMasterXLSX = async (file: File): Promise<{
+    designations: string[],
+    divisions: string[],
+    branches: string[],
+    sites: string[]
+}> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                const masters = {
+                    designations: [] as string[],
+                    divisions: [] as string[],
+                    branches: [] as string[],
+                    sites: [] as string[]
+                };
+
+                data.forEach((row: any) => {
+                    const type = String(row['Master Type'] || '').trim().toLowerCase();
+                    const name = String(row['Item Name'] || '').trim();
+                    if (!name) return;
+
+                    if (type === 'designation') masters.designations.push(name);
+                    else if (type === 'division' || type === 'department') masters.divisions.push(name);
+                    else if (type === 'branch') masters.branches.push(name);
+                    else if (type === 'site') masters.sites.push(name);
+                });
+
+                resolve(masters);
+            } catch (err) { reject(err); }
+        };
+        reader.readAsBinaryString(file);
+    });
+};

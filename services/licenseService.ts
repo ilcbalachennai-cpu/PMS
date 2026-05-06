@@ -3,8 +3,8 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "02.02.44";
-export const APP_PATCH_TIMESTAMP = "02-05-2026 21:35:00"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_VERSION = "03.01.03";
+export const APP_PATCH_TIMESTAMP = "05-05-2026 08:24:00"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -802,7 +802,7 @@ export const validateLicenseStartup = async (
         }
 
         if (!result.success) {
-          // --- V02.02.18: LEGACY BLOCK (Hard Guard) ---
+          // --- V03.01.01: ID Format Migration (Add Underscore to 12-char IDs) ---
           if (result.status === 'BLOCK_LEGACY' || result.message?.includes('VERSION_STUCK')) {
             return {
               valid: false,
@@ -812,20 +812,20 @@ export const validateLicenseStartup = async (
             };
           }
 
-          // --- V02.02.15: IDENTITY RESTORATION PASSTHROUGH ---
+          // --- V03.01.01: IDENTITY RESTORATION PASSTHROUGH ---
           if (result.message === "IDENTITY_RESTORE_REQUIRED") {
-            // V02.02.18: IDENTITY MISMATCH GUIDANCE
+            // V03.01.01: IDENTITY MISMATCH GUIDANCE
             const errorMsg = "Registration Conflict: The Email/Mobile provided do not match our cloud records for this User ID. Please verify your registered details or contact Support.";
             console.warn(`⚠️ [SYNC] ${errorMsg}`);
 
-            // --- V02.02.24: STATUS SYNC & TRIAL OVERWRITE ---
+            // --- V03.01.01: STATUS SYNC & TRIAL OVERWRITE ---
             // If the cloud response provides identity data (matches Trial or Full records), 
             // we update the local status to match the Cloud's source of truth.
             if (result.data) {
               const cloudIsTrial = result.data.isTrial === true;
               const localIsTrial = stored?.isTrial === true;
 
-              // --- V02.02.40: SILENT PROMOTION (Bypass Restore Required for Upgraded Users) ---
+              // --- V03.01.01: SILENT PROMOTION (Bypass Restore Required for Upgraded Users) ---
               if (localIsTrial && !cloudIsTrial && result.data.userName) {
                 console.log("🚀 [AUTO-PROMOTION] Trial user found with Full License. Performing silent upgrade...");
                 const cloudKey = result.data.licenseKey || result.data.key || "ACTIVATED";
@@ -913,7 +913,7 @@ export const validateLicenseStartup = async (
           const cloudIsTrial = cloudData.isTrial === true;
           const localIsTrial = activeLicense?.isTrial === true;
 
-          // --- V02.02.40: AUTO-PROMOTION LOGIC ---
+          // --- V03.01.01: AUTO-PROMOTION LOGIC ---
           // If local is trial but cloud is full, we allow auto-upgrade even if UserID differs
           if ((!activeLicense || (localIsTrial && !cloudIsTrial)) && cloudData.userName) {
             console.log("🛠️ Syncing/Restoring Identity from Cloud (FORCE UPGRADE)...");
@@ -975,12 +975,12 @@ export const validateLicenseStartup = async (
               activeLicense.status = cloudData.status;
               storageUpdated = true;
             } else if (!cloudData.status && activeLicense.status === 'PENDING_RESTORE') {
-              // V02.02.41: Auto-Clear PENDING_RESTORE if cloud sync is successful but status is missing
-              activeLicense.status = activeLicense.isTrial ? 'REGISTERED' : 'ACTIVATED';
+              // V03.01.01: Auto-Clear PENDING_RESTORE if cloud sync is successful but status is missing
+              activeLicense.status = activeLicense.isTrial ? 'REGISTERED' : 'ACTIVE';
               storageUpdated = true;
               console.log(`🔓 [SYNC] Identity verified. Promoting status: PENDING_RESTORE -> ${activeLicense.status}`);
             }
-            // --- V02.02.18: IDENTITY FIDELITY SYNC ---
+            // --- V03.01.01: IDENTITY FIDELITY SYNC ---
             if (cloudData.registeredTo && cloudData.registeredTo !== activeLicense.registeredTo) {
               console.log(`📧 [SYNC] Email Update: ${activeLicense.registeredTo} -> ${cloudData.registeredTo}`);
               activeLicense.registeredTo = cloudData.registeredTo;
@@ -1019,7 +1019,7 @@ export const validateLicenseStartup = async (
               if (cloudData.launcherUrl) localStorage.setItem('app_launcher_url', cloudData.launcherUrl);
               if (cloudData.patchTimestamp) localStorage.setItem('app_latest_patch_timestamp', cloudData.patchTimestamp);
               
-              // --- V02.02.40: SECURE HASH STORAGE ---
+              // --- V03.01.01: SECURE HASH STORAGE ---
               if (cloudData.updateHashWin10) localStorage.setItem('app_update_hash_win10', cloudData.updateHashWin10);
               if (cloudData.updateHashWin7) localStorage.setItem('app_update_hash_win7', cloudData.updateHashWin7);
               if (cloudData.sha256) localStorage.setItem('app_update_hash', cloudData.sha256);
@@ -1113,7 +1113,7 @@ export const sendRegistrationOTP = async (email: string): Promise<ActivationResu
 };
 
 /**
- * V02.02.15: Verify OTP for Registration
+ * V03.01.01: Verify OTP for Registration
  */
 export const verifyRegistrationOTP = async (email: string, mobile: string, otp: string): Promise<any> => {
   try {
@@ -1200,7 +1200,7 @@ export const verifyDeveloperOTP = async (username: string, otp: string): Promise
       // @ts-ignore
       if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambled);
       
-      // V02.02.30: Return mapped user object to ensure structural integrity in App State
+      // V03.01.01: Return mapped user object to ensure structural integrity in App State
       result.data = devObj;
     }
 

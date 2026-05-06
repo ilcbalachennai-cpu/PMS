@@ -16,7 +16,7 @@ import {
     getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
     requestResetOTP, getAppDeveloper
 } from '../services/licenseService';
-import { formatExpiryDate, formatIndianNumber, formatLicenseKey } from '../utils/formatters';
+import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, generateBackupFilename } from '../utils/formatters';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 
 declare global {
@@ -36,6 +36,8 @@ interface SettingsProps {
     setLeavePolicy: (policy: LeavePolicy) => void;
     onRestore: () => void;
     onNuclearReset: () => void;
+    onPayrollReset: () => Promise<void>;
+    onDeepReset: () => Promise<void>;
     initialTab?: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS';
     userRole?: string;
     currentUser?: User;
@@ -45,18 +47,20 @@ interface SettingsProps {
     showAlert: (type: 'success' | 'warning' | 'danger' | 'info' | 'confirm' | 'error', title: string, message: string | React.ReactNode, onConfirm?: () => void, onCancel?: () => void, confirmLabel?: string, cancelLabel?: string, cancel2Label?: string) => void;
     verifyLicense?: () => Promise<void>;
     activeCompanyId?: string;
-    onDeleteCompany?: (id: string) => void;
     onOpenGate?: () => void;
+    globalMonth?: string;
+    globalYear?: number;
 }
 
 const Settings: React.FC<SettingsProps> = ({ 
     config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, 
-    leavePolicy, setLeavePolicy, onRestore, onNuclearReset, initialTab = 'COMPANY', 
+    leavePolicy, setLeavePolicy, onRestore, onNuclearReset, onPayrollReset, onDeepReset, initialTab = 'COMPANY', 
     userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange, 
-    showAlert, verifyLicense, activeCompanyId = 'default', onDeleteCompany, onOpenGate
+    showAlert, verifyLicense, activeCompanyId = 'default', onOpenGate,
+    globalMonth = 'April', globalYear = 2025
 }) => {
     const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${activeCompanyId}_${key}`;
-    const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(isSetupMode ? 'COMPANY' : initialTab);
+    const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(initialTab);
 
     const [formData, setFormData] = useState<StatutoryConfig>(() => {
         const pfOrig = config.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
@@ -118,14 +122,15 @@ const Settings: React.FC<SettingsProps> = ({
     }, [isDirty, onDirtyChange]);
 
     useEffect(() => {
-        setActiveTab(isSetupMode ? 'COMPANY' : initialTab);
-    }, [initialTab, isSetupMode]);
+        setActiveTab(initialTab);
+    }, [initialTab]);
 
     const [showBackupModal, setShowBackupModal] = useState(false);
     const [encryptionKey, setEncryptionKey] = useState('');
     const [selectedBackupFile, setSelectedBackupFile] = useState<File | null>(null);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [isSqliteFile, setIsSqliteFile] = useState(false);
+    const [isMachineLocked, setIsMachineLocked] = useState(false);
     const [importIntoCurrent, setImportIntoCurrent] = useState(false);
     const [authPassword, setAuthPassword] = useState('');
     const [authError, setAuthError] = useState('');
@@ -136,11 +141,23 @@ const Settings: React.FC<SettingsProps> = ({
 
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+
+    const isBCACFile = useMemo(() => {
+        if (!selectedBackupFile) return false;
+        const name = selectedBackupFile.name.toUpperCase();
+        return name.includes('_BC_') || name.includes('_AC_') || 
+               name.includes('BEFORE_CONFIRMATION') || name.includes('AFTER_CONFIRMATION');
+    }, [selectedBackupFile]);
+    const [recoveryEmail, setRecoveryEmail] = useState('');
+    const [recoveryOTP, setRecoveryOTP] = useState('');
+    const [recoveryStep, setRecoveryStep] = useState<'IDENTIFY' | 'OTP'>('IDENTIFY');
+    const [isRecovering, setIsRecovering] = useState(false);
 
     const [processProgress, setProcessProgress] = useState(0);
     const [processStatus, setProcessStatus] = useState('');
 
-    const [licenseInfo, setLicenseInfo] = useState<LicenseData | null>(() => getStoredLicense(activeCompanyId));
+    const [licenseInfo, setLicenseInfo] = useState<LicenseData | null>(() => getStoredLicense());
     const [newLicenseKey, setNewLicenseKey] = useState('');
     const [newUserName, setNewUserName] = useState(licenseInfo?.userName || '');
     const [newRegEmail, setNewRegEmail] = useState('');
@@ -326,12 +343,12 @@ const Settings: React.FC<SettingsProps> = ({
     const handleCloudSync = async () => {
         setIsSyncing(true);
         try {
-            const result = await validateLicenseStartup(true, undefined, undefined, undefined, activeCompanyId); // Force sync
+            const result = await validateLicenseStartup(true, undefined, undefined, undefined); // Force sync
             if (result.valid) {
                 // Ensure the global App state reflects the new license (for the Header)
                 if (verifyLicense) await verifyLicense();
 
-                const updated = getStoredLicense(activeCompanyId);
+                const updated = getStoredLicense();
                 setLicenseInfo(updated); // Update Local Settings UI
                 showAlert?.('success', 'Sync Successful', 'License credentials and limits refreshed from cloud.');
             } else {
@@ -348,7 +365,10 @@ const Settings: React.FC<SettingsProps> = ({
         const file = e.target.files?.[0];
         if (file) {
             setSelectedBackupFile(file);
-            setIsSqliteFile(file.name.endsWith('.sqlite'));
+            const name = file.name.toUpperCase();
+            const isSqlite = name.endsWith('.sqlite') || name.includes('_BC_') || name.includes('_AC_');
+            setIsSqliteFile(isSqlite);
+            
             // If we are already in MIGRATE mode (from the Migration Wizard button), 
             // keep it. Otherwise, default to standard IMPORT.
             setBackupMode(prev => prev === 'MIGRATE' ? 'MIGRATE' : 'IMPORT');
@@ -358,11 +378,10 @@ const Settings: React.FC<SettingsProps> = ({
 
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-    const handleAuthSubmit = () => {
+    const handleAuthSubmit = async () => {
         // Authorization Logic:
         // 1. If a Developer is logged in, verify against secure developer storage.
-        // 2. If a standard user is logged in, verify against session password.
-        // 3. If in Setup Mode, fallback 'setup' password is accepted.
+        // 2. If a standard user is logged in, verify against app_users database.
         
         let isAuthorized = false;
         
@@ -371,10 +390,24 @@ const Settings: React.FC<SettingsProps> = ({
             if (devAccount && devAccount.password === authPassword) {
                 isAuthorized = true;
             }
-        } else if (currentUser?.password && authPassword === currentUser.password) {
-            isAuthorized = true;
-        } else if (isSetupMode && (authPassword === 'setup' || authPassword === '')) {
-            isAuthorized = true;
+        } else {
+            // Verify against local database for Administrators/Users
+            const usersRaw = localStorage.getItem('app_users');
+            if (usersRaw) {
+                try {
+                    const users = JSON.parse(usersRaw);
+                    const dbUser = users.find((u: any) => u.username === currentUser?.username);
+                    if (dbUser && dbUser.password === authPassword) {
+                        isAuthorized = true;
+                    }
+                } catch (e) {}
+            }
+            
+            
+            // Session fallback (legacy)
+            if (!isAuthorized && currentUser?.password && authPassword === currentUser.password) {
+                isAuthorized = true;
+            }
         }
 
         if (isAuthorized) {
@@ -388,26 +421,79 @@ const Settings: React.FC<SettingsProps> = ({
         }
     };
 
-    const executeImport = async () => {
-        const file = selectedBackupFile;
-        if (!file || (!encryptionKey && !isSqliteFile)) {
-            showAlert?.('warning', 'Missing Information', 'Please select a file and enter the decryption password.');
-            return;
+
+
+    const handleRequestRecoveryOTP = async () => {
+        if (!recoveryEmail) return;
+        setIsRecovering(true);
+        try {
+            // Use the established cloud service to request an OTP linked to the identity
+            const res = await requestResetOTP(recoveryEmail, licenseInfo?.userID || 'RECOVERY');
+            if (res.success) {
+                setRecoveryStep('OTP');
+                showAlert?.('success', 'OTP Sent', `A verification code has been dispatched to ${recoveryEmail}.`);
+            } else throw new Error(res.message);
+        } catch (e: any) {
+            showAlert?.('error', 'Request Failed', e.message);
+        } finally {
+            setIsRecovering(false);
         }
+    };
+
+    const handleVerifyRecoveryAndRestore = async () => {
+        if (!recoveryOTP) return;
+        setIsRecovering(true);
+        try {
+            // @ts-ignore
+            const res = await verifyRegistrationOTP(recoveryEmail, licenseInfo?.registeredMobile || '0', recoveryOTP);
+            if (res.success && res.data?.licenseKey) {
+                setShowRecoveryModal(false);
+                setEncryptionKey(res.data.licenseKey);
+                // Trigger the actual import with the fetched key
+                showAlert?.('success', 'Identity Verified', 'Hardware lock bypassed. Starting restoration...', () => {
+                   executeImport(res.data.licenseKey);
+                });
+            } else throw new Error(res.message || "Invalid OTP");
+        } catch (e: any) {
+            showAlert?.('error', 'Verification Failed', e.message);
+        } finally {
+            setIsRecovering(false);
+        }
+    };
+
+    const executeImport = async (overrideKey?: string) => {
+        const file = selectedBackupFile;
+        if (!file) return;
 
         setIsProcessing(true);
         setProcessProgress(0);
 
+        // Use overrideKey if provided (from OTP recovery)
+        const activeKey = overrideKey || encryptionKey;
+
         // --- SMART DETECTION: Check if .enc is actually a SQLite Binary (from Rollover) ---
-        let detectedAsSqlite = isSqliteFile;
+        // RULE: If the user entered a PIN, it's ALWAYS a CryptoJS legacy text file.
+        // isMachineLocked only applies when there is NO user-entered PIN.
+        const hasPinEntered = !!activeKey;
+        let detectedAsSqlite = isSqliteFile || (!hasPinEntered && isMachineLocked);
         if (!detectedAsSqlite && file.name.endsWith('.enc')) {
             try {
                 setProcessStatus('Analyzing archive format...');
                 const blob = file.slice(0, 16);
                 const buffer = await blob.arrayBuffer();
+                const arr = new Uint8Array(buffer);
+                
+                // 1. Check for plain SQLite header
                 const header = new TextDecoder().decode(buffer);
                 if (header.startsWith('SQLite format 3')) {
                     detectedAsSqlite = true;
+                } else {
+                    // 2. Check for binary format (indicates encrypted SQLite)
+                    // CryptoJS Base64 files look like binary to some checks - don't misroute them
+                    const isBinary = arr.some((b: number) => (b < 32 && b !== 9 && b !== 10 && b !== 13) || b > 126);
+                    if (isBinary || isBCACFile) {
+                        detectedAsSqlite = true;
+                    }
                 }
             } catch (e) {
                 console.error("Format detection failed", e);
@@ -416,16 +502,32 @@ const Settings: React.FC<SettingsProps> = ({
 
         if (detectedAsSqlite) {
             try {
-                setProcessStatus('Restoring Database File...');
+                setProcessStatus('Restoring Secure Archive...');
                 setProcessProgress(40);
-                const res = await window.electronAPI.restoreSqliteBackup((file as unknown as { path: string }).path);
+                
+                // Fetch license key or machine ID as fallback if no key provided
+                let licenseKey = activeKey;
+                if (!licenseKey) {
+                    licenseKey = licenseInfo?.key || '';
+                    if (!licenseKey) {
+                        licenseKey = await window.electronAPI.getMachineId();
+                    }
+                }
+                
+                const res = await window.electronAPI.restoreSqliteBackup({
+                    path: (file as unknown as { path: string }).path,
+                    encryptionKey: licenseKey
+                });
+                
                 if (res.success) {
                     setProcessProgress(80);
                     setProcessStatus('Synchronizing Local Storage...');
 
-                    // 1. Clear current local state to prevent collisions (only app-specific keys)
+                    // 1. Clear current local state to prevent collisions (PROTECT GLOBAL KEYS)
+                    const protectedKeys = ['app_companies', 'app_active_company_id', 'app_license_data', 'app_users', 'app_developer_account'];
                     Object.keys(localStorage).forEach(key => {
-                        if (key.startsWith('app_') || key.startsWith('company_') || key.startsWith('user_')) {
+                        const isAppData = key.startsWith('app_') || key.startsWith('company_') || key.startsWith('user_');
+                        if (isAppData && !protectedKeys.includes(key)) {
                             localStorage.removeItem(key);
                         }
                     });
@@ -446,11 +548,20 @@ const Settings: React.FC<SettingsProps> = ({
                         setProcessStatus('Migrating Legacy Structure...');
                         try {
                             const profile = JSON.parse(legacyProfileRaw);
-                            const targetId = 'company_1';
+                            const targetId = activeCompanyId;
                             
-                            // 1. Create the first company entity
-                            const defaultCompany = { ...profile, id: targetId };
-                            localStorage.setItem('app_companies', JSON.stringify([defaultCompany]));
+                            // 1. Update the global company entity list in localStorage
+                            try {
+                                const savedCompanies = localStorage.getItem('app_companies');
+                                let companiesList: any[] = savedCompanies ? JSON.parse(savedCompanies) : [];
+                                const exists = companiesList.some((c: any) => c.id === targetId);
+                                if (!exists) {
+                                    companiesList.push({ ...profile, id: targetId });
+                                    localStorage.setItem('app_companies', JSON.stringify(companiesList));
+                                }
+                            } catch (e) {
+                                console.warn("Failed to sync company list during restore", e);
+                            }
                             localStorage.setItem('app_active_company_id', targetId);
 
                             // 2. Force-Migrate all pay data silos into the new company storage
@@ -461,15 +572,27 @@ const Settings: React.FC<SettingsProps> = ({
                                 'master_designations', 'master_divisions', 'master_branches', 'master_sites'
                             ];
 
-                            dataSilos.forEach(silo => {
+                            // Use Promise.all to wait for all DB commits to finish
+                            await Promise.all(dataSilos.map(async (silo) => {
                                 const globalKey = `app_${silo}`;
-                                const scopedKey = `${targetId}_app_${silo}`;
-                                const data = localStorage.getItem(globalKey);
+                                const scopedKey = `${targetId}_${globalKey}`;
+                                const data = localStorage.getItem(scopedKey) || localStorage.getItem(globalKey);
+                                
                                 if (data) {
-                                    localStorage.setItem(scopedKey, data);
-                                    console.log(`[RESTORE-MIGRATE] Mapped legacy ${globalKey} to ${scopedKey}`);
+                                    localStorage.setItem(globalKey, data);
+                                    if (window.electronAPI?.dbSet) {
+                                        try {
+                                            await window.electronAPI.dbSet(globalKey, JSON.parse(data));
+                                        } catch (e) {
+                                            console.error(`DB commit failed for ${globalKey}:`, e);
+                                        }
+                                    }
                                 }
-                            });
+                            }));
+                            
+                            setTimeout(() => {
+                                onRestore();
+                            }, 500); // 500ms safety buffer for DB flush
                             
                             setProcessStatus('Legacy Migration Successful!');
                             await delay(500);
@@ -485,6 +608,7 @@ const Settings: React.FC<SettingsProps> = ({
                     setShowBackupModal(false);
                     setSelectedBackupFile(null);
                     setEncryptionKey('');
+                    sessionStorage.setItem('settings_initial_tab', 'DATA');
                     onRestore();
                     return;
                 } else {
@@ -492,7 +616,27 @@ const Settings: React.FC<SettingsProps> = ({
                 }
             } catch (err: any) {
                 setIsProcessing(false);
-                showAlert?.('error', 'Restoration Failed', `Restore Error: ${err.message}`);
+                const isDecryptionError = err.message.includes("Decryption failed") || err.message.includes("Invalid key");
+                
+                if (isDecryptionError && isMachineLocked) {
+                    showAlert?.('warning', 'Hardware Mismatch Detected', (
+                        <div className="space-y-4">
+                            <p className="text-sm">This backup is locked to a different machine or identity. Would you like to unlock it using an OTP sent to your registered email?</p>
+                            <button 
+                                onClick={() => {
+                                    setRecoveryEmail(licenseInfo?.registeredTo || '');
+                                    setRecoveryStep('IDENTIFY');
+                                    setShowRecoveryModal(true);
+                                }}
+                                className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-black text-[10px] uppercase tracking-widest shadow-lg"
+                            >
+                                Verify Identity & Unlock
+                            </button>
+                        </div>
+                    ));
+                } else {
+                    showAlert?.('error', 'Restoration Failed', `Restore Error: ${err.message}`);
+                }
                 return;
             }
         }
@@ -512,7 +656,14 @@ const Settings: React.FC<SettingsProps> = ({
                 try {
                     const bytes = CryptoJS.AES.decrypt(encryptedContent, encryptionKey);
                     decryptedString = bytes.toString(CryptoJS.enc.Utf8);
-                    setProcessProgress(50);
+                    
+                    if (!decryptedString) {
+                        // Fallback to Machine ID for legacy machine-locked files
+                        const machineId = await window.electronAPI.getMachineId();
+                        const fallbackBytes = CryptoJS.AES.decrypt(encryptedContent, machineId);
+                        decryptedString = fallbackBytes.toString(CryptoJS.enc.Utf8);
+                    }
+
                     if (!decryptedString) throw new Error("Invalid Decryption Result");
                 } catch (cryptoErr) {
                     throw new Error("Wrong Password or Corrupt File");
@@ -672,7 +823,7 @@ const Settings: React.FC<SettingsProps> = ({
     const initiateLegacyMigration = () => {
         const file = selectedBackupFile;
         if (!file || !encryptionKey) {
-            showAlert?.('warning', 'Input Required', 'Please select a legacy .enc file and enter the decryption password.');
+            showAlert?.('warning', 'Input Required', 'Please select a legacy .enc file and enter the decryption PIN.');
             return;
         }
 
@@ -724,8 +875,10 @@ const Settings: React.FC<SettingsProps> = ({
                 let targetCompanyId = activeCompanyId;
                 
                 if (!importIntoCurrent) {
-                    const nextIdNum = companiesList.length + 1;
-                    targetCompanyId = `company_${nextIdNum}`;
+                    // Extract name from data to generate a specific ID
+                    const rawProfile = data.company_profile || data.app_company_profile || data.companyProfile || {};
+                    const establishmentName = rawProfile.establishmentName || 'COMPANY';
+                    targetCompanyId = generateCompanyId(establishmentName);
                 }
                 
                 const getCKey = (key: string) => `${targetCompanyId}_${key}`;
@@ -778,38 +931,42 @@ const Settings: React.FC<SettingsProps> = ({
                             migratedSummary.push(`${silo}: Object found`);
                         }
                         
-                        const storageKey = getCKey(`app_${silo}`);
-                        localStorage.setItem(storageKey, JSON.stringify(rawData));
-                        console.log(`[MIGRATE] Silo '${silo}' migrated to ${storageKey}`);
+                        const storageKey = `app_${silo}`;
+                        localStorage.setItem(getCKey(storageKey), JSON.stringify(rawData));
+                        
+                        // V03.01.03: Direct Silo Write (Physical isolation)
+                        if (window.electronAPI?.dbSet) {
+                            window.electronAPI.dbSet(storageKey, rawData);
+                        }
+                        
+                        console.log(`[MIGRATE] Silo '${silo}' migrated to ${targetCompanyId} (LocalKey: ${getCKey(storageKey)})`);
                         migratedSilos++;
                     }
                 }
 
                 // 4. Handle Masters (Designations, Sites, etc.)
                 const masters = data.masters || data.app_masters;
-                if (masters) {
-                    if (masters.designations) localStorage.setItem(getCKey('app_master_designations'), JSON.stringify(masters.designations));
-                    if (masters.divisions) localStorage.setItem(getCKey('app_master_divisions'), JSON.stringify(masters.divisions));
-                    if (masters.branches) localStorage.setItem(getCKey('app_master_branches'), JSON.stringify(masters.branches));
-                    if (masters.sites) localStorage.setItem(getCKey('app_master_sites'), JSON.stringify(masters.sites));
-                } else {
-                    const masterMap: Record<string, string[]> = {
-                        'master_designations': ['master_designations', 'designations', 'app_master_designations'],
-                        'master_divisions': ['master_divisions', 'divisions', 'app_master_divisions'],
-                        'master_branches': ['master_branches', 'branches', 'app_master_branches'],
-                        'master_sites': ['master_sites', 'sites', 'app_master_sites']
-                    };
-                    for (const [mSilo, mKeys] of Object.entries(masterMap)) {
+                const masterMap: Record<string, string[]> = {
+                    'master_designations': ['master_designations', 'designations', 'app_master_designations'],
+                    'master_divisions': ['master_divisions', 'divisions', 'app_master_divisions'],
+                    'master_branches': ['master_branches', 'branches', 'app_master_branches'],
+                    'master_sites': ['master_sites', 'sites', 'app_master_sites']
+                };
+
+                for (const [mSilo, mKeys] of Object.entries(masterMap)) {
+                    let masterData = null;
+                    if (masters && masters[mSilo.replace('master_', '')]) {
+                        masterData = masters[mSilo.replace('master_', '')];
+                    } else {
                         for (const mk of mKeys) {
-                            if (data[mk] !== undefined) {
-                                localStorage.setItem(getCKey(`app_${mSilo}`), JSON.stringify(data[mk]));
-                                break;
-                            }
-                            if (data[`app_${mk}`] !== undefined) {
-                                localStorage.setItem(getCKey(`app_${mSilo}`), JSON.stringify(data[`app_${mk}`]));
-                                break;
-                            }
+                            if (data[mk] !== undefined) { masterData = data[mk]; break; }
                         }
+                    }
+
+                    if (masterData) {
+                        const mKey = `app_${mSilo}`;
+                        localStorage.setItem(getCKey(mKey), JSON.stringify(masterData));
+                        if (window.electronAPI?.dbSet) window.electronAPI.dbSet(mKey, masterData);
                     }
                 }
 
@@ -824,6 +981,12 @@ const Settings: React.FC<SettingsProps> = ({
                 localStorage.setItem('app_companies', JSON.stringify(companiesList));
                 localStorage.setItem('app_active_company_id', targetCompanyId);
                 localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(newProfile));
+                if (window.electronAPI?.dbSet) {
+                    window.electronAPI.dbSet('app_company_profile', newProfile);
+                    window.electronAPI.dbSet('app_companies', companiesList);
+                    window.electronAPI.dbSet('app_active_company_id', targetCompanyId);
+                }
+                
                 localStorage.removeItem('app_is_reset_mode'); 
                 localStorage.setItem('app_setup_complete', 'true');
 
@@ -904,9 +1067,9 @@ const Settings: React.FC<SettingsProps> = ({
     };
 
     const initiateRestore = () => {
-        const file = selectedBackupFile;
-        if (!file || (!encryptionKey && !isSqliteFile)) {
-            showAlert?.('warning', 'Input Required', 'Please select a backup file and enter the decryption password.');
+        if (!selectedBackupFile || (!encryptionKey && !isSqliteFile && !isMachineLocked)) {
+            const label = isBCACFile ? 'Security PIN' : 'decryption Password';
+            showAlert?.('warning', 'Input Required', `Please select a backup file and enter the ${label}.`);
             return;
         }
 
@@ -929,7 +1092,7 @@ const Settings: React.FC<SettingsProps> = ({
 
     const handleEncryptedExport = async () => {
         if (!encryptionKey) {
-            showAlert?.('warning', 'Security Required', 'Please enter a secure password to encrypt your data file.');
+            showAlert?.('warning', 'Security Required', 'Please enter a secure PIN to encrypt your data file.');
             return;
         }
         setIsProcessing(true);
@@ -973,20 +1136,31 @@ const Settings: React.FC<SettingsProps> = ({
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            const today = new Date();
-            let fyStart = today.getFullYear();
-            if (today.getMonth() < 3) fyStart = fyStart - 1;
-            const fyEnd = fyStart + 1;
-            const compName = companyProfile.establishmentName ? companyProfile.establishmentName.replace(/[^a-zA-Z0-9]/g, '_') : 'Company';
-            a.download = `${compName}_Backup_${fyStart}-${fyEnd}.enc`;
+            // Standardized Naming Convention: [FirstWord]_[Month]_[Year]_[Date].enc
+            let fileName = 'backup.enc';
+            try {
+                fileName = generateBackupFilename(companyProfile.establishmentName, globalMonth, globalYear);
+            } catch (e) {
+                console.error("Filename generation failed:", e);
+                const today = new Date();
+                fileName = `backup_${today.getFullYear()}_${today.getMonth()+1}.enc`;
+            }
+
+            a.download = fileName;
             if (window.electronAPI && window.electronAPI.runBackup) {
                 setProcessStatus('Saving to BharatPP location...');
-                const res = await window.electronAPI.runBackup(encrypted);
+                const res = await window.electronAPI.runBackup(encrypted, fileName, companyProfile.establishmentName);
+
                 if (res.success) {
                     setProcessProgress(100);
                     setProcessStatus('Backup Saved Successfully');
-                    showAlert?.('success', 'Safe Local Backup Created', `Your data has been encrypted and saved as: ${res.fileName}`);
-                } else throw new Error(res.error);
+                    showAlert?.('success', 'Safe Local Backup Created', `Your data has been encrypted and saved as: ${res.fileName || fileName}`, () => {
+                        // Open the folder location ONLY after clicking OK
+                        if (res.filePath && window.electronAPI.openItemLocation) {
+                            window.electronAPI.openItemLocation(res.filePath);
+                        }
+                    });
+                } else throw new Error(res.error || 'Unknown backup error');
             } else {
                 document.body.appendChild(a);
                 a.click();
@@ -1132,8 +1306,24 @@ const Settings: React.FC<SettingsProps> = ({
 
     const executeFactoryReset = () => {
         const typedPass = resetPassword.trim();
-        const isMasterBypass = currentUser?.role === 'Developer' && typedPass === 'bharatpay';
-        if (typedPass === currentUser?.password || isMasterBypass || (isSetupMode && typedPass === 'setup')) {
+        let isAuthorized = false;
+        
+
+
+        // 3. Database & Admin Fallback
+        if (!isAuthorized) {
+            const usersRaw = localStorage.getItem('app_users');
+            if (usersRaw) {
+                try {
+                    const users = JSON.parse(usersRaw);
+                    const dbUser = users.find((u: any) => u.username === currentUser?.username);
+                    if (dbUser && dbUser.password === typedPass) isAuthorized = true;
+                } catch (e) {}
+            }
+            if (!isAuthorized && typedPass === currentUser?.password) isAuthorized = true;
+        }
+
+        if (isAuthorized) {
             setIsProcessing(true);
             onNuclearReset();
         } else {
@@ -1141,59 +1331,54 @@ const Settings: React.FC<SettingsProps> = ({
         }
     };
 
-    const executePayrollReset = () => {
+    const executePayrollReset = async () => {
         const typedPass = resetPassword.trim();
-        const isMasterBypass = currentUser?.role === 'Developer' && typedPass === 'bharatpay';
-        if (typedPass === currentUser?.password || isMasterBypass || (isSetupMode && typedPass === 'setup')) {
-            setIsProcessing(true);
-            const getCKey = (key: string) => activeCompanyId !== 'default' ? `${activeCompanyId}_${key}` : key;
-            
-            const keysToWipe = [
-                'app_employees', 'app_attendance', 'app_leave_ledgers', 
-                'app_advance_ledgers', 'app_payroll_history', 'app_fines', 
-                'app_arrear_history', 'app_ot_records'
-            ];
+        let isAuthorized = false;
+        
 
-            keysToWipe.forEach(k => localStorage.removeItem(getCKey(k)));
-            
-            // We keep company profile, config, and license
-            setTimeout(() => {
-                setIsProcessing(false);
-                setShowPayrollResetModal(false);
-                showAlert?.('success', 'Payroll Reset Complete', 'All employee and payroll data has been cleared for the active company. The application will now reload.', () => {
-                    onRestore();
-                });
-            }, 800); // Artificial delay to ensure UI loading state registers clearly
+        if (!isAuthorized) {
+            const usersRaw = localStorage.getItem('app_users');
+            if (usersRaw) {
+                try {
+                    const users = JSON.parse(usersRaw);
+                    const dbUser = users.find((u: any) => u.username === currentUser?.username);
+                    if (dbUser && dbUser.password === typedPass) isAuthorized = true;
+                } catch (e) {}
+            }
+            if (!isAuthorized && typedPass === currentUser?.password) isAuthorized = true;
+        }
+
+        if (isAuthorized) {
+            setIsProcessing(true);
+            await onPayrollReset();
+            setIsProcessing(false);
+            setShowPayrollResetModal(false);
         } else {
             setResetError("Incorrect Login Password. Access Denied.");
         }
     };
 
-    const executeDeepReset = () => {
+    const executeDeepReset = async () => {
         const typedPass = resetPassword.trim();
-        const isMasterBypass = currentUser?.role === 'Developer' && typedPass === 'bharatpay';
+        let isAuthorized = false;
         
-        if (typedPass === currentUser?.password || isMasterBypass || (isSetupMode && typedPass === 'setup')) {
+
+        if (!isAuthorized) {
+            const usersRaw = localStorage.getItem('app_users');
+            if (usersRaw) {
+                try {
+                    const users = JSON.parse(usersRaw);
+                    const dbUser = users.find((u: any) => u.username === currentUser?.username);
+                    if (dbUser && dbUser.password === typedPass) isAuthorized = true;
+                } catch (e) {}
+            }
+            if (!isAuthorized && typedPass === currentUser?.password) isAuthorized = true;
+        }
+        
+        if (isAuthorized) {
             setIsProcessing(true);
-            const getCKey = (key: string) => activeCompanyId !== 'default' ? `${activeCompanyId}_${key}` : key;
-            
-            const keysToWipe = [
-                'app_employees', 'app_config', 'app_company_profile',
-                'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
-                'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_ot_records', 'app_logo',
-                'app_master_designations', 'app_master_divisions', 'app_master_branches', 'app_master_sites'
-            ];
-            
-            keysToWipe.forEach(k => localStorage.removeItem(getCKey(k)));
-            
-            // Mark setup as incomplete for THIS company only
-            localStorage.setItem(getCKey('app_setup_complete'), 'false');
-            localStorage.setItem('app_is_reset_mode', 'true');
-            
+            await onDeepReset();
             setIsProcessing(false);
-            showAlert?.('success', 'Company Deep Reset Complete', 'All data and profiles for this company have been wiped. You will be taken to the setup wizard.', () => {
-                onRestore();
-            });
         } else {
             setResetError("Incorrect Login Password. Access Denied.");
         }
@@ -1227,8 +1412,9 @@ const Settings: React.FC<SettingsProps> = ({
                         if (backupMode !== 'MIGRATE') {
                             setBackupMode('IMPORT');
                         }
-                        // Reset SQLite detection
+                        // Reset detections
                         setIsSqliteFile(false);
+                        setIsMachineLocked(false);
 
                         // Check Signature using ArrayBuffer (safer for binary)
                         const reader = new FileReader();
@@ -1236,14 +1422,22 @@ const Settings: React.FC<SettingsProps> = ({
                             const buffer = re.target?.result as ArrayBuffer;
                             if (buffer) {
                                 const arr = new Uint8Array(buffer);
-                                const signature = String.fromCharCode(...Array.from(arr));
-                                if (signature.startsWith('SQLite format 3')) {
+                                const header = String.fromCharCode(...Array.from(arr.slice(0, 16)));
+                                
+                                if (header.startsWith('SQLite format 3')) {
                                     setIsSqliteFile(true);
                                     setEncryptionKey(''); // Not needed for SQLite
+                                } else if (file.name.endsWith('.enc')) {
+                                    // Detect if it's binary (Type 2: Machine-Locked) or Text (Type 1: Legacy/Manual)
+                                    const isBinary = Array.from(arr).some(b => (b < 32 && b !== 9 && b !== 10 && b !== 13) || b > 126);
+                                    if (isBinary) {
+                                        setIsMachineLocked(true);
+                                        setEncryptionKey('');
+                                    }
                                 }
                             }
                         };
-                        reader.readAsArrayBuffer(file.slice(0, 16));
+                        reader.readAsArrayBuffer(file.slice(0, 100)); // Read first 100 bytes for better binary detection
 
                         setShowBackupModal(true);
                     }
@@ -1971,8 +2165,33 @@ const Settings: React.FC<SettingsProps> = ({
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1">Legal Identity & Identification</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="space-y-1"><label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label><input id="profile-est-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500 uppercase" placeholder="Your Name - as mentioned in App request mail" value={profileData.establishmentName} onChange={e => setProfileData({ ...profileData, establishmentName: e.target.value.toUpperCase() })} title="Establishment Name" aria-label="Establishment Name" /></div>
+                                    <div className="space-y-1">
+                                        <label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label>
+                                        <input id="profile-est-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500 uppercase" placeholder="Your Name - as mentioned in App request mail" value={profileData.establishmentName} onChange={e => setProfileData({ ...profileData, establishmentName: e.target.value.toUpperCase() })} title="Establishment Name" aria-label="Establishment Name" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label htmlFor="profile-db-pass" className="text-[10px] font-bold text-sky-400 uppercase">Database Access Password (Optional)</label>
+                                        <div className="relative">
+                                            <input
+                                                id="profile-db-pass"
+                                                type={showPin ? "text" : "password"}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-blue-500 font-bold placeholder:text-slate-700"
+                                                placeholder="Leave blank for open access"
+                                                value={profileData.dashboardPassword || ''}
+                                                onChange={e => setProfileData({ ...profileData, dashboardPassword: e.target.value })}
+                                                title="Optional password required to open this company from dashboard"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPin(!showPin)}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-blue-400 transition-colors"
+                                            >
+                                                {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                                            </button>
+                                        </div>
+                                    </div>
                                     <div className="space-y-1"><label htmlFor="profile-trade-name" className="text-[10px] font-bold text-slate-400 uppercase">Trade Name (If Any)</label><input id="profile-trade-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Trade Name" value={profileData.tradeName} onChange={e => setProfileData({ ...profileData, tradeName: e.target.value })} title="Trade Name" aria-label="Trade Name" /></div>
+
                                     <div className="space-y-1"><label htmlFor="profile-cin" className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)*</label><input id="profile-cin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.cin} onChange={e => setProfileData({ ...profileData, cin: e.target.value })} placeholder="U00000XX0000XXX000000" title="Corporate Identification Number" aria-label="Corporate Identification Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-pan-no" className="text-[10px] font-bold text-sky-400 uppercase">PAN Number of Establishment*</label><input id="profile-pan-no" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" placeholder="PAN Number" value={profileData.pan} onChange={e => setProfileData({ ...profileData, pan: e.target.value })} title="PAN Number" aria-label="PAN Number" /></div>
                                 </div>
@@ -2037,29 +2256,29 @@ const Settings: React.FC<SettingsProps> = ({
                             <div className="md:col-span-3">
                                 <div className="flex items-center gap-3 border-b border-slate-800 pb-2 mb-4 mt-4">
                                     <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest flex items-center gap-2">
-                                        <Lock size={12} /> PAYROLL SECURITY PIN (MANDATORY FOR FREEZE)
+                                        <Lock size={12} /> PAYROLL SECURITY PASSWORD / PIN (MANDATORY FOR FREEZE)
                                     </h4>
                                 </div>
                                 <div className="bg-amber-900/10 border border-amber-700/20 p-6 rounded-xl space-y-4">
                                     <div className="flex flex-col md:flex-row gap-6 items-start md:items-center">
                                         <div className="flex-1 space-y-2">
                                             <p className="text-[11px] text-amber-200/70 leading-relaxed">
-                                                This separate PIN is required whenever you **Freeze Attendance** or **Finalize Payroll**.
+                                                This separate Security Password / PIN is required whenever you **Freeze Attendance** or **Finalize Payroll**.
                                                 It ensures that critical data backups cannot be initiated without explicit authorization.
                                             </p>
                                         </div>
                                         <div className="w-full md:w-64 relative">
-                                            <label htmlFor="security-pin-input" className="text-[9px] font-black text-amber-500/50 uppercase tracking-widest mb-1.5 block">SECURITY PIN / PASSWORD</label>
+                                            <label htmlFor="security-pin-input" className="text-[9px] font-black text-amber-500/50 uppercase tracking-widest mb-1.5 block">SECURITY PASSWORD / PIN</label>
                                             <div className="relative">
                                                 <input
                                                     id="security-pin-input"
                                                     type={showPin ? "text" : "password"}
                                                     className="w-full bg-slate-950 border border-amber-900/30 rounded-lg p-3 text-sm text-white font-mono outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-700"
-                                                    placeholder="Enter Security PIN"
+                                                    placeholder="Enter Security Password"
                                                     value={profileData.securityPin || ''}
                                                     onChange={e => setProfileData({ ...profileData, securityPin: e.target.value })}
-                                                    title="Set Security PIN for Payroll Operations"
-                                                    aria-label="Set Security PIN for Payroll Operations"
+                                                    title="Set Security Password / PIN for Payroll Operations"
+                                                    aria-label="Set Security Password / PIN for Payroll Operations"
                                                 />
                                                 <button
                                                     type="button"
@@ -2312,7 +2531,16 @@ const Settings: React.FC<SettingsProps> = ({
                                             <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded">Encrypted (.enc)</span>
                                         </div>
                                     </div>
-                                    <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Create a secure, portable snapshot of your entire payroll database (Employees, Attendance, Settings) for archival or migration."</p>
+                                    <p className="text-[11px] text-slate-400 mb-2 leading-relaxed italic">"Create a secure, portable snapshot of your entire payroll database (Employees, Attendance, Company Profile, Statutory & Configuration Settings) for archival or migration."</p>
+                                    
+                                    {/* Filename Preview */}
+                                    <div className="mb-4 p-2.5 bg-slate-950/50 border border-slate-800/50 rounded-lg flex flex-col gap-1">
+                                        <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Filename Preview</span>
+                                        <code className="text-[10px] text-blue-400 font-mono font-bold break-all">
+                                            {generateBackupFilename(companyProfile.establishmentName, globalMonth, globalYear)}
+                                        </code>
+                                    </div>
+
                                     <button
                                         onClick={() => requireAuth(() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); })}
                                         className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
@@ -2546,7 +2774,7 @@ const Settings: React.FC<SettingsProps> = ({
                             {!isProcessing && <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Backup Modal"><X size={20} /></button>}
                             <div className="flex flex-col items-center gap-2">
                                 <div className="p-4 bg-blue-900/20 text-blue-400 rounded-full border border-blue-900/50 mb-2">{backupMode === 'EXPORT' ? <Lock size={32} /> : <Database size={32} />}</div>
-                                <h3 className="text-xl font-black text-white text-center uppercase tracking-widest">{backupMode === 'EXPORT' ? 'SECURE EXPORT' : 'Secure Restore'}</h3>
+                                <h3 className="text-xl font-black text-white text-center uppercase tracking-widest">{backupMode === 'EXPORT' ? 'SECURE EXPORT' : 'SECURE RESTORE'}</h3>
                             </div>
 
                             <div className="space-y-4 mt-2">
@@ -2569,30 +2797,44 @@ const Settings: React.FC<SettingsProps> = ({
 
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
-                                        {backupMode === 'EXPORT' ? 'SET ENCRYPTION PASSWORD' : 'ENTER DECRYPTION PASSWORD'}
+                                        {backupMode === 'EXPORT' ? 'SET ENCRYPTION PASSWORD' : (backupMode === 'MIGRATE' ? 'ENTER DECRYPTION PASSWORD' : (isBCACFile ? 'ENTER SECURITY PIN' : 'ENTER DECRYPTION PASSWORD'))}
                                     </label>
                                     <input
                                         type="password"
-                                        placeholder="Enter Password"
+                                        placeholder={isMachineLocked ? "No Password Required" : (backupMode === 'MIGRATE' ? "Enter Password" : (isBCACFile ? "Enter 6-Digit PIN" : "Enter Password"))}
                                         title="Password"
-                                        className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                        disabled={isMachineLocked}
+                                        className={`w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all ${isMachineLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         value={encryptionKey}
                                         onChange={(e) => setEncryptionKey(e.target.value)}
                                     />
+                                    {(isMachineLocked || (isSqliteFile && !isBCACFile && !encryptionKey)) && (
+                                        <div className="mt-1 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300">
+                                            <ShieldCheck size={12} className="text-emerald-400" />
+                                            <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest">Secure Binary Backup Detected</span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {backupMode === 'MIGRATE' && (
-                                    <div className="flex items-center gap-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
-                                        <input 
-                                            type="checkbox" 
-                                            id="importCurrent"
-                                            className="w-4 h-4 accent-amber-500"
-                                            checked={importIntoCurrent}
-                                            onChange={(e) => setImportIntoCurrent(e.target.checked)}
-                                        />
-                                        <label htmlFor="importCurrent" className="text-[10px] font-bold text-amber-200/80 cursor-pointer uppercase tracking-tight">
-                                            Restore into current company profile
-                                        </label>
+                                    <div className="flex flex-col p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+                                        <div className="flex items-center gap-3">
+                                            <input 
+                                                type="checkbox" 
+                                                id="importCurrent"
+                                                className="w-4 h-4 accent-amber-500"
+                                                checked={importIntoCurrent}
+                                                onChange={(e) => setImportIntoCurrent(e.target.checked)}
+                                            />
+                                            <label htmlFor="importCurrent" className="text-[10px] font-bold text-amber-200/80 cursor-pointer uppercase tracking-tight">
+                                                Restore into current company profile
+                                            </label>
+                                        </div>
+                                        {importIntoCurrent && (
+                                            <p className="text-[9px] text-amber-500 font-black uppercase mt-2 ml-7 animate-in fade-in slide-in-from-top-1">
+                                                Target: {companyProfile.establishmentName}
+                                            </p>
+                                        )}
                                     </div>
                                 )}
 
@@ -2626,6 +2868,94 @@ const Settings: React.FC<SettingsProps> = ({
                     </div>
                 )
             }
+
+            {/* OTP RECOVERY MODAL */}
+            {showRecoveryModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#020617]/95 backdrop-blur-md p-4 animate-in fade-in duration-300">
+                    <div className="w-full max-w-md bg-[#0f172a] border border-slate-800 rounded-3xl overflow-hidden shadow-2xl ring-1 ring-white/10 animate-in zoom-in-95 duration-300">
+                        <div className="p-6 bg-gradient-to-br from-blue-900/40 via-transparent to-transparent">
+                            <div className="flex justify-between items-center mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-blue-500/10 rounded-xl border border-blue-500/20 shadow-inner">
+                                        <Mail size={18} className="text-blue-400" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-black text-white uppercase tracking-widest">Identify Verification</h3>
+                                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Recover machine-locked backup</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setShowRecoveryModal(false)} className="p-2 hover:bg-slate-800 rounded-xl transition-colors" title="Close Recovery Modal" aria-label="Close">
+                                    <X size={16} className="text-slate-500" />
+                                </button>
+                            </div>
+
+                            <div className="space-y-6">
+                                {recoveryStep === 'IDENTIFY' ? (
+                                    <div className="space-y-4">
+                                        <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                                            <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
+                                                Confirm your registered email to receive a recovery code. Once verified, the cloud will authorize decryption for this machine.
+                                            </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">Registered Email ID</label>
+                                            <div className="relative group">
+                                                <Mail size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+                                                <input
+                                                    type="email"
+                                                    value={recoveryEmail}
+                                                    onChange={(e) => setRecoveryEmail(e.target.value)}
+                                                    className="w-full bg-slate-900/50 border border-slate-800 rounded-xl pl-11 pr-4 py-3 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                                                    placeholder="e.g. admin@company.com"
+                                                />
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={handleRequestRecoveryOTP}
+                                            disabled={isRecovering || !recoveryEmail}
+                                            className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                                        >
+                                            {isRecovering ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                                            Send Recovery Code
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
+                                            <p className="text-[10px] text-emerald-400/80 leading-relaxed font-medium italic">
+                                                Verification code sent! Please enter the 6-digit OTP from your email to unlock your payroll database.
+                                            </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">Enter OTP Code</label>
+                                            <div className="relative group">
+                                                <KeyRound size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-emerald-400 transition-colors" />
+                                                <input
+                                                    type="text"
+                                                    maxLength={6}
+                                                    value={recoveryOTP}
+                                                    onChange={(e) => setRecoveryOTP(e.target.value)}
+                                                    className="w-full bg-slate-900/50 border border-slate-800 rounded-xl pl-11 pr-4 py-3 text-xl font-black text-emerald-400 tracking-[0.5em] text-center outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+                                                    placeholder="000000"
+                                                />
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={handleVerifyRecoveryAndRestore}
+                                            disabled={isRecovering || recoveryOTP.length < 6}
+                                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                                        >
+                                            {isRecovering ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
+                                            Verify & Finalize Restore
+                                        </button>
+                                        <button onClick={() => setRecoveryStep('IDENTIFY')} className="w-full text-center text-[9px] text-slate-500 hover:text-slate-300 font-bold uppercase tracking-widest">Resend Code</button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {activeTab === 'LICENSE' && (
                 (() => {

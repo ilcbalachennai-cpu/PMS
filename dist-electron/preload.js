@@ -2,16 +2,21 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 electron_1.contextBridge.exposeInMainWorld('electronAPI', {
-    saveReport: (fileName, data, type) => electron_1.ipcRenderer.invoke('save-report', { fileName, data, type }),
-    saveTemplate: (fileName, data, type) => electron_1.ipcRenderer.invoke('save-template', { fileName, data, type }),
+    saveReport: (fileName, data, type, subfolder) => electron_1.ipcRenderer.invoke('save-report', { fileName, data, type, subfolder }),
+    saveTemplate: (fileName, data, type, subfolder) => electron_1.ipcRenderer.invoke('save-template', { fileName, data, type, subfolder }),
     dbSet: (key, value) => electron_1.ipcRenderer.invoke('db-set', { key, value }),
     dbGet: (key) => electron_1.ipcRenderer.invoke('db-get', key),
     dbGetAll: () => electron_1.ipcRenderer.invoke('db-get-all'),
     sendEmail: (smtpConfig, mailOptions) => electron_1.ipcRenderer.invoke('send-email', { smtpConfig, mailOptions }),
     dbDelete: (key) => electron_1.ipcRenderer.invoke('db-delete', key),
-    runBackup: (data) => electron_1.ipcRenderer.invoke('run-backup', data),
-    createDataBackup: (fileName) => electron_1.ipcRenderer.invoke('create-data-backup', fileName),
-    restoreSqliteBackup: (filePath) => electron_1.ipcRenderer.invoke('restore-sqlite-backup', filePath),
+    runBackup: (data, fileName, subfolder) => {
+        if (typeof data === 'object' && data.data) {
+            return electron_1.ipcRenderer.invoke('run-backup', data);
+        }
+        return electron_1.ipcRenderer.invoke('run-backup', fileName ? { data, fileName, subfolder } : data);
+    },
+    createDataBackup: (arg) => electron_1.ipcRenderer.invoke('create-data-backup', arg),
+    restoreSqliteBackup: (arg) => electron_1.ipcRenderer.invoke('restore-sqlite-backup', arg),
     closeApp: () => electron_1.ipcRenderer.invoke('close-app'),
     getMachineId: () => electron_1.ipcRenderer.invoke('get-machine-id'),
     selectAppDirectory: () => electron_1.ipcRenderer.invoke('select-app-directory'),
@@ -36,6 +41,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     relaunchApp: () => electron_1.ipcRenderer.invoke('relaunch-app'),
     openExternal: (url) => electron_1.ipcRenderer.invoke('open-external', url),
     getIsElectron: () => true,
-    getIsDev: () => process.env.NODE_ENV === 'development'
+    getIsDev: () => process.env.NODE_ENV === 'development',
+    switchCompanyData: (companyId) => electron_1.ipcRenderer.invoke('switch-company-data', companyId),
+    dbSetGlobal: (key, value) => electron_1.ipcRenderer.invoke('db-set-global', { key, value }),
+    wipeAllData: () => electron_1.ipcRenderer.invoke('wipe-all-data')
 });
 console.log("EB: Electron Bridge (electronAPI) Initialized");
