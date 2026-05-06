@@ -669,12 +669,22 @@ const Settings: React.FC<SettingsProps> = ({
         reader.readAsText(file);
     };
 
-    const executeLegacyMigration = async () => {
+    const initiateLegacyMigration = () => {
         const file = selectedBackupFile;
         if (!file || !encryptionKey) {
             showAlert?.('warning', 'Input Required', 'Please select a legacy .enc file and enter the decryption password.');
             return;
         }
+
+        // 2FA: Require Login Password to finalize the migration
+        requireAuth(() => {
+            executeLegacyMigration();
+        });
+    };
+
+    const executeLegacyMigration = async () => {
+        const file = selectedBackupFile;
+        if (!file) return;
 
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -2598,7 +2608,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 )}
 
                                 <button
-                                    onClick={backupMode === 'EXPORT' ? handleEncryptedExport : backupMode === 'MIGRATE' ? executeLegacyMigration : initiateRestore}
+                                    onClick={backupMode === 'EXPORT' ? handleEncryptedExport : backupMode === 'MIGRATE' ? initiateLegacyMigration : initiateRestore}
                                     disabled={isProcessing || (backupMode !== 'EXPORT' && !selectedBackupFile)}
                                     className={`w-full ${backupMode === 'MIGRATE' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'} disabled:opacity-50 text-white font-black text-xs py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-widest`}
                                 >
