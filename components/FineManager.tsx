@@ -177,6 +177,17 @@ const FineManager: React.FC<FineManagerProps> = ({
         reader.readAsBinaryString(file);
     };
 
+    // --- AGGREGATE TOTALS FOR TABLE SUMMARY ---
+    const totalTax = filteredEmployees.reduce((acc, emp) => {
+        const rec = fines.find(f => f.employeeId === emp.id && f.month === month && f.year === year);
+        return acc + (rec?.tax || 0);
+    }, 0);
+
+    const totalFine = filteredEmployees.reduce((acc, emp) => {
+        const rec = fines.find(f => f.employeeId === emp.id && f.month === month && f.year === year);
+        return acc + (rec?.amount || 0);
+    }, 0);
+
     return (
         <div className="space-y-6">
             {isLocked && (
@@ -219,14 +230,14 @@ const FineManager: React.FC<FineManagerProps> = ({
                 </div>
             </div>
 
-            <div className="bg-[#1e293b] rounded-xl border border-slate-800 overflow-hidden shadow-2xl overflow-x-auto">
+            <div className={`bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl max-h-[600px] overflow-y-auto custom-scrollbar`}>
                 <table className="w-full text-left">
                     <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-normal font-bold">
                         <tr>
-                            <th className="px-5 py-3">Employee Identity</th>
-                            <th className="px-3 py-3 text-right">Income Tax (₹)</th>
-                            <th className="px-3 py-3 text-right">Fine Amount (₹)</th>
-                            <th className="px-5 py-3">Reason / Remarks</th>
+                            <th className="px-5 py-3 bg-[#0f172a] sticky top-0 z-10">Employee Identity</th>
+                            <th className="px-3 py-3 text-right bg-[#0f172a] sticky top-0 z-10">Income Tax (₹)</th>
+                            <th className="px-3 py-3 text-right bg-[#0f172a] sticky top-0 z-10">Fine Amount (₹)</th>
+                            <th className="px-5 py-3 bg-[#0f172a] sticky top-0 z-10">Reason / Remarks</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
@@ -280,6 +291,14 @@ const FineManager: React.FC<FineManagerProps> = ({
                             );
                         })}
                     </tbody>
+                    <tfoot className="sticky bottom-0 z-20 bg-[#0f172a]/95 backdrop-blur-md border-t-2 border-slate-700 shadow-[0_-4px_10px_rgba(0,0,0,0.3)]">
+                        <tr className="text-[10px] font-black uppercase tracking-tight">
+                            <td className="px-5 py-3 text-sky-400">Total Summary</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-white text-xs font-black">{totalTax > 0 ? totalTax.toFixed(2) : '-'}</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-white text-xs font-black">{totalFine > 0 ? totalFine.toFixed(2) : '-'}</td>
+                            <td className="px-5 py-2.5"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
 

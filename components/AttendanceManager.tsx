@@ -80,6 +80,13 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     });
   }, [employees, month, year]);
 
+  const totalPresentDays = useMemo(() => {
+    return activeEmployees.reduce((acc, emp) => {
+      const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { presentDays: 0 };
+      return acc + (att.presentDays || 0);
+    }, 0);
+  }, [activeEmployees, attendances, month, year]);
+
   // Helper to get or create attendance record for current view
   const getAttendance = (empId: string) => {
     return attendances.find(a => a.employeeId === empId && a.month === month && a.year === year) ||
@@ -432,6 +439,14 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
     );
   }
 
+  // --- AGGREGATE TOTALS FOR TABLE SUMMARY ---
+  const totalEL = activeEmployees.reduce((acc, emp) => acc + (getAttendance(emp.id).earnedLeave || 0), 0);
+  const totalEncash = activeEmployees.reduce((acc, emp) => acc + (getAttendance(emp.id).encashedDays || 0), 0);
+  const totalSL = activeEmployees.reduce((acc, emp) => acc + (getAttendance(emp.id).sickLeave || 0), 0);
+  const totalCL = activeEmployees.reduce((acc, emp) => acc + (getAttendance(emp.id).casualLeave || 0), 0);
+  const totalLOP = activeEmployees.reduce((acc, emp) => acc + (getAttendance(emp.id).lopDays || 0), 0);
+  const totalAllDays = totalPresentDays + totalEL + totalSL + totalCL + totalLOP;
+
   return (
     <div className="space-y-6">
 
@@ -553,18 +568,18 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
         </div>
       </div>
 
-      <div className={`bg-[#1e293b] rounded-xl border border-slate-800 overflow-hidden shadow-2xl ${isLocked ? 'opacity-80 pointer-events-none' : ''}`}>
+      <div className={`bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl max-h-[600px] overflow-y-auto custom-scrollbar ${isLocked ? 'opacity-80 pointer-events-none' : ''}`}>
         <table className="w-full text-left">
           <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-normal font-bold">
             <tr>
-              <th className="px-5 py-3">Employee Identity</th>
-              <th className="px-3 py-3 text-center">Present Days</th>
-              <th className="px-3 py-3 text-center">EL (Availed)</th>
-              <th className="px-3 py-3 text-center text-orange-400">EL Encash</th>
-              <th className="px-3 py-3 text-center">SL (Sick)</th>
-              <th className="px-3 py-3 text-center">CL (Casual)</th>
-              <th className="px-3 py-3 text-center text-red-400">LOP</th>
-              <th className="px-5 py-3">Status & Alerts</th>
+              <th className="px-5 py-3 bg-[#0f172a] sticky top-0 z-10">Employee Identity</th>
+              <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">Present Days</th>
+              <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">EL (Availed)</th>
+              <th className="px-3 py-3 text-center text-orange-400 bg-[#0f172a] sticky top-0 z-10">EL Encash</th>
+              <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">SL (Sick)</th>
+              <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">CL (Casual)</th>
+              <th className="px-3 py-3 text-center text-red-400 bg-[#0f172a] sticky top-0 z-10">LOP</th>
+              <th className="px-5 py-3 bg-[#0f172a] sticky top-0 z-10">Status & Alerts</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
@@ -685,6 +700,18 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
               )
             })}
           </tbody>
+          <tfoot className="sticky bottom-0 z-20 bg-[#0f172a]/95 backdrop-blur-md border-t-2 border-slate-700 shadow-[0_-4px_10px_rgba(0,0,0,0.3)]">
+            <tr className="text-[10px] font-black uppercase tracking-tight">
+              <td className="px-5 py-3 text-sky-400">Total Summary</td>
+              <td className="px-3 py-2.5 text-center font-mono text-white text-xs font-black">{totalPresentDays.toFixed(1)}</td>
+              <td className="px-3 py-2.5 text-center font-mono text-white text-xs font-black">{totalEL.toFixed(1)}</td>
+              <td className="px-3 py-2.5 text-center font-mono text-white text-xs font-black">{totalEncash.toFixed(1)}</td>
+              <td className="px-3 py-2.5 text-center font-mono text-white text-xs font-black">{totalSL.toFixed(1)}</td>
+              <td className="px-3 py-2.5 text-center font-mono text-white text-xs font-black">{totalCL.toFixed(1)}</td>
+              <td className="px-3 py-2.5 text-center font-mono text-white text-xs font-black">{totalLOP.toFixed(1)}</td>
+              <td className="px-5 py-2.5 text-center font-mono text-white text-xs font-black">{totalAllDays.toFixed(1)}</td>
+            </tr>
+          </tfoot>
         </table>
       </div>
 

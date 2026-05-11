@@ -46,7 +46,7 @@ export const useSync = (props: SyncProps) => {
         const allUsersRaw = localStorage.getItem('app_users');
         const allUsers = (() => { try { return allUsersRaw ? JSON.parse(allUsersRaw) : []; } catch { return []; } })();
         
-        const getCKey = (key: string) => key;
+        const getCKey = (key: string) => `${key}_${activeCompanyId}`;
 
         const keys = [
           { k: 'app_employees', v: employees },

@@ -116,6 +116,10 @@ export interface StatutoryConfig {
   bonusWagesComponents: WageBasisComponents;
   gratuityWagesComponents: WageBasisComponents;
   enableArrearSalary: boolean;
+  
+  // NEW: Dynamic Pay Sheet Settings
+  enableDynamicPaySheet?: boolean;
+  dynamicPaySheetColumns?: string[];
 }
 
 export interface CompanyProfile {
@@ -301,6 +305,7 @@ export interface PayrollResult {
     bonus: number;
     leaveEncashment: number;
     otAmount: number; // New: Overtime Payment
+    arrears: number; // New: Arrear Payment
     total: number;
   };
   deductions: {
@@ -385,6 +390,7 @@ export interface ArrearRecord {
 }
 
 export interface ArrearBatch {
+  id?: string;
   companyId?: string;
   month: string;
   year: number;
@@ -392,6 +398,7 @@ export interface ArrearBatch {
   effectiveYear: number;
   records: ArrearRecord[];
   status?: 'Draft' | 'Finalized';
+  createdAt?: string;
 }
 
 export interface User {
@@ -415,6 +422,15 @@ export enum View {
   Utilities = 'utilities',
   Settings = 'settings',
   AI_Assistant = 'ai_assistant'
+}
+
+export enum SettingsTab {
+  Company = 'COMPANY',
+  Statutory = 'STATUTORY',
+  Data = 'DATA',
+  Developer = 'DEVELOPER',
+  License = 'LICENSE',
+  Users = 'USERS'
 }
 
 export interface LicenseData {

@@ -49,6 +49,12 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default') => {
       }
 
       if (latestDraftPeriod) return latestDraftPeriod;
+      
+      // V03.01.04: Default to last frozen month if available, else standard baseline
+      if (lastLockedVal > getMonthValue('March', 2025)) {
+        return { month: monthsArr[lastLockedVal % 12], year: Math.floor(lastLockedVal / 12) };
+      }
+      
       const nextVal = lastLockedVal + 1;
       return { month: monthsArr[nextVal % 12], year: Math.floor(nextVal / 12) };
     } catch (e) {

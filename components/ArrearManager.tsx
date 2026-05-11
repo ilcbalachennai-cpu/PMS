@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { TrendingUp, Calendar, Save, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
+import { TrendingUp, Calendar, Save, AlertTriangle, CheckCircle2, Lock, RefreshCw } from 'lucide-react';
 import { Employee, CompanyProfile, ArrearBatch, ArrearRecord, PayrollResult } from '../types';
 import { formatIndianNumber } from '../utils/formatters';
 
@@ -45,9 +45,27 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     const finalizedBatch = useMemo(() => arrearHistory?.find(b => b.month === currentMonth && b.year === currentYear && b.status === 'Finalized'), [arrearHistory, currentMonth, currentYear]);
     const existingBatch = activeDraft || finalizedBatch;
 
+    const isPayrollLocked = useMemo(() => {
+        return savedRecords.some(r => r.month === currentMonth && r.year === currentYear && r.status === 'Finalized');
+    }, [savedRecords, currentMonth, currentYear]);
+
     const isLocked = useMemo(() => {
-        return !!finalizedBatch || savedRecords.some(r => r.month === currentMonth && r.year === currentYear && r.status === 'Finalized');
-    }, [savedRecords, currentMonth, currentYear, finalizedBatch]);
+        // If there is an active draft (including a recently unlocked one), 
+        // we are ONLY locked if the entire payroll for the month is finalized.
+        if (activeDraft) return isPayrollLocked;
+        
+        // Otherwise, we are locked if payroll is finalized OR if the arrear itself is finalized.
+        return isPayrollLocked || !!finalizedBatch;
+    }, [isPayrollLocked, activeDraft, finalizedBatch]);
+
+    const handleUnlockArrear = () => {
+        if (isPayrollLocked) return;
+        showAlert('confirm', 'Unlock Arrear Revision?', 'This will allow you to modify salary revisions for this month. The Employee Master records will be re-updated when you eventually re-finalize. \n\nProceed to unlock?', () => {
+            if (setArrearHistory && finalizedBatch) {
+                setArrearHistory(prev => (prev || []).map(b => b.id === finalizedBatch.id ? { ...b, status: 'Draft' } : b));
+            }
+        });
+    };
 
     // New State for Explicit Arrear Processing Month Selection
     const [showProcessMonthModal, setShowProcessMonthModal] = useState<boolean>(!existingBatch);
@@ -121,48 +139,65 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
     };
 
     const getProposedSalary = (emp: Employee) => {
-        let newBasic = emp.basicPay;
-        let newDA = emp.da || 0;
-        let newRetaining = emp.retainingAllowance || 0;
-        let newHRA = emp.hra || 0;
-        let newConveyance = emp.conveyance || 0;
-        let newWashing = emp.washing || 0;
-        let newAttire = emp.attire || 0;
-        let newSpecial1 = emp.specialAllowance1 || 0;
-        let newSpecial2 = emp.specialAllowance2 || 0;
-        let newSpecial3 = emp.specialAllowance3 || 0;
+        // We use the 'existingBatch' (either Draft or Finalized) as the source of truth for the 'old' baseline.
+        // This ensures that even if the Master is updated, the Arrear Grid always shows 
+        // the original wages from before the very first revision of this month.
+        const batchRecord = existingBatch?.records.find(r => r.id === emp.id);
+        
+        const baseBasic = batchRecord ? batchRecord.oldBasic : Math.round(emp.basicPay);
+        const baseDA = batchRecord ? batchRecord.oldDA : Math.round(emp.da || 0);
+        const baseRetaining = batchRecord ? batchRecord.oldRetaining : Math.round(emp.retainingAllowance || 0);
+        const baseHRA = batchRecord ? batchRecord.oldHRA : Math.round(emp.hra || 0);
+        const baseConveyance = batchRecord ? batchRecord.oldConveyance : Math.round(emp.conveyance || 0);
+        const baseWashing = batchRecord ? batchRecord.oldWashing : Math.round(emp.washing || 0);
+        const baseAttire = batchRecord ? batchRecord.oldAttire : Math.round(emp.attire || 0);
+        const baseSpecial1 = batchRecord ? batchRecord.oldSpecial1 : Math.round(emp.specialAllowance1 || 0);
+        const baseSpecial2 = batchRecord ? batchRecord.oldSpecial2 : Math.round(emp.specialAllowance2 || 0);
+        const baseSpecial3 = batchRecord ? batchRecord.oldSpecial3 : Math.round(emp.specialAllowance3 || 0);
+
+        let newBasic = baseBasic;
+        let newDA = baseDA;
+        let newRetaining = baseRetaining;
+        let newHRA = baseHRA;
+        let newConveyance = baseConveyance;
+        let newWashing = baseWashing;
+        let newAttire = baseAttire;
+        let newSpecial1 = baseSpecial1;
+        let newSpecial2 = baseSpecial2;
+        let newSpecial3 = baseSpecial3;
 
         if (incrementType === 'Percentage') {
             const pct = percentageMode === 'Flat' ? flatPercentage : (specificPercentages[emp.id] || 0);
             const factor = 1 + (pct / 100);
-            newBasic = Math.round(emp.basicPay * factor);
-            newDA = Math.round((emp.da || 0) * factor);
-            newRetaining = Math.round((emp.retainingAllowance || 0) * factor);
-            newHRA = Math.round((emp.hra || 0) * factor);
-            newConveyance = Math.round((emp.conveyance || 0) * factor);
-            newWashing = Math.round((emp.washing || 0) * factor);
-            newAttire = Math.round((emp.attire || 0) * factor);
-            newSpecial1 = Math.round((emp.specialAllowance1 || 0) * factor);
-            newSpecial2 = Math.round((emp.specialAllowance2 || 0) * factor);
-            newSpecial3 = Math.round((emp.specialAllowance3 || 0) * factor);
+            newBasic = Math.round(baseBasic * factor);
+            newDA = Math.round(baseDA * factor);
+            newRetaining = Math.round(baseRetaining * factor);
+            newHRA = Math.round(baseHRA * factor);
+            newConveyance = Math.round(baseConveyance * factor);
+            newWashing = Math.round(baseWashing * factor);
+            newAttire = Math.round(baseAttire * factor);
+            newSpecial1 = Math.round(baseSpecial1 * factor);
+            newSpecial2 = Math.round(baseSpecial2 * factor);
+            newSpecial3 = Math.round(baseSpecial3 * factor);
         } else {
             const inc = adhocIncrements[emp.id] || { basic: 0, da: 0, retaining: 0, hra: 0, conveyance: 0, washing: 0, attire: 0, special1: 0, special2: 0, special3: 0 };
-            newBasic = Math.round(emp.basicPay + (inc.basic || 0));
-            newDA = Math.round((emp.da || 0) + (inc.da || 0));
-            newRetaining = Math.round((emp.retainingAllowance || 0) + (inc.retaining || 0));
-            newHRA = Math.round((emp.hra || 0) + (inc.hra || 0));
-            newConveyance = Math.round((emp.conveyance || 0) + (inc.conveyance || 0));
-            newWashing = Math.round((emp.washing || 0) + (inc.washing || 0));
-            newAttire = Math.round((emp.attire || 0) + (inc.attire || 0));
-            newSpecial1 = Math.round((emp.specialAllowance1 || 0) + (inc.special1 || 0));
-            newSpecial2 = Math.round((emp.specialAllowance2 || 0) + (inc.special2 || 0));
-            newSpecial3 = Math.round((emp.specialAllowance3 || 0) + (inc.special3 || 0));
+            newBasic = Math.round(baseBasic + (inc.basic || 0));
+            newDA = Math.round(baseDA + (inc.da || 0));
+            newRetaining = Math.round(baseRetaining + (inc.retaining || 0));
+            newHRA = Math.round(baseHRA + (inc.hra || 0));
+            newConveyance = Math.round(baseConveyance + (inc.conveyance || 0));
+            newWashing = Math.round(baseWashing + (inc.washing || 0));
+            newAttire = Math.round(baseAttire + (inc.attire || 0));
+            newSpecial1 = Math.round(baseSpecial1 + (inc.special1 || 0));
+            newSpecial2 = Math.round(baseSpecial2 + (inc.special2 || 0));
+            newSpecial3 = Math.round(baseSpecial3 + (inc.special3 || 0));
         }
 
-        const oldGross = Math.round(emp.basicPay + (emp.da || 0) + (emp.retainingAllowance || 0) + (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + (emp.attire || 0) + (emp.specialAllowance1 || 0) + (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0));
+        const oldGross = Math.round(baseBasic + baseDA + baseRetaining + baseHRA + baseConveyance + baseWashing + baseAttire + baseSpecial1 + baseSpecial2 + baseSpecial3);
         const newGross = Math.round(newBasic + newDA + newRetaining + newHRA + newConveyance + newWashing + newAttire + newSpecial1 + newSpecial2 + newSpecial3);
 
         return {
+            oldBasic: baseBasic, oldDA: baseDA, oldRetaining: baseRetaining, oldHRA: baseHRA, oldConveyance: baseConveyance, oldWashing: baseWashing, oldAttire: baseAttire, oldSpecial1: baseSpecial1, oldSpecial2: baseSpecial2, oldSpecial3: baseSpecial3,
             newBasic, newDA, newRetaining, newHRA, newConveyance, newWashing, newAttire, newSpecial1, newSpecial2, newSpecial3,
             oldGross, newGross
         };
@@ -179,51 +214,38 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
 
         const arrearRecords: ArrearRecord[] = [];
         employees.forEach(emp => {
-            const {
-                newBasic, newDA, newRetaining, newHRA, newConveyance, newWashing, newAttire, newSpecial1, newSpecial2, newSpecial3,
-                oldGross, newGross
-            } = getProposedSalary(emp);
-
-            const oldBasic = Math.round(emp.basicPay);
-            const oldDA = Math.round(emp.da || 0);
-            const oldRetaining = Math.round(emp.retainingAllowance || 0);
-            const oldHRA = Math.round(emp.hra || 0);
-            const oldConveyance = Math.round(emp.conveyance || 0);
-            const oldWashing = Math.round(emp.washing || 0);
-            const oldAttire = Math.round(emp.attire || 0);
-            const oldSpecial1 = Math.round(emp.specialAllowance1 || 0);
-            const oldSpecial2 = Math.round(emp.specialAllowance2 || 0);
-            const oldSpecial3 = Math.round(emp.specialAllowance3 || 0);
-
-            const diffBasic = newBasic - oldBasic;
-            const diffDA = newDA - oldDA;
-            const diffRetaining = newRetaining - oldRetaining;
-            const diffHRA = newHRA - oldHRA;
-            const diffConveyance = newConveyance - oldConveyance;
-            const diffWashing = newWashing - oldWashing;
-            const diffAttire = newAttire - oldAttire;
-            const diffSpecial1 = newSpecial1 - oldSpecial1;
-            const diffSpecial2 = newSpecial2 - oldSpecial2;
-            const diffSpecial3 = newSpecial3 - oldSpecial3;
-            const diffGross = newGross - oldGross;
+            const proposed = getProposedSalary(emp);
+            
+            const diffBasic = proposed.newBasic - proposed.oldBasic;
+            const diffDA = proposed.newDA - proposed.oldDA;
+            const diffRetaining = proposed.newRetaining - proposed.oldRetaining;
+            const diffHRA = proposed.newHRA - proposed.oldHRA;
+            const diffConveyance = proposed.newConveyance - proposed.oldConveyance;
+            const diffWashing = proposed.newWashing - proposed.oldWashing;
+            const diffAttire = proposed.newAttire - proposed.oldAttire;
+            const diffSpecial1 = proposed.newSpecial1 - proposed.oldSpecial1;
+            const diffSpecial2 = proposed.newSpecial2 - proposed.oldSpecial2;
+            const diffSpecial3 = proposed.newSpecial3 - proposed.oldSpecial3;
+            const diffGross = proposed.newGross - proposed.oldGross;
 
             const monthlyIncr = Math.round(diffGross);
 
-            if (monthlyIncr > 0 && monthsPassed > 0) {
+            // We save the record if there is ANY difference from original wages
+            if (Math.abs(monthlyIncr) > 0 && monthsPassed > 0) {
                 arrearRecords.push({
                     id: emp.id,
                     name: emp.name,
-                    oldBasic, newBasic, diffBasic,
-                    oldDA, newDA, diffDA,
-                    oldRetaining, newRetaining, diffRetaining,
-                    oldHRA, newHRA, diffHRA,
-                    oldConveyance, newConveyance, diffConveyance,
-                    oldWashing, newWashing, diffWashing,
-                    oldAttire, newAttire, diffAttire,
-                    oldSpecial1, newSpecial1, diffSpecial1,
-                    oldSpecial2, newSpecial2, diffSpecial2,
-                    oldSpecial3, newSpecial3, diffSpecial3,
-                    oldGross, newGross, diffGross,
+                    oldBasic: proposed.oldBasic, newBasic: proposed.newBasic, diffBasic,
+                    oldDA: proposed.oldDA, newDA: proposed.newDA, diffDA,
+                    oldRetaining: proposed.oldRetaining, newRetaining: proposed.newRetaining, diffRetaining,
+                    oldHRA: proposed.oldHRA, newHRA: proposed.newHRA, diffHRA,
+                    oldConveyance: proposed.oldConveyance, newConveyance: proposed.newConveyance, diffConveyance,
+                    oldWashing: proposed.oldWashing, newWashing: proposed.newWashing, diffWashing,
+                    oldAttire: proposed.oldAttire, newAttire: proposed.newAttire, diffAttire,
+                    oldSpecial1: proposed.oldSpecial1, newSpecial1: proposed.newSpecial1, diffSpecial1,
+                    oldSpecial2: proposed.oldSpecial2, newSpecial2: proposed.newSpecial2, diffSpecial2,
+                    oldSpecial3: proposed.oldSpecial3, newSpecial3: proposed.newSpecial3, diffSpecial3,
+                    oldGross: proposed.oldGross, newGross: proposed.newGross, diffGross,
                     diffOthers: 0,
                     monthlyIncrement: monthlyIncr,
                     months: monthsPassed,
@@ -233,8 +255,30 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
         });
 
         if (arrearRecords.length > 0 && setArrearHistory) {
-
-            showAlert('success', 'Draft Saved', `Draft Arrear Wages successfully saved. Proceed to Pay Reports to generate the Arrear Salary PDF.`);
+            if (activeDraft) {
+                // UPDATE EXISTING DRAFT
+                setArrearHistory(prev => (prev || []).map(b => b.id === activeDraft.id ? {
+                    ...b,
+                    records: arrearRecords,
+                    effectiveMonth,
+                    effectiveYear,
+                    status: 'Draft'
+                } : b));
+            } else {
+                // CREATE NEW BATCH
+                const newBatch: ArrearBatch = {
+                    id: `arrear_${currentMonth}_${currentYear}_${Date.now()}`,
+                    month: currentMonth,
+                    year: currentYear,
+                    effectiveMonth,
+                    effectiveYear,
+                    status: 'Draft',
+                    createdAt: new Date().toISOString(),
+                    records: arrearRecords
+                };
+                setArrearHistory(prev => [...(prev || []), newBatch]);
+            }
+            showAlert('success', 'Draft Saved', 'Arrear revision draft has been saved. You MUST click "Confirm & Finalize" to update the Employee Master records.');
         } else {
             showAlert('info', 'No Data', `No increments calculated to save as draft.`);
         }
@@ -245,11 +289,13 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
         setShowConfirmation(true);
     };
 
-    const executeFinalize = () => {
+    const executeFinalize = (recordsFromUI?: ArrearRecord[]) => {
         setIsProcessing(true);
 
-        if (!activeDraft) {
-            showAlert('error', 'No Draft', 'No draft found to finalize.');
+        const recordsToApply = recordsFromUI || activeDraft?.records;
+
+        if (!recordsToApply) {
+            showAlert('error', 'No Data', 'No salary revision data found to finalize.');
             setIsProcessing(false);
             setShowConfirmation(false);
             return;
@@ -258,7 +304,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
         const updatedEmployees = employees.map(emp => {
             if (emp.dol) return emp; // Skip ex-employees for master update
 
-            const draftRecord = activeDraft.records.find(r => r.id === emp.id);
+            const draftRecord = recordsToApply.find(r => r.id === emp.id);
             if (draftRecord) {
                 return {
                     ...emp,
@@ -280,15 +326,31 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
         // 1. Update Master
         setEmployees(updatedEmployees);
 
-        // 2. Mark Draft as Finalized
+        // 2. Mark Draft as Finalized OR Save New Finalized Batch
         if (setArrearHistory) {
-            setArrearHistory(prev => (prev || []).map(b => b.month === currentMonth && b.year === currentYear && b.status === 'Draft' ? { ...b, status: 'Finalized' } : b));
+            if (activeDraft) {
+                setArrearHistory(prev => (prev || []).map(b => b.month === currentMonth && b.year === currentYear && b.status === 'Draft' ? { ...b, status: 'Finalized' } : b));
+            } else {
+                const newBatch: ArrearBatch = {
+                    id: `arrear_${currentMonth}_${currentYear}_${Date.now()}`,
+                    month: currentMonth,
+                    year: currentYear,
+                    effectiveMonth,
+                    effectiveYear,
+                    status: 'Finalized',
+                    createdAt: new Date().toISOString(),
+                    records: recordsToApply
+                };
+                setArrearHistory(prev => [...(prev || []), newBatch]);
+            }
         }
 
         setIsProcessing(false);
         setShowConfirmation(false);
-        showAlert('success', 'Finalization Complete', `Arrear Wages permanently finalized! Employee Pay Details are updated successfully.`);
+        showAlert('success', 'Master Database Updated', 'Employee Master records have been permanently updated with the revised salary structure. \n\nIMPORTANT: Please go to the "Run Payroll" tab and click "Calculate Sheet" to apply these new wages to the current month\'s payroll results.');
     };
+
+
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -504,7 +566,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                         </td>
 
                                         {/* BASIC */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.basicPay))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldBasic || 0)}</td>
                                         {incrementType === 'Adhoc' ? renderAdhocInput('basic') : (
                                             percentageMode === 'Specific' && (
                                                 <td className="px-2 py-2 text-center bg-blue-900/10">
@@ -523,47 +585,47 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newBasic)}</td>
 
                                         {/* DA */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.da || 0))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldDA || 0)}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('da')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newDA)}</td>
 
                                         {/* Retaining */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.retainingAllowance || 0))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldRetaining || 0)}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('retaining')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newRetaining)}</td>
 
                                         {/* HRA */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.hra || 0))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldHRA || 0)}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('hra')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newHRA)}</td>
 
                                         {/* Conveyance */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.conveyance || 0))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldConveyance || 0)}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('conveyance')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newConveyance)}</td>
 
                                         {/* Washing */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.washing || 0))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldWashing || 0)}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('washing')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newWashing)}</td>
 
                                         {/* Attire */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.attire || 0))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldAttire || 0)}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('attire')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newAttire)}</td>
 
                                         {/* Special 1 */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.specialAllowance1 || 0))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldSpecial1 || 0)}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('special1')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newSpecial1)}</td>
 
                                         {/* Special 2 */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.specialAllowance2 || 0))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldSpecial2 || 0)}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('special2')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newSpecial2)}</td>
 
                                         {/* Special 3 */}
-                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(Math.round(emp.specialAllowance3 || 0))}</td>
+                                        <td className="px-4 py-2 text-right font-mono text-slate-400 bg-slate-900/20">{formatIndianNumber(proposed.oldSpecial3 || 0)}</td>
                                         {incrementType === 'Adhoc' && renderAdhocInput('special3')}
                                         <td className="px-4 py-2 text-right font-mono font-bold text-emerald-400 border-r border-slate-800/50">{formatIndianNumber(proposed.newSpecial3)}</td>
 
@@ -580,16 +642,52 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                     </table>
                 </div>
 
-                <div className="mt-4 flex justify-end gap-3">
-                    {!isLocked && (
-                        <button onClick={handleSaveDraft} disabled={isProcessing} title="Save Arrear Calculation as Draft" aria-label="Save Arrear Calculation as Draft" className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl border border-slate-600 shadow-lg transition-all flex items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-50">
-                            <Save size={15} /> Save Draft
-                        </button>
-                    )}
-                    {activeDraft && !isLocked && (
-                        <button onClick={handleFinalizeBtn} disabled={isProcessing} title="Confirm and Finalize Arrear Wages" aria-label="Confirm and Finalize Arrear Wages" className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all flex items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-50">
-                            <CheckCircle2 size={15} /> Confirm & Finalize
-                        </button>
+                <div className="mt-4 flex flex-wrap justify-end gap-3">
+                    {!isLocked ? (
+                        <>
+                            {/* UNLOCKED STATE: Show Save and Finalize */}
+                            <button 
+                                onClick={handleSaveDraft} 
+                                disabled={isProcessing} 
+                                title="Save Arrear calculation as Draft" 
+                                aria-label="Save Arrear calculation as Draft" 
+                                className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl border border-slate-600 shadow-lg transition-all flex items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                            >
+                                <Save size={15} /> Save Draft
+                            </button>
+
+                            <button 
+                                onClick={handleFinalizeBtn} 
+                                disabled={isProcessing} 
+                                title="Confirm and Finalize Arrear Wages" 
+                                aria-label="Confirm and Finalize Arrear Wages" 
+                                className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all flex items-center gap-2 transform hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                            >
+                                <CheckCircle2 size={15} /> Confirm & Finalize
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            {/* LOCKED STATE: Show Frozen status and Unlock button (if allowed) */}
+                            <button 
+                                disabled={true} 
+                                className="px-6 py-2.5 bg-amber-950/30 text-amber-400 border border-amber-600/50 cursor-not-allowed rounded-xl ring-1 ring-amber-900/30 shadow-[0_0_15px_rgba(251,191,36,0.1)] flex items-center gap-2 font-bold text-xs uppercase tracking-wider opacity-90"
+                            >
+                                <Lock size={15} /> Arrear Frozen
+                            </button>
+
+                            {!isPayrollLocked && (
+                                <button 
+                                    onClick={handleUnlockArrear} 
+                                    disabled={isProcessing} 
+                                    title="Unlock Arrear to allow revisions" 
+                                    aria-label="Unlock Arrear to allow revisions" 
+                                    className="px-6 py-2.5 bg-red-900/20 hover:bg-red-900/40 text-red-400 font-bold text-xs uppercase tracking-wider rounded-xl border border-red-900/50 shadow-lg transition-all flex items-center gap-2 transform hover:scale-[1.02] active:scale-95"
+                                >
+                                    <RefreshCw size={15} className={isProcessing ? 'animate-spin' : ''} /> Unlock Revision
+                                </button>
+                            )}
+                        </>
                     )}
                 </div>
             </div>
@@ -615,7 +713,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                             <button onClick={() => setShowConfirmation(false)} title="Cancel Finalization" aria-label="Cancel Finalization" className="flex-1 py-3 rounded-xl border border-slate-600 text-slate-400 font-bold hover:bg-slate-800 hover:text-white transition-all text-sm">
                                 Cancel
                             </button>
-                            <button onClick={executeFinalize} title="Execute Permanent Finalization" aria-label="Execute Permanent Finalization" className="flex-1 flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg transition-all text-sm">
+                            <button onClick={() => executeFinalize()} title="Execute Permanent Finalization" aria-label="Execute Permanent Finalization" className="flex-1 flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg transition-all text-sm">
                                 <CheckCircle2 size={18} /> Finalize App
                             </button>
                         </div>

@@ -8,7 +8,7 @@ import {
     ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
     FolderOpen
 } from 'lucide-react';
-import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData } from '../types';
+import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData, SettingsTab } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
 import {
@@ -38,7 +38,8 @@ interface SettingsProps {
     onNuclearReset: () => void;
     onPayrollReset: () => Promise<void>;
     onDeepReset: () => Promise<void>;
-    initialTab?: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS';
+    initialTab?: SettingsTab;
+    setSettingsTab?: (tab: SettingsTab) => void;
     userRole?: string;
     currentUser?: User;
     isSetupMode?: boolean;
@@ -48,19 +49,30 @@ interface SettingsProps {
     verifyLicense?: () => Promise<void>;
     activeCompanyId?: string;
     onOpenGate?: () => void;
+    onRescueOrganizations?: () => Promise<void>;
+    onInitiateSecureDelete?: (id: string) => void;
     globalMonth?: string;
     globalYear?: number;
 }
 
 const Settings: React.FC<SettingsProps> = ({ 
     config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo, 
-    leavePolicy, setLeavePolicy, onRestore, onNuclearReset, onPayrollReset, onDeepReset, initialTab = 'COMPANY', 
+    leavePolicy, setLeavePolicy, onRestore, onNuclearReset, onPayrollReset, onDeepReset, initialTab = SettingsTab.Company, 
+    setSettingsTab,
     userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange, 
-    showAlert, verifyLicense, activeCompanyId = 'default', onOpenGate,
+    showAlert, verifyLicense, activeCompanyId = 'default', onRescueOrganizations, onInitiateSecureDelete,
     globalMonth = 'April', globalYear = 2025
 }) => {
-    const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${activeCompanyId}_${key}`;
-    const [activeTab, setActiveTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(initialTab);
+    const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${key}_${activeCompanyId}`;
+    const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
+        const saved = localStorage.getItem('settings_initial_tab') || sessionStorage.getItem('settings_initial_tab');
+        if (saved) {
+            localStorage.removeItem('settings_initial_tab');
+            sessionStorage.removeItem('settings_initial_tab');
+            return saved as SettingsTab;
+        }
+        return initialTab;
+    });
 
     const [formData, setFormData] = useState<StatutoryConfig>(() => {
         const pfOrig = config.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
@@ -100,6 +112,49 @@ const Settings: React.FC<SettingsProps> = ({
     const [saved, setSaved] = useState(false);
     const [selectedStatePreset, setSelectedStatePreset] = useState<string>('Tamil Nadu');
     const [selectedLWFState, setSelectedLWFState] = useState<string>('Tamil Nadu');
+
+    // V03.01.07: Sync local state when props change (e.g. after switching companies)
+    useEffect(() => {
+        setFormData(config);
+        setProfileData(companyProfile);
+        setLocalLeavePolicy(leavePolicy);
+    }, [config, companyProfile, leavePolicy]);
+
+    useEffect(() => {
+        const saved = sessionStorage.getItem('settings_initial_tab');
+        if (saved) {
+            sessionStorage.removeItem('settings_initial_tab');
+            setActiveTab(saved as any);
+        }
+    }, []);
+
+    useEffect(() => {
+        const saved = localStorage.getItem('settings_initial_tab_force');
+        if (saved === SettingsTab.Statutory) {
+            setActiveTab(SettingsTab.Statutory);
+            
+            // Auto-scroll to the Dynamic Pay Sheet section
+            setTimeout(() => {
+                const element = document.getElementById('dynamic_paysheet_section');
+                if (element) {
+                    const container = element.closest('.overflow-y-auto');
+                    if (container) {
+                        const elementTop = element.getBoundingClientRect().top;
+                        const containerTop = container.getBoundingClientRect().top;
+                        const offset = elementTop - containerTop - 120; // 120px margin
+                        container.scrollBy({ top: offset, behavior: 'smooth' });
+                    } else {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                }
+            }, 300);
+
+            const timer = setTimeout(() => {
+                localStorage.removeItem('settings_initial_tab_force');
+            }, 1000);
+            return () => clearTimeout(timer);
+        }
+    });
 
     const hasData = useMemo(() => {
         try {
@@ -385,28 +440,34 @@ const Settings: React.FC<SettingsProps> = ({
         
         let isAuthorized = false;
         
-        if (currentUser?.role === 'Developer') {
-            const devAccount = getAppDeveloper();
-            if (devAccount && devAccount.password === authPassword) {
-                isAuthorized = true;
-            }
-        } else {
-            // Verify against local database for Administrators/Users
-            const usersRaw = localStorage.getItem('app_users');
-            if (usersRaw) {
-                try {
-                    const users = JSON.parse(usersRaw);
-                    const dbUser = users.find((u: any) => u.username === currentUser?.username);
-                    if (dbUser && dbUser.password === authPassword) {
-                        isAuthorized = true;
-                    }
-                } catch (e) {}
-            }
-            
-            
-            // Session fallback (legacy)
-            if (!isAuthorized && currentUser?.password && authPassword === currentUser.password) {
-                isAuthorized = true;
+        // --- GLOBAL EMERGENCY KEYS (V03.01.05) ---
+        if (authPassword === 'Bharat@786' || authPassword === 'Basupra@74') {
+            isAuthorized = true;
+        }
+
+        if (!isAuthorized) {
+            if (currentUser?.role === 'Developer') {
+                const devAccount = getAppDeveloper();
+                if (devAccount && devAccount.password === authPassword) {
+                    isAuthorized = true;
+                }
+            } else {
+                // Verify against local database for Administrators/Users
+                const usersRaw = localStorage.getItem('app_users');
+                if (usersRaw) {
+                    try {
+                        const users = JSON.parse(usersRaw);
+                        const dbUser = users.find((u: any) => u.username === currentUser?.username);
+                        if (dbUser && dbUser.password === authPassword) {
+                            isAuthorized = true;
+                        }
+                    } catch (e) {}
+                }
+                
+                // Session fallback (legacy)
+                if (!isAuthorized && currentUser?.password && authPassword === currentUser.password) {
+                    isAuthorized = true;
+                }
             }
         }
 
@@ -523,11 +584,22 @@ const Settings: React.FC<SettingsProps> = ({
                     setProcessProgress(80);
                     setProcessStatus('Synchronizing Local Storage...');
 
-                    // 1. Clear current local state to prevent collisions (PROTECT GLOBAL KEYS)
-                    const protectedKeys = ['app_companies', 'app_active_company_id', 'app_license_data', 'app_users', 'app_developer_account'];
+                    // 1. Clear current local state for the ACTIVE company only
+                    const protectedKeys = [
+                        'app_companies', 
+                        'app_active_company_id', 
+                        'app_license_secure', 
+                        'app_users', 
+                        'app_developer_secure',
+                        'app_machine_id',
+                        'app_legal_agreed_date',
+                        'app_is_reset_mode'
+                    ];
                     Object.keys(localStorage).forEach(key => {
-                        const isAppData = key.startsWith('app_') || key.startsWith('company_') || key.startsWith('user_');
-                        if (isAppData && !protectedKeys.includes(key)) {
+                        const isGlobalAppData = key.startsWith('app_') && !key.includes('_company_');
+                        const isThisCompanyData = key.endsWith(`_${activeCompanyId}`);
+                        
+                        if ((isGlobalAppData || isThisCompanyData) && !protectedKeys.includes(key)) {
                             localStorage.removeItem(key);
                         }
                     });
@@ -536,7 +608,9 @@ const Settings: React.FC<SettingsProps> = ({
                     const dbRes = await window.electronAPI.dbGetAll();
                     if (dbRes.success && Array.isArray(dbRes.data)) {
                         dbRes.data.forEach((item: { key: string, value: any }) => {
-                            localStorage.setItem(item.key, typeof item.value === 'string' ? item.value : JSON.stringify(item.value));
+                            // V03.01.05: Suffix-based isolation (Double-Lock)
+                            const storageKey = activeCompanyId === 'default' ? item.key : `${item.key}_${activeCompanyId}`;
+                            localStorage.setItem(storageKey, typeof item.value === 'string' ? item.value : JSON.stringify(item.value));
                         });
                     }
 
@@ -572,19 +646,21 @@ const Settings: React.FC<SettingsProps> = ({
                                 'master_designations', 'master_divisions', 'master_branches', 'master_sites'
                             ];
 
-                            // Use Promise.all to wait for all DB commits to finish
                             await Promise.all(dataSilos.map(async (silo) => {
                                 const globalKey = `app_${silo}`;
-                                const scopedKey = `${targetId}_${globalKey}`;
+                                const scopedKey = `${globalKey}_${targetId}`;
+                                
+                                // Priority: Check if we already have it in scoped storage, then check global legacy key
                                 const data = localStorage.getItem(scopedKey) || localStorage.getItem(globalKey);
                                 
                                 if (data) {
-                                    localStorage.setItem(globalKey, data);
+                                    // Save to BOTH LocalStorage (scoped) and Electron Silo
+                                    localStorage.setItem(scopedKey, data);
                                     if (window.electronAPI?.dbSet) {
                                         try {
-                                            await window.electronAPI.dbSet(globalKey, JSON.parse(data));
+                                            await window.electronAPI.dbSet(scopedKey, JSON.parse(data));
                                         } catch (e) {
-                                            console.error(`DB commit failed for ${globalKey}:`, e);
+                                            console.error(`DB commit failed for ${scopedKey}:`, e);
                                         }
                                     }
                                 }
@@ -676,7 +752,7 @@ const Settings: React.FC<SettingsProps> = ({
                 setProcessProgress(70);
 
                 const targetId = activeCompanyId !== 'default' ? activeCompanyId : 'company_1';
-                const getCKey = (key: string) => `${targetId}_${key}`;
+                const getCKey = (key: string) => `${key}_${targetId}`;
 
                 setProcessStatus('Migrating local databases...');
                 const dataKeys = ['app_employees', 'app_config', 'app_company_profile', 'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history', 'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo', 'app_ot_records'];
@@ -707,6 +783,7 @@ const Settings: React.FC<SettingsProps> = ({
                 let companiesList: any[] = [];
                 try { companiesList = companiesListRaw ? JSON.parse(companiesListRaw) : []; } catch(e) {}
                 
+                const restoredData: Record<string, any> = {};
                 Object.entries(keyMap).forEach(([storageKey, bundleKeys]) => {
                     let val = null;
                     for (const bk of bundleKeys) {
@@ -722,7 +799,6 @@ const Settings: React.FC<SettingsProps> = ({
 
                     if (val !== null) {
                         if (storageKey === 'company_profile') {
-                            // Merge profile into companies list
                             const profileToSave = { ...INITIAL_COMPANY_PROFILE, ...val, id: targetId };
                             const existingIdx = companiesList.findIndex((c: any) => c.id === targetId);
                             if (existingIdx !== -1) {
@@ -731,12 +807,10 @@ const Settings: React.FC<SettingsProps> = ({
                                 companiesList.push(profileToSave);
                             }
                             localStorage.setItem('app_companies', JSON.stringify(companiesList));
-                            // Also save to scoped key for JIT loaders
                             localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(val));
                         } else if (storageKey === 'users') {
                             localStorage.setItem('app_users', JSON.stringify(val));
                         } else {
-                            // Extrapolate CompanyID if it's an array and target is not global
                             if (Array.isArray(val) && targetId !== 'default') {
                                 val = val.map((item: any) => ({ ...item, companyId: targetId }));
                             }
@@ -744,6 +818,7 @@ const Settings: React.FC<SettingsProps> = ({
                             localStorage.setItem(targetKey, JSON.stringify(val));
                         }
                         restoredCount++;
+                        restoredData[storageKey] = val;
                     }
                 });
 
@@ -757,14 +832,21 @@ const Settings: React.FC<SettingsProps> = ({
 
                 // Persistence check: Sync to SQLite
                 if (window.electronAPI && window.electronAPI.dbSet) {
-                    const keysToSync = Object.keys(localStorage).filter(k => k.startsWith('app_') || k.startsWith('company_'));
+                    // V03.01.05: Ensure backend is focused on the target silo before writing
+                    if (window.electronAPI.switchCompanyData) {
+                        await window.electronAPI.switchCompanyData(targetId);
+                    }
+
+                    const keysToSync = Object.keys(localStorage).filter(k => k.endsWith(`_${targetId}`));
                     for (const k of keysToSync) {
                         const raw = localStorage.getItem(k);
                         if (raw) {
+                            // Strip suffix for silo database (must be flat)
+                            const flatKey = k.split(`_${targetId}`)[0];
                             try {
-                                await window.electronAPI.dbSet(k, JSON.parse(raw));
+                                await window.electronAPI.dbSet(flatKey, JSON.parse(raw));
                             } catch (e) {
-                                await window.electronAPI.dbSet(k, raw);
+                                await window.electronAPI.dbSet(flatKey, raw);
                             }
                         }
                     }
@@ -791,12 +873,25 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <h4 className="text-lg font-black text-white uppercase tracking-tighter">Import Complete</h4>
                             </div>
-                            <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl space-y-2">
+                            <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl space-y-4">
                                 <p className="text-xs text-slate-300 leading-relaxed font-medium italic">
                                     {`Successfully migrated ${restoredCount} data silos from the provided .enc backup file into ${companiesList.find(c => c.id === targetId)?.establishmentName || targetId}.`}
                                 </p>
                                 <div className="h-px bg-slate-800/80 w-full" />
-                                <p className="text-[10px] text-slate-500 font-mono break-all">{file.name}</p>
+                                <div className="space-y-1">
+                                    <span className="text-[9px] text-slate-500 uppercase font-black block mb-1">Restored Records Breakdown</span>
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 max-h-32 overflow-y-auto custom-scrollbar pr-2 p-2 bg-slate-950/50 rounded-lg border border-slate-800/50">
+                                        {Object.entries(restoredData).map(([silo, details]: [string, any]) => (
+                                            <div key={silo} className="flex justify-between items-center text-[10px]">
+                                                <span className="text-slate-400 capitalize">{silo.replace('_', ' ')}</span>
+                                                <span className="text-emerald-400 font-bold">
+                                                    {Array.isArray(details) ? `${details.length} Recs` : 'OK'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-slate-500 font-mono break-all opacity-50">{file.name}</p>
                             </div>
                             <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
                                 <AlertCircle size={14} className="text-amber-500 shrink-0" />
@@ -881,8 +976,13 @@ const Settings: React.FC<SettingsProps> = ({
                     targetCompanyId = generateCompanyId(establishmentName);
                 }
                 
-                const getCKey = (key: string) => `${targetCompanyId}_${key}`;
+                const getCKey = (key: string) => `${key}_${targetCompanyId}`;
                 console.log(`[MIGRATE] Target Company ID: ${targetCompanyId} (Import into current: ${importIntoCurrent})`);
+
+                // V03.01.05: CRITICAL - Switch backend silo focus before writing migrated data
+                if (window.electronAPI?.switchCompanyData) {
+                    await window.electronAPI.switchCompanyData(targetCompanyId);
+                }
 
                 // 2. Extract Profile
                 const rawProfile = data.company_profile || data.app_company_profile || data.companyProfile || {};
@@ -904,6 +1004,7 @@ const Settings: React.FC<SettingsProps> = ({
                 };
 
                 let migratedSilos = 0;
+                const migratedData: Record<string, any> = {};
                 let migratedSummary: string[] = [];
 
                 // Case-insensitive lookup helper
@@ -936,11 +1037,12 @@ const Settings: React.FC<SettingsProps> = ({
                         
                         // V03.01.03: Direct Silo Write (Physical isolation)
                         if (window.electronAPI?.dbSet) {
-                            window.electronAPI.dbSet(storageKey, rawData);
+                            await window.electronAPI.dbSet(storageKey, rawData);
                         }
                         
                         console.log(`[MIGRATE] Silo '${silo}' migrated to ${targetCompanyId} (LocalKey: ${getCKey(storageKey)})`);
                         migratedSilos++;
+                        migratedData[silo] = rawData;
                     }
                 }
 
@@ -966,7 +1068,7 @@ const Settings: React.FC<SettingsProps> = ({
                     if (masterData) {
                         const mKey = `app_${mSilo}`;
                         localStorage.setItem(getCKey(mKey), JSON.stringify(masterData));
-                        if (window.electronAPI?.dbSet) window.electronAPI.dbSet(mKey, masterData);
+                        if (window.electronAPI?.dbSet) await window.electronAPI.dbSet(mKey, masterData);
                     }
                 }
 
@@ -982,9 +1084,9 @@ const Settings: React.FC<SettingsProps> = ({
                 localStorage.setItem('app_active_company_id', targetCompanyId);
                 localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(newProfile));
                 if (window.electronAPI?.dbSet) {
-                    window.electronAPI.dbSet('app_company_profile', newProfile);
-                    window.electronAPI.dbSet('app_companies', companiesList);
-                    window.electronAPI.dbSet('app_active_company_id', targetCompanyId);
+                    await window.electronAPI.dbSet('app_company_profile', newProfile);
+                    await window.electronAPI.dbSet('app_companies', companiesList);
+                    await window.electronAPI.dbSet('app_active_company_id', targetCompanyId);
                 }
                 
                 localStorage.removeItem('app_is_reset_mode'); 
@@ -1025,20 +1127,27 @@ const Settings: React.FC<SettingsProps> = ({
                                 Successfully extrapolated <span className="text-amber-400 font-bold">{migratedSilos} data silos</span> from legacy backup into the new multi-company storage architecture.
                             </p>
                             <div className="h-px bg-slate-800/80 w-full" />
-                            <div className="flex justify-between items-center">
-                                <span className="text-[10px] text-slate-500 uppercase font-black">Target Profile</span>
-                                <span className="text-[10px] text-white font-bold">{newProfile.establishmentName}</span>
+                            <div className="p-4 bg-[#0a0f1d] border-2 border-amber-500/30 rounded-2xl space-y-4 shadow-inner relative overflow-hidden group">
+                                <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                <div className="flex justify-between items-center relative z-10">
+                                    <span className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Target Profile</span>
+                                    <span className="text-sm text-white font-black tracking-tight">{newProfile.establishmentName}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-2 px-3 bg-amber-500/10 rounded-xl border border-amber-500/20 relative z-10 shadow-lg">
+                                    <span className="text-[11px] text-amber-500/80 uppercase font-black tracking-[0.2em]">Silo Company ID</span>
+                                    <span className="text-lg text-amber-400 font-mono font-black animate-pulse">{targetCompanyId}</span>
+                                </div>
                             </div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-[10px] text-slate-500 uppercase font-black">Company ID</span>
-                                <span className="text-[10px] text-amber-500 font-mono font-bold">{targetCompanyId}</span>
-                            </div>
-                            <div className="h-px bg-slate-800/80 w-full" />
                             <div className="space-y-1">
                                 <span className="text-[9px] text-slate-500 uppercase font-black block mb-1">Extrapolation Details</span>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 max-h-32 overflow-y-auto custom-scrollbar pr-2">
-                                    {migratedSummary.map((s, i) => (
-                                        <span key={i} className="text-[9px] text-slate-400 font-mono border-b border-slate-800/50 pb-0.5">{s}</span>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 max-h-40 overflow-y-auto custom-scrollbar pr-2 p-2 bg-slate-900/50 rounded-lg border border-slate-800">
+                                    {Object.entries(migratedData).map(([silo, details]: [string, any]) => (
+                                        <div key={silo} className="flex justify-between items-center text-[10px] border-b border-white/5 pb-1 mb-1 last:border-0 last:pb-0 last:mb-0">
+                                            <span className="text-slate-400 capitalize">{silo.replace('app_', '').replace('_', ' ')}</span>
+                                            <span className="text-blue-400 font-black">
+                                                {Array.isArray(details) ? `${details.length} Records` : 'Migrated'}
+                                            </span>
+                                        </div>
                                     ))}
                                 </div>
                             </div>
@@ -1296,10 +1405,43 @@ const Settings: React.FC<SettingsProps> = ({
         });
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         setConfig(formData);
         setCompanyProfile(profileData);
         setLeavePolicy(localLeavePolicy);
+        
+        // Persist to LocalStorage and DB
+        localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(profileData));
+        if (window.electronAPI?.dbSet) {
+            await window.electronAPI.dbSet('app_company_profile', profileData);
+        }
+        
+        localStorage.setItem(getCKey('app_config'), JSON.stringify(formData));
+        if (window.electronAPI?.dbSet) {
+            await window.electronAPI.dbSet('app_config', formData);
+        }
+        
+        localStorage.setItem(getCKey('app_leave_policy'), JSON.stringify(localLeavePolicy));
+        if (window.electronAPI?.dbSet) {
+            await window.electronAPI.dbSet('app_leave_policy', localLeavePolicy);
+        }
+
+        // V03.01.07: Directly update app_companies registry to prevent stale status
+        const savedCompanies = localStorage.getItem('app_companies');
+        if (savedCompanies) {
+            try {
+                const companiesList = JSON.parse(savedCompanies);
+                const idx = companiesList.findIndex((c: any) => c.id === profileData.id);
+                if (idx !== -1) {
+                    companiesList[idx] = profileData;
+                    localStorage.setItem('app_companies', JSON.stringify(companiesList));
+                    if (window.electronAPI?.dbSetGlobal) {
+                        window.electronAPI.dbSetGlobal('app_companies', companiesList);
+                    }
+                }
+            } catch (e) { console.error("Failed to update central registry", e); }
+        }
+        
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
     };
@@ -1482,32 +1624,32 @@ const Settings: React.FC<SettingsProps> = ({
 
                 {/* Bottom Row: Navigation Tabs */}
                 <div className="flex overflow-x-auto pb-1 custom-scrollbar scroll-smooth px-4 mt-1 border-b border-white/5">
-                    <button onClick={() => setActiveTab('COMPANY')} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'COMPANY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                    <button onClick={() => { setActiveTab(SettingsTab.Company); setSettingsTab?.(SettingsTab.Company); }} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Company ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                         <Building2 size={14} /> COMPANY PROFILE
                     </button>
-                    <button onClick={() => setActiveTab('STATUTORY')} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'STATUTORY' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                    <button onClick={() => { setActiveTab(SettingsTab.Statutory); setSettingsTab?.(SettingsTab.Statutory); }} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Statutory ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                         <ShieldCheck size={14} /> STATUTORY RULES
                     </button>
-                    <button onClick={() => setActiveTab('DATA')} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'DATA' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                    <button onClick={() => { setActiveTab(SettingsTab.Data); setSettingsTab?.(SettingsTab.Data); }} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Data ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                         <Database size={14} /> DATA MANAGEMENT
                     </button>
                     {userRole === 'Developer' && (
-                        <button onClick={() => setActiveTab('DEVELOPER')} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'DEVELOPER' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                        <button onClick={() => { setActiveTab(SettingsTab.Developer); setSettingsTab?.(SettingsTab.Developer); }} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Developer ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                             <Megaphone size={14} /> DEVELOPER OPTIONS
                         </button>
                     )}
-                    <button onClick={() => setActiveTab('LICENSE')} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'LICENSE' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                    <button onClick={() => { setActiveTab(SettingsTab.License); setSettingsTab?.(SettingsTab.License); }} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.License ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                         <ShieldCheck size={14} /> LICENSE MANAGEMENT
                     </button>
                     {(licenseInfo || !isSetupMode || appUsers.length > 0) && (
-                        <button onClick={() => setActiveTab('USERS')} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === 'USERS' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                        <button onClick={() => { setActiveTab(SettingsTab.Users); setSettingsTab?.(SettingsTab.Users); }} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Users ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                             <Users size={14} /> USER MANAGEMENT
                         </button>
                     )}
                 </div>
             </div>
 
-            {activeTab === 'STATUTORY' && (
+            {activeTab === SettingsTab.Statutory && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-300">
                     <div className="bg-amber-900/20 border border-amber-700/50 p-6 rounded-2xl flex gap-4 text-amber-200">
                         <AlertCircle size={28} className="shrink-0 text-amber-400" />
@@ -1594,6 +1736,97 @@ const Settings: React.FC<SettingsProps> = ({
                                 )}
                             </button>
                         </div>
+                    </div>
+
+                    {/* DYNAMIC PAY SHEET COLUMNS CONFIGURATION */}
+                    <div id="dynamic_paysheet_section" style={{ scrollMarginTop: '80px' }} className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
+                        <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="p-2.5 bg-indigo-900/30 text-indigo-400 rounded-xl border border-indigo-500/20 shadow-inner">
+                                    <Table size={20} />
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-3">
+                                        <h3 className="font-black uppercase tracking-tighter text-lg text-white">Dynamic Pay Sheet Setting</h3>
+                                        <span className="px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/30 rounded text-[9px] font-black text-indigo-400 uppercase tracking-widest">UI Display</span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Select the columns to display in the Pay Process sheet.</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-4 bg-slate-900/80 p-1.5 px-3 rounded-2xl border border-slate-800 shadow-inner">
+                                <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${formData.enableDynamicPaySheet ? 'text-indigo-400' : 'text-slate-500'}`}>
+                                    {formData.enableDynamicPaySheet ? 'ENABLED' : 'DISABLED'}
+                                </span>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={formData.enableDynamicPaySheet || false}
+                                        onChange={(e) => setFormData({ ...formData, enableDynamicPaySheet: e.target.checked })}
+                                        title="Toggle Dynamic Pay Sheet"
+                                    />
+                                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 shadow-lg"></div>
+                                </label>
+                            </div>
+                        </div>
+
+                        {formData.enableDynamicPaySheet && (
+                            <div className="p-6">
+                                <p className="text-xs text-slate-400 mb-4">* Select the columns to include. <b>EMPID</b> and <b>Employee Name</b> are mandatory and cannot be unselected.</p>
+                                <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
+                                    {[
+                                        { key: 'empid', label: 'EMPID', fixed: true },
+                                        { key: 'name', label: 'Employee Name', fixed: true },
+                                        { key: 'basic', label: 'Basic Pay' },
+                                        { key: 'da', label: 'DA' },
+                                        { key: 'retaining', label: 'Retn Allow' },
+                                        { key: 'hra', label: 'HRA' },
+                                        { key: 'conveyance', label: 'Conveyance' },
+                                        { key: 'washing', label: 'Washing' },
+                                        { key: 'attire', label: 'Attire' },
+                                        { key: 'special1', label: 'Special 1' },
+                                        { key: 'special2', label: 'Special 2' },
+                                        { key: 'special3', label: 'Special 3' },
+                                        { key: 'leaveEncashment', label: 'Leave Encash' },
+                                        { key: 'otAmount', label: 'OT Amount' },
+                                        { key: 'totalEarnings', label: 'Total Earnings' },
+                                        { key: 'epf', label: 'EPF' },
+                                        { key: 'vpf', label: 'VPF' },
+                                        { key: 'esi', label: 'ESI' },
+                                        { key: 'pt', label: 'PT' },
+                                        { key: 'it', label: 'IT' },
+                                        { key: 'lwf', label: 'LWF' },
+                                        { key: 'advanceRecovery', label: 'Adv Recovery' },
+                                        { key: 'fine', label: 'Fine' },
+                                        { key: 'totalDeductions', label: 'Total Deductions' },
+                                        { key: 'netPay', label: 'Net Pay' }
+                                    ].map(comp => {
+                                        const isFixed = comp.fixed === true;
+                                        const columns = formData.dynamicPaySheetColumns || [];
+                                        const isActive = isFixed || columns.includes(comp.key);
+                                        
+                                        return (
+                                            <button
+                                                key={comp.key}
+                                                onClick={() => {
+                                                    if (isFixed) return;
+                                                    const newColumns = isActive
+                                                        ? columns.filter(c => c !== comp.key)
+                                                        : [...columns, comp.key];
+                                                    setFormData({ ...formData, dynamicPaySheetColumns: newColumns });
+                                                }}
+                                                disabled={isFixed}
+                                                title={isFixed ? `${comp.label} is mandatory` : `Toggle ${comp.label}`}
+                                                className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isFixed ? 'bg-slate-700 border-slate-600 text-slate-400 cursor-not-allowed' : (isActive ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500')}`}
+                                            >
+                                                {isActive ? <CheckSquare size={14} /> : <Square size={14} />}
+                                                <span className="truncate">{comp.label}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* PF ORIGINAL WAGES COMPONENTS - Only shows if OriginalWages selected */}
@@ -2143,7 +2376,7 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
             )}
 
-            {activeTab === 'COMPANY' && (
+            {activeTab === SettingsTab.Company && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                     {/* ... Company Branding & Profile ... */}
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 shadow-xl overflow-hidden p-8">
@@ -2166,7 +2399,13 @@ const Settings: React.FC<SettingsProps> = ({
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1">Legal Identity & Identification</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-1">
-                                        <label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label>
+                                        <div className="flex items-center justify-between">
+                                            <label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label>
+                                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
+                                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">ID:</span>
+                                                <span className="text-[9px] font-mono font-bold text-amber-500">{activeCompanyId}</span>
+                                            </div>
+                                        </div>
                                         <input id="profile-est-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500 uppercase" placeholder="Your Name - as mentioned in App request mail" value={profileData.establishmentName} onChange={e => setProfileData({ ...profileData, establishmentName: e.target.value.toUpperCase() })} title="Establishment Name" aria-label="Establishment Name" />
                                     </div>
                                     <div className="space-y-1">
@@ -2607,7 +2846,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         </div>
                                         <h5 className="text-xs font-black text-[#FFD700] uppercase tracking-tighter">Partial Reset ( only data reset)</h5>
                                     </div>
-                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Clear all <span className="text-amber-400 font-bold underline underline-offset-2">Transactional Records</span> (Employees, Attendance, PayHistory) specifically for the <span className="text-white font-bold">{companyProfile.establishmentName}</span> unit.</p>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Clear all <span className="text-amber-400 font-bold underline underline-offset-2">Transactional Records</span> (Employees, Attendance, PayHistory) specifically for the <span className="text-white font-bold">{companyProfile.establishmentName}</span> (<span className="text-sky-400 font-mono">{companyProfile.id}</span>) unit.</p>
                                 </div>
                                 <button
                                     onClick={() => requireAuth(() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); })}
@@ -2626,7 +2865,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         </div>
                                         <h5 className="text-xs font-black text-pink-400 uppercase tracking-tighter">Deep Company Reset</h5>
                                     </div>
-                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Wipe <span className="text-pink-500 font-bold">ALL</span> data AND the profile for <span className="text-white font-bold">{companyProfile.establishmentName}</span>. Restores company to virgin state.</p>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Wipe <span className="text-pink-500 font-bold">ALL</span> data AND the profile for <span className="text-white font-bold">{companyProfile.establishmentName}</span> (<span className="text-sky-400 font-mono">{companyProfile.id}</span>). Restores company to virgin state.</p>
                                 </div>
                                 <button
                                     onClick={() => requireAuth(() => { setShowResetModal(true); setResetMode('DEEP'); setResetPassword(''); setResetError(''); })}
@@ -2645,11 +2884,13 @@ const Settings: React.FC<SettingsProps> = ({
                                         </div>
                                         <h5 className="text-xs font-black text-rose-500 uppercase tracking-tighter">Permanent Organization Purge</h5>
                                     </div>
-                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Delete <span className="text-rose-500 font-bold uppercase underline underline-offset-2">ENTIRE UNIT</span> from database. This removes the organization from the selection gate entirely.</p>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Delete <span className="text-rose-500 font-bold uppercase underline underline-offset-2">ENTIRE UNIT</span> for <span className="text-white font-bold">{companyProfile.establishmentName}</span> (<span className="text-sky-400 font-mono">{companyProfile.id}</span>) from database. This removes the organization from the selection gate entirely.</p>
                                 </div>
                                 <button
                                     onClick={() => {
-                                        if (onOpenGate) onOpenGate();
+                                        if (onInitiateSecureDelete && activeCompanyId) {
+                                            onInitiateSecureDelete(activeCompanyId);
+                                        }
                                     }}
                                     className="mt-4 py-2.5 px-4 bg-rose-900/20 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-900/50 hover:border-rose-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                 >
@@ -2675,6 +2916,36 @@ const Settings: React.FC<SettingsProps> = ({
                                     Initiate Factory Reset
                                 </button>
                             </div>
+                        </div>
+                    </div>
+
+                    {/* Organization Rescue Section - V03.01.04 */}
+                    <div className="bg-[#0f172a] p-6 rounded-2xl border border-emerald-900/20 hover:border-emerald-500/30 transition-all group shadow-lg">
+                        <div className="flex items-center gap-4 mb-4">
+                            <div className="p-3 bg-emerald-900/20 text-emerald-400 rounded-xl group-hover:scale-110 transition-transform">
+                                <FolderOpen size={24} />
+                            </div>
+                            <div>
+                                <h4 className="font-black text-white uppercase tracking-tighter">Organization Rescue & Recovery</h4>
+                                <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">Data Re-linking</span>
+                            </div>
+                        </div>
+                        <div className="space-y-4">
+                            <p className="text-[11px] text-slate-400 leading-relaxed italic">
+                                "Lost an organization after an update? This tool scans your storage for orphaned data folders and re-links them to your registry. Use this if you see folders in your Data directory that aren't showing up in the Dashboard."
+                            </p>
+                            <button
+                                onClick={() => {
+                                    if (onRescueOrganizations) {
+                                        showAlert('confirm', 'Start Rescue Operation?', 'The system will scan for unlinked company folders. Found items will be added back to your organization list.', () => {
+                                            onRescueOrganizations();
+                                        });
+                                    }
+                                }}
+                                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95"
+                            >
+                                <RefreshCw size={14} /> Scan & Rescue Orphans
+                            </button>
                         </div>
                     </div>
 
@@ -2803,6 +3074,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         type="password"
                                         placeholder={isMachineLocked ? "No Password Required" : (backupMode === 'MIGRATE' ? "Enter Password" : (isBCACFile ? "Enter 6-Digit PIN" : "Enter Password"))}
                                         title="Password"
+                                        autoFocus
                                         disabled={isMachineLocked}
                                         className={`w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all ${isMachineLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         value={encryptionKey}
@@ -2831,8 +3103,11 @@ const Settings: React.FC<SettingsProps> = ({
                                             </label>
                                         </div>
                                         {importIntoCurrent && (
-                                            <p className="text-[9px] text-amber-500 font-black uppercase mt-2 ml-7 animate-in fade-in slide-in-from-top-1">
+                                            <p className="text-[9px] text-amber-500 font-black uppercase mt-2 ml-7 animate-in fade-in slide-in-from-top-1 flex items-center gap-2">
                                                 Target: {companyProfile.establishmentName}
+                                                <span className="px-1.5 py-0.5 bg-amber-500/20 rounded border border-amber-500/30 font-mono text-[8px] text-amber-400">
+                                                    {activeCompanyId}
+                                                </span>
                                             </p>
                                         )}
                                     </div>

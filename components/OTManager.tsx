@@ -174,6 +174,11 @@ const OTManager: React.FC<OTManagerProps> = ({
         reader.readAsBinaryString(file);
     };
 
+    // --- AGGREGATE TOTALS FOR TABLE SUMMARY ---
+    const totalOTDays = activeEmployees.reduce((acc, emp) => acc + (getOTRecord(emp.id).otDays || 0), 0);
+    const totalOTHours = activeEmployees.reduce((acc, emp) => acc + (getOTRecord(emp.id).otHours || 0), 0);
+    const totalOTAmount = activeEmployees.reduce((acc, emp) => acc + (getOTRecord(emp.id).otAmount || 0), 0);
+
     return (
         <div className="space-y-6">
             <div className="bg-[#1e293b] p-3 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
@@ -217,13 +222,13 @@ const OTManager: React.FC<OTManagerProps> = ({
 
             <div className={`bg-[#1e293b] rounded-xl border border-slate-800 overflow-y-auto custom-scrollbar shadow-2xl max-h-[600px] ${isLocked ? 'opacity-80 pointer-events-none' : ''}`}>
                 <table className="w-full text-left">
-                    <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase font-bold sticky top-0 z-10 shadow-md">
+                    <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase font-bold">
                         <tr>
-                            <th className="px-5 py-3">Employee Identity</th>
-                            <th className="px-3 py-3 text-right">Daily Rate</th>
-                            <th className="px-3 py-3 text-center">OT Days</th>
-                            <th className="px-3 py-3 text-center">OT Hours</th>
-                            <th className="px-5 py-3 text-right">OT Amount</th>
+                            <th className="px-5 py-3 bg-[#0f172a] sticky top-0 z-10">Employee Identity</th>
+                            <th className="px-3 py-3 text-right bg-[#0f172a] sticky top-0 z-10">Daily Rate</th>
+                            <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">OT Days</th>
+                            <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">OT Hours</th>
+                            <th className="px-5 py-3 text-right bg-[#0f172a] sticky top-0 z-10">OT Amount</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
@@ -269,6 +274,15 @@ const OTManager: React.FC<OTManagerProps> = ({
                             );
                         })}
                     </tbody>
+                    <tfoot className="sticky bottom-0 z-20 bg-[#0f172a]/95 backdrop-blur-md border-t-2 border-slate-700 shadow-[0_-4px_10px_rgba(0,0,0,0.3)]">
+                        <tr className="text-[10px] font-black uppercase tracking-tight">
+                            <td className="px-5 py-3 text-sky-400">Total Summary</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-white text-xs font-black">-</td>
+                            <td className="px-3 py-2.5 text-center font-mono text-white text-xs font-black">{totalOTDays.toFixed(1)}</td>
+                            <td className="px-3 py-2.5 text-center font-mono text-white text-xs font-black">{totalOTHours.toFixed(1)}</td>
+                            <td className="px-5 py-3 text-right font-black text-emerald-400 font-mono text-xs">₹ {formatIndianNumber(totalOTAmount)}</td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
 

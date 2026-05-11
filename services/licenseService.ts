@@ -3,8 +3,8 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "03.01.03";
-export const APP_PATCH_TIMESTAMP = "05-05-2026 08:24:00"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_VERSION = "03.01.07";
+export const APP_PATCH_TIMESTAMP = "09-05-2026 19:43:41"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -317,6 +317,11 @@ export const isValidKeyFormat = (key: string): boolean => {
 };
 
 const fetchFromApi = async (url: string, options: any) => {
+  // Check for basic browser online status first
+  if (!navigator.onLine) {
+    throw new Error('NO_INTERNET');
+  }
+
   try {
     // --- V02.02.23: SECURE SHA-256 COMMUNICATION HANDSHAKE ---
     if (options.method === 'POST' && options.body) {
@@ -338,16 +343,26 @@ const fetchFromApi = async (url: string, options: any) => {
 
     // @ts-ignore
     if (window.electronAPI && window.electronAPI.apiFetch) {
-      // @ts-ignore
-      return await window.electronAPI.apiFetch(url, options);
+      try {
+        // @ts-ignore
+        const result = await window.electronAPI.apiFetch(url, options);
+        return result;
+      } catch (ipcErr: any) {
+        // Handle common Electron IPC fetch errors (usually connection reset or timeout)
+        console.error("IPC API Fetch Failure:", ipcErr);
+        throw new Error(ipcErr.message || 'CONNECTION_FAILURE');
+      }
     }
+    
     const res = await fetchWithTimeout(url, options, 8000); // 8s timeout
     try {
       return await res.json();
     } catch { return { success: false, message: 'Invalid JSON response from server' }; }
-  } catch (error) {
+  } catch (error: any) {
     console.error("API Fetch Error:", error);
-    throw error;
+    if (error.name === 'AbortError') throw new Error('TIMEOUT');
+    if (error.message === 'NO_INTERNET' || error.message === 'CONNECTION_FAILURE') throw error;
+    throw new Error('CONNECTION_FAILURE');
   }
 };
 
@@ -620,7 +635,8 @@ export const validateLicenseStartup = async (
   force = false,
   attemptedID?: string,
   overrideEmail?: string,
-  overrideMobile?: string
+  overrideMobile?: string,
+  appPassword?: string
 ): Promise<{
   valid: boolean;
   message?: string;
@@ -776,7 +792,7 @@ export const validateLicenseStartup = async (
             mobile: overrideMobile || (stored?.registeredMobile || 'RESCUE'),
             machineId: currentMachineId,
             userID: attemptedID || (stored?.userID || 'RESCUE'),
-            appPassword: adminUser?.password
+            appPassword: appPassword || adminUser?.password
           })
         });
 
@@ -1136,19 +1152,44 @@ export const verifyRegistrationOTP = async (email: string, mobile: string, otp: 
 /**
  * NEW: Requests a password reset OTP from the cloud.
  */
-export const requestResetOTP = async (email: string, userID: string): Promise<ActivationResult> => {
+export const requestResetOTP = async (email: string, userID: string, companyName?: string): Promise<ActivationResult> => {
   try {
     const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({
         action: 'REQUEST_OTP_RESET',
         email,
-        userID
+        userID,
+        companyName
       })
     });
     return result;
   } catch (error: any) {
-    return { success: false, message: `OTP Request Error: ${error.message || "Unknown Failure"}` };
+    let msg = error.message;
+    if (msg === 'NO_INTERNET') msg = "Internet connection not available.";
+    else if (msg === 'CONNECTION_FAILURE') msg = "Failed to reach server.";
+    
+    return { success: false, message: `OTP Request Error: ${msg}` };
+  }
+};
+
+/**
+ * NEW: Verifies a reset OTP without changing the password.
+ */
+export const verifyResetOTP = async (email: string, userID: string, otp: string): Promise<ActivationResult> => {
+  try {
+    const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'VERIFY_OTP_ONLY', // New action for generic verification
+        email,
+        userID,
+        otp
+      })
+    });
+    return result;
+  } catch (error: any) {
+    return { success: false, message: `OTP Verification Error: ${error.message || "Unknown Failure"}` };
   }
 };
 
@@ -1167,7 +1208,12 @@ export const requestDeveloperOTP = async (username: string, password?: string): 
     });
     return result;
   } catch (error: any) {
-    return { success: false, message: `Developer Auth Error: ${error.message || "Unknown Failure"}` };
+    let msg = error.message;
+    if (msg === 'NO_INTERNET') msg = "Internet connection not available. Please connect to continue.";
+    else if (msg === 'CONNECTION_FAILURE') msg = "Failed to reach security server. Please check your network.";
+    else if (msg === 'TIMEOUT') msg = "Request timed out. Please try again.";
+    
+    return { success: false, message: `Developer Auth Error: ${msg}` };
   }
 };
 

@@ -96,6 +96,32 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
         });
     }, [employees, month, year, viewMode, advanceLedgers]);
 
+    const totals = useMemo(() => {
+        if (viewMode === 'leave') {
+            return filteredEmployees.reduce((acc, emp) => {
+                const l = leaveLedgers.find(led => led.employeeId === emp.id) || { el: { opening: 0, eligible: 0, balance: 0 }, sl: { balance: 0 }, cl: { balance: 0 } };
+                return {
+                    elOpening: acc.elOpening + (l.el.opening || 0),
+                    elCredit: acc.elCredit + (l.el.eligible || 0),
+                    elBalance: acc.elBalance + (l.el.balance || 0),
+                    slBalance: acc.slBalance + (l.sl.balance || 0),
+                    clBalance: acc.clBalance + (l.cl.balance || 0)
+                };
+            }, { elOpening: 0, elCredit: 0, elBalance: 0, slBalance: 0, clBalance: 0 });
+        } else {
+            return filteredEmployees.reduce((acc, emp) => {
+                const a = advanceLedgers.find(adv => adv.employeeId === emp.id) || { opening: 0, totalAdvance: 0, manualPayment: 0, recovery: 0, balance: 0 };
+                return {
+                    opening: acc.opening + (a.opening || 0),
+                    newAdvance: acc.newAdvance + (a.totalAdvance || 0),
+                    manual: acc.manual + (a.manualPayment || 0),
+                    recovery: acc.recovery + (a.recovery || 0),
+                    balance: acc.balance + (a.balance || 0)
+                };
+            }, { opening: 0, newAdvance: 0, manual: 0, recovery: 0, balance: 0 });
+        }
+    }, [filteredEmployees, leaveLedgers, advanceLedgers, viewMode]);
+
     const handleLeaveUpdate = (empId: string, field: 'el' | 'sl' | 'cl', subField: string, value: number) => {
         if (isLocked || isReadOnly || justSaved || !setLeaveLedgers) return;
 
@@ -446,27 +472,27 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                 </div>
             </div>
 
-            <div className="bg-[#1e293b] rounded-xl border border-slate-800 overflow-hidden shadow-2xl overflow-x-auto">
+            <div className={`bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl max-h-[600px] overflow-y-auto custom-scrollbar ${isLocked ? 'opacity-80 pointer-events-none' : ''}`}>
                 <table className="w-full text-left">
                     <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-normal font-bold">
                         <tr>
-                            <th className="px-5 py-3">Employee Identity</th>
+                            <th className="px-5 py-3 bg-[#0f172a] sticky top-0 z-10">Employee Identity</th>
                             {viewMode === 'leave' ? (
                                 <>
-                                    <th className="px-3 py-3 text-center">EL Opening</th>
-                                    <th className="px-3 py-3 text-center">EL Credit</th>
-                                    <th className="px-3 py-3 text-center">EL Balance</th>
-                                    <th className="px-3 py-3 text-center text-emerald-400">SL Balance</th>
-                                    <th className="px-3 py-3 text-center text-amber-400">CL Balance</th>
+                                    <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">EL Opening</th>
+                                    <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">EL Credit</th>
+                                    <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">EL Balance</th>
+                                    <th className="px-3 py-3 text-center text-emerald-400 bg-[#0f172a] sticky top-0 z-10">SL Balance</th>
+                                    <th className="px-3 py-3 text-center text-amber-400 bg-[#0f172a] sticky top-0 z-10">CL Balance</th>
                                 </>
                             ) : (
                                 <>
-                                    <th className="px-3 py-3 text-center">Opening</th>
-                                    <th className="px-3 py-3 text-center">New Advance</th>
-                                    <th className="px-3 py-3 text-center text-amber-400">Manual</th>
-                                    <th className="px-3 py-3 text-center">EMI Count</th>
-                                    <th className="px-3 py-3 text-center text-sky-400">Recovery</th>
-                                    <th className="px-3 py-3 text-center font-black text-white">Balance</th>
+                                    <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">Opening</th>
+                                    <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">New Advance</th>
+                                    <th className="px-3 py-3 text-center text-amber-400 bg-[#0f172a] sticky top-0 z-10">Manual</th>
+                                    <th className="px-3 py-3 text-center bg-[#0f172a] sticky top-0 z-10">EMI Count</th>
+                                    <th className="px-3 py-3 text-center text-sky-400 bg-[#0f172a] sticky top-0 z-10">Recovery</th>
+                                    <th className="px-3 py-3 text-center font-black text-white bg-[#0f172a] sticky top-0 z-10">Balance</th>
                                 </>
                             )}
                         </tr>
@@ -552,6 +578,29 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                             }
                         })}
                     </tbody>
+                    <tfoot className="sticky bottom-0 z-20 bg-[#0f172a]/95 backdrop-blur-md border-t-2 border-slate-700 shadow-[0_-4px_10px_rgba(0,0,0,0.3)]">
+                        <tr className="text-[10px] font-black uppercase tracking-tight">
+                            <td className="px-5 py-3 text-sky-400">Total Summary</td>
+                            {viewMode === 'leave' ? (
+                                <>
+                                    <td className="px-3 py-2.5 text-center text-slate-300 font-mono text-[11px]">{(totals as any).elOpening}</td>
+                                    <td className="px-3 py-2.5 text-center text-slate-300 font-mono text-[11px]">{(totals as any).elCredit}</td>
+                                    <td className="px-3 py-2.5 text-center font-black text-blue-400 text-xs">{(totals as any).elBalance}</td>
+                                    <td className="px-3 py-2.5 text-center text-emerald-400 font-bold text-xs">{(totals as any).slBalance}</td>
+                                    <td className="px-3 py-2.5 text-center text-amber-400 font-bold text-xs">{(totals as any).clBalance}</td>
+                                </>
+                            ) : (
+                                <>
+                                    <td className="px-3 py-2.5 text-center text-slate-400 font-mono text-[11px]">{formatIndianNumber((totals as any).opening)}</td>
+                                    <td className="px-3 py-2.5 text-center text-emerald-400 font-black text-[11px] font-mono">{formatIndianNumber((totals as any).newAdvance)}</td>
+                                    <td className="px-3 py-2.5 text-center text-amber-400 text-[11px] font-mono font-black">{formatIndianNumber((totals as any).manual)}</td>
+                                    <td className="px-3 py-2.5 text-center text-slate-300 text-[11px] font-mono">-</td>
+                                    <td className="px-3 py-2.5 text-center font-mono text-sky-400 font-black text-xs">{formatIndianNumber((totals as any).recovery)}</td>
+                                    <td className="px-3 py-2.5 text-center font-black text-white text-sm">{formatIndianNumber((totals as any).balance)}</td>
+                                </>
+                            )}
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
 

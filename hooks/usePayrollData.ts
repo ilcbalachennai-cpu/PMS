@@ -14,6 +14,8 @@ import { getBackupFileName } from '../services/reportService';
 export const usePayrollData = (showAlert: any) => {
   const [isResetting, setIsResetting] = useState(false);
   const [isHydrating, setIsHydrating] = useState(true);
+  const [reloadTrigger, setReloadTrigger] = useState(0);
+  const triggerReload = () => setReloadTrigger(prev => prev + 1);
 
   // --- MULTI-COMPANY STATE ---
   const [companies, setCompanies] = useState<CompanyProfile[]>(() => {
@@ -48,8 +50,10 @@ export const usePayrollData = (showAlert: any) => {
   // V03.01.03: In the physical isolation model, we use FLAT keys inside silos.
   // We only use the activeCompanyId for storage path isolation, not for key prefixing.
   const getCKey = useCallback((key: string) => {
-    if (activeCompanyId === 'default' || !activeCompanyId) return key;
-    return `${activeCompanyId}_${key}`;
+    // V03.01.05: Double-Lock Isolation. 
+    // We append the unique ID to EVERY key to ensure total data integrity
+    // across both LocalStorage and physical silos.
+    return `${key}_${activeCompanyId}`;
   }, [activeCompanyId]);
 
   // --- STATE INITIALIZATION (Now company-aware) ---
@@ -103,86 +107,99 @@ export const usePayrollData = (showAlert: any) => {
 
   // Save activeCompanyId and switch backend data silo
   useEffect(() => {
-    const syncDatabaseSilo = async () => {
-      console.log(`[usePayrollData] Notifying backend of company switch: ${activeCompanyId}`);
-      localStorage.setItem('app_active_company_id', activeCompanyId);
-      
-      if (window.electronAPI?.switchCompanyData) {
-        await window.electronAPI.switchCompanyData(activeCompanyId);
+    let isMounted = true;
+    const safetyTimeout = setTimeout(() => {
+      if (isMounted) {
+        console.warn("[usePayrollData] Hydration safety timeout triggered.");
+        setIsHydrating(false);
+      }
+    }, 5000); // 5s absolute limit
+
+    const performSync = async () => {
+      try {
+        setIsHydrating(true);
+        console.log(`[usePayrollData] Notifying backend of company switch: ${activeCompanyId}`);
+        localStorage.setItem('app_active_company_id', activeCompanyId);
         
-        // After switching the physical DB, fetch the latest data from that silo
-        const dbRes = await window.electronAPI.dbGetAll();
-        if (dbRes.success && Array.isArray(dbRes.data)) {
-            console.log(`[usePayrollData] Hydrating state from ${activeCompanyId} data silo...`);
-            
-            // Map to track what we've found to handle priority
+        if (window.electronAPI?.switchCompanyData) {
+          if (window.electronAPI.dbSetGlobal) {
+            await window.electronAPI.dbSetGlobal('app_active_company_id', activeCompanyId);
+          }
+          await window.electronAPI.switchCompanyData(activeCompanyId);
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          const dbRes = await window.electronAPI.dbGetAll();
+          if (dbRes.success && Array.isArray(dbRes.data)) {
             const siloData: Record<string, any> = {};
-            
             dbRes.data.forEach((item: { key: string, value: any }) => {
-                const key = item.key;
-                const value = typeof item.value === 'string' ? item.value : JSON.stringify(item.value);
-                
-                // 1. If it's a prefixed key for the ACTIVE company, it's our top priority data
-                if (activeCompanyId && key.startsWith(`${activeCompanyId}_`)) {
-                    const flatKey = key.replace(`${activeCompanyId}_`, '');
-                    siloData[flatKey] = value;
-                } 
-                // 2. If it's a global system key, keep it
-                else if (key.startsWith('app_companies') || key.startsWith('app_active_company_id') || key.startsWith('app_license_data') || key.startsWith('app_users')) {
-                    localStorage.setItem(key, value);
+              const key = item.key;
+              const value = typeof item.value === 'string' ? item.value : JSON.stringify(item.value);
+              // 1. If the key ends with our active ID, it's our target data (Double-Lock)
+              if (activeCompanyId && key.endsWith(`_${activeCompanyId}`)) {
+                const flatKey = key.split(`_${activeCompanyId}`)[0];
+                siloData[flatKey] = value;
+              } 
+              // 2. Fallback for legacy flat keys in the silo (e.g., "app_employees")
+              // We identify these as keys that start with "app_" but don't have the activeCompanyId suffix
+              else if (key.startsWith('app_') && !key.endsWith(`_${activeCompanyId}`)) {
+                if (!siloData[key]) {
+                  siloData[key] = value;
                 }
-                // 3. If it's a standard flat key (starts with app_), use it 
-                // but only if we haven't already found a company-prefixed version (priority)
-                else if (key.startsWith('app_')) {
-                    if (!siloData[key]) {
-                        siloData[key] = value;
-                    }
-                }
-                // 4. Fallback for company-prefixed profiles
-                else if (key.startsWith('company_')) {
-                    if (!siloData[key]) {
-                        siloData[key] = value;
-                    }
-                }
+              }
             });
 
-            // Commit the silo-exclusive data to localStorage AND React State
-            Object.entries(siloData).forEach(([key, value]) => {
-                localStorage.setItem(key, value);
-                
-                // Direct State Updates for immediate UI reflection
-                try {
-                    const parsed = JSON.parse(value);
-                    if (key === 'app_employees') setEmployees(parsed);
-                    if (key === 'app_statutory_config') setConfig(parsed);
-                    if (key === 'app_company_profile') setCompanyProfile(parsed);
-                    if (key === 'app_attendance') setAttendances(parsed);
-                    if (key === 'app_payroll_history') setPayrollHistory(parsed);
-                    if (key === 'app_leave_ledgers') setLeaveLedgers(parsed);
-                    if (key === 'app_advance_ledgers') setAdvanceLedgers(parsed);
-                    if (key === 'app_fines') setFines(parsed);
-                    if (key === 'app_leave_policy') setLeavePolicy(parsed);
-                    if (key === 'master_designations') setDesignations(parsed);
-                    if (key === 'master_divisions') setDivisions(parsed);
-                    if (key === 'master_branches') setBranches(parsed);
-                    if (key === 'master_sites') setSites(parsed);
-                } catch (e) {}
+            Object.entries(siloData).forEach(([fKey, value]) => {
+              localStorage.setItem(`${fKey}_${activeCompanyId}`, value);
+              try {
+                const parsed = JSON.parse(value);
+                if (fKey === 'app_employees') setEmployees(parsed);
+                if (fKey === 'app_config') setConfig(parsed);
+                if (fKey === 'app_company_profile') setCompanyProfile(parsed);
+                if (fKey === 'app_attendance') setAttendances(parsed);
+                if (fKey === 'app_payroll_history') setPayrollHistory(parsed);
+                if (fKey === 'app_leave_ledgers') setLeaveLedgers(parsed);
+                if (fKey === 'app_advance_ledgers') setAdvanceLedgers(parsed);
+                if (fKey === 'app_fines') setFines(parsed);
+                if (fKey === 'app_leave_policy') setLeavePolicy(parsed);
+                if (fKey === 'app_master_designations') setDesignations(parsed);
+                if (fKey === 'app_master_divisions') setDivisions(parsed);
+                if (fKey === 'app_master_branches') setBranches(parsed);
+                if (fKey === 'app_master_sites') setSites(parsed);
+              } catch (e) {}
             });
 
-            triggerReload();
+            // V03.01.07: Fallback for company profile and config if not found in DB
+            // This prevents a new company from inheriting data from the previous company state.
+            if (!siloData['app_company_profile']) {
+              const currentComp = companies.find(c => c.id === activeCompanyId);
+              setCompanyProfile(currentComp || INITIAL_COMPANY_PROFILE);
+            }
+            if (!siloData['app_config']) {
+              setConfig(INITIAL_STATUTORY_CONFIG);
+            }
+            if (!siloData['app_employees']) setEmployees([]);
+            if (!siloData['app_attendance']) setAttendances([]);
+            if (!siloData['app_payroll_history']) setPayrollHistory([]);
+            if (!siloData['app_leave_ledgers']) setLeaveLedgers([]);
+            if (!siloData['app_advance_ledgers']) setAdvanceLedgers([]);
+            if (!siloData['app_fines']) setFines([]);
+            if (!siloData['app_leave_policy']) setLeavePolicy(DEFAULT_LEAVE_POLICY);
+          }
+        }
+      } catch (err) {
+        console.error("Hydration failed:", err);
+      } finally {
+        if (isMounted) {
+          setIsHydrating(false);
+          clearTimeout(safetyTimeout);
         }
       }
     };
-    
-    const performSync = async () => {
-        await syncDatabaseSilo();
-        setIsHydrating(false);
-    };
-    performSync();
-  }, [activeCompanyId]);
 
-  const [reloadTrigger, setReloadTrigger] = useState(0);
-  const triggerReload = () => setReloadTrigger(prev => prev + 1);
+    performSync();
+    return () => { isMounted = false; clearTimeout(safetyTimeout); };
+  }, [activeCompanyId, reloadTrigger]);
+
 
   // Update companies list when profile changes
   useEffect(() => {
@@ -252,21 +269,40 @@ export const usePayrollData = (showAlert: any) => {
   }, [activeCompanyId, isResetting, reloadTrigger]);
 
   // --- PERSISTENCE HELPERS ---
-  const safeSave = useCallback((key: string, data: any) => {
+  const safeSave = useCallback(async (key: string, data: any) => {
     if (isResetting) return;
     try {
-      localStorage.setItem(getCKey(key), JSON.stringify(data));
+      const uKey = getCKey(key);
+      const value = JSON.stringify(data);
+      
+      // 1. Local Persistence (Isolated via Unique Key)
+      localStorage.setItem(uKey, value);
+      
+      // 2. Physical Silo Persistence (Double-Lock: Unique Key inside isolated DB)
+      if (window.electronAPI?.dbSet) {
+        await window.electronAPI.dbSet(uKey, data);
+      }
     } catch (e: any) {
       console.error(`Failed to save ${key}:`, e);
       if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
         showAlert('warning', 'Storage Limit Exceeded', "Your browser's local storage is full. Please remove large images or use the 'Factory Reset' in Settings to clear old data.");
       }
     }
-  }, [isResetting, showAlert, activeCompanyId]);
+  }, [isResetting, showAlert, getCKey]);
 
   // --- DATA PURGE UTILITY ---
   const purgeState = useCallback(() => {
     setIsResetting(true);
+    
+    // V03.01.05: Also clear Silo-specific LocalStorage keys to prevent race conditions
+    const siloKeys = [
+      'app_employees', 'app_config', 'app_company_profile',
+      'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 
+      'app_payroll_history', 'app_fines', 'app_leave_policy', 
+      'app_arrear_history', 'app_ot_records'
+    ];
+    siloKeys.forEach(k => localStorage.removeItem(k));
+
     setEmployees([]);
     setAttendances([]);
     setLeaveLedgers([]);
@@ -275,7 +311,7 @@ export const usePayrollData = (showAlert: any) => {
     setFines([]);
     setArrearHistory([]);
     setOTRecords([]);
-    // masters reset to empty or default
+    // masters reset to default
     setDesignations(['Software Engineer', 'Project Manager', 'HR Manager', 'Accounts Executive', 'Peon']);
     setDivisions(['Head Office', 'Manufacturing', 'Sales', 'Marketing', 'Engineering']);
     setBranches(['Chennai', 'New Delhi', 'Mumbai', 'Bangalore']);
@@ -290,23 +326,12 @@ export const usePayrollData = (showAlert: any) => {
   const switchCompany = useCallback((id: string) => {
     if (id === activeCompanyId) return;
     
-    // 1. Flush memory
+    // V03.01.05: Smooth Isolation - No more nuclear reload
+    // We purge and then let the activeCompanyId effect handle the switch.
     purgeState();
-    
-    // 2. Update Registry
     setActiveCompanyId(id);
     localStorage.setItem('app_active_company_id', id);
-    if (window.electronAPI?.dbSetGlobal) {
-      window.electronAPI.dbSetGlobal('app_active_company_id', id);
-    }
-
-    // 3. Handover to Physical Silo
-    if (window.electronAPI?.switchCompanyData) {
-      window.electronAPI.switchCompanyData(id);
-    }
-
-    showAlert('success', 'Company Switched', `Active Silo: ${companies.find(c => c.id === id)?.establishmentName || id}`, undefined, undefined, 'OK', undefined, undefined, 1.5);
-  }, [activeCompanyId, companies, purgeState, showAlert]);
+  }, [activeCompanyId, purgeState]);
 
   const addCompany = useCallback(async (newCompany: CompanyProfile, initialConfig?: StatutoryConfig) => {
     const updated = [...companies, newCompany];
@@ -331,7 +356,7 @@ export const usePayrollData = (showAlert: any) => {
     showAlert('success', 'Organization Added', `${newCompany.establishmentName} has been provisioned.`);
   }, [companies, switchCompany, showAlert]);
 
-  const deleteCompany = useCallback((id: string) => {
+  const deleteCompany = useCallback(async (id: string) => {
     if (companies.length <= 1) {
       showAlert('warning', 'Action Prohibited', 'You must have at least one company in the system.');
       return;
@@ -344,12 +369,57 @@ export const usePayrollData = (showAlert: any) => {
       window.electronAPI.dbSetGlobal('app_companies', updated);
     }
 
+    // V03.01.04: Physical cleanup
+    if (window.electronAPI?.deleteSilo) {
+      await window.electronAPI.deleteSilo(id);
+    }
+
     if (activeCompanyId === id) {
       switchCompany(updated[0].id);
     }
 
-    showAlert('success', 'Organization Removed', 'The organization has been removed from the registry.');
+    showAlert('success', 'Organization Removed', 'The organization and its physical data have been permanently deleted.');
   }, [companies, activeCompanyId, switchCompany, showAlert]);
+
+  const rescueOrganizations = useCallback(async () => {
+    if (!window.electronAPI?.listSilos) return;
+    
+    try {
+      const res = await window.electronAPI.listSilos();
+      if (res.success && res.silos) {
+        const foundSilos = res.silos as string[];
+        const existingIds = companies.map(c => c.id);
+        const missingSilos = foundSilos.filter(s => !existingIds.includes(s));
+        
+        if (missingSilos.length === 0) {
+          showAlert('info', 'No Orphans Found', 'All physical data folders are already linked to your organizations.');
+          return;
+        }
+
+        // Add missing silos to the registry
+        let newCompanies = [...companies];
+        for (const siloId of missingSilos) {
+          const rescued: CompanyProfile = {
+            ...INITIAL_COMPANY_PROFILE,
+            id: siloId,
+            establishmentName: siloId, // V03.01.05: No more 'Rescued:' prefix
+            cin: ''
+          };
+          newCompanies.push(rescued);
+        }
+
+        setCompanies(newCompanies);
+        localStorage.setItem('app_companies', JSON.stringify(newCompanies));
+        if (window.electronAPI?.dbSetGlobal) {
+          await window.electronAPI.dbSetGlobal('app_companies', newCompanies);
+        }
+        
+        showAlert('success', 'Recovery Successful', `${missingSilos.length} missing organizations have been re-linked to your system. Please update their names in Settings.`);
+      }
+    } catch (e) {
+      console.error("Rescue failed", e);
+    }
+  }, [companies, showAlert]);
 
 
 
@@ -384,7 +454,12 @@ export const usePayrollData = (showAlert: any) => {
           const payrollResult = finalizedResults.find(r => r.employeeId === a.employeeId);
           const actualRecovered = payrollResult ? (payrollResult.deductions?.advanceRecovery ?? 0) : 0;
           const carryOpening = Math.max(0, (a.opening || 0) + (a.totalAdvance || 0) - actualRecovered);
-          const nextEmiCount = carryOpening > 0 ? (a.emiCount || 0) : 0;
+          
+          // Decrement EMI count if recovery happened, but keep at least 1 if balance remains
+          const nextEmiCount = carryOpening > 0 
+            ? Math.max(1, (a.emiCount || 0) - (actualRecovered > 0 ? 1 : 0)) 
+            : 0;
+            
           let nextRecovery = nextEmiCount > 0 ? Math.min(Math.round(carryOpening / nextEmiCount), carryOpening) : 0;
           return { 
             ...a, 
@@ -509,6 +584,7 @@ export const usePayrollData = (showAlert: any) => {
     setOTRecords([]);
     
     showAlert('success', 'Partial Reset Complete', 'All employee and payroll records for the active company have been cleared. System will now reload.', () => {
+       sessionStorage.setItem('app_is_reloading_after_reset', 'true');
        window.location.reload();
     }, undefined, 'RELOAD NOW', undefined, undefined, 5, false, 'Disk Cleanup in Progress...');
   }, [showAlert, activeCompanyId, getCKey]);
@@ -543,6 +619,7 @@ export const usePayrollData = (showAlert: any) => {
     localStorage.setItem('app_is_reset_mode', 'true');
 
     showAlert('success', 'Deep Reset Complete', 'The active company has been wiped to a factory state. System will now reload.', () => {
+      sessionStorage.setItem('app_is_reloading_after_reset', 'true');
       window.location.reload();
     }, undefined, 'RELOAD NOW', undefined, undefined, 5, false, 'Factory Reset in Progress...');
   }, [showAlert]);
@@ -571,6 +648,7 @@ export const usePayrollData = (showAlert: any) => {
     setActiveCompanyId('default');
     
     showAlert('success', 'Factory Reset Complete', 'All system data and identities have been wiped.', () => {
+      sessionStorage.setItem('app_is_reloading_after_reset', 'true');
       window.location.reload();
     }, undefined, 'RELOAD NOW', undefined, undefined, 5, false, 'Nuclear Wipe in Progress...');
   }, [showAlert]);
@@ -594,6 +672,7 @@ export const usePayrollData = (showAlert: any) => {
     logoUrl, setLogoUrl,
     safeSave, handleRollover, handlePayrollReset, handleDeepReset, handleNuclearReset,
     isResetting, isHydrating,
-    companies, activeCompanyId, switchCompany, addCompany, deleteCompany, purgeState
+    companies, activeCompanyId, switchCompany, addCompany, deleteCompany, rescueOrganizations, purgeState,
+    triggerReload
   };
 };

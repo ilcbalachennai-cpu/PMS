@@ -43,16 +43,32 @@ export const numberToWords = (num: number): string => {
     const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
     const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
 
+    if (num === 0) return 'Zero';
+    if (isNaN(num)) return '';
+
+    let isNegative = false;
+    if (num < 0) {
+        isNegative = true;
+        num = Math.abs(num);
+    }
+
     if ((num = num.toString() as any).length > 9) return 'overflow';
-    const n: any[] = ('000000000' + num).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/) || [];
-    if (!n) return '';
+    const match = ('000000000' + num).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
+    if (!match) return '';
+    
+    const n1 = Number(match[1]);
+    const n2 = Number(match[2]);
+    const n3 = Number(match[3]);
+    const n4 = Number(match[4]);
+    const n5 = Number(match[5]);
+
     let str = '';
-    str += (n[1] != 0) ? (a[Number(n[1])] || b[n[1][0]] + ' ' + a[n[1][1]]) + 'Crore ' : '';
-    str += (n[2] != 0) ? (a[Number(n[2])] || b[n[2][0]] + ' ' + a[n[2][1]]) + 'Lakh ' : '';
-    str += (n[3] != 0) ? (a[Number(n[3])] || b[n[3][0]] + ' ' + a[n[3][1]]) + 'Thousand ' : '';
-    str += (n[4] != 0) ? (a[Number(n[4])] || b[n[4][0]] + ' ' + a[n[4][1]]) + 'Hundred ' : '';
-    str += (n[5] != 0) ? ((str != '') ? 'and ' : '') + (a[Number(n[5])] || b[n[5][0]] + ' ' + a[n[5][1]]) : '';
-    return str.trim();
+    str += (n1 !== 0) ? (a[n1] || b[Math.floor(n1 / 10)] + ' ' + a[n1 % 10]) + 'Crore ' : '';
+    str += (n2 !== 0) ? (a[n2] || b[Math.floor(n2 / 10)] + ' ' + a[n2 % 10]) + 'Lakh ' : '';
+    str += (n3 !== 0) ? (a[n3] || b[Math.floor(n3 / 10)] + ' ' + a[n3 % 10]) + 'Thousand ' : '';
+    str += (n4 !== 0) ? a[n4] + 'Hundred ' : '';
+    str += (n5 !== 0) ? ((str !== '') ? 'and ' : '') + (a[n5] || b[Math.floor(n5 / 10)] + ' ' + a[n5 % 10]) : '';
+    return (isNegative ? 'Negative ' : '') + str.trim();
 };
 
 export const openSavedReport = async (path: string | undefined | null) => {
@@ -656,29 +672,101 @@ export const generateStateAdvanceRegister = async (results: PayrollResult[], emp
     return await generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile, { 3: { halign: 'right' }, 5: { halign: 'center' }, 6: { halign: 'right' }, 7: { halign: 'right' } });
 };
 
-export const generateSimplePaySheetPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, subtitle?: string, customFilename?: string): Promise<string | null> => {
-    const headers = ['ID', 'Name', 'Basic', 'DA', 'HRA', 'Conv', 'OT', 'Spl/Oth', 'GROSS', 'PF', 'ESI', 'PT', 'TDS', 'Adv', 'Fine', 'NET PAY'];
-    const data = results.map(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const mainComponents = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.hra || 0) + (r.earnings.conveyance || 0) + (r.earnings.otAmount || 0);
-        const otherAllowances = Math.max(0, (r.earnings.total || 0) - mainComponents);
-        return [
-            r.employeeId, emp?.name || '', Math.round(r.earnings.basic), Math.round(r.earnings.da), Math.round(r.earnings.hra),
-            Math.round(r.earnings.conveyance), Math.round(r.earnings.otAmount || 0), Math.round(otherAllowances), Math.round(r.earnings.total),
-            Math.round(r.deductions.epf + r.deductions.vpf), Math.round(r.deductions.esi), Math.round(r.deductions.pt),
-            Math.round(r.deductions.it), Math.round(r.deductions.advanceRecovery), Math.round(r.deductions.fine), Math.round(r.netPay)
+export const generateSimplePaySheetPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, subtitle?: string, customFilename?: string, config?: StatutoryConfig): Promise<string | null> => {
+    const columns = config?.dynamicPaySheetColumns || [];
+    const enableDynamic = config?.enableDynamicPaySheet;
+
+    let headers: string[] = [];
+    let data: any[][] = [];
+    let grandTotal: any[] = [];
+    let colStyles: any = {};
+
+    if (!enableDynamic) {
+        headers = ['ID', 'Name', 'Basic', 'DA', 'HRA', 'Conv', 'OT', 'Leave', 'Spl/Oth', 'GROSS', 'PF', 'ESI', 'PT', 'TDS', 'Adv', 'Fine', 'NET PAY'];
+        data = results.map(r => {
+            const emp = employees.find(e => e.id === r.employeeId);
+            const mainComponents = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.hra || 0) + (r.earnings.conveyance || 0) + (r.earnings.otAmount || 0) + (r.earnings.leaveEncashment || 0);
+            const otherAllowances = Math.max(0, (r.earnings.total || 0) - mainComponents);
+            return [
+                r.employeeId, emp?.name || '', Math.round(r.earnings.basic), Math.round(r.earnings.da), Math.round(r.earnings.hra),
+                Math.round(r.earnings.conveyance), Math.round(r.earnings.otAmount || 0), Math.round(r.earnings.leaveEncashment || 0), Math.round(otherAllowances), Math.round(r.earnings.total),
+                Math.round(r.deductions.epf + r.deductions.vpf), Math.round(r.deductions.esi), Math.round(r.deductions.pt),
+                Math.round(r.deductions.it), Math.round(r.deductions.advanceRecovery), Math.round(r.deductions.fine), Math.round(r.netPay)
+            ];
+        });
+
+        grandTotal = [
+            '', 'GRAND TOTAL',
+            ...Array.from({ length: 15 }, (_, i) =>
+                data.reduce((sum, row) => sum + (Number(row[i + 2]) || 0), 0)
+            )
         ];
-    });
 
-    // Grand Total row — sum all numeric columns (indices 2-15), leave ID & Name as labels
-    const grandTotal = [
-        '', 'GRAND TOTAL',
-        ...Array.from({ length: 14 }, (_, i) =>
-            data.reduce((sum, row) => sum + (Number(row[i + 2]) || 0), 0)
-        )
-    ];
+        colStyles = { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right' }, 9: { halign: 'right', fontStyle: 'bold' }, 10: { halign: 'right' }, 11: { halign: 'right' }, 12: { halign: 'right' }, 13: { halign: 'right' }, 14: { halign: 'right' }, 15: { halign: 'right' }, 16: { halign: 'right', fontStyle: 'bold' } };
+    } else {
+        const allColumns = [
+            { key: 'basic', label: 'Basic', getValue: (r: any) => Math.round(r.earnings?.basic || 0) },
+            { key: 'da', label: 'DA', getValue: (r: any) => Math.round(r.earnings?.da || 0) },
+            { key: 'retaining', label: 'Retn', getValue: (r: any) => Math.round(r.earnings?.retainingAllowance || 0) },
+            { key: 'hra', label: 'HRA', getValue: (r: any) => Math.round(r.earnings?.hra || 0) },
+            { key: 'conveyance', label: 'Conv', getValue: (r: any) => Math.round(r.earnings?.conveyance || 0) },
+            { key: 'washing', label: 'Wash', getValue: (r: any) => Math.round(r.earnings?.washing || 0) },
+            { key: 'attire', label: 'Attire', getValue: (r: any) => Math.round(r.earnings?.attire || 0) },
+            { key: 'special1', label: 'Spl 1', getValue: (r: any) => Math.round(r.earnings?.special1 || 0) },
+            { key: 'special2', label: 'Spl 2', getValue: (r: any) => Math.round(r.earnings?.special2 || 0) },
+            { key: 'special3', label: 'Spl 3', getValue: (r: any) => Math.round(r.earnings?.special3 || 0) },
+            { key: 'bonus', label: 'Bonus', getValue: (r: any) => Math.round(r.earnings?.bonus || 0) },
+            { key: 'leaveEncashment', label: 'Leave', getValue: (r: any) => Math.round(r.earnings?.leaveEncashment || 0) },
+            { key: 'otAmount', label: 'OT', getValue: (r: any) => Math.round(r.earnings?.otAmount || 0) },
+            { key: 'arrears', label: 'Arrears', getValue: (r: any) => Math.round(r.earnings?.arrears || 0) },
+            { key: 'totalEarnings', label: 'GROSS', getValue: (r: any) => Math.round(r.earnings?.total || 0) },
+            { key: 'epf', label: 'PF', getValue: (r: any) => Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) },
+            { key: 'esi', label: 'ESI', getValue: (r: any) => Math.round(r.deductions?.esi || 0) },
+            { key: 'pt', label: 'PT', getValue: (r: any) => Math.round(r.deductions?.pt || 0) },
+            { key: 'it', label: 'TDS', getValue: (r: any) => Math.round(r.deductions?.it || 0) },
+            { key: 'lwf', label: 'LWF', getValue: (r: any) => Math.round(r.deductions?.lwf || 0) },
+            { key: 'advanceRecovery', label: 'Adv', getValue: (r: any) => Math.round(r.deductions?.advanceRecovery || 0) },
+            { key: 'fine', label: 'Fine', getValue: (r: any) => Math.round(r.deductions?.fine || 0) },
+            { key: 'totalDeductions', label: 'TOTAL DED', getValue: (r: any) => Math.round(r.deductions?.total || 0) },
+            { key: 'netPay', label: 'NET PAY', getValue: (r: any) => Math.round(r.netPay || 0) }
+        ];
 
-    const colStyles: any = { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right', fontStyle: 'bold' }, 9: { halign: 'right' }, 10: { halign: 'right' }, 11: { halign: 'right' }, 12: { halign: 'right' }, 13: { halign: 'right' }, 14: { halign: 'right' }, 15: { halign: 'right', fontStyle: 'bold' } };
+        headers = ['ID', 'Name'];
+        allColumns.forEach(col => {
+            if (columns.includes(col.key)) {
+                headers.push(col.label);
+            }
+        });
+
+        data = results.map(r => {
+            const emp = employees.find(e => e.id === r.employeeId);
+            const row: any[] = [r.employeeId, emp?.name || ''];
+            
+            allColumns.forEach(col => {
+                if (columns.includes(col.key)) {
+                    row.push(col.getValue(r));
+                }
+            });
+            
+            return row;
+        });
+
+        grandTotal = ['', 'GRAND TOTAL'];
+        allColumns.forEach((col) => {
+            if (columns.includes(col.key)) {
+                const idx = headers.indexOf(col.label);
+                const sum = data.reduce((acc, row) => acc + (Number(row[idx]) || 0), 0);
+                grandTotal.push(sum);
+            }
+        });
+
+        for (let i = 2; i < headers.length; i++) {
+            colStyles[i] = { halign: 'right' };
+            if (headers[i] === 'GROSS' || headers[i] === 'NET PAY') {
+                colStyles[i].fontStyle = 'bold';
+            }
+        }
+    }
     const doc = new jsPDF('l');
     doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.text(companyProfile.establishmentName || 'Company Name', 14, 15);
     doc.setFontSize(10); doc.setFont('helvetica', 'normal');
@@ -700,7 +788,7 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
         body: [...data, grandTotal],
         startY: tableStartY,
         theme: 'grid',
-        styles: { fontSize: 8, cellPadding: 2 },
+        styles: { fontSize: headers.length > 15 ? 6.5 : 8, cellPadding: headers.length > 15 ? 1.2 : 2 },
         headStyles: { fillColor: [26, 188, 156], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
         columnStyles: colStyles,
         didParseCell: (hookData) => {
@@ -753,16 +841,26 @@ export const generatePaySlipsPDF = async (results: PayrollResult[], employees: E
         doc.setFont('helvetica', 'bold'); doc.text("ESI No", col1X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.esiNumber || '-', col1X + labelWidth, y);
         doc.setFont('helvetica', 'bold'); doc.text("PAN No", col2X, y); doc.setFont('helvetica', 'bold'); doc.text(emp.pan || '-', col2X + labelWidth, y); y += 10;
         const specialAllw = (r.earnings.special1 || 0) + (r.earnings.special2 || 0) + (r.earnings.special3 || 0);
-        const otherAllw = (r.earnings.washing || 0) + (r.earnings.attire || 0) + (r.earnings.bonus || 0);
+        // Calculate otherAllw as a residue to ensure the sum matches the total
+        const otherAllw = r.earnings.total - (
+            r.earnings.basic + 
+            r.earnings.da + 
+            (r.earnings.retainingAllowance || 0) + 
+            r.earnings.hra + 
+            r.earnings.conveyance + 
+            (r.earnings.otAmount || 0) + 
+            specialAllw + 
+            (r.earnings.leaveEncashment || 0)
+        );
         const earningsData = [
             ['Basic Pay', r.earnings.basic.toFixed(2)],
             ['DA', r.earnings.da.toFixed(2)],
             ['Retaining Allw', (r.earnings.retainingAllowance || 0).toFixed(2)],
             ['HRA', r.earnings.hra.toFixed(2)],
             ['Conveyance', r.earnings.conveyance.toFixed(2)],
-            ['Overtime', (r.earnings.otAmount || 0).toFixed(2)],
+            ['Washing Allw', otherAllw.toFixed(2)],
             ['Special Allw', specialAllw.toFixed(2)],
-            ['Other Allw', otherAllw.toFixed(2)],
+            ['Overtime', (r.earnings.otAmount || 0).toFixed(2)],
             ['Leave Encash', (r.earnings.leaveEncashment || 0).toFixed(2)]
         ];
         let isPropPFCapped = r.isProportionatePFCapped;
@@ -790,16 +888,16 @@ export const generatePaySlipsPDF = async (results: PayrollResult[], employees: E
             ['Fine / Damages', r.deductions.fine.toFixed(2)],
             ['', ''] // Balanced empty row
         ];
-        const tableBody = earningsData.map((e, i) => [e[0], e[1], deductionsData[i][0], deductionsData[i][1]]);
+        const tableBody = earningsData.map((e, i) => [e[0], e[1], deductionsData[i]?.[0] || '', deductionsData[i]?.[1] || '']);
         tableBody.push(['Gross Earnings', r.earnings.total.toFixed(2), 'Total Deductions', r.deductions.total.toFixed(2)]);
         autoTable(doc, { head: [['Earnings', 'Amount', 'Deductions', 'Amount']], body: tableBody, startY: y, theme: 'grid', headStyles: { fillColor: [20, 20, 20], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' }, columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 40, halign: 'right' }, 2: { cellWidth: 50 }, 3: { cellWidth: 40, halign: 'right' } } as any, styles: { fontSize: 9, cellPadding: 3, lineColor: [200, 200, 200] }, didParseCell: function (data) { if (data.row.index === tableBody.length - 1) { data.cell.styles.fontStyle = 'bold'; } if (data.section === 'body' && data.column.index === 2 && data.cell.text && data.cell.text.length > 0 && data.cell.text[0] === 'Provident Fund #') { data.cell.styles.textColor = [0, 0, 128]; } } });
         const finalY = (doc as any).lastAutoTable.finalY + 5;
         doc.setDrawColor(100, 149, 237); doc.setLineWidth(0.5); doc.roundedRect(14, finalY, 180, 25, 3, 3, 'S'); doc.setFillColor(240, 248, 255); doc.roundedRect(14.5, finalY + 0.5, 179, 24, 3, 3, 'F');
         doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text("NET SALARY PAYABLE", 20, finalY + 8);
         doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(50, 100, 200);
-        const amountInWords = numberToWords(Math.round(r.netPay)) + " Rupees Only";
+        const amountInWords = numberToWords(Math.round(r.netPay || 0)) + " Rupees Only";
         doc.text(amountInWords, 20, finalY + 18);
-        doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text(`Rs. ${formatIndianNumber(Math.round(r.netPay))}`, 185, finalY + 15, { align: 'right' });
+        doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text(`Rs. ${formatIndianNumber(Math.round(r.netPay || 0))}`, 185, finalY + 15, { align: 'right' });
         const footerY = finalY + 40; doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100); doc.text("This is a computer-generated document and does not require a signature.", 105, footerY, { align: 'center' });
         if (isPropPFCapped) {
             doc.setTextColor(0, 0, 128); // Navy Blue
@@ -886,7 +984,7 @@ export const generateSinglePayslipU8 = async (
         ['', '']
     ];
 
-    const tableBody = earningsData.map((e, i) => [e[0], e[1], deductionsData[i][0], deductionsData[i][1]]);
+    const tableBody = earningsData.map((e, i) => [e[0], e[1], deductionsData[i]?.[0] || '', deductionsData[i]?.[1] || '']);
     tableBody.push(['Gross Earnings', result.earnings.total.toFixed(2), 'Total Deductions', result.deductions.total.toFixed(2)]);
 
     autoTable(doc, {
@@ -910,9 +1008,9 @@ export const generateSinglePayslipU8 = async (
     doc.setFillColor(240, 248, 255); doc.roundedRect(14.5, finalY + 0.5, 179, 24, 3, 3, 'F');
     doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text("NET SALARY PAYABLE", 20, finalY + 8);
     doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(50, 100, 200);
-    const amountInWords = numberToWords(Math.round(result.netPay)) + " Rupees Only";
+    const amountInWords = numberToWords(Math.round(result.netPay || 0)) + " Rupees Only";
     doc.text(amountInWords, 20, finalY + 18);
-    doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text(`Rs. ${formatIndianNumber(Math.round(result.netPay))}`, 185, finalY + 15, { align: 'right' });
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 51, 153); doc.text(`Rs. ${formatIndianNumber(Math.round(result.netPay || 0))}`, 185, finalY + 15, { align: 'right' });
 
     const footerY = finalY + 40;
     doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
@@ -1621,7 +1719,7 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
         doc.setFillColor(240, 240, 240);
         doc.rect(14, y - 4, pageWidth - 28, 5, 'F');
 
-        const labels2 = [": OTdays", "OTrate", "OTamt  :", "OTSum  :", "", "", "", "Other_Allow :", "Gross"];
+        const labels2 = [": OTdays", "OTrate", "OTamt  :", "OTSum  :", "Leave Amt:", "", "", "Other_Allow :", "Gross"];
         labels2.forEach((l, i) => doc.text(l, colX[i], y));
         doc.text(" :", pageWidth - 16, y);
         y += 6.5;
@@ -1746,13 +1844,13 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
         doc.line(14, y - 4.5, pageWidth - 14, y - 4.5, 'S');
 
         // Row 2 Values (OT + Other + Gross)
-        const otherAllw = (r.earnings?.bonus || 0) + (r.earnings?.leaveEncashment || 0) + (r.earnings?.attire || 0);
+        const otherAllw = (r.earnings?.bonus || 0) + (r.earnings?.attire || 0);
         const val2 = [
             `${(r.earnings?.otAmount || 0) > 0 ? '0' : '0'} :`, 
             `0 :`, 
             `${formatIndianNumber(Math.round(r.earnings?.otAmount || 0))} :`,
             `${formatIndianNumber(Math.round(r.earnings?.otAmount || 0))} :`,
-            `:`,
+            `${formatIndianNumber(Math.round(r.earnings?.leaveEncashment || 0))} :`,
             `:`,
             `:`,
             `${formatIndianNumber(Math.round(otherAllw))} :`,
@@ -2813,7 +2911,7 @@ export const generateCodeOnWagesReport = (results: PayrollResult[], employees: E
     }
 };
 
-export const generateESICodeWagesReport = async (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile, month: string, year: number): Promise<string | null> => {
+export const generateESICodeWagesReport = async (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile, month: string, year: number, prevResults?: PayrollResult[], prevPeriodLabel?: string): Promise<string | null> => {
 
     // ── Build per-employee rows ─────────────────────────────────────────────
     let totOld = 0, totNew = 0, totDiff = 0;
@@ -2828,15 +2926,23 @@ export const generateESICodeWagesReport = async (results: PayrollResult[], emplo
         .filter(r => !employees.find(e => e.id === r.employeeId)?.isESIExempt && r.payableDays > 0)
         .map(r => {
             const emp = employees.find(e => e.id === r.employeeId);
+            const prevR = prevResults?.find(pr => pr.employeeId === r.employeeId);
             const gross = Math.round(r.earnings.total);
 
-            // For ESI Impact Analysis: Base Wage = Basic + DA + Retaining + HRA as per user specification "Old Value" note
-            const baseWage = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0) + (r.earnings.hra || 0));
-            const codeWage = baseWage;
+            // For ESI Impact Analysis: Base Wage = Basic + DA + Retaining + HRA
+            let baseWage: number;
+            let oldValue: number;
 
-            // Old Value = 0.75% of Base Wage (uncapped theoretical)
-            const oldValue = Math.ceil(baseWage * 0.0075);
-            // New Value = Actual ESI Deducted
+            if (prevR) {
+                const prevStatutory = Math.round((prevR.earnings.basic || 0) + (prevR.earnings.da || 0) + (prevR.earnings.retainingAllowance || 0) + (prevR.earnings.hra || 0));
+                baseWage = prevStatutory;
+                oldValue = Math.ceil(prevR.deductions.esi || (prevStatutory * 0.0075));
+            } else {
+                baseWage = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0) + (r.earnings.hra || 0));
+                oldValue = Math.ceil(baseWage * 0.0075);
+            }
+
+            const codeWage = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0) + (r.earnings.hra || 0));
             const newValue = Math.ceil(r.deductions.esi || 0);
 
             const diff = oldValue - newValue;
@@ -2886,6 +2992,16 @@ export const generateESICodeWagesReport = async (results: PayrollResult[], emplo
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(80);
     doc.text(`For the Month of: ${month} ${year}`, pageW - 14, y, { align: 'right' });
     y += 7;
+
+    if (prevPeriodLabel) {
+        doc.setFontSize(8); doc.setFont('helvetica', 'italic'); doc.setTextColor(100);
+        doc.text(`Comparison Basis: Actual Data from ${prevPeriodLabel} vs Projected Code Wages`, 14, y);
+        y += 5;
+    } else {
+        doc.setFontSize(8); doc.setFont('helvetica', 'italic'); doc.setTextColor(100);
+        doc.text(`Comparison Basis: Theoretical Old Rates (Current Components) vs Projected Code Wages`, 14, y);
+        y += 5;
+    }
 
     // Table
     const tableHead = [['ID', 'Name', 'Gross', 'Base Wage', 'Code Wage', 'Old Value', 'New Value', 'Diff', 'Impact']];
@@ -2959,7 +3075,7 @@ export const generateESICodeWagesReport = async (results: PayrollResult[], emplo
     return res.path || null;
 };
 
-export const generateEPFCodeImpactReport = async (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile, month: string, year: number, prevResults?: PayrollResult[], prevPeriodLabel?: string): Promise<string | null> => {
+export const generateEPFCodeImpactReport = async (results: PayrollResult[], employees: Employee[], format: 'PDF' | 'Excel', fileName: string, companyProfile: CompanyProfile, month: string, year: number, config: StatutoryConfig, prevResults?: PayrollResult[], prevPeriodLabel?: string): Promise<string | null> => {
 
     // ── Build per-employee rows ─────────────────────────────────────────────
     let totOld = 0, totNew = 0, totDiff = 0;
@@ -2977,7 +3093,7 @@ export const generateEPFCodeImpactReport = async (results: PayrollResult[], empl
             const prevR = prevResults?.find(pr => pr.employeeId === r.employeeId);
 
             const isHigherPF = emp?.isPFHigherWages || false;
-            const ceiling = 15000;
+            const ceiling = config.epfCeiling || 15000;
 
             const gross = Math.round(r.earnings.total);
 

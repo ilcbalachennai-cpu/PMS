@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp, UploadCloud, AlertCircle, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord } from '../types';
+import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord, View } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
@@ -13,6 +13,8 @@ import OTManager from './OTManager';
 
 interface PayProcessProps {
     employees: Employee[];
+    onNavigate?: (view: View) => void;
+    setSettingsTab?: (tab: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS') => void;
     setEmployees?: (emps: Employee[]) => void;
     config: StatutoryConfig;
     companyProfile: CompanyProfile;
@@ -569,6 +571,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     <PayrollProcessor
                         employees={props.employees}
                         config={props.config}
+                        onNavigate={props.onNavigate}
+                        setSettingsTab={props.setSettingsTab}
                         companyProfile={props.companyProfile}
                         attendances={props.attendances}
                         leaveLedgers={props.leaveLedgers}
@@ -585,6 +589,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         currentUser={props.currentUser}
                         fines={props.fines}
                         otRecords={props.otRecords}
+                        arrearHistory={props.arrearHistory}
                         showAlert={props.showAlert}
                     />
                 </div>

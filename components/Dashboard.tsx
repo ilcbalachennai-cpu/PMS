@@ -158,9 +158,8 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
             <Sparkles size={40} className="text-blue-400" />
           </div>
           <h2 className="text-4xl font-black text-white tracking-tight">Organization Initialized</h2>
-          <p className="text-slate-400 text-lg font-medium">
-            The profile and statutory rules for <span className="text-white font-bold">{companyProfile.establishmentName}</span> are now active. 
-            Choose your next step to begin payroll processing.
+          <p className="text-slate-400 mt-2 max-w-2xl mx-auto text-lg leading-relaxed">
+            The profile and statutory rules for <span className="whitespace-nowrap"><span className="text-white font-bold">{companyProfile.establishmentName}</span> <span className="text-amber-500 font-mono text-sm ml-1">[{companyProfile.id}]</span></span> are now active. Choose your next step to begin payroll processing.
           </p>
         </div>
 

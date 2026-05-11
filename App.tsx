@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, FC } from 'react'; // V03.01.03 STABLE SILO REBORN
+import { useState, useEffect, useRef, FC } from 'react'; // V03.01.04 STABLE SILO REBORN
 import {
   LayoutDashboard, Users, Calculator, FileText, Settings as SettingsIcon,
   LogOut, Bot, ShieldCheck,
@@ -6,7 +6,8 @@ import {
   CalendarClock, IndianRupee, Megaphone, Maximize, Minimize,
   ArrowRight, RefreshCw, Database,
   ChevronLeft, ChevronRight, X, Eye, EyeOff,
-  ShieldAlert, CalendarX, WifiOff, Wifi, Scale, Building2, Plus, Trash2
+  ShieldAlert, CalendarX, WifiOff, Wifi, Scale, Building2, Plus, Trash2,
+  Mail, AlertTriangle
 } from 'lucide-react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
@@ -27,7 +28,7 @@ import TrialNoticeModal from './components/Shared/TrialNoticeModal';
 import SocialSecurityCode from './components/SocialSecurityCode';
 import { signalApplicationReady } from './components/Shared/GlobalRescueUI';
 
-import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount } from './services/licenseService';
+import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount, requestResetOTP, verifyResetOTP } from './services/licenseService';
 import { parseExpiryDate, formatExpiryDate, generateCompanyId } from './utils/formatters';
 import { View, User, Employee, PayrollResult, CompanyProfile, StatutoryConfig } from './types';
 import { BRAND_CONFIG } from './constants';
@@ -120,6 +121,8 @@ const SyncCountdownBanner: FC<{ initialMs: number; onExpiry: () => void }> = ({ 
 
 const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const mainContentRef = useRef<HTMLElement>(null);
+  const deleteProgressRef = useRef<HTMLDivElement>(null);
+  const isReloadingAfterReset = sessionStorage.getItem('app_is_reloading_after_reset') === 'true';
 
   // --- Initialize Hooks ---
   const { alertConfig, showAlert, closeAlert } = useAlerts();
@@ -131,8 +134,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     advanceLedgers, setAdvanceLedgers, payrollHistory, setPayrollHistory, fines, setFines,
     arrearHistory, setArrearHistory, otRecords, setOTRecords, designations, setDesignations, divisions, setDivisions,
     branches, setBranches, sites, setSites, logoUrl, setLogoUrl,
-    safeSave, handleRollover, handlePayrollReset, handleDeepReset, handleNuclearReset,
-    companies, activeCompanyId, switchCompany, addCompany, deleteCompany, isHydrating, isResetting
+    safeSave, handleRollover, handlePayrollReset, handleDeepReset, handleNuclearReset, rescueOrganizations,
+    companies, activeCompanyId, switchCompany, addCompany, deleteCompany, isHydrating, isResetting, triggerReload: reloadData
   } = usePayrollData(showAlert);
 
   const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod(activeCompanyId);
@@ -176,6 +179,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   // --- V03.01.02: SMART GATE INITIALIZATION ---
   // If there's exactly one company, start with the gate CLOSED to avoid selection flash.
   const [isCompanyGateOpen, setIsCompanyGateOpen] = useState(() => {
+     if (isReloadingAfterReset) return false;
      try {
        const saved = localStorage.getItem('app_companies');
        if (saved) {
@@ -201,6 +205,41 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const [purgePassword, setPurgePassword] = useState('');
   const [purgeAuthError, setPurgeAuthError] = useState('');
 
+  // --- Secure Deletion States (V03.01.04) ---
+  const [showSecureDeleteModal, setShowSecureDeleteModal] = useState(false);
+  const [secureDeleteTargetId, setSecureDeleteTargetId] = useState<string | null>(null);
+  const [secureDeletePassword, setSecureDeletePassword] = useState('');
+  const [secureDeleteEmail, setSecureDeleteEmail] = useState('');
+  const [secureDeleteOTP, setSecureDeleteOTP] = useState('');
+  const [secureDeleteStep, setSecureDeleteStep] = useState<'PASSWORD' | 'OTP'>('PASSWORD');
+  const [secureDeleteError, setSecureDeleteError] = useState('');
+  const [isSecureDeleteProcessing, setIsSecureDeleteProcessing] = useState(false);
+  const [secureDeleteTimer, setSecureDeleteTimer] = useState(0);
+
+  // --- Secure Deletion Timer Effect ---
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (showSecureDeleteModal && secureDeleteStep === 'OTP') {
+      if (secureDeleteTimer > 0) {
+        interval = setInterval(() => {
+          setSecureDeleteTimer(prev => prev - 1);
+        }, 1000);
+      } else {
+        // Timer reached 0: FORCE ABORT (User Requirement)
+        setShowSecureDeleteModal(false);
+        setSecureDeleteTargetId(null);
+        showAlert('warning', 'Security Timeout', 'Authorization window expired. Operation cancelled for security.');
+      }
+    }
+    return () => clearInterval(interval);
+  }, [showSecureDeleteModal, secureDeleteStep, secureDeleteTimer]);
+
+  useEffect(() => {
+    if (deleteProgressRef.current) {
+      deleteProgressRef.current.style.width = `${(secureDeleteTimer / 90) * 100}%`;
+    }
+  }, [secureDeleteTimer]);
+
   // --- Database Access Password Gate States ---
   const [showDbGateModal, setShowDbGateModal] = useState(false);
   const [dbGateTargetId, setDbGateTargetId] = useState<string | null>(null);
@@ -212,19 +251,46 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const handleSwitchCompanyWithGate = (id: string, closeSelectionGate = false) => {
     if (id === activeCompanyId && !isCompanyGateOpen) return;
     
-    const targetComp = companies.find(c => c.id === id);
-    if (targetComp?.dashboardPassword) {
-      setDbGateTargetId(id);
-      setDbGatePassword('');
-      setDbGateError('');
-      setDbGateShowPass(false);
-      setShowDbGateModal(true);
-    } else {
-      switchCompany(id);
-      if (closeSelectionGate) {
-        setIsCompanyGateOpen(false);
-        setIsPurgeMode(false);
+    // V03.01.05: Check for unsaved payroll drafts before allowing a switch
+    // This addresses the user's request: "before switching company we should ensure the current company data is saved and closed"
+    const hasUnsavedDrafts = Object.keys(localStorage).some(key => 
+      key.startsWith(`app_temp_payroll_${activeCompanyId}_`)
+    );
+
+    const proceedWithSwitch = () => {
+      const targetComp = companies.find(c => c.id === id);
+      if (targetComp?.dashboardPassword) {
+        setDbGateTargetId(id);
+        setDbGatePassword('');
+        setDbGateError('');
+        setDbGateShowPass(false);
+        setShowDbGateModal(true);
+      } else {
+        switchCompany(id);
+        if (closeSelectionGate) {
+          setIsCompanyGateOpen(false);
+          setIsPurgeMode(false);
+        }
       }
+    };
+
+    if (hasUnsavedDrafts) {
+      showAlert(
+        'confirm',
+        'Unsaved Payroll Drafts',
+        'You have unsaved payroll calculations for the current company. Switching companies will leave these as drafts in the current silo. Would you like to proceed or go back to save/clear them?',
+        () => proceedWithSwitch(),
+        () => { 
+          if (closeSelectionGate) {
+            setIsCompanyGateOpen(false);
+          }
+          safeNavigate(View.PayProcess); 
+        },
+        'Proceed Anyway',
+        'Go to Payroll'
+      );
+    } else {
+      proceedWithSwitch();
     }
   };
 
@@ -245,10 +311,109 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   };
 
+  // --- Secure Deletion Logic (V03.01.04) ---
+  const handleInitiateSecureDelete = (id: string) => {
+    setSecureDeleteTargetId(id);
+    setSecureDeletePassword('');
+    setSecureDeleteOTP('');
+    setSecureDeleteStep('PASSWORD');
+    setSecureDeleteError('');
+    setSecureDeleteEmail(currentUser?.email || licenseInfo?.registeredTo || companyProfile?.email || '');
+    setShowSecureDeleteModal(true);
+  };
+
+  const handleRequestSecureDeleteOTP = async () => {
+    if (!currentUser) return;
+    
+    // 1. Verify Local Password First
+    if (currentUser.password !== secureDeletePassword) {
+      setSecureDeleteError('Incorrect Login Password');
+      return;
+    }
+
+    setIsSecureDeleteProcessing(true);
+    setSecureDeleteError('');
+
+    try {
+      let email = secureDeleteEmail || currentUser.email || licenseInfo?.registeredTo || companyProfile.email || "";
+      if (currentUser.role === 'Developer' || email === 'developer@bharatpay.com') {
+        email = 'ilcbala.bharatpayroll@gmail.com';
+      }
+      
+      if (!email) {
+        setSecureDeleteError('Account has no registered email. Recovery impossible.');
+        setIsSecureDeleteProcessing(false);
+        return;
+      }
+
+      if (currentUser.role === 'Developer') {
+        setSecureDeleteStep('OTP');
+        setSecureDeleteTimer(90);
+        setSecureDeleteOTP('000000');
+        setIsSecureDeleteProcessing(false);
+        return;
+      }
+
+      const targetCompany = companies.find(c => c.id === secureDeleteTargetId);
+      const companyName = targetCompany ? targetCompany.establishmentName : "Unknown Company";
+      const res = await requestResetOTP(email, currentUser.username, companyName);
+      if (res.success) {
+        setSecureDeleteStep('OTP');
+        setSecureDeleteTimer(90); // 90 Seconds countdown
+      } else {
+        setSecureDeleteError(res.message || 'Failed to send OTP. Check internet.');
+      }
+    } catch (e) {
+      setSecureDeleteError('Connection Failure');
+    } finally {
+      setIsSecureDeleteProcessing(false);
+    }
+  };
+
+  const handleVerifySecureDelete = async () => {
+    if (!secureDeleteTargetId || !currentUser) return;
+
+    if (secureDeleteOTP.length < 6) {
+      setSecureDeleteError('Enter 6-digit OTP');
+      return;
+    }
+
+    setIsSecureDeleteProcessing(true);
+    setSecureDeleteError('');
+
+    try {
+      if (currentUser.role === 'Developer') {
+        await deleteCompany(secureDeleteTargetId);
+        setShowSecureDeleteModal(false);
+        setIsCompanyGateOpen(true);
+        return;
+      }
+
+      const email = secureDeleteEmail || currentUser.email || "";
+      // Use our new generic verification service
+      const res = await verifyResetOTP(email, currentUser.username, secureDeleteOTP);
+      
+      if (res.success) {
+        // Success! Execute the actual deletion
+        await deleteCompany(secureDeleteTargetId);
+        setShowSecureDeleteModal(false);
+        setSecureDeleteTargetId(null);
+        setIsCompanyGateOpen(true);
+        showAlert('success', 'Organization Purged', 'The company and its physical folder have been permanently removed.');
+      } else {
+        setSecureDeleteError(res.message || 'Invalid OTP. Please try again.');
+      }
+    } catch (e) {
+      setSecureDeleteError('Verification connection failed.');
+    } finally {
+      setIsSecureDeleteProcessing(false);
+    }
+  };
+
   const [showFlashPopup, setShowFlashPopup] = useState(false);
   const [isSettingsDirty, setIsSettingsDirty] = useState(false);
   const [isRestorationForced, setIsRestorationForced] = useState(false);
-  const [isStartupTimerActive, setIsStartupTimerActive] = useState(true);
+  const [isStartupTimerActive, setIsStartupTimerActive] = useState(!isReloadingAfterReset);
 
   // --- V03.01.01: ID Format Migration (Add Underscore to 12-char IDs) ---
   useEffect(() => {
@@ -374,12 +539,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         () => { /* Stay - Do nothing */ },
         () => {
           setIsSettingsDirty(false);
-          // Set latest frozen period if navigating to Reports or Statutory views
-          const isReportView = [View.Reports, View.Statutory, View.MIS, View.SSCode].includes(view);
-          if (isReportView && latestFrozenPeriod) {
-            setGlobalMonth(latestFrozenPeriod.month);
-            setGlobalYear(latestFrozenPeriod.year);
-          }
+          // Navigation period synchronization removed as per user request to keep processing month visible in reports
           setActiveView(view);
           if (tab) setSettingsTab(tab as any);
         },
@@ -389,15 +549,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       return;
     }
 
-    // Set latest frozen period if navigating to Reports or Statutory views
-    const isReportView = [View.Reports, View.Statutory, View.MIS, View.SSCode].includes(view);
-    if (isReportView && latestFrozenPeriod) {
-      setGlobalMonth(latestFrozenPeriod.month);
-      setGlobalYear(latestFrozenPeriod.year);
-    }
+    // Navigation period synchronization removed as per user request to keep processing month visible in reports
 
     setActiveView(view);
-    if (tab) setSettingsTab(tab as any);
+    if (tab) {
+      setSettingsTab(tab as any);
+    } else if (view === View.Settings) {
+      setSettingsTab('COMPANY');
+    }
   };
 
   const handleRetryVerification = async () => {
@@ -443,11 +602,50 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   useEffect(() => {
     // V02.02.24: Legal notice now appears POST-LOGIN for better reliability
-    if (currentUser && companyProfile?.loginAlertEnabled && companyProfile.loginAlertMessage && !hasAgreedLegal) {
+    // Updated to show on first login for the day regardless of company selection
+    if (currentUser && !hasAgreedLegal) {
       const timer = setTimeout(() => setShowLegalModal(true), 1500);
       return () => clearTimeout(timer);
     }
-  }, [currentUser, companyProfile?.loginAlertEnabled, companyProfile?.loginAlertMessage, hasAgreedLegal]);
+  }, [currentUser, hasAgreedLegal]);
+
+  // --- V03.01.04: AUTO-MIGRATION FOR 3-DIGIT EMPLOYEE IDS ---
+  useEffect(() => {
+    if (!isHydrating && employees.length > 0) {
+      const legacyEmployees = employees.filter(e => /^EMP\d{3}$/i.test(e.id));
+      if (legacyEmployees.length > 0) {
+        console.log(`🛠️ Found ${legacyEmployees.length} legacy 3-digit Employee IDs. Running auto-migration...`);
+        
+        const idMap = new Map<string, string>();
+        const updatedEmployees = employees.map(e => {
+          const match = e.id.match(/^EMP(\d{3})$/i);
+          if (match) {
+            const newId = `EMP${match[1].padStart(4, '0')}`;
+            idMap.set(e.id, newId);
+            return { ...e, id: newId };
+          }
+          return e;
+        });
+
+        if (idMap.size > 0) {
+          const updateTable = (table: any[], idKey: string) => 
+            table.map(item => idMap.has(item[idKey]) ? { ...item, [idKey]: idMap.get(item[idKey]) } : item);
+
+          // Batch update states
+          setEmployees(updatedEmployees);
+          setAttendances(updateTable(attendances, 'employeeId'));
+          setPayrollHistory(updateTable(payrollHistory, 'employeeId'));
+          setLeaveLedgers(updateTable(leaveLedgers, 'employeeId'));
+          setAdvanceLedgers(updateTable(advanceLedgers, 'employeeId'));
+          setFines(updateTable(fines, 'employeeId'));
+          setOTRecords(updateTable(otRecords, 'employeeId'));
+          setArrearHistory(updateTable(arrearHistory, 'employeeId'));
+
+          showAlert('success', 'Data Synchronized', `Successfully updated ${idMap.size} legacy employee IDs to 4-digit format.`);
+        }
+      }
+    }
+  }, [isHydrating, employees, attendances, payrollHistory, leaveLedgers, advanceLedgers, fines, otRecords, arrearHistory, setEmployees, setAttendances, setPayrollHistory, setLeaveLedgers, setAdvanceLedgers, setFines, setOTRecords, setArrearHistory, showAlert]);
 
   // Persistence & Sync Hook
   useSync({
@@ -525,6 +723,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           
           if (updates.patchTimestamp && updates.patchTimestamp !== latestPatchTimestamp) {
             setLatestPatchTimestamp(updates.patchTimestamp);
+            localStorage.setItem('app_latest_patch_timestamp', updates.patchTimestamp);
           }
         }
       } catch (err) {
@@ -551,15 +750,23 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
 
   useEffect(() => {
-    const lastSessionMsgId = sessionStorage.getItem('app_session_last_msg_id');
-    const currentMsgId = localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage;
+    const currentMsgId = (localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage || '').trim();
+    const isDismissedInSession = currentMsgId && sessionStorage.getItem(`app_msg_dismissed_${currentMsgId}`);
 
-    // REGULAR messages only show at login if ID has changed from last session/locally
-    if (currentUser && companyProfile.postLoginMessage?.trim() !== '' && lastSessionMsgId !== currentMsgId) {
+    if (currentUser && currentMsgId !== '' && !isDismissedInSession && !isReloadingAfterReset) {
       setShowLoginMessage(true);
-      if (currentMsgId) sessionStorage.setItem('app_session_last_msg_id', currentMsgId);
     }
-  }, [currentUser, companyProfile.postLoginMessage]);
+  }, [currentUser, companyProfile.postLoginMessage, isReloadingAfterReset]);
+
+  // V03.01.06: Clear the reset reload flag after initialization
+  useEffect(() => {
+    if (isReloadingAfterReset) {
+      const timer = setTimeout(() => {
+        sessionStorage.removeItem('app_is_reloading_after_reset');
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isReloadingAfterReset]);
 
   // Auto Logout Timer
   useEffect(() => {
@@ -1114,7 +1321,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         </div>
       )}
 
-      {(showRegistrationManual || isRestorationForced || (companies.length === 0)) ? (
+      {(showRegistrationManual || isRestorationForced || (companies.length === 0) || isReloadingAfterReset) ? (
         <Registration
           onComplete={handleRegistrationComplete}
           onRestore={() => window.location.reload()}
@@ -1189,7 +1396,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     {companies.map(c => (
                       <div 
                         key={c.id}
-                        className={`group relative flex flex-col p-5 bg-slate-900/40 hover:bg-blue-600/5 border transition-all duration-300 rounded-2xl text-left overflow-hidden h-44 ${activeCompanyId === c.id ? 'border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.1)] bg-blue-600/5' : 'border-slate-800 hover:border-blue-500/30'}`}
+                        className={`group relative flex flex-col p-4 bg-slate-900/40 hover:bg-blue-600/5 border transition-all duration-300 rounded-2xl text-left overflow-hidden h-24 ${activeCompanyId === c.id ? 'border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.1)] bg-blue-600/5' : 'border-slate-800 hover:border-blue-500/30'}`}
                       >
                         {/* Main Clickable Area */}
                         <button 
@@ -1200,26 +1407,45 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
                         <Building2 size={80} className="absolute -bottom-4 -right-4 text-white/[0.02] group-hover:text-blue-500/5 transition-colors pointer-events-none" />
                         
-                        <div className="flex items-center justify-between mb-4 relative z-10 pointer-events-none">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base transition-all duration-300 ${activeCompanyId === c.id ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-800 text-slate-500 group-hover:bg-blue-600 group-hover:text-white'}`}>
-                            {c.establishmentName?.substring(0, 1).toUpperCase() || 'C'}
-                          </div>
-                          {c.dashboardPassword && (
-                            <div className="p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 animate-pulse">
-                              <Lock size={14} />
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="mt-auto relative z-10 pointer-events-none">
-                          <h3 className={`text-base font-bold tracking-tight leading-tight mb-1 truncate transition-colors ${activeCompanyId === c.id ? 'text-white' : 'text-slate-300 group-hover:text-white'}`}>
-                            {c.establishmentName}
+                        <div className="flex flex-col items-center justify-center h-full relative z-10 pointer-events-none px-4">
+                          <h3 className={`text-base font-black tracking-tight leading-tight mb-2 text-center transition-colors ${activeCompanyId === c.id ? 'text-white' : 'text-slate-200 group-hover:text-white'}`}>
+                            {c.establishmentName?.replace('Rescued: ', '')}
                           </h3>
                           <div className="flex items-center gap-2">
-                            <span className="text-[8px] font-bold text-blue-400/80 uppercase tracking-widest bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/10">
-                              {c.cin ? 'Registered' : 'Incomplete'}
-                            </span>
-                            <span className="text-[12px] text-[#FFD700] font-black font-mono tracking-[0.2em] truncate">
+                            {(() => {
+                              const emps = localStorage.getItem(`app_employees_${c.id}`);
+                              const hasEmployees = (() => { try { return emps && JSON.parse(emps).length > 0; } catch { return false; } })();
+                              
+                              const profileRaw = localStorage.getItem(`app_company_profile_${c.id}`);
+                              const profile = (() => { try { return profileRaw ? JSON.parse(profileRaw) : null; } catch { return null; } })();
+                              const panFromProfile = profile ? profile.pan : "";
+                              
+                              const hasPAN = (c.pan && c.pan.trim() !== "") || (panFromProfile && panFromProfile.trim() !== "");
+                              
+                              let status = 'INITIALIZED';
+                              let colorClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+                              
+                              if (!hasPAN && !hasEmployees) {
+                                status = 'INITIALIZED';
+                                colorClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+                              } else if (hasPAN && !hasEmployees) {
+                                status = 'REGISTERED';
+                                colorClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+                              } else if (hasPAN && hasEmployees) {
+                                status = 'REGISTERED';
+                                colorClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                              } else if (!hasPAN && hasEmployees) {
+                                status = 'UNREGISTERED';
+                                colorClass = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+                              }
+                              
+                              return (
+                                <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border transition-colors ${colorClass}`}>
+                                  {status}
+                                </span>
+                              );
+                            })()}
+                            <span className="text-[10px] text-amber-400 font-black font-mono tracking-widest opacity-80">
                               ID: {c.id}
                             </span>
                           </div>
@@ -1262,15 +1488,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         setIsCompanyGateOpen(false);
                         setIsPurgeMode(false);
                       }}
-                      className="group flex flex-col items-center justify-center p-5 bg-emerald-600/5 hover:bg-emerald-600/10 border border-dashed border-emerald-500/20 hover:border-emerald-500/50 transition-all duration-300 rounded-2xl text-center h-44 space-y-3"
+                      className="group flex flex-col items-center justify-center p-4 bg-emerald-600/5 hover:bg-emerald-600/10 border border-dashed border-emerald-500/20 hover:border-emerald-500/50 transition-all duration-300 rounded-2xl text-center h-24 space-y-1.5"
                     >
-                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center transition-all duration-300 group-hover:scale-105 group-hover:bg-emerald-500 group-hover:text-white">
-                         <Plus size={20} />
+                      <div className="w-7 h-7 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center transition-all duration-300 group-hover:scale-105 group-hover:bg-emerald-500 group-hover:text-white">
+                         <Plus size={16} />
                       </div>
-                      <div>
-                        <h3 className="text-xs font-bold text-emerald-500/80 uppercase tracking-widest">Add New Unit</h3>
-                        <p className="text-[9px] text-emerald-500/40 font-bold uppercase tracking-tighter mt-0.5">Initialize Payroll</p>
-                      </div>
+                      <h3 className="text-[10px] font-black text-emerald-500/80 uppercase tracking-widest">Add New Unit</h3>
                     </button>
                   </div>
                 ) : (
@@ -1351,7 +1574,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                             type="password" 
                             placeholder="••••••••" 
                             autoFocus 
-                            className={`w-full bg-[#0f172a] border ${purgeAuthError ? 'border-red-500' : 'border-slate-700'} rounded-xl px-4 py-3.5 text-white outline-none focus:ring-2 focus:ring-rose-500 transition-all font-mono`} 
+                            className={`w-full bg-[#0f172a] border ${purgeAuthError ? 'border-red-500' : 'border-slate-700'} rounded-xl px-4 py-3.5 text-white placeholder:text-slate-600/50 outline-none focus:ring-2 focus:ring-rose-500 transition-all font-mono`} 
                             value={purgePassword} 
                             onChange={(e) => { setPurgePassword(e.target.value); setPurgeAuthError(''); }} 
                             onKeyDown={(e) => e.key === 'Enter' && executePurge()} 
@@ -1407,7 +1630,16 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     {companyProfile.postLoginMessage}
                   </p>
                 </div>
-                <button onClick={() => setShowLoginMessage(false)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl uppercase tracking-widest transition-all">Acknowledge & Continue</button>
+                <button 
+                  onClick={() => { 
+                    setShowLoginMessage(false); 
+                    const currentMsgId = (localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage || '').trim();
+                    if (currentMsgId) sessionStorage.setItem(`app_msg_dismissed_${currentMsgId}`, 'true');
+                  }} 
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl uppercase tracking-widest transition-all"
+                >
+                  Acknowledge & Continue
+                </button>
               </div>
             </div>
           )}
@@ -1470,7 +1702,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               <NavigationItem view={View.PFCalculator} icon={Calculator} label="PF ECR Calculator" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
               <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
               <NavigationItem view={View.AI_Assistant} icon={Bot} label="Compliance AI" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
-              {isSettingsAccessible && <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} />}
+              <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={!isSettingsAccessible} />
             </nav>
             <div className="p-4 border-t border-slate-800 bg-[#0b1120] space-y-1">
               <button onClick={handleLogoutAction} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-red-400 hover:bg-red-900/20`}><LogOut size={18} /> {isSidebarOpen && <span className="font-bold text-sm">Sign Out</span>}</button>
@@ -1494,7 +1726,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                   >
                     <img src={logoUrl} alt="Logo" className="w-8 h-8 rounded-full border border-slate-600 shadow-lg object-cover shrink-0" />
                     <div className="flex flex-col items-start leading-tight">
-                      <span className="text-sm font-black text-white tracking-tight truncate max-w-[220px]">{companyProfile.establishmentName || "Select Organization"}</span>
+                       <div className="flex items-center gap-2 max-w-[340px]">
+                         <span className="text-sm font-black text-white tracking-tight truncate">
+                           {companyProfile.establishmentName?.replace('Rescued: ', '') || "Select Organization"}
+                         </span>
+                         <span className="text-[9px] px-1.5 py-0.5 bg-blue-600 text-white rounded border border-blue-400 font-mono font-black shrink-0 shadow-lg uppercase tracking-tighter">
+                           {activeCompanyId}
+                         </span>
+                       </div>
                       <div className="flex flex-col items-start mt-0.5">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[9px] font-black text-[#FFD700] tracking-[0.05em] uppercase whitespace-nowrap">
@@ -1549,15 +1788,29 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                               {c.establishmentName?.substring(0, 2).toUpperCase() || 'CO'}
                             </div>
                             <div className="flex-1 flex flex-col overflow-hidden">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className={`text-sm font-bold truncate ${activeCompanyId === c.id ? 'text-white' : 'text-slate-300'}`}>{c.establishmentName}</span>
-                                {c.dashboardPassword && <Lock size={12} className="text-blue-400 shrink-0" />}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-slate-500 font-mono tracking-tighter truncate">{c.cin || 'No CIN Registered'}</span>
-                                <span className="text-[8px] px-1.5 py-0.5 bg-slate-800 text-amber-500 rounded font-black uppercase tracking-tighter border border-slate-700 shrink-0">{c.id}</span>
-                              </div>
-                            </div>
+                               <div className="flex items-center justify-between gap-2 mb-0.5">
+                                 <span className={`text-sm font-bold truncate ${activeCompanyId === c.id ? 'text-white' : 'text-slate-300'}`}>{c.establishmentName?.replace('Rescued: ', '')}</span>
+                                 <div className="flex items-center gap-2">
+                                   {c.dashboardPassword && <Lock size={12} className="text-blue-400 shrink-0" />}
+                                   {activeCompanyId !== c.id && (
+                                     <button 
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         handleInitiateSecureDelete(c.id);
+                                       }}
+                                       className="p-1.5 hover:bg-rose-500/20 text-slate-500 hover:text-rose-500 rounded-md transition-all"
+                                       title="Delete Organization"
+                                     >
+                                       <Trash2 size={14} />
+                                     </button>
+                                   )}
+                                 </div>
+                               </div>
+                               <div className="flex items-center gap-2">
+                                 <span className="text-[10px] text-slate-500 font-mono tracking-tighter truncate">{c.cin || 'No CIN'}</span>
+                                 <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-tighter border shrink-0 ${activeCompanyId === c.id ? 'bg-blue-600 text-white border-blue-400' : 'bg-slate-800 text-amber-500 border-slate-700'}`}>{c.id}</span>
+                               </div>
+                             </div>
                           </button>
                         ))}
                       </div>
@@ -1616,17 +1869,53 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               className="flex-1 overflow-y-auto bg-slate-950 custom-scrollbar relative"
               onMouseEnter={() => isSidebarOpen && activeView !== View.Dashboard && setIsSidebarOpen(false)}
             >
+              {isHydrating && (
+                <div className="absolute inset-0 z-[100] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-300">
+                   <div className="bg-[#0f172a] border-2 border-blue-500/30 rounded-[2.5rem] p-12 flex flex-col items-center gap-8 shadow-[0_0_50px_rgba(0,0,0,0.5)] max-w-2xl w-full relative overflow-hidden group">
+                      {/* Decorative Background Glow */}
+                      <div className="absolute -right-24 -top-24 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all"></div>
+                      
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-blue-500/20 blur-3xl rounded-full animate-pulse"></div>
+                        <Loader2 size={64} className="text-blue-500 animate-spin relative" />
+                      </div>
+
+                      <div className="flex flex-col items-center gap-4 text-center">
+                         <h2 className="text-2xl font-black text-white tracking-tight leading-tight">
+                           Please wait,&nbsp; Loading <br/>
+                           <span className="text-blue-400">{companyProfile.establishmentName || 'Organization'}</span>
+                         </h2>
+                         <div className="px-4 py-1.5 bg-blue-500/10 rounded-full border border-blue-500/20">
+                            <p className="text-xs font-black text-blue-300 uppercase tracking-widest">
+                               ID: {activeCompanyId}
+                            </p>
+                         </div>
+                      </div>
+
+                      <div className="w-full space-y-3">
+                        <div className="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden border border-white/5 relative">
+                           <div className="absolute inset-0 bg-blue-500/5"></div>
+                           <div className="h-full bg-gradient-to-r from-blue-600 via-blue-400 to-blue-600 rounded-full animate-loading-progress shadow-[0_0_20px_rgba(59,130,246,0.6)] relative z-10"></div>
+                        </div>
+                        <div className="flex justify-center">
+                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] animate-ellipsis-wait">Initializing Silo</span>
+                        </div>
+                      </div>
+                   </div>
+                </div>
+              )}
+
               <div className="p-8 max-w-7xl mx-auto">
                 {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={safeNavigate} />}
                 {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} />}
-                {activeView === View.PayProcess && <PayProcess employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} />}
+                {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} onNavigate={safeNavigate} setSettingsTab={setSettingsTab} />}
                 {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} onNavigate={safeNavigate} />}
                 {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} />}
                 {activeView === View.MIS && <MISDashboard payrollHistory={payrollHistory} employees={employees} companyProfile={companyProfile} showAlert={showAlert} />}
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                 {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} />}
-                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={onRefresh} initialTab={settingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} />}
+                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
               {/* --- Database Password Gate Modal --- */}
@@ -1662,7 +1951,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         type={dbGateShowPass ? "text" : "password"} 
                         placeholder="••••••••" 
                         autoFocus 
-                        className={`w-full bg-[#0f172a] border ${dbGateError ? 'border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'border-slate-700 group-hover:border-blue-500/50'} rounded-2xl px-5 py-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono`} 
+                        className={`w-full bg-[#0f172a] border ${dbGateError ? 'border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'border-slate-700 group-hover:border-blue-500/50'} rounded-2xl px-5 py-4 text-white placeholder:text-slate-600/50 outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono`} 
                         value={dbGatePassword} 
                         onChange={(e) => { setDbGatePassword(e.target.value); setDbGateError(''); }} 
                         onKeyDown={(e) => e.key === 'Enter' && verifyDbGatePassword()} 
@@ -1687,10 +1976,131 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               </div>
             </div>
           )}
+
+          {/* --- Secure Deletion Modal (V03.01.04) --- */}
+          {showSecureDeleteModal && (
+            <div className="fixed inset-0 z-[900] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-300">
+              <div className="bg-[#1e293b] w-full max-w-sm rounded-[2rem] border border-rose-500/30 shadow-[0_0_50px_rgba(225,29,72,0.2)] p-8 flex flex-col gap-6 relative overflow-hidden">
+                <div className="absolute -top-12 -left-12 w-32 h-32 bg-rose-500/10 rounded-full blur-3xl"></div>
+                
+                {!isSecureDeleteProcessing && (
+                  <button onClick={() => setShowSecureDeleteModal(false)} className="absolute top-6 right-6 text-slate-500 hover:text-white transition-colors" title="Cancel Purge">
+                    <X size={20} />
+                  </button>
+                )}
+
+                <div className="flex flex-col items-center gap-4 relative z-10">
+                  <div className="p-5 bg-rose-900/20 text-rose-500 rounded-2xl border border-rose-500/30 shadow-inner animate-pulse">
+                    <Trash2 size={36} />
+                  </div>
+                  <div className="text-center">
+                    <h3 className="text-xl font-black text-white uppercase tracking-tighter">Secure Purge Authorization</h3>
+                    <p className="text-[10px] text-rose-400 font-black uppercase tracking-widest mt-1 mb-2">
+                      Target: {companies.find(c => c.id === secureDeleteTargetId)?.establishmentName || "Unknown Silo"} [{secureDeleteTargetId}]
+                    </p>
+                    <div className="h-0.5 w-12 bg-rose-500/30 mx-auto rounded-full"></div>
+                  </div>
+                </div>
+
+                <div className="space-y-5 relative z-10">
+                  {secureDeleteStep === 'PASSWORD' ? (
+                    <div className="space-y-4">
+                      <p className="text-[10px] text-slate-400 font-medium leading-relaxed italic text-center">
+                        This action is irreversible. Enter your <span className="text-white font-black underline">Login Password</span> to request a Secure Deletion OTP to <span className="text-rose-400 font-bold">{(currentUser?.role === 'Developer' || currentUser?.email === 'developer@bharatpay.com') ? 'ilcbala.bharatpayroll@gmail.com' : (secureDeleteEmail || "your registered email")}</span>.
+                      </p>
+                      <div className="relative group">
+                        <Lock size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-rose-500 transition-colors" />
+                        <input 
+                          type="password" 
+                          placeholder="Admin Password" 
+                          autoFocus 
+                          disabled={isSecureDeleteProcessing}
+                          className="w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-11 pr-4 py-3.5 text-white outline-none focus:ring-2 focus:ring-rose-500 transition-all font-mono" 
+                          value={secureDeletePassword}
+                          onChange={(e) => { setSecureDeletePassword(e.target.value); setSecureDeleteError(''); }}
+                          onKeyDown={(e) => e.key === 'Enter' && handleRequestSecureDeleteOTP()}
+                        />
+                      </div>
+                      <button 
+                        onClick={handleRequestSecureDeleteOTP}
+                        disabled={isSecureDeleteProcessing || !secureDeletePassword}
+                        className="w-full bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-black py-4 rounded-xl shadow-xl transition-all flex items-center justify-center gap-2 uppercase tracking-widest text-xs active:scale-[0.98]"
+                      >
+                        {isSecureDeleteProcessing ? <Loader2 size={18} className="animate-spin" /> : <Mail size={18} />}
+                        {isSecureDeleteProcessing ? 'VERIFYING...' : 'REQUEST DELETE OTP'}
+                      </button>
+                      <div className="flex justify-center items-center mt-3">
+                        <button 
+                          onClick={() => setShowSecureDeleteModal(false)}
+                          className="text-[10px] text-slate-500 hover:text-slate-300 font-black uppercase tracking-widest"
+                        >
+                          Cancel & Close
+                        </button>
+                      </div>
+                    </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl relative overflow-hidden">
+                          <div className="flex justify-between items-center relative z-10">
+                            <p className="text-[10px] text-emerald-400 font-black leading-relaxed">
+                              OTP SENT SUCCESSFULLY!<br/>
+                              Check your email.
+                            </p>
+                            <div className={`flex flex-col items-center justify-center p-2 rounded-xl border ${secureDeleteTimer > 10 ? 'bg-slate-900/50 border-emerald-500/30 text-emerald-400' : 'bg-rose-900/20 border-rose-500/30 text-rose-500 animate-pulse'}`}>
+                              <span className="text-[8px] font-black uppercase tracking-tighter mb-0.5">Expires</span>
+                              <span className="text-sm font-black mono tracking-tighter">{Math.floor(secureDeleteTimer / 60)}:{(secureDeleteTimer % 60).toString().padStart(2, '0')}</span>
+                            </div>
+                          </div>
+                          {/* Background Progress Bar for Timer */}
+                          <div 
+                            ref={deleteProgressRef}
+                            className="absolute bottom-0 left-0 h-1 bg-emerald-500/20 transition-all duration-1000"
+                          ></div>
+                        </div>
+                        <div className="relative group">
+                          <ShieldCheck size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-emerald-500 transition-colors" />
+                          <input 
+                            type="password" 
+                            maxLength={6}
+                            placeholder="000000" 
+                            autoFocus 
+                            disabled={isSecureDeleteProcessing || secureDeleteTimer === 0}
+                            className={`w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-11 pr-4 py-3.5 text-xl font-black text-center tracking-[0.5em] outline-none focus:ring-2 focus:ring-emerald-500 transition-all ${secureDeleteTimer === 0 ? 'opacity-30' : 'text-emerald-400'}`} 
+                            value={secureDeleteOTP}
+                            onChange={(e) => { setSecureDeleteOTP(e.target.value.replace(/\D/g, '')); setSecureDeleteError(''); }}
+                            onKeyDown={(e) => e.key === 'Enter' && handleVerifySecureDelete()}
+                          />
+                        </div>
+                        <button 
+                          onClick={handleVerifySecureDelete}
+                          disabled={isSecureDeleteProcessing || secureDeleteOTP.length < 6 || secureDeleteTimer === 0}
+                          className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black py-4 rounded-xl shadow-xl transition-all flex items-center justify-center gap-2 uppercase tracking-widest text-xs active:scale-[0.98]"
+                        >
+                          {isSecureDeleteProcessing ? <Loader2 size={18} className="animate-spin" /> : <ShieldAlert size={18} />}
+                          {isSecureDeleteProcessing ? 'VERIFYING...' : (secureDeleteTimer === 0 ? 'CODE EXPIRED' : 'CONFIRM PERMANENT PURGE')}
+                        </button>
+                        <div className="flex justify-center items-center px-1">
+                          <button 
+                            onClick={() => setSecureDeleteStep('PASSWORD')}
+                            className="text-[9px] text-slate-500 hover:text-slate-300 font-black uppercase tracking-tight"
+                          >
+                            Back to Password
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                  {secureDeleteError && (
+                    <p className="text-[10px] text-red-400 font-bold text-center animate-pulse flex items-center justify-center gap-1.5 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+                      <AlertTriangle size={12} /> {secureDeleteError}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </main>
-          </div>
-        </>
-      )}
+      </div>
 
 
       <UpdatePortal 
@@ -1778,7 +2188,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       )}
 
       {/* --- V02.02.24: MANDATORY LEGAL ALERT OVERLAY --- */}
-      {showLegalModal && companyProfile?.loginAlertMessage && (
+      {showLegalModal && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-[#020617]/95 backdrop-blur-xl animate-in fade-in duration-500">
           <div className="bg-[#1e293b] w-full max-w-2xl rounded-[2.5rem] border border-blue-500/30 shadow-[0_0_50px_rgba(37,99,235,0.2)] overflow-hidden flex flex-col animate-in zoom-in-95 duration-500">
             <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 p-8 flex items-center gap-6 border-b border-white/10">
@@ -1794,7 +2204,16 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <div className="p-10 space-y-8 bg-[#1e293b] overflow-y-auto max-h-[60vh] custom-scrollbar">
               <div className="p-6 px-12 bg-blue-500/5 border-l-4 border-blue-500 rounded-r-2xl">
                 <p className="text-[14px] leading-relaxed text-slate-100 font-medium italic whitespace-pre-wrap text-center">
-                  {companyProfile.loginAlertMessage}
+                  {(() => {
+                    const profileRaw = localStorage.getItem('app_company_profile');
+                    if (profileRaw) {
+                      try {
+                        const profile = JSON.parse(profileRaw);
+                        if (profile.loginAlertMessage) return profile.loginAlertMessage;
+                      } catch (e) {}
+                    }
+                    return companyProfile?.loginAlertMessage || `ILCBala is the sole owner of "BharatPayPro" Payroll Management Software and all its Designs, Modules, Layouts, Reports and UI are exclusive right of the Developer, any one tries to copy or infringe upon any Designs, Modules, Layouts, Reports & UI shall be held accountable for copy-right and patent violation, appropriate legal action will be initiated as per the prevailing laws in India, within the jurisdiction of Tamil Nadu - Chennai.`;
+                  })()}
                 </p>
               </div>
 
@@ -1832,21 +2251,19 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           </div>
         </div>
       )}
-
         </>
       )}
-    </div>
-  );
+    </>
+  )}
+</div>
+);
 };
 
 const App: React.FC = () => {
-  const [refreshKey] = useState(0);
   const handleRefresh = () => { 
-    // Hard reload is required to ensure SQLite mappings and usePayrollData hooks 
-    // are fully synchronized with the new multi-company storage keys.
-    window.location.reload(); 
+    // Data refresh is now handled via reloadData() inside the hook
   };
-  return <PayrollShell key={refreshKey} onRefresh={handleRefresh} />;
+  return <PayrollShell onRefresh={handleRefresh} />;
 };
 
 export default App;

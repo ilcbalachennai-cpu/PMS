@@ -143,7 +143,6 @@ export const parseEmployeeXLSX = async (
                 const batchPAN = new Set();
                 const batchESI = new Set();
                 const batchPF = new Set();
-
                 const getEmptyForm = (): Partial<Employee> => ({
                     id: '', name: '', gender: 'Male', dob: '',
                     doj: new Date().toISOString().split('T')[0], dol: '', leavingReason: '',
@@ -164,6 +163,8 @@ export const parseEmployeeXLSX = async (
                     photoUrl: '', employeeDocuments: {}, serviceRecords: []
                 });
 
+                const tempEmps: Employee[] = [];
+
                 data.forEach((row: any, rowIndex: number) => {
                     const rowNum = rowIndex + 2;
                     const getVal = (keys: string[]) => {
@@ -174,12 +175,10 @@ export const parseEmployeeXLSX = async (
                         return null;
                     };
 
-                    currentMaxId++;
-                    const id = `EMP${String(currentMaxId).padStart(4, '0')}`;
-
+                    const excelId = String(getVal(['Employee ID', 'ID', 'Emp ID']) || '').trim();
                     const name = String(getVal(['Full Name', 'Name', 'Employee Name']) || '').trim();
                     if (!name || name === 'Unknown') {
-                        rejectedRecords.push({ row: rowNum, name: 'Unknown', id: '', reason: "Missing 'Full Name'. Skipped." });
+                        rejectedRecords.push({ row: rowNum, name: 'Unknown', id: excelId, reason: "Missing 'Full Name'. Skipped." });
                         return;
                     }
 
@@ -197,16 +196,15 @@ export const parseEmployeeXLSX = async (
                     if (pf) { if (existingPF.has(pf) || batchPF.has(pf)) duplicateReasons.push(`Duplicate PF (${pf})`); }
 
                     if (duplicateReasons.length > 0) {
-                        rejectedRecords.push({ row: rowNum, name, id, reason: duplicateReasons.join(', ') });
-                        currentMaxId--;
+                        rejectedRecords.push({ row: rowNum, name, id: excelId, reason: duplicateReasons.join(', ') });
                         return;
                     }
 
-                    if (uan) batchUAN.add(uan);
-                    if (aadhaar) batchAadhaar.add(aadhaar);
-                    if (pan) batchPAN.add(pan);
-                    if (esi) batchESI.add(esi);
-                    if (pf) batchPF.add(pf);
+                    batchUAN.add(uan);
+                    batchAadhaar.add(aadhaar);
+                    batchPAN.add(pan);
+                    batchESI.add(esi);
+                    batchPF.add(pf);
 
                     const parseIndDate = (val: any) => {
                         if (!val) return '';
@@ -231,7 +229,7 @@ export const parseEmployeeXLSX = async (
 
                     const importedEmp: Employee = {
                         ...getEmptyForm() as Employee,
-                        id,
+                        id: '', // Will be assigned later
                         name,
                         gender: (getVal(['Gender']) as any) || 'Male',
                         dob: parseIndDate(getVal(['Date of Birth (DD-MM-YYYY)', 'Date of Birth', 'DOB'])),
@@ -300,7 +298,21 @@ export const parseEmployeeXLSX = async (
                         serviceRecords: [{ date: parseIndDate(getVal(['Date of Joining', 'DOJ'])) || new Date().toISOString().split('T')[0], type: 'Appointment', description: 'Imported from Excel' }]
                     };
 
-                    validNewEmployees.push(importedEmp);
+                    tempEmps.push(importedEmp);
+                });
+
+                // Sort by DOJ ascending
+                tempEmps.sort((a, b) => {
+                    const dateA = new Date(a.doj).getTime();
+                    const dateB = new Date(b.doj).getTime();
+                    return dateA - dateB;
+                });
+
+                // Assign IDs
+                tempEmps.forEach(emp => {
+                    currentMaxId++;
+                    emp.id = `EMP${String(currentMaxId).padStart(4, '0')}`;
+                    validNewEmployees.push(emp);
                 });
 
                 resolve({

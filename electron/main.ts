@@ -12,7 +12,10 @@ let mainWindow: BrowserWindow | null = null;
 const isDev = process.env.NODE_ENV === 'development';
 
 // ── CONFIGURATION & PERSISTENCE ──
-const CONFIG_PATH = path.join(app.getPath('userData'), 'app-config.json');
+// V03.01.06: Isolate Developer and Production database configurations
+const CONFIG_PATH = isDev 
+    ? path.join(app.getPath('userData'), 'app-config-dev.json') 
+    : path.join(app.getPath('userData'), 'app-config.json');
 
 console.log(`🚀 Electron v${process.versions.electron} | Node ${process.versions.node} | Chrome ${process.versions.chrome}`);
 if (parseInt(process.versions.electron.split('.')[0]) < 30) {
@@ -299,6 +302,14 @@ app.on('window-all-closed', () => {
     console.error("EVENT 'window-all-closed' WAS FIRED. STACK TRACE:");
     console.trace();
     if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+    if (db) {
+        console.log('🔌 Closing database before quit...');
+        try { db.close(); } catch (e) {}
+        db = null;
+    }
 });
 
 // ── IPC HANDLERS ──
@@ -603,6 +614,44 @@ ipcMain.handle('db-set-global', async (_, { key, value }) => {
     }
 });
 
+ipcMain.handle('list-silos', async () => {
+    try {
+        if (!appBasePath) throw new Error("App storage not initialized");
+        const paths = getAppPaths(appBasePath);
+        const dataDir = paths.data;
+        if (!fs.existsSync(dataDir)) return { success: true, silos: [] };
+
+        const silos = fs.readdirSync(dataDir)
+            .filter(name => fs.statSync(path.join(dataDir, name)).isDirectory())
+            .filter(name => name !== 'LOESCH_976374' && name !== '.icon-ico'); // Exclude known non-silo folders if any
+        
+        return { success: true, silos };
+    } catch (e: any) {
+        console.error('[IPC] list-silos failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('delete-silo', async (_, companyId: string) => {
+    try {
+        if (!appBasePath) throw new Error("App storage not initialized");
+        if (!companyId || companyId === 'default') throw new Error("Invalid company ID for deletion");
+        
+        const paths = getAppPaths(appBasePath);
+        const siloPath = path.join(paths.data, companyId);
+        
+        if (fs.existsSync(siloPath)) {
+            console.log(`[IPC] Deleting physical silo folder: ${siloPath}`);
+            fs.rmSync(siloPath, { recursive: true, force: true });
+        }
+        
+        return { success: true };
+    } catch (e: any) {
+        console.error('[IPC] delete-silo failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('wipe-all-data', async () => {
     try {
         if (db) { db.close(); db = null; }
@@ -630,7 +679,7 @@ ipcMain.handle('run-backup', async (_, arg1, arg2, arg3) => {
             subfolder = arg3;
         }
 
-        if (!ensureDatabase()) throw new Error("Database not ready");
+        if (!appBasePath) throw new Error("Storage folder not set. Please select a data location in Settings.");
         const paths = getAppPaths(appBasePath);
         
         let targetDir = paths.backups;
@@ -656,11 +705,9 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
         const subfolder = typeof arg === 'object' ? arg.subfolder : '';
 
         console.log(`[IPC] create-data-backup requested: ${fileName} in subfolder: ${subfolder}`);
+        console.log(`[IPC] Current DB instance: ${db ? 'Present' : 'NULL'}`);
+        console.log(`[IPC] Current appBasePath: ${appBasePath}`);
 
-        // 1. Proactive Self-Check / Initialization
-        if (!ensureDatabase()) {
-             console.warn('⚠️ Manual recovery attempt failed. Returning diagnostic error.');
-        }
 
         if (!appBasePath) throw new Error("Storage folder not set. Please select a data location in Settings.");
         if (!db) {
@@ -684,8 +731,32 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
         const finalPath = path.join(targetDir, `${fileName}.enc`);
 
         
-        console.log(`[IPC] Performing Online SQL Snapshot...`);
-        await db.backup(tempPath);
+        console.log(`[IPC] Creating filtered backup (excluding user/license data)...`);
+        const backupDb = new Database(tempPath);
+        backupDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+        
+        const rows = db!.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
+        
+        const excludedKeys = [
+            'app_license_secure', 
+            'app_license_data', 
+            'app_users', 
+            'app_machine_id', 
+            'app_developer_secure',
+            'app_data_size'
+        ];
+        
+        const insertStmt = backupDb.prepare('INSERT INTO store (key, value) VALUES (?, ?)');
+        
+        backupDb.transaction(() => {
+            for (const row of rows) {
+                if (!excludedKeys.includes(row.key)) {
+                    insertStmt.run(row.key, row.value);
+                }
+            }
+        })();
+        
+        backupDb.close();
 
         // --- ENCRYPTION LAYER ---
         const encryptionKey = (typeof arg === 'object' && arg.encryptionKey) ? arg.encryptionKey : await getInternalMachineId();
@@ -746,7 +817,7 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
             // --- FORMAT GUARD: Detect CryptoJS/Base64 text files before attempting binary decryption ---
             const formatCheckBuf = Buffer.alloc(256);
             const formatFd = fs.openSync(backupFilePath, 'r');
-            const bytesRead = fs.readSync(formatFd, formatCheckBuf, 0, 256, 0);
+            const bytesRead = fs.readSync(formatFd, formatCheckBuf as any, 0, 256, 0);
             fs.closeSync(formatFd);
             const sampleBytes = formatCheckBuf.slice(0, bytesRead);
             const isBase64TextFormat = sampleBytes.every((b: number) => b >= 32 && b <= 126);
@@ -826,18 +897,74 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
             }
         }
 
-        // 1. Close current connection
-        if (db) {
-            db.close();
-            db = null;
+        // 1. Open the restored database as a source
+        const sourceDb = new Database(tempRestorePath);
+        
+        // 2. Read all rows from the source store
+        const rows = sourceDb.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
+        console.log(`[IPC] Read ${rows.length} rows from backup file.`);
+        
+        try {
+            const logMsg = `[${new Date().toISOString()}] Restore: Read ${rows.length} rows. DB_PATH: ${DB_PATH}\n`;
+            const fs = require('fs');
+            const path = require('path');
+            fs.appendFileSync(path.join(require('electron').app.getPath('userData'), 'restore_log.txt'), logMsg);
+        } catch (e) {}
+        
+        // 3. Define keys to exclude (License and User management)
+        const excludedKeys = [
+            'app_license_secure', 
+            'app_license_data', 
+            'app_users', 
+            'app_machine_id', 
+            'app_developer_secure',
+            'app_data_size'
+        ];
+        
+        // 4. Ensure active database is open
+        console.log(`[IPC] Restoring into database path: ${DB_PATH}`);
+        if (!db) {
+            db = new Database(DB_PATH, { timeout: 15000 });
+            db.pragma('journal_mode = WAL');
         }
-
-        // 2. Perform the swap
-        fs.copyFileSync(tempRestorePath, DB_PATH);
+        
+        // 4.5 Check for Company Name conflict
+        const backupProfileRow = rows.find(r => r.key === 'company_profile');
+        if (backupProfileRow) {
+            try {
+                const backupProfile = JSON.parse(backupProfileRow.value);
+                const backupName = backupProfile.establishmentName;
+                
+                const activeProfileRow = db.prepare('SELECT value FROM store WHERE key = ?').get('company_profile') as { value: string } | undefined;
+                if (activeProfileRow) {
+                    const activeProfile = JSON.parse(activeProfileRow.value);
+                    const activeName = activeProfile.establishmentName;
+                    
+                    if (backupName && activeName && backupName !== activeName) {
+                        sourceDb.close();
+                        fs.unlinkSync(tempRestorePath);
+                        return { success: false, error: `Data restoration failed due to conflict in Company Name. Backup belongs to '${backupName}', but active company is '${activeName}'.` };
+                    }
+                }
+            } catch (e) {
+                console.warn('[IPC] Failed to parse company profile for name check:', e);
+            }
+        }
+        
+        // 5. Merge rows into active database, skipping excluded keys
+        const upsertStmt = db.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+        
+        db.transaction(() => {
+            for (const row of rows) {
+                if (!excludedKeys.includes(row.key)) {
+                    upsertStmt.run(row.key, row.value);
+                }
+            }
+        })();
+        
+        // 6. Clean up
+        sourceDb.close();
         fs.unlinkSync(tempRestorePath);
-
-        // 3. Re-initialize
-        initializeDatabase(appBasePath);
 
         console.log(`[IPC] restoration successful.`);
         return { success: true };

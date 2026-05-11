@@ -51,6 +51,7 @@ interface ReportsProps {
 const Reports: React.FC<ReportsProps> = ({
     employees,
     setEmployees,
+    config,
     companyProfile,
     attendances: _attendances,
     savedRecords,
@@ -65,12 +66,10 @@ const Reports: React.FC<ReportsProps> = ({
     onRollover,
     arrearHistory,
     showAlert: _showAlert,
-    latestFrozenPeriod,
     onNavigate
 }) => {
     const [reportType, setReportType] = useState<string>('Pay Sheet');
     const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
-    const hasInitialJumped = useRef(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
     const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('all');
@@ -139,9 +138,41 @@ const Reports: React.FC<ReportsProps> = ({
         return arrearHistory?.some(b => b.month === month && b.year === year) || false;
     }, [arrearHistory, month, year]);
 
+    const earliestPeriod = useMemo<{ month: string, year: number, val: number } | null>(() => {
+        if (!savedRecords || savedRecords.length === 0) return null;
+        
+        let minVal = 9999999;
+        let earliest: { month: string, year: number, val: number } | null = null;
+        
+        savedRecords.forEach(r => {
+            const mIdx = months.indexOf(r.month);
+            const val = r.year * 12 + mIdx;
+            if (val < minVal) {
+                minVal = val;
+                earliest = { month: r.month, year: r.year, val };
+            }
+        });
+        
+        return earliest;
+    }, [savedRecords]);
+
+    const isBeforeEarliest = useMemo(() => {
+        if (!earliestPeriod) return false;
+        const mIdx = months.indexOf(month);
+        const currentVal = year * 12 + mIdx;
+        return currentVal < earliestPeriod.val;
+    }, [earliestPeriod, month, year]);
+
     // Check for unsaved changes in Process Payroll (Temp Storage)
     useEffect(() => {
-        const tempKey = `app_temp_payroll_${month}_${year}`;
+        const tempKey = `app_temp_payroll_${companyProfile.id}_${month}_${year}`;
+        const legacyKey = `app_temp_payroll_${month}_${year}`;
+        
+        // Clean up legacy unscoped keys if found to prevent "ghost" unsaved changes
+        if (localStorage.getItem(legacyKey)) {
+            localStorage.removeItem(legacyKey);
+        }
+
         const tempData = localStorage.getItem(tempKey);
         if (tempData) {
             try {
@@ -153,42 +184,14 @@ const Reports: React.FC<ReportsProps> = ({
         } else {
             setHasUnsavedChanges(false);
         }
-    }, [month, year]);
+    }, [month, year, companyProfile.id]);
 
     useEffect(() => {
         setSelectedEmployeeId('all');
     }, [month, year, reportType]);
 
-    // Initial Jump to Latest Relevant Month (Prioritize Frozen for Reports)
-    useEffect(() => {
-        if (!hasInitialJumped.current) {
-            if (latestFrozenPeriod) {
-                // If we have frozen data, reports should ALMOST ALWAYS default to it
-                if (latestFrozenPeriod.month !== month || latestFrozenPeriod.year !== year) {
-                    setMonth(latestFrozenPeriod.month);
-                    setYear(latestFrozenPeriod.year);
-                }
-            } else if (savedRecords.length > 0) {
-                // Fallback: Find the absolute latest saved period (Draft)
-                let latest = savedRecords[0];
-                let maxVal = (latest.year * 12) + months.indexOf(latest.month);
-
-                savedRecords.forEach(r => {
-                    const val = (r.year * 12) + months.indexOf(r.month);
-                    if (val > maxVal) {
-                        maxVal = val;
-                        latest = r;
-                    }
-                });
-
-                if (latest.month !== month || latest.year !== year) {
-                    setMonth(latest.month);
-                    setYear(latest.year);
-                }
-            }
-            hasInitialJumped.current = true;
-        }
-    }, [savedRecords, month, year, setMonth, setYear, latestFrozenPeriod, months]);
+    // Initial Jump logic removed to respect global state synchronized across the app.
+    // usePayrollPeriod already handles default selection smartly based on processing status.
 
     const getPayrollPeriodStart = () => {
         const mIdx = months.indexOf(month);
@@ -588,81 +591,157 @@ const Reports: React.FC<ReportsProps> = ({
 
                     if (validToExport.length === 0) throw new Error(`No data found for the selected ${paySheetFilter}: ${paySheetFilterValue}`);
 
-                    const excelData = validToExport.map(r => {
-                        const emp = employees.find(e => e.id === r.employeeId);
-                        return {
-                            'ID': r.employeeId,
-                            'Name': emp?.name,
-                            'Designation': emp?.designation,
-                            'Site': emp?.site || '-',
-                            'Branch': emp?.branch || '-',
-                            'Division': emp?.division || '-',
-                            'Days Paid': r.payableDays,
-                            'Basic': Math.round(r.earnings?.basic || 0),
-                            'DA': Math.round(r.earnings?.da || 0),
-                            'Retaining Allw': Math.round(r.earnings?.retainingAllowance || 0),
-                            'HRA': Math.round(r.earnings?.hra || 0),
-                            'Conveyance': Math.round(r.earnings?.conveyance || 0),
-                            'Washing': Math.round(r.earnings?.washing || 0),
-                            'Attire': Math.round(r.earnings?.attire || 0),
-                            'Special Allw 1': Math.round(r.earnings?.special1 || 0),
-                            'Special Allw 2': Math.round(r.earnings?.special2 || 0),
-                            'Special Allw 3': Math.round(r.earnings?.special3 || 0),
-                            'Bonus': Math.round(r.earnings?.bonus || 0),
-                            'Leave Encash': Math.round(r.earnings?.leaveEncashment || 0),
-                            'Overtime': Math.round(r.earnings?.otAmount || 0),
-                            'GROSS EARNINGS': Math.round(r.earnings?.total || 0),
-                            'PF (EE)': Math.round(r.deductions?.epf || 0),
-                            'VPF': Math.round(r.deductions?.vpf || 0),
-                            'ESI (EE)': Math.round(r.deductions?.esi || 0),
-                            'Prof Tax': Math.round(r.deductions?.pt || 0),
-                            'Income Tax': Math.round(r.deductions?.it || 0),
-                            'LWF': Math.round(r.deductions?.lwf || 0),
-                            'Advance': Math.round(r.deductions?.advanceRecovery || 0),
-                            'Fine': Math.round(r.deductions?.fine || 0),
-                            'TOTAL DEDUCTIONS': Math.round(r.deductions?.total || 0),
-                            'NET PAY': Math.round(r.netPay || 0)
+                    const columns = config.dynamicPaySheetColumns || [];
+                    const enableDynamic = config.enableDynamicPaySheet;
+
+                    let excelData: any[] = [];
+
+                    if (!enableDynamic) {
+                        excelData = validToExport.map(r => {
+                            const emp = employees.find(e => e.id === r.employeeId);
+                            return {
+                                'ID': r.employeeId,
+                                'Name': emp?.name,
+                                'Designation': emp?.designation,
+                                'Site': emp?.site || '-',
+                                'Branch': emp?.branch || '-',
+                                'Division': emp?.division || '-',
+                                'Days Paid': r.payableDays,
+                                'Basic': Math.round(r.earnings?.basic || 0),
+                                'DA': Math.round(r.earnings?.da || 0),
+                                'Retaining Allw': Math.round(r.earnings?.retainingAllowance || 0),
+                                'HRA': Math.round(r.earnings?.hra || 0),
+                                'Conveyance': Math.round(r.earnings?.conveyance || 0),
+                                'Washing': Math.round(r.earnings?.washing || 0),
+                                'Attire': Math.round(r.earnings?.attire || 0),
+                                'Special Allw 1': Math.round(r.earnings?.special1 || 0),
+                                'Special Allw 2': Math.round(r.earnings?.special2 || 0),
+                                'Special Allw 3': Math.round(r.earnings?.special3 || 0),
+                                'Bonus': Math.round(r.earnings?.bonus || 0),
+                                'Leave Encash': Math.round(r.earnings?.leaveEncashment || 0),
+                                'Overtime': Math.round(r.earnings?.otAmount || 0),
+                                'GROSS EARNINGS': Math.round(r.earnings?.total || 0),
+                                'PF (EE)': Math.round(r.deductions?.epf || 0),
+                                'VPF': Math.round(r.deductions?.vpf || 0),
+                                'ESI (EE)': Math.round(r.deductions?.esi || 0),
+                                'Prof Tax': Math.round(r.deductions?.pt || 0),
+                                'Income Tax': Math.round(r.deductions?.it || 0),
+                                'LWF': Math.round(r.deductions?.lwf || 0),
+                                'Advance': Math.round(r.deductions?.advanceRecovery || 0),
+                                'Fine': Math.round(r.deductions?.fine || 0),
+                                'TOTAL DEDUCTIONS': Math.round(r.deductions?.total || 0),
+                                'NET PAY': Math.round(r.netPay || 0)
+                            };
+                        });
+
+                        const sum = (key: string) =>
+                            excelData.reduce((acc, row: any) => acc + (Number(row[key]) || 0), 0);
+
+                        const grandTotal: any = {
+                            'ID': '',
+                            'Name': 'GRAND TOTAL',
+                            'Designation': '',
+                            'Site': '',
+                            'Branch': '',
+                            'Division': '',
+                            'Days Paid': sum('Days Paid'),
+                            'Basic': sum('Basic'),
+                            'DA': sum('DA'),
+                            'Retaining Allw': sum('Retaining Allw'),
+                            'HRA': sum('HRA'),
+                            'Conveyance': sum('Conveyance'),
+                            'Washing': sum('Washing'),
+                            'Attire': sum('Attire'),
+                            'Special Allw 1': sum('Special Allw 1'),
+                            'Special Allw 2': sum('Special Allw 2'),
+                            'Special Allw 3': sum('Special Allw 3'),
+                            'Bonus': sum('Bonus'),
+                            'Leave Encash': sum('Leave Encash'),
+                            'Overtime': sum('Overtime'),
+                            'GROSS EARNINGS': sum('GROSS EARNINGS'),
+                            'PF (EE)': sum('PF (EE)'),
+                            'VPF': sum('VPF'),
+                            'ESI (EE)': sum('ESI (EE)'),
+                            'Prof Tax': sum('Prof Tax'),
+                            'Income Tax': sum('Income Tax'),
+                            'LWF': sum('LWF'),
+                            'Advance': sum('Advance'),
+                            'Fine': sum('Fine'),
+                            'TOTAL DEDUCTIONS': sum('TOTAL DEDUCTIONS'),
+                            'NET PAY': sum('NET PAY')
                         };
-                    });
+                        excelData.push(grandTotal);
+                    } else {
+                        const allColumns = [
+                            { key: 'basic', label: 'Basic Pay', getValue: (r: any) => Math.round(r.earnings?.basic || 0) },
+                            { key: 'da', label: 'DA', getValue: (r: any) => Math.round(r.earnings?.da || 0) },
+                            { key: 'retaining', label: 'Retn Allow', getValue: (r: any) => Math.round(r.earnings?.retainingAllowance || 0) },
+                            { key: 'hra', label: 'HRA', getValue: (r: any) => Math.round(r.earnings?.hra || 0) },
+                            { key: 'conveyance', label: 'Conveyance', getValue: (r: any) => Math.round(r.earnings?.conveyance || 0) },
+                            { key: 'washing', label: 'Washing', getValue: (r: any) => Math.round(r.earnings?.washing || 0) },
+                            { key: 'attire', label: 'Attire', getValue: (r: any) => Math.round(r.earnings?.attire || 0) },
+                            { key: 'special1', label: 'Special 1', getValue: (r: any) => Math.round(r.earnings?.special1 || 0) },
+                            { key: 'special2', label: 'Special 2', getValue: (r: any) => Math.round(r.earnings?.special2 || 0) },
+                            { key: 'special3', label: 'Special 3', getValue: (r: any) => Math.round(r.earnings?.special3 || 0) },
+                            { key: 'bonus', label: 'Bonus', getValue: (r: any) => Math.round(r.earnings?.bonus || 0) },
+                            { key: 'leaveEncashment', label: 'Leave Encash', getValue: (r: any) => Math.round(r.earnings?.leaveEncashment || 0) },
+                            { key: 'otAmount', label: 'OT Amount', getValue: (r: any) => Math.round(r.earnings?.otAmount || 0) },
+                            { key: 'arrears', label: 'Arrears', getValue: (r: any) => Math.round(r.earnings?.arrears || 0) },
+                            { key: 'totalEarnings', label: 'Total Earnings', getValue: (r: any) => Math.round(r.earnings?.total || 0) },
+                            { key: 'epf', label: 'EPF', getValue: (r: any) => Math.round(r.deductions?.epf || 0) },
+                            { key: 'vpf', label: 'VPF', getValue: (r: any) => Math.round(r.deductions?.vpf || 0) },
+                            { key: 'esi', label: 'ESI', getValue: (r: any) => Math.round(r.deductions?.esi || 0) },
+                            { key: 'pt', label: 'PT', getValue: (r: any) => Math.round(r.deductions?.pt || 0) },
+                            { key: 'it', label: 'IT', getValue: (r: any) => Math.round(r.deductions?.it || 0) },
+                            { key: 'lwf', label: 'LWF', getValue: (r: any) => Math.round(r.deductions?.lwf || 0) },
+                            { key: 'advanceRecovery', label: 'Adv Recovery', getValue: (r: any) => Math.round(r.deductions?.advanceRecovery || 0) },
+                            { key: 'fine', label: 'Fine', getValue: (r: any) => Math.round(r.deductions?.fine || 0) },
+                            { key: 'totalDeductions', label: 'Total Deductions', getValue: (r: any) => Math.round(r.deductions?.total || 0) },
+                            { key: 'netPay', label: 'Net Pay', getValue: (r: any) => Math.round(r.netPay || 0) }
+                        ];
 
-                    // Grand Total row
-                    const sum = (key: string) =>
-                        excelData.reduce((acc, row: any) => acc + (Number(row[key]) || 0), 0);
+                        excelData = validToExport.map(r => {
+                            const emp = employees.find(e => e.id === r.employeeId);
+                            const row: any = {
+                                'ID': r.employeeId,
+                                'Name': emp?.name,
+                                'Designation': emp?.designation,
+                                'Site': emp?.site || '-',
+                                'Branch': emp?.branch || '-',
+                                'Division': emp?.division || '-',
+                                'Days Paid': r.payableDays,
+                            };
 
-                    const grandTotal: any = {
-                        'ID': '',
-                        'Name': 'GRAND TOTAL',
-                        'Designation': '',
-                        'Site': '',
-                        'Branch': '',
-                        'Division': '',
-                        'Days Paid': sum('Days Paid'),
-                        'Basic': sum('Basic'),
-                        'DA': sum('DA'),
-                        'Retaining Allw': sum('Retaining Allw'),
-                        'HRA': sum('HRA'),
-                        'Conveyance': sum('Conveyance'),
-                        'Washing': sum('Washing'),
-                        'Attire': sum('Attire'),
-                        'Special Allw 1': sum('Special Allw 1'),
-                        'Special Allw 2': sum('Special Allw 2'),
-                        'Special Allw 3': sum('Special Allw 3'),
-                        'Bonus': sum('Bonus'),
-                        'Leave Encash': sum('Leave Encash'),
-                        'Overtime': sum('Overtime'),
-                        'GROSS EARNINGS': sum('GROSS EARNINGS'),
-                        'PF (EE)': sum('PF (EE)'),
-                        'VPF': sum('VPF'),
-                        'ESI (EE)': sum('ESI (EE)'),
-                        'Prof Tax': sum('Prof Tax'),
-                        'Income Tax': sum('Income Tax'),
-                        'LWF': sum('LWF'),
-                        'Advance': sum('Advance'),
-                        'Fine': sum('Fine'),
-                        'TOTAL DEDUCTIONS': sum('TOTAL DEDUCTIONS'),
-                        'NET PAY': sum('NET PAY')
-                    };
-                    excelData.push(grandTotal);
+                            allColumns.forEach(col => {
+                                if (columns.includes(col.key)) {
+                                    row[col.label] = col.getValue(r);
+                                }
+                            });
+
+                            return row;
+                        });
+
+                        const sum = (key: string) =>
+                            excelData.reduce((acc, row: any) => acc + (Number(row[key]) || 0), 0);
+
+                        const grandTotal: any = {
+                            'ID': '',
+                            'Name': 'GRAND TOTAL',
+                            'Designation': '',
+                            'Site': '',
+                            'Branch': '',
+                            'Division': '',
+                            'Days Paid': sum('Days Paid'),
+                        };
+
+                        allColumns.forEach(col => {
+                            if (columns.includes(col.key)) {
+                                grandTotal[col.label] = sum(col.label);
+                            }
+                        });
+
+                        excelData.push(grandTotal);
+                    }
 
                     let customExcelFilename = undefined;
                     if (paySheetFilter !== 'all') {
@@ -704,7 +783,7 @@ const Reports: React.FC<ReportsProps> = ({
                     if (useLegacyDesign) {
                         savedPath = await generateLegacyFormB(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName);
                     } else {
-                        savedPath = await generateSimplePaySheetPDF(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName);
+                        savedPath = await generateSimplePaySheetPDF(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName, config);
                     }
                 }
             } else if (reportType === 'Pay Slips') {
@@ -901,32 +980,32 @@ const Reports: React.FC<ReportsProps> = ({
 
                 <div className="flex items-center gap-3 bg-[#0f172a] p-2 rounded-xl border border-slate-700">
                     <select value={month} onChange={e => setMonth(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400" title="Select Month" aria-label="Select Month">
-                        {months.map(m => (<option key={m} value={m}>{m}</option>))}
+                        {months.map(m => (<option key={m} value={m} className="bg-[#0f172a] text-white">{m}</option>))}
                     </select>
                     <select value={year} onChange={e => setYear(+e.target.value)} className="bg-transparent px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400" title="Select Year" aria-label="Select Year">
-                        {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
+                        {yearOptions.map(y => (<option key={y} value={y} className="bg-[#0f172a] text-white">{y}</option>))}
                     </select>
                 </div>
             </div>
 
             {/* Lock/Unlock Section */}
-            <div className={`p-6 rounded-xl border flex items-center justify-between shadow-lg transition-all ${isLocked ? 'bg-emerald-900/10 border-emerald-500/30' : 'bg-amber-900/10 border-amber-500/30'}`}>
+            <div className={`p-6 rounded-xl border flex items-center justify-between shadow-lg transition-all ${isBeforeEarliest ? 'bg-slate-800/50 border-slate-700' : (isLocked ? 'bg-emerald-900/10 border-emerald-500/30' : 'bg-amber-900/10 border-amber-500/30')}`}>
                 <div className="flex items-center gap-4">
-                    <div className={`p-3 rounded-full border ${isLocked ? 'bg-emerald-900/20 border-emerald-500/50 text-emerald-400' : 'bg-amber-900/20 border-amber-500/50 text-amber-400'}`}>
-                        {isLocked ? <Lock size={24} /> : <Unlock size={24} />}
+                    <div className={`p-3 rounded-full border ${isBeforeEarliest ? 'bg-slate-800/50 border-slate-700 text-slate-500' : (isLocked ? 'bg-emerald-900/20 border-emerald-500/50 text-emerald-400' : 'bg-amber-900/20 border-amber-500/50 text-amber-400')}`}>
+                        {isBeforeEarliest ? <FileText size={24} /> : (isLocked ? <Lock size={24} /> : <Unlock size={24} />)}
                     </div>
                     <div>
-                        <h3 className={`font-bold text-lg ${isLocked ? 'text-emerald-400' : 'text-amber-400'}`}>
-                            {isLocked ? 'Payroll Finalized' : 'Payroll in Draft'}
+                        <h3 className={`font-bold text-lg ${isBeforeEarliest ? 'text-slate-400' : (isLocked ? 'text-emerald-400' : 'text-amber-400')}`}>
+                            {isBeforeEarliest ? 'No Data Available' : (isLocked ? 'Payroll Finalized' : 'Payroll in Draft')}
                         </h3>
                         <p className="text-xs text-slate-400 mt-1">
-                            {isLocked
-                                ? 'Data is frozen for compliance reporting.'
-                                : 'Freeze data to generate statutory reports and lock edits.'}
+                            {isBeforeEarliest 
+                                ? `Last frozen data is available from ${earliestPeriod?.month} ${earliestPeriod?.year} only.`
+                                : (isLocked ? 'Data is frozen for compliance reporting.' : 'Freeze data to generate statutory reports and lock edits.')}
                         </p>
                     </div>
                 </div>
-                {!isLocked && (
+                {!isLocked && !isBeforeEarliest && (
                     <button
                         onClick={handleFreeze}
                         disabled={!hasData || hasUnsavedChanges}
@@ -1036,7 +1115,7 @@ const Reports: React.FC<ReportsProps> = ({
                                                 title={`Select ${paySheetFilter}`}
                                                 aria-label={`Select ${paySheetFilter}`}
                                             >
-                                                <option value="">-- Select {paySheetFilter === 'site' ? 'Site' : paySheetFilter === 'branch' ? 'Branch' : 'Division'} --</option>
+                                                <option value="" className="bg-[#0f172a] text-white">-- Select {paySheetFilter === 'site' ? 'Site' : paySheetFilter === 'branch' ? 'Branch' : 'Division'} --</option>
                                                 {Array.from(new Set(
                                                     currentResults.map(r => {
                                                         const emp = employees.find(e => e.id === r.employeeId);
@@ -1045,7 +1124,7 @@ const Reports: React.FC<ReportsProps> = ({
                                                 ))
                                                     .sort()
                                                     .map(val => (
-                                                        <option key={val} value={val!}>{val}</option>
+                                                        <option key={val} value={val!} className="bg-[#0f172a] text-white">{val}</option>
                                                     ))}
                                             </select>
                                         </div>
@@ -1100,13 +1179,13 @@ const Reports: React.FC<ReportsProps> = ({
                                                 title="Select Employee for Pay Slip"
                                                 aria-label="Select Employee for Pay Slip"
                                             >
-                                                <option value="all">All Employees</option>
+                                                <option value="all" className="bg-[#0f172a] text-white">All Employees</option>
                                                 {currentResults
                                                     .filter(r => r.netPay > 0)
                                                     .map(r => ({ id: r.employeeId, name: employees.find(e => e.id === r.employeeId)?.name || r.employeeId }))
                                                     .sort((a, b) => a.name.localeCompare(b.name))
                                                     .map(emp => (
-                                                        <option key={emp.id} value={emp.id}>{emp.name}</option>
+                                                        <option key={emp.id} value={emp.id} className="bg-[#0f172a] text-white">{emp.name}</option>
                                                     ))
                                                 }
                                             </select>
@@ -1125,7 +1204,7 @@ const Reports: React.FC<ReportsProps> = ({
                                                 title={`Select ${paySlipFilter}`}
                                                 aria-label={`Select ${paySlipFilter}`}
                                             >
-                                                <option value="">-- Select {paySlipFilter === 'site' ? 'Site' : paySlipFilter === 'branch' ? 'Branch' : 'Division'} --</option>
+                                                <option value="" className="bg-[#0f172a] text-white">-- Select {paySlipFilter === 'site' ? 'Site' : paySlipFilter === 'branch' ? 'Branch' : 'Division'} --</option>
                                                 {Array.from(new Set(
                                                     currentResults.map(r => {
                                                         const emp = employees.find(e => e.id === r.employeeId);
@@ -1134,7 +1213,7 @@ const Reports: React.FC<ReportsProps> = ({
                                                 ))
                                                     .sort()
                                                     .map(val => (
-                                                        <option key={val} value={val!}>{val}</option>
+                                                        <option key={val} value={val!} className="bg-[#0f172a] text-white">{val}</option>
                                                     ))}
                                             </select>
                                         </div>
@@ -1163,7 +1242,7 @@ const Reports: React.FC<ReportsProps> = ({
                                         className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-bold outline-none focus:border-indigo-500 transition-colors"
                                     >
                                         {arrearHistory.map(b => (
-                                            <option key={`${b.month}-${b.year}`} value={`${b.month}-${b.year}`}>
+                                            <option key={`${b.month}-${b.year}`} value={`${b.month}-${b.year}`} className="bg-[#0f172a] text-white">
                                                 [{b.status || 'Finalized'}] Processed: {b.month} {b.year} (Eff: {b.effectiveMonth} {b.effectiveYear})
                                             </option>
                                         ))}
@@ -1382,13 +1461,13 @@ const Reports: React.FC<ReportsProps> = ({
                                                             title={`Select separation reason for ${emp?.name}`}
                                                             aria-label={`Select separation reason for ${emp?.name}`}
                                                         >
-                                                            <option value="">Select Reason...</option>
-                                                            <option value="ON LOP">ON LOP</option>
-                                                            <option value="Resignation">Resignation</option>
-                                                            <option value="Retirement">Retirement</option>
-                                                            <option value="Termination">Termination</option>
-                                                            <option value="Death">Death</option>
-                                                            <option value="Absconding">Absconding</option>
+                                                            <option value="" className="bg-[#0f172a] text-white">Select Reason...</option>
+                                                            <option value="ON LOP" className="bg-[#0f172a] text-white">ON LOP</option>
+                                                            <option value="Resignation" className="bg-[#0f172a] text-white">Resignation</option>
+                                                            <option value="Retirement" className="bg-[#0f172a] text-white">Retirement</option>
+                                                            <option value="Termination" className="bg-[#0f172a] text-white">Termination</option>
+                                                            <option value="Death" className="bg-[#0f172a] text-white">Death</option>
+                                                            <option value="Absconding" className="bg-[#0f172a] text-white">Absconding</option>
                                                         </select>
                                                     </td>
                                                 </tr>

@@ -58,13 +58,24 @@ import { APP_VERSION, APP_PATCH_TIMESTAMP } from '../services/licenseService';
 export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false) => {
   const [latestAppVersion, setLatestAppVersion] = useState<string | null>(localStorage.getItem('app_latest_version'));
   const [latestPatchTimestamp, setLatestPatchTimestamp] = useState<string | null>(localStorage.getItem('app_latest_patch_timestamp'));
+  const [appStartupTime] = useState(Date.now());
   const [downloadUrl, setDownloadUrl] = useState<string | null>(localStorage.getItem('app_download_url'));
   const [sha256, setSha256] = useState<string | null>(localStorage.getItem('app_update_hash'));
   const [showUpdateNotice, setShowUpdateNotice] = useState(false);
   const [showBackgroundNotice, setShowBackgroundNotice] = useState(false);
   const [isUpdateDownloading, setIsUpdateDownloading] = useState(false);
   const [isUpdatePreparing, setIsUpdatePreparing] = useState(false);
-  const [updateDownloaded, setUpdateDownloaded] = useState(localStorage.getItem('app_update_ready') === 'true');
+  const [updateDownloaded, setUpdateDownloaded] = useState(() => {
+    const isReady = localStorage.getItem('app_update_ready') === 'true';
+    if (!isReady) return false;
+    
+    // V03.01.04: Double-Check Version before declaring "Ready"
+    const cloudVer = localStorage.getItem('app_latest_version');
+    if (cloudVer && !isVersionHigher(cloudVer, APP_VERSION)) {
+        return false; 
+    }
+    return true;
+  });
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [deploymentStep, setDeploymentStep] = useState<number>(3); // 3=EXTRACT, 4=VALIDATE, 5=APPLY, 6=SUCCESS
@@ -251,6 +262,46 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false) => {
       }
     }
   }, [downloadUrl, updateDownloaded, isPatchNotice, latestPatchTimestamp, patchSkipCount, activePatchTs]);
+
+  // --- V03.01.04: Version Migration Sync ---
+  // If we just upgraded to a new version, automatically adopt the cloud patch timestamp
+  // as our new baseline to prevent "heritage" patch loops from old versions.
+  useEffect(() => {
+    const versionMarker = localStorage.getItem('app_version_marker');
+    if (versionMarker && versionMarker !== APP_VERSION) {
+       if (latestPatchTimestamp) {
+          console.log(`🎊 [VersionSync] Upgrade detected (${versionMarker} -> ${APP_VERSION}). Adopting cloud patch baseline: ${latestPatchTimestamp}`);
+          localStorage.setItem('app_active_patch_ts', latestPatchTimestamp);
+          setActivePatchTs(latestPatchTimestamp);
+          localStorage.setItem('app_version_marker', APP_VERSION);
+       } else {
+          console.log(`⏳ [VersionSync] Upgrade detected (${versionMarker} -> ${APP_VERSION}). Waiting for cloud patch timestamp...`);
+       }
+    } else if (!versionMarker) {
+        localStorage.setItem('app_version_marker', APP_VERSION);
+    }
+  }, [latestPatchTimestamp]);
+
+  // --- V03.01.04: HARD CLEANUP OF REDUNDANT UPDATE FLAGS ---
+  useEffect(() => {
+    const ready = localStorage.getItem('app_update_ready') === 'true';
+    if (!ready) return;
+
+    const cloudVer = localStorage.getItem('app_latest_version');
+    const cloudPatchTs = localStorage.getItem('app_latest_patch_timestamp');
+    const localPatchTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
+
+    const isVerHigher = cloudVer ? isVersionHigher(cloudVer, APP_VERSION) : false;
+    const isPatchNewer = cloudPatchTs ? parseDateTime(cloudPatchTs) > parseDateTime(localPatchTs) : false;
+
+    if (!isVerHigher && !isPatchNewer) {
+      console.log(`🧹 [HardCleanup] Current version (${APP_VERSION}) is up to date. Nuking redundant update flags.`);
+      localStorage.removeItem('app_update_ready');
+      setUpdateDownloaded(false);
+      setShowUpdateNotice(false);
+    }
+  }, []);
+
   useEffect(() => {
     // 🛡️ [V02.02.23] DEVELOPER BYPASS
     if (import.meta.env.DEV || isDeveloper) {
@@ -293,14 +344,14 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false) => {
     // ── PHASE 2: Patch Update (Only if no new version) ──
     const latestTs = parseDateTime(latestPatchTimestamp);
     const activeTs = parseDateTime(activePatchTs);
-    const delayMs = 5 * 60 * 1000; // 5 Minute Cooldown for Developer Verification
+    const delayMs = 5 * 60 * 1000; 
 
-    console.log(`[PatchSync] Cloud: ${latestPatchTimestamp} (${latestTs}) | Local X: ${activePatchTs} (${activeTs}) | Now: ${now} | Diff: ${now - latestTs}ms | Delay: ${delayMs}ms`);
+    console.log(`[PatchSync] Cloud: ${latestPatchTimestamp} (${latestTs}) | Local X: ${activePatchTs} (${activeTs}) | Startup: ${appStartupTime} | Now: ${now} | Grace Ends: ${appStartupTime + delayMs}`);
     
     // Check if patch is newer AND if the 5-minute grace period has passed
     if (latestTs > activeTs && !isSessionDismissed) {
-       if (now >= (latestTs + delayMs)) {
-         console.log("🚀 [PatchSync] Grace period expired. Triggering update notice.");
+       if (now >= (appStartupTime + delayMs)) {
+         console.log("🚀 [PatchSync] Startup grace period expired. Triggering update notice.");
          setIsPatchNotice(true);
          setIsPatchMandatory(patchSkipCount >= 3);
          setShowUpdateNotice(true);

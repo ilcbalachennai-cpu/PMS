@@ -163,7 +163,9 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
   esiOriginalWagesComponents: { basic: true, da: true, retaining: true, hra: false, conveyance: true, washing: true, attire: true, special1: true, special2: true, special3: true },
   bonusWagesComponents: { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false },
   gratuityWagesComponents: { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false },
-  enableArrearSalary: false
+  enableArrearSalary: false,
+  enableDynamicPaySheet: false,
+  dynamicPaySheetColumns: ['empid', 'name', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears', 'totalEarnings', 'epf', 'vpf', 'esi', 'pt', 'it', 'lwf', 'advanceRecovery', 'fine', 'totalDeductions', 'netPay']
 };
 
 export const DEFAULT_LEAVE_POLICY: LeavePolicy = {

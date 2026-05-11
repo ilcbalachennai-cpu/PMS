@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, ShieldCheck, Maximize, Minimize, Power, Eye, EyeOff, Clock, Timer } from 'lucide-react';
 import { User as UserType } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
-import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense, requestResetOTP, updateCloudPassword, requestDeveloperOTP, verifyDeveloperOTP, verifyIdentityEmail, syncIdentityRepair, requestRestoreOTP, verifyRestoreOTP } from '../services/licenseService';
+import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense, requestResetOTP, updateCloudPassword, requestDeveloperOTP, verifyDeveloperOTP, verifyIdentityEmail, syncIdentityRepair, requestRestoreOTP, verifyRestoreOTP, trackActiveOfflineDay } from '../services/licenseService';
 import CustomModal from './Shared/CustomModal';
 import { Mail, CheckCircle2, ShieldAlert, Loader2 } from 'lucide-react';
 
@@ -143,6 +143,25 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
     return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
   }, []);
 
+  // Sync app_users from DB to localStorage on mount
+  useEffect(() => {
+    const syncUsers = async () => {
+      const api = (window as any).electronAPI;
+      if (api && api.dbGet) {
+        try {
+          const res = await api.dbGet('app_users');
+          if (res && res.success && res.data) {
+            localStorage.setItem('app_users', JSON.stringify(res.data));
+            console.log('[SYNC] app_users synced from DB to localStorage');
+          }
+        } catch (e) {
+          console.warn('[SYNC] Failed to get app_users from DB:', e);
+        }
+      }
+    };
+    syncUsers();
+  }, []);
+
   // Auto-focus on mount
   useEffect(() => {
     // --- EMERGENCY AUTO-LOCKOUT PROTECTION ---
@@ -276,7 +295,27 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
       // This ensures that 'VRANGA' always triggers a cloud credential check + OTP
       const isDev = cleanUsername.toLowerCase() === 'vranga';
       if (isDev) {
-        console.log("≡ƒ¢á∩╕Å Developer high-priority bypass initiated:", cleanUsername);
+        console.log("🛠️ Developer high-priority bypass initiated:", cleanUsername);
+        
+        // --- V03.01.06: OFFLINE DEVELOPER FALLBACK ---
+        if (!navigator.onLine) {
+          console.warn("📴 Offline: Checking cached developer credentials...");
+          if (cloudDev && 
+              String(cloudDev.username).toUpperCase() === cleanUsername && 
+              String(cloudDev.password) === cleanPassword) {
+            console.log("✅ Offline Developer login successful.");
+            // --- V03.01.06: TRACK OFFLINE USAGE ---
+            trackActiveOfflineDay();
+            
+            onLogin(cloudDev);
+            return;
+          } else {
+            setError("Internet connection required for initial developer authentication.");
+            setIsLoading(false);
+            return;
+          }
+        }
+
         try {
           // Step 1: Request OTP (GAS will verify cleanPassword vs Master_Config sheet)
           const res = await requestDeveloperOTP(cleanUsername, cleanPassword);
@@ -320,6 +359,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
         console.log("Γ£à Login successful for:", cleanUsername);
         setFailedAttempts(0); // Reset on success
 
+        if (!navigator.onLine) {
+          trackActiveOfflineDay();
+        }
+
         // --- V01.0.11: CLOUD LOGIN TRACKING ---
         try {
           const machineId = localStorage.getItem('app_machine_id');
@@ -343,8 +386,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
         }
 
         // --- CLOUD FALLBACK ---
-        console.log("ΓÜá∩╕Å Local login failed. Attempting cloud sync fallback...");
-        const syncResult = await validateLicenseStartup(true, cleanUsername);
+        console.log("⚠️ Local login failed. Attempting cloud sync fallback...");
+        const syncResult = await validateLicenseStartup(true, cleanUsername, undefined, undefined, cleanPassword);
 
         // 1. ADVANCED DEVELOPER BYPASS (Check this FIRST before license validity)
         let freshDev = getAppDeveloper();
@@ -425,7 +468,20 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
         const nextFailedCount = failedAttempts + 1;
         setFailedAttempts(nextFailedCount);
 
-        if (isLegacy || isCaseMismatch || isLicenseMismatch || (!isPerfectMatch && nextFailedCount >= 3)) {
+        // --- V03.01.04: FORGOT PASSWORD REDIRECT ---
+        if (nextFailedCount >= 3) {
+          setError(`Too many failed attempts. Redirecting to Password Reset...`);
+          setTimeout(() => {
+            setShowResetModal(true);
+            setResetStep('IDENTIFY');
+            setResetUserID(username);
+            setError('');
+          }, 1500);
+          setIsLoading(false);
+          return;
+        }
+
+        if (isLegacy || isCaseMismatch || isLicenseMismatch) {
           setError(`Identity Transition Required (Attempt ${nextFailedCount}/3)`);
           setSyncNotice('Dear user kindly reset your USER ID (one time) with new ID as per the criteria set under User ID for a seamless access in future');
           setSyncStep('EMAIL');
@@ -569,7 +625,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
       if (res.success) {
         setDevTimer(60);
         setDevOTP('');
-        setDevError('New Bypass Code sent to your mail.');
+        setDevError('New Pass Code sent to your mail.');
         setTimeout(() => {
           if (otpInputRef.current) otpInputRef.current.focus();
         }, 100);
@@ -1156,7 +1212,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
 
             <form onSubmit={handleDevVerify} className="space-y-2">
               <div className="space-y-0.5">
-                <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1 text-center block">6-Digit Bypass Code</label>
+                <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1 text-center block">6-Digit Pass Code</label>
                 <input
                   ref={otpInputRef}
                   type="text"
@@ -1186,7 +1242,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
                       disabled={isVerifyingDev}
                       className="text-[9px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest transition-all flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl hover:scale-105 active:scale-95"
                     >
-                      <Timer size={14} /> Request New Bypass Code
+                      <Timer size={14} /> Request New Pass Code
                     </button>
                   ) : (
                     <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest opacity-60">OTP is valid for 60 seconds</p>

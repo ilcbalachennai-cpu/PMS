@@ -1,5 +1,5 @@
 # BharatPay Pro - Comprehensive User Manual
-*Version 03.01.03*
+*Version 03.01.04*
 
 Welcome to **BharatPay Pro**, a premium Payroll Management System designed for precision, security, and ease of use. This manual will guide you through every aspect of the software, including the advanced **Multi-Company Architecture** introduced in the 03.xx series.
 
@@ -23,7 +23,7 @@ BharatPay Pro uses **Hardware-Locked Identity**. Your license and data are secur
 
 ## 2. Multi-Organization Management
 
-BharatPay Pro 03.01.03 supports managing multiple establishments or companies within a single installation. Each company operates in its own **Data Silo**, ensuring total isolation of payroll, employees, and settings.
+BharatPay Pro 03.01.04 supports managing multiple establishments or companies within a single installation. Each company operates in its own **Data Silo**, ensuring total isolation of payroll, employees, and settings.
 
 ### 2.1 The Organization Gate
 When you log into an installation with multiple companies, the **Organization Selector** will appear:
@@ -115,4 +115,4 @@ Stay ahead of compliance with the proposed Social Security Code 2020:
 📞 **Support**: Refer to your License Agreement for the dedicated helpdesk number.
 
 ---
-*© 2026 BharatPay Pro. All Rights Reserved. (Version 03.01.03)*
+*© 2026 BharatPay Pro. All Rights Reserved. (Version 03.01.04)*

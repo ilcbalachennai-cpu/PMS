@@ -54,7 +54,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getIsDev: () => process.env.NODE_ENV === 'development',
     switchCompanyData: (companyId: string) => ipcRenderer.invoke('switch-company-data', companyId),
     dbSetGlobal: (key: string, value: any) => ipcRenderer.invoke('db-set-global', { key, value }),
-    wipeAllData: () => ipcRenderer.invoke('wipe-all-data')
+    wipeAllData: () => ipcRenderer.invoke('wipe-all-data'),
+    listSilos: () => ipcRenderer.invoke('list-silos'),
+    deleteSilo: (companyId: string) => ipcRenderer.invoke('delete-silo', companyId)
 });
 
 console.log("EB: Electron Bridge (electronAPI) Initialized");

@@ -58,7 +58,8 @@ export const calculatePayroll = (
     year: number,
     advanceOptions: { restrictTo50Percent: boolean } = { restrictTo50Percent: false },
     fines: FineRecord[] = [],
-    otRecord: OTRecord | null = null
+    otRecord: OTRecord | null = null,
+    arrearAmount: number = 0
 ): PayrollResult => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const monthIdx = months.indexOf(month);
@@ -124,7 +125,7 @@ export const calculatePayroll = (
             earnings: {
                 basic: 0, da: 0, retainingAllowance: 0, hra: 0, conveyance: 0, washing: 0, attire: 0,
                 special1: 0, special2: 0, special3: 0, bonus: 0, leaveEncashment: 0,
-                otAmount: 0, total: 0
+                otAmount: 0, arrears: 0, total: 0
             },
             deductions: { epf: 0, vpf: 0, esi: 0, pt: 0, it: 0, lwf: 0, advanceRecovery: 0, fine: 0, total: 0 },
             employerContributions: { epf: 0, eps: 0, esi: 0, lwf: 0 },
@@ -152,7 +153,7 @@ export const calculatePayroll = (
     const special2 = Math.round((employee.specialAllowance2 || 0) * factor);
     const special3 = Math.round((employee.specialAllowance3 || 0) * factor);
 
-    const bonusRate = (config.bonusRate || 0) / 100;
+    const bonusRate = (config.bonusRate || 0); // Bug fix: Do not divide by 100 as it is already stored as a fraction (e.g., 0.0833)
     let bonus = 0;
     const encashedDays = attendance.encashedDays || 0;
 
@@ -161,7 +162,8 @@ export const calculatePayroll = (
 
     const leaveEncashment = Math.round((leaveWageBaseRaw / daysInMonth) * encashedDays);
 
-    let grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
+    // Removed bonus from grossEarnings as per user request (Bonus is not paid monthly)
+    let grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + leaveEncashment;
 
     const standardMonthlyGross = employee.basicPay + (employee.da || 0) + (employee.retainingAllowance || 0) + (employee.hra || 0) + (employee.conveyance || 0) + (employee.washing || 0) + (employee.attire || 0) + (employee.specialAllowance1 || 0) + (employee.specialAllowance2 || 0) + (employee.specialAllowance3 || 0);
 
@@ -201,8 +203,8 @@ export const calculatePayroll = (
     }
     bonus = Math.round(bonusBasisWage * bonusRate);
 
-    // --- Recalculate Gross with Bonus ---
-    grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + bonus + leaveEncashment;
+    // Removed bonus from grossEarnings recalculation as per user request
+    grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + leaveEncashment;
     
     let isCode88 = (config.pfEsiCalculationBasis === 'LabourCode' && wageD > 0);
 
@@ -543,7 +545,8 @@ export const calculatePayroll = (
                 basic, da, retainingAllowance: retaining, hra, conveyance, washing, attire,
                 special1, special2, special3, bonus, leaveEncashment, 
                 otAmount: otRecord?.otAmount || 0,
-                total: grossEarnings + (otRecord?.otAmount || 0)
+                arrears: arrearAmount,
+                total: grossEarnings + (otRecord?.otAmount || 0) + arrearAmount
             },
             deductions: {
                 epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf: lwfEmployee,
@@ -551,7 +554,7 @@ export const calculatePayroll = (
             },
             employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer, lwf: lwfEmployer },
             gratuityAccrual: Math.round(((gratuityBasisWage) * 15 / 26) / 12),
-        netPay: (grossEarnings + (otRecord?.otAmount || 0)) - totalDeductions,
+        netPay: (grossEarnings + (otRecord?.otAmount || 0) + arrearAmount) - totalDeductions,
         isProportionatePFCapped,
         isCode88,
         isESICodeWagesUsed,

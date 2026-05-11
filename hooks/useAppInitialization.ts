@@ -19,7 +19,8 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
           console.log("RECOVERY: LocalStorage empty but SQLite contains data. Restoring...");
           const keysToRecover = [
             'app_license_secure', 'app_data_size', 'app_machine_id', 'app_setup_complete',
-            'app_users', 'app_master_designations', 'app_master_divisions', 'app_master_branches',
+            'app_users', 'app_companies', 'app_active_company_id',
+            'app_master_designations', 'app_master_divisions', 'app_master_branches',
             'app_master_sites', 'app_employees', 'app_config', 'app_company_profile',
             'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
             'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo'
@@ -28,7 +29,7 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
              // @ts-ignore
             const res = await window.electronAPI.dbGet(k);
             if (res.success && res.data !== null && res.data !== undefined) {
-              const isStringVal = typeof res.data === 'string' && (k === 'app_license_secure' || k === 'app_machine_id' || k === 'app_setup_complete' || k === 'app_data_size');
+              const isStringVal = typeof res.data === 'string' && (k === 'app_license_secure' || k === 'app_machine_id' || k === 'app_setup_complete' || k === 'app_data_size' || k === 'app_active_company_id');
               localStorage.setItem(k, isStringVal ? res.data : JSON.stringify(res.data));
             }
           }

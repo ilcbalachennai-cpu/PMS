@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { ShieldCheck, Landmark, X, ReceiptText, Info, Calendar, Scale, BookOpen, Lock } from 'lucide-react';
+import { ShieldCheck, Landmark, X, ReceiptText, Info, Calendar, Scale, BookOpen, Lock, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { PayrollResult, Employee, StatutoryConfig, CompanyProfile } from '../types';
 import {
     generateEPFCodeImpactReport,
@@ -25,6 +26,7 @@ interface SocialSecurityCodeProps {
 const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
     payrollHistory,
     employees,
+    config,
     companyProfile,
     globalMonth,
     setGlobalMonth,
@@ -39,9 +41,18 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
     const [showLegalModal, setShowLegalModal] = useState(false);
     const [impactModal, setImpactModal] = useState({
         isOpen: false,
-        mode: 'Theoretical' as 'Theoretical' | 'Historical',
+        mode: 'Theoretical' as 'Theoretical' | 'Historical' | 'Excel',
         prevPeriod: ''
     });
+
+    const [esiImpactModal, setEsiImpactModal] = useState({
+        isOpen: false,
+        mode: 'Theoretical' as 'Theoretical' | 'Historical' | 'Excel',
+        prevPeriod: ''
+    });
+
+    const [excelFile, setExcelFile] = useState<File | null>(null);
+    const [excelData, setExcelData] = useState<PayrollResult[] | null>(null);
 
     const isFinalized = useMemo(() => {
         if (!Array.isArray(payrollHistory)) return false;
@@ -73,6 +84,89 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
         }
     }, [availablePeriods, globalMonth, globalYear]);
 
+    const downloadTemplate = (prefix: string) => {
+        const periodToUse = impactModal.prevPeriod || availablePeriods[0];
+        if (!periodToUse) {
+            _showAlert('warning', 'No Historical Data', 'Please ensure there is at least one finalized payroll period to generate a template based on historical data.');
+            return;
+        }
+
+        const [m, y] = periodToUse.split(' ');
+        const lastConfirmedRecords = payrollHistory.filter(r => r.month === m && r.year === parseInt(y));
+        
+        const currentRecords = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
+        
+        const filteredEmployees = employees.filter(emp => 
+            !emp.dol && (
+                lastConfirmedRecords.some(r => r.employeeId === emp.id) ||
+                currentRecords.some(r => r.employeeId === emp.id)
+            )
+        );
+
+        const templateData = filteredEmployees.map(emp => {
+            const row: any = {
+                'Employee ID': emp.id,
+                'Name': emp.name,
+                'Basic': 0,
+                'DA': 0,
+                'Retaining Allowance': 0
+            };
+            
+            if (prefix === 'EPF') {
+                row['EPF'] = 0;
+                row['VPF'] = 0;
+            } else if (prefix === 'ESI') {
+                row['HRA'] = 0;
+                row['ESI'] = 0;
+            }
+            
+            return row;
+        });
+        
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template');
+        XLSX.writeFile(wb, `${prefix}_Impact_Comparison_Template.xlsx`);
+    };
+
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setExcelFile(file);
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+                
+                const mappedData = data.map((row: any) => ({
+                    employeeId: String(row['Employee ID'] || ''),
+                    earnings: {
+                        basic: Number(row['Basic'] || 0),
+                        da: Number(row['DA'] || 0),
+                        retainingAllowance: Number(row['Retaining Allowance'] || 0),
+                        hra: Number(row['HRA'] || 0)
+                    },
+                    deductions: {
+                        epf: Number(row['EPF'] || 0),
+                        vpf: Number(row['VPF'] || 0),
+                        esi: Number(row['ESI'] || 0)
+                    }
+                }));
+                
+                setExcelData(mappedData as any);
+                _showAlert('success', 'File Uploaded', `Successfully parsed ${mappedData.length} records from ${file.name}`);
+            } catch (err: any) {
+                _showAlert('error', 'Upload Failed', `Failed to parse Excel file: ${err.message}`);
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
     const handleDownload = async (reportName: string, format: string) => {
         if (!Array.isArray(payrollHistory) || !Array.isArray(employees)) return;
         const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
@@ -81,7 +175,19 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
 
         try {
             if (reportName.includes('ESI Code Wages')) {
-                savedPath = await generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear);
+                let prevResults: PayrollResult[] | undefined = undefined;
+                let prevLabel: string | undefined = undefined;
+                
+                if (esiImpactModal.mode === 'Historical' && esiImpactModal.prevPeriod) {
+                    const [m, y] = esiImpactModal.prevPeriod.split(' ');
+                    prevResults = payrollHistory.filter(r => r.month === m && r.year === parseInt(y));
+                    prevLabel = esiImpactModal.prevPeriod;
+                } else if (esiImpactModal.mode === 'Excel' && excelData) {
+                    prevResults = excelData;
+                    prevLabel = excelFile ? excelFile.name : 'Excel Data';
+                }
+
+                savedPath = await generateESICodeWagesReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear, prevResults, prevLabel);
             } else if (reportName.includes('EPF Code Impact')) {
                 let prevResults: PayrollResult[] | undefined = undefined;
                 let prevLabel: string | undefined = undefined;
@@ -90,9 +196,12 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
                     const [m, y] = impactModal.prevPeriod.split(' ');
                     prevResults = payrollHistory.filter(r => r.month === m && r.year === parseInt(y));
                     prevLabel = impactModal.prevPeriod;
+                } else if (impactModal.mode === 'Excel' && excelData) {
+                    prevResults = excelData;
+                    prevLabel = excelFile ? excelFile.name : 'Excel Data';
                 }
 
-                savedPath = await generateEPFCodeImpactReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear, prevResults, prevLabel);
+                savedPath = await generateEPFCodeImpactReport(currentData, employees, format as any, fileName, companyProfile, globalMonth, globalYear, config, prevResults, prevLabel);
             }
 
             if (savedPath) {
@@ -224,7 +333,7 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
                         icon={ShieldCheck}
                         color="pink"
                         reports={[
-                            { label: 'Generate ESI Code Wage Analysis', action: () => handleDownload('ESI Code Wages', 'PDF'), format: 'PDF' }
+                            { label: 'Generate ESI Code Wage Analysis', action: () => setEsiImpactModal({ ...esiImpactModal, isOpen: true }), format: 'PDF' }
                         ]}
                     >
                         <p className="text-[11px] text-slate-400 leading-relaxed italic">
@@ -249,38 +358,134 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
                             </div>
                             <button onClick={() => setImpactModal({ ...impactModal, isOpen: false })} className="p-2 hover:bg-white/10 rounded-full text-white/70 hover:text-white transition-all" title="Close"><X size={20} /></button>
                         </div>
-                        <div className="p-8 space-y-8">
-                            <div className="space-y-4">
+                        <div className="p-5 space-y-4">
+                            <div className="space-y-3">
                                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] pl-1">Choose Analysis Mode</label>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <button onClick={() => setImpactModal({ ...impactModal, mode: 'Theoretical' })} className={`p-5 rounded-2xl border-2 transition-all flex flex-col items-center gap-3 text-center ${impactModal.mode === 'Theoretical' ? 'border-blue-500 bg-blue-500/10' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}>
-                                        <div className={`p-3 rounded-xl ${impactModal.mode === 'Theoretical' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-500'}`}><ReceiptText size={20} /></div>
+                                <div className="grid grid-cols-3 gap-3">
+                                    <button onClick={() => setImpactModal({ ...impactModal, mode: 'Theoretical' })} className={`p-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center ${impactModal.mode === 'Theoretical' ? 'border-blue-500 bg-blue-500/10' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}>
+                                        <div className={`p-2 rounded-xl ${impactModal.mode === 'Theoretical' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-500'}`}><ReceiptText size={18} /></div>
                                         <div>
-                                            <div className={`font-black text-sm ${impactModal.mode === 'Theoretical' ? 'text-white' : 'text-slate-400'}`}>Theoretical</div>
-                                            <div className="text-[10px] text-slate-500 font-bold mt-1 uppercase leading-tight italic">What it should be now</div>
+                                            <div className={`font-black text-xs ${impactModal.mode === 'Theoretical' ? 'text-white' : 'text-slate-400'}`}>Theoretical</div>
+                                            <div className="text-[9px] text-slate-500 font-bold mt-0.5 uppercase leading-tight italic">What it should be</div>
                                         </div>
                                     </button>
-                                    <button onClick={() => setImpactModal({ ...impactModal, mode: 'Historical' })} className={`p-5 rounded-2xl border-2 transition-all flex flex-col items-center gap-3 text-center ${impactModal.mode === 'Historical' ? 'border-blue-500 bg-blue-500/10' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}>
-                                        <div className={`p-3 rounded-xl ${impactModal.mode === 'Historical' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-500'}`}><Calendar size={20} /></div>
+                                    <button onClick={() => setImpactModal({ ...impactModal, mode: 'Historical' })} className={`p-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center ${impactModal.mode === 'Historical' ? 'border-blue-500 bg-blue-500/10' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}>
+                                        <div className={`p-2 rounded-xl ${impactModal.mode === 'Historical' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-500'}`}><Calendar size={18} /></div>
                                         <div>
-                                            <div className={`font-black text-sm ${impactModal.mode === 'Historical' ? 'text-white' : 'text-slate-400'}`}>Historical</div>
-                                            <div className="text-[10px] text-slate-500 font-bold mt-1 uppercase leading-tight italic">What was actually paid</div>
+                                            <div className={`font-black text-xs ${impactModal.mode === 'Historical' ? 'text-white' : 'text-slate-400'}`}>Historical</div>
+                                            <div className="text-[9px] text-slate-500 font-bold mt-0.5 uppercase leading-tight italic">What was paid</div>
+                                        </div>
+                                    </button>
+                                    <button onClick={() => setImpactModal({ ...impactModal, mode: 'Excel' })} className={`p-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center ${impactModal.mode === 'Excel' ? 'border-blue-500 bg-blue-500/10' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}>
+                                        <div className={`p-2 rounded-xl ${impactModal.mode === 'Excel' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-500'}`}><Upload size={18} /></div>
+                                        <div>
+                                            <div className={`font-black text-xs ${impactModal.mode === 'Excel' ? 'text-white' : 'text-slate-400'}`}>Excel Data</div>
+                                            <div className="text-[9px] text-slate-500 font-bold mt-0.5 uppercase leading-tight italic">Upload sheet</div>
                                         </div>
                                     </button>
                                 </div>
                             </div>
                             {impactModal.mode === 'Historical' && (
-                                <div className="space-y-4 animate-in slide-in-from-top-2 duration-300">
+                                <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
                                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] pl-1">Comparison Period</label>
-                                    <select aria-label="Select comparison period" title="Comparison Period" value={impactModal.prevPeriod} onChange={(e) => setImpactModal({ ...impactModal, prevPeriod: e.target.value })} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-6 py-4 text-base font-bold text-white focus:ring-4 focus:ring-blue-500/20 outline-none cursor-pointer">
+                                    <select aria-label="Select comparison period" title="Comparison Period" value={impactModal.prevPeriod} onChange={(e) => setImpactModal({ ...impactModal, prevPeriod: e.target.value })} className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm font-bold text-white focus:ring-4 focus:ring-blue-500/20 outline-none cursor-pointer">
                                         {availablePeriods.map(p => <option key={p} value={p}>{p}</option>)}
                                     </select>
+                                </div>
+                            )}
+                            {impactModal.mode === 'Excel' && (
+                                <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
+                                    <div className="flex justify-between items-center">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] pl-1">Upload Data Sheet</label>
+                                        <button onClick={() => downloadTemplate('EPF')} className="text-[10px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest">Download Template</button>
+                                    </div>
+                                    <div className="relative border-2 border-dashed border-slate-700 rounded-xl p-4 bg-[#0f172a] text-center hover:border-slate-600 transition-all">
+                                        <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" aria-label="Upload Excel Data" />
+                                        <div className="space-y-1">
+                                            <div className="p-2 bg-slate-800 rounded-full w-fit mx-auto text-slate-400"><Upload size={16} /></div>
+                                            <div className="text-xs font-bold text-slate-300">{excelFile ? excelFile.name : "Click or drag file to upload"}</div>
+                                            <div className="text-[9px] text-slate-500 uppercase font-bold">Supported formats: .xlsx, .xls</div>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
                         </div>
                         <div className="p-6 bg-[#0f172a] border-t border-slate-800 flex gap-3">
                             <button onClick={() => setImpactModal({ ...impactModal, isOpen: false })} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black rounded-xl transition-all uppercase tracking-widest text-xs">Cancel</button>
                             <button onClick={() => { setImpactModal({ ...impactModal, isOpen: false }); handleDownload('EPF Code Impact', 'PDF'); }} className="flex-2 px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl transition-all shadow-lg shadow-blue-900/40 uppercase tracking-widest text-xs">Run Analysis</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {esiImpactModal.isOpen && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-[#1e293b] w-full max-w-lg rounded-3xl border border-pink-500/30 shadow-[0_0_40px_rgba(236,72,153,0.2)] overflow-hidden flex flex-col animate-in zoom-in-95">
+                        <div className="bg-gradient-to-r from-pink-600 to-rose-700 p-6 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-white/10 rounded-2xl"><ShieldCheck className="text-white" size={24} /></div>
+                                <div>
+                                    <h3 className="text-lg font-black text-white tracking-tight uppercase">ESI Code Impact</h3>
+                                    <p className="text-pink-100 text-[10px] font-bold opacity-80 uppercase tracking-widest">Select Comparison Basis</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setEsiImpactModal({ ...esiImpactModal, isOpen: false })} className="p-2 hover:bg-white/10 rounded-full text-white/70 hover:text-white transition-all" title="Close"><X size={20} /></button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] pl-1">Choose Analysis Mode</label>
+                                <div className="grid grid-cols-3 gap-3">
+                                    <button onClick={() => setEsiImpactModal({ ...esiImpactModal, mode: 'Theoretical' })} className={`p-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center ${esiImpactModal.mode === 'Theoretical' ? 'border-pink-500 bg-pink-500/10' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}>
+                                        <div className={`p-2 rounded-xl ${esiImpactModal.mode === 'Theoretical' ? 'bg-pink-500 text-white' : 'bg-slate-800 text-slate-500'}`}><ReceiptText size={18} /></div>
+                                        <div>
+                                            <div className={`font-black text-xs ${esiImpactModal.mode === 'Theoretical' ? 'text-white' : 'text-slate-400'}`}>Theoretical</div>
+                                            <div className="text-[9px] text-slate-500 font-bold mt-0.5 uppercase leading-tight italic">What it should be</div>
+                                        </div>
+                                    </button>
+                                    <button onClick={() => setEsiImpactModal({ ...esiImpactModal, mode: 'Historical' })} className={`p-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center ${esiImpactModal.mode === 'Historical' ? 'border-pink-500 bg-pink-500/10' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}>
+                                        <div className={`p-2 rounded-xl ${esiImpactModal.mode === 'Historical' ? 'bg-pink-500 text-white' : 'bg-slate-800 text-slate-500'}`}><Calendar size={18} /></div>
+                                        <div>
+                                            <div className={`font-black text-xs ${esiImpactModal.mode === 'Historical' ? 'text-white' : 'text-slate-400'}`}>Historical</div>
+                                            <div className="text-[9px] text-slate-500 font-bold mt-0.5 uppercase leading-tight italic">What was paid</div>
+                                        </div>
+                                    </button>
+                                    <button onClick={() => setEsiImpactModal({ ...esiImpactModal, mode: 'Excel' })} className={`p-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center ${esiImpactModal.mode === 'Excel' ? 'border-pink-500 bg-pink-500/10' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'}`}>
+                                        <div className={`p-2 rounded-xl ${esiImpactModal.mode === 'Excel' ? 'bg-pink-500 text-white' : 'bg-slate-800 text-slate-500'}`}><Upload size={18} /></div>
+                                        <div>
+                                            <div className={`font-black text-xs ${esiImpactModal.mode === 'Excel' ? 'text-white' : 'text-slate-400'}`}>Excel Data</div>
+                                            <div className="text-[9px] text-slate-500 font-bold mt-0.5 uppercase leading-tight italic">Upload sheet</div>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+                            {esiImpactModal.mode === 'Historical' && (
+                                <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] pl-1">Comparison Period</label>
+                                    <select aria-label="Select comparison period" title="Comparison Period" value={esiImpactModal.prevPeriod} onChange={(e) => setEsiImpactModal({ ...esiImpactModal, prevPeriod: e.target.value })} className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-sm font-bold text-white focus:ring-4 focus:ring-pink-500/20 outline-none cursor-pointer">
+                                        {availablePeriods.map(p => <option key={p} value={p}>{p}</option>)}
+                                    </select>
+                                </div>
+                            )}
+                            {esiImpactModal.mode === 'Excel' && (
+                                <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
+                                    <div className="flex justify-between items-center">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] pl-1">Upload Data Sheet</label>
+                                        <button onClick={() => downloadTemplate('ESI')} className="text-[10px] font-black text-pink-400 hover:text-pink-300 uppercase tracking-widest">Download Template</button>
+                                    </div>
+                                    <div className="relative border-2 border-dashed border-slate-700 rounded-xl p-4 bg-[#0f172a] text-center hover:border-slate-600 transition-all">
+                                        <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" aria-label="Upload Excel Data" />
+                                        <div className="space-y-1">
+                                            <div className="p-2 bg-slate-800 rounded-full w-fit mx-auto text-slate-400"><Upload size={16} /></div>
+                                            <div className="text-xs font-bold text-slate-300">{excelFile ? excelFile.name : "Click or drag file to upload"}</div>
+                                            <div className="text-[9px] text-slate-500 uppercase font-bold">Supported formats: .xlsx, .xls</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-6 bg-[#0f172a] border-t border-slate-800 flex gap-3">
+                            <button onClick={() => setEsiImpactModal({ ...esiImpactModal, isOpen: false })} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black rounded-xl transition-all uppercase tracking-widest text-xs">Cancel</button>
+                            <button onClick={() => { setEsiImpactModal({ ...esiImpactModal, isOpen: false }); handleDownload('ESI Code Wages', 'PDF'); }} className="flex-2 px-8 py-3 bg-pink-600 hover:bg-pink-500 text-white font-black rounded-xl transition-all shadow-lg shadow-pink-900/40 uppercase tracking-widest text-xs">Run Analysis</button>
                         </div>
                     </div>
                 </div>

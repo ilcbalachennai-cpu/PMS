@@ -230,7 +230,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                         onChange={e => setNewEmpForm({ ...newEmpForm, name: e.target.value })} 
                                     />
                                     {isRejoining && (!isDOJUpdated || !isDOLRemoved) && (
-                                        <div className="text-[10px] text-pink-500 font-bold uppercase mt-1 animate-pulse">Rejoining Instance: Update Joining Date & Remove Leaving Date</div>
+                                        <div className="text-[10px] text-pink-500 font-bold uppercase mt-1 animate-pulse">REJOINING INSTANCE: UPDATE DATE OF JOINING & DELETE DATE OF LEAVING DATE</div>
                                     )}
                                 </div>
 

@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { View } from '../types';
 
 export const useUIState = (activeCompanyId: string, employeesCount: number) => {
   const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${activeCompanyId}_${key}`;
@@ -10,7 +9,7 @@ export const useUIState = (activeCompanyId: string, employeesCount: number) => {
       sessionStorage.removeItem('settings_initial_tab');
       return saved as any;
     }
-    return 'STATUTORY';
+    return 'COMPANY';
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isFullScreen, setIsFullScreen] = useState(false);

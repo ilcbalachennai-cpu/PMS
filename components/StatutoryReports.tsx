@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, BookOpen, ScrollText, ReceiptText, Info } from 'lucide-react';
 import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
 import { INDIAN_STATES } from '../constants';
@@ -93,6 +93,14 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     const [taxToYear, setTaxToYear] = useState(globalYear);
 
     const currentForms = useMemo(() => STATE_FORM_MAPPINGS[selectedState] || STATE_FORM_MAPPINGS['Default'], [selectedState]);
+
+    // Sync tax period with global period when global period changes
+    useEffect(() => {
+        setTaxFromMonth(globalMonth);
+        setTaxToMonth(globalMonth);
+        setTaxFromYear(globalYear);
+        setTaxToYear(globalYear);
+    }, [globalMonth, globalYear]);
 
     const openRangeModal = (reportType: string) => {
         const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
