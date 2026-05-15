@@ -188,6 +188,11 @@ export const parseEmployeeXLSX = async (
                     const esi = String(getVal(['ESI Number', 'ESI IP Number', 'ESI No']) || '').trim();
                     const pf = String(getVal(['PF Member ID', 'PF ID', 'PF Number']) || '').trim();
 
+                    if (!aadhaar) {
+                        rejectedRecords.push({ row: rowNum, name, id: excelId, reason: "Missing 'Aadhaar Number'. Skipped." });
+                        return;
+                    }
+
                     const duplicateReasons: string[] = [];
                     if (uan) { if (existingUAN.has(uan) || batchUAN.has(uan)) duplicateReasons.push(`Duplicate UAN (${uan})`); }
                     if (aadhaar) { if (existingAadhaar.has(aadhaar) || batchAadhaar.has(aadhaar)) duplicateReasons.push(`Duplicate Aadhaar (${aadhaar})`); }
@@ -445,3 +450,265 @@ export const parseMasterXLSX = async (file: File): Promise<{
         reader.readAsBinaryString(file);
     });
 };
+
+/**
+ * Generates an Excel Template for Updating Existing Employees
+ */
+export const generateEmployeeUpdateTemplateXLSX = async (employees: Employee[], company?: CompanyProfile) => {
+    try {
+        const templateHeaders = [
+            "Employee ID (LOCKED)", "Full Name (LOCKED)", "Gender (LOCKED)", "Date of Birth (LOCKED)", "Designation",
+            "Department/Division", "Branch", "Site", "Date of Joining (LOCKED)",
+            "Mobile Number", "mail_id", "Father or Spouse Name", "Relationship",
+            "Married (Yes/No)", "Spouse Name", "Spouse Gender", "Spouse Aadhaar Number",
+            "Door No", "Building Name", "Street", "Area", "City", "State", "Pincode",
+            "PAN Number", "Aadhaar Number", "UAN Number (LOCKED)", "PF Member ID", "ESI Number (LOCKED)",
+            "Bank Account Number", "Bank Name", "Bank Branch", "IFSC Code",
+            "Basic Pay", "DA", "Retaining Allowance", "HRA", "Conveyance",
+            "Washing Allowance", "Attire Allowance", "Special Allowance 1",
+            "Special Allowance 2", "Special Allowance 3",
+            "PF Exempt (Yes/No)", "ESI Exempt (Yes/No)",
+            "Higher Pension Enabled (Yes/No)",
+            "HP: Pre-2014 Contrib (Yes/No)",
+            "HP: EPF Membership Date (DD-MM-YYYY)",
+            "HP: EE Contrib (Regular/Higher)",
+            "HP: ER Contrib (Regular/Higher)",
+            "HP: Joint Option (Yes/No)",
+            "EL Opening Balance", "SL Opening Balance", "CL Opening Balance",
+            "Date of Leaving (LOCKED)", "Reason for Leaving (LOCKED)"
+        ];
+
+        const formatDate = (dateStr?: string) => {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            const d = String(date.getDate()).padStart(2, '0');
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const y = date.getFullYear();
+            return `${d}-${m}-${y}`;
+        };
+
+        const rows = employees.map(emp => [
+            emp.id,
+            emp.name,
+            emp.gender || 'Male',
+            formatDate(emp.dob),
+            emp.designation || '',
+            emp.division || emp.department || '',
+            emp.branch || '',
+            emp.site || '',
+            formatDate(emp.doj),
+            emp.mobile || '',
+            emp.email || '',
+            emp.fatherSpouseName || '',
+            emp.relationship || 'Father',
+            emp.maritalStatus || 'No',
+            emp.spouseName || '',
+            emp.spouseGender || '',
+            emp.spouseAadhaar || '',
+            emp.doorNo || '',
+            emp.buildingName || '',
+            emp.street || '',
+            emp.area || '',
+            emp.city || '',
+            emp.state || 'Tamil Nadu',
+            emp.pincode || '',
+            emp.pan || '',
+            emp.aadhaarNumber || '',
+            emp.uanc || '',
+            emp.pfNumber || '',
+            emp.esiNumber || '',
+            emp.bankAccount || '',
+            emp.bankName || '',
+            emp.bankBranch || '',
+            emp.ifsc || '',
+            emp.basicPay || 0,
+            emp.da || 0,
+            emp.retainingAllowance || 0,
+            emp.hra || 0,
+            emp.conveyance || 0,
+            emp.washing || 0,
+            emp.attire || 0,
+            emp.specialAllowance1 || 0,
+            emp.specialAllowance2 || 0,
+            emp.specialAllowance3 || 0,
+            emp.isPFExempt ? 'Yes' : 'No',
+            emp.isESIExempt ? 'Yes' : 'No',
+            emp.pfHigherPension?.enabled ? 'Yes' : 'No',
+            emp.pfHigherPension?.contributedBefore2014 || 'No',
+            formatDate(emp.epfMembershipDate),
+            emp.pfHigherPension?.employeeContribution || 'Regular',
+            emp.pfHigherPension?.employerContribution || 'Regular',
+            emp.pfHigherPension?.isHigherPensionOpted || 'No',
+            emp.initialOpeningBalances?.el || 0,
+            emp.initialOpeningBalances?.sl || 0,
+            emp.initialOpeningBalances?.cl || 0,
+            formatDate(emp.dol),
+            emp.leavingReason || ''
+        ]);
+
+        const ws = XLSX.utils.aoa_to_sheet([templateHeaders, ...rows]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "EmployeeUpdateTemplate");
+
+        const now = new Date();
+        const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const fileName = getStandardFileName('Employee_Update_Template', company || {} as any, months[now.getMonth()], now.getFullYear());
+        const path = await generateTemplateWorkbook(wb, fileName, company?.establishmentName);
+        return path;
+    } catch (err: any) {
+        console.error("Update Template Error:", err);
+        alert("Failed to process Excel file.");
+    }
+};
+
+/**
+ * Parses Employee Update XLSX and updates existing employees
+ */
+export const parseEmployeeUpdateXLSX = async (
+    file: File,
+    existingEmployees: Employee[]
+): Promise<any> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                
+                const rawData = XLSX.utils.sheet_to_json(ws);
+                const data = sanitizeData(rawData);
+
+                if (data.length === 0) {
+                    alert("No data found in the Excel sheet.");
+                    resolve({ total: 0, success: 0, failed: 0, errors: [] });
+                    return;
+                }
+
+                const updatedEmployees: Employee[] = [...existingEmployees];
+                const rejectedRecords: { row: number; name: string; id: string; reason: string }[] = [];
+                let successCount = 0;
+
+                const parseIndDate = (val: any) => {
+                    if (!val) return '';
+                    if (val instanceof Date) {
+                        const offset = val.getTimezoneOffset() * 60000;
+                        const localDate = new Date(val.getTime() - offset);
+                        return localDate.toISOString().split('T')[0];
+                    }
+                    const str = String(val).trim();
+                    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
+                        const [d, m, y] = str.split('-');
+                        return `${y}-${m}-${d}`;
+                    }
+                    return str;
+                };
+
+                const isTrue = (val: any) => String(val).trim().toUpperCase() === 'TRUE' || String(val).trim().toUpperCase() === 'YES';
+
+                data.forEach((row: any, rowIndex: number) => {
+                    const rowNum = rowIndex + 2;
+                    const getVal = (keys: string[]) => {
+                        for (const k of keys) {
+                            const foundKey = Object.keys(row).find(rk => rk.trim().toLowerCase() === k.toLowerCase());
+                            if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null) return row[foundKey];
+                        }
+                        return null;
+                    };
+
+                    const excelId = String(getVal(['Employee ID (LOCKED)', 'Employee ID', 'ID', 'Emp ID']) || '').trim();
+                    if (!excelId) {
+                        rejectedRecords.push({ row: rowNum, name: 'Unknown', id: '', reason: "Missing 'Employee ID'. Skipped." });
+                        return;
+                    }
+
+                    const empIndex = updatedEmployees.findIndex(e => e.id === excelId);
+                    if (empIndex === -1) {
+                        rejectedRecords.push({ row: rowNum, name: 'Unknown', id: excelId, reason: `Employee with ID ${excelId} not found.` });
+                        return;
+                    }
+
+                    const existingEmp = updatedEmployees[empIndex];
+
+                    // Update allowed fields
+                    const updatedEmp: Employee = {
+                        ...existingEmp,
+                        designation: String(getVal(['Designation']) || existingEmp.designation),
+                        division: String(getVal(['Department/Division', 'Department', 'Division']) || existingEmp.division),
+                        department: String(getVal(['Department/Division', 'Department', 'Division']) || existingEmp.department),
+                        branch: String(getVal(['Branch']) || existingEmp.branch),
+                        site: String(getVal(['Site']) || existingEmp.site),
+                        mobile: String(getVal(['Mobile Number', 'Mobile', 'Mobile No']) || existingEmp.mobile),
+                        email: String(getVal(['mail_id', 'Mail ID', 'Email']) || existingEmp.email),
+                        fatherSpouseName: String(getVal(['Father or Spouse Name']) || existingEmp.fatherSpouseName),
+                        relationship: String(getVal(['Relationship']) || existingEmp.relationship),
+                        maritalStatus: String(getVal(['Married (Yes/No)']) || existingEmp.maritalStatus) === 'Yes' ? 'Yes' : 'No',
+                        spouseName: String(getVal(['Spouse Name']) || existingEmp.spouseName),
+                        spouseGender: (getVal(['Spouse Gender']) as any) || existingEmp.spouseGender,
+                        spouseAadhaar: String(getVal(['Spouse Aadhaar Number']) || existingEmp.spouseAadhaar),
+                        doorNo: String(getVal(['Door No']) || existingEmp.doorNo),
+                        buildingName: String(getVal(['Building Name']) || existingEmp.buildingName),
+                        street: String(getVal(['Street']) || existingEmp.street),
+                        area: String(getVal(['Area']) || existingEmp.area),
+                        city: String(getVal(['City']) || existingEmp.city),
+                        state: String(getVal(['State']) || existingEmp.state),
+                        pincode: String(getVal(['Pincode']) || existingEmp.pincode),
+                        pan: String(getVal(['PAN Number']) || existingEmp.pan).toUpperCase(),
+                        aadhaarNumber: String(getVal(['Aadhaar Number']) || existingEmp.aadhaarNumber),
+                        bankAccount: String(getVal(['Bank Account Number']) || existingEmp.bankAccount),
+                        bankName: String(getVal(['Bank Name']) || existingEmp.bankName),
+                        bankBranch: String(getVal(['Bank Branch']) || existingEmp.bankBranch),
+                        ifsc: String(getVal(['IFSC Code']) || existingEmp.ifsc),
+                        basicPay: Number(getVal(['Basic Pay']) || existingEmp.basicPay),
+                        da: Number(getVal(['DA']) || existingEmp.da),
+                        retainingAllowance: Number(getVal(['Retaining Allowance']) || existingEmp.retainingAllowance),
+                        hra: Number(getVal(['HRA']) || existingEmp.hra),
+                        conveyance: Number(getVal(['Conveyance']) || existingEmp.conveyance),
+                        washing: Number(getVal(['Washing Allowance']) || existingEmp.washing),
+                        attire: Number(getVal(['Attire Allowance']) || existingEmp.attire),
+                        specialAllowance1: Number(getVal(['Special Allowance 1']) || existingEmp.specialAllowance1),
+                        specialAllowance2: Number(getVal(['Special Allowance 2']) || existingEmp.specialAllowance2),
+                        specialAllowance3: Number(getVal(['Special Allowance 3']) || existingEmp.specialAllowance3),
+                        isPFExempt: isTrue(getVal(['PF Exempt (Yes/No)'])) || existingEmp.isPFExempt,
+                        isESIExempt: isTrue(getVal(['ESI Exempt (Yes/No)'])) || existingEmp.isESIExempt,
+                        pfHigherPension: {
+                            ...existingEmp.pfHigherPension,
+                            enabled: isTrue(getVal(['Higher Pension Enabled (Yes/No)'])) || existingEmp.pfHigherPension?.enabled,
+                            contributedBefore2014: (getVal(['HP: Pre-2014 Contrib (Yes/No)']) as any) || existingEmp.pfHigherPension?.contributedBefore2014,
+                            employeeContribution: (getVal(['HP: EE Contrib (Regular/Higher)']) as any) || existingEmp.pfHigherPension?.employeeContribution,
+                            employerContribution: (getVal(['HP: ER Contrib (Regular/Higher)']) as any) || existingEmp.pfHigherPension?.employerContribution,
+                            isHigherPensionOpted: (getVal(['HP: Joint Option (Yes/No)']) as any) || existingEmp.pfHigherPension?.isHigherPensionOpted
+                        },
+                        epfMembershipDate: parseIndDate(getVal(['HP: EPF Membership Date (DD-MM-YYYY)'])) || existingEmp.epfMembershipDate
+                    };
+
+                    updatedEmployees[empIndex] = updatedEmp;
+                    successCount++;
+                });
+
+                resolve({
+                    total: data.length,
+                    success: successCount,
+                    failed: rejectedRecords.length,
+                    errors: rejectedRecords,
+                    updatedEmployees
+                });
+
+            } catch (err: any) {
+                console.error("Excel Update Import Error:", err);
+                alert(`Error parsing file: ${err.message || 'Unknown error'}.`);
+                reject(err);
+            }
+        };
+
+        reader.onerror = (err) => {
+            alert("Failed to read file.");
+            reject(err);
+        };
+
+        reader.readAsBinaryString(file);
+    });
+};
+

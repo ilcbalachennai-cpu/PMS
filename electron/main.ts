@@ -47,7 +47,7 @@ function saveAppConfig(config: any) {
 }
 
 let appConfig = getAppConfig();
-let appBasePath = appConfig.appBasePath || '';
+let appBasePath = appConfig.appBasePath || (isDev ? 'E:\\BharatPP_Dev' : '');
 
 // Helper to get structured paths
 const getAppPaths = (base: string) => {
@@ -87,6 +87,10 @@ function initializeDatabase(basePath: string, companyId?: string) {
         return;
     }
 
+    // V03.01.07: Forced base path to User App folder for debugging
+    // console.log(`🔍 Original basePath: ${basePath}. Forcing to E:\\BharatPP_Dev`);
+    // basePath = 'E:\\BharatPP_Dev';
+
     appBasePath = basePath;
     const paths = getAppPaths(basePath);
     
@@ -125,9 +129,6 @@ function initializeDatabase(basePath: string, companyId?: string) {
         }
     });
 
-    const snapshotDir = path.join(paths.backups, 'PRE_UPDATE_SNAPSHOT');
-    const snapshotDb = path.join(snapshotDir, 'active_db_snapshot.sqlite');
-
     try {
         console.log(`🗄️ Opening isolated database: ${DB_PATH}`);
         if (db) {
@@ -143,18 +144,60 @@ function initializeDatabase(basePath: string, companyId?: string) {
         appBasePath = basePath;
         
         console.log('✅ Database initialized successfully.');
+        
+        // V03.01.07: Create a startup backup
+        try {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const autoBackupDir = path.join(paths.backups, 'AUTO_SNAPSHOTS');
+            if (!fs.existsSync(autoBackupDir)) {
+                fs.mkdirSync(autoBackupDir, { recursive: true });
+            }
+            const backupPath = path.join(autoBackupDir, `startup_db_${timestamp}.sqlite`);
+            
+            // Use safe backup API
+            db.backup(backupPath)
+                .then(() => {
+                    console.log(`✅ Startup snapshot created: ${backupPath}`);
+                    cleanupOldSnapshots(autoBackupDir, 5); // Keep last 5
+                })
+                .catch(e => console.error(`❌ Failed to create startup snapshot:`, e));
+                
+            // Start interval snapshots
+            startAutoSnapshot(basePath, companyId || 'default');
+        } catch (e) {
+            console.error(`❌ Failed to initialize snapshot system:`, e);
+        }
     } catch (e: any) {
         console.error('❌ DB connection failed:', e);
         const errorLog = `[${new Date().toISOString()}] DB connection failed at ${DB_PATH}: ${e.message}\n`;
         fs.appendFileSync(path.join(app.getPath('userData'), 'electron_errors.txt'), errorLog);
         
+        // V03.01.07: Log error to a file we can easily access
+        try {
+            const errorFilePath = path.join(paths.data, 'error_log.txt');
+            fs.appendFileSync(errorFilePath, errorLog);
+            console.log(`📝 Error logged to: ${errorFilePath}`);
+        } catch (err) {}
+        
+        // V03.01.07: Safe Recovery from Snapshot
+        const snapshotDb = path.join(paths.backups, 'PRE_UPDATE_SNAPSHOT', 'active_db_snapshot.sqlite');
+        
         if (fs.existsSync(snapshotDb)) {
             try {
-                console.log('🛠️ Attempting recovery from snapshot...');
+                console.log('🛠️ Attempting safe recovery from snapshot...');
                 if (db) { try { db.close(); } catch (err) {} }
+                
+                // Backup the failed DB before overwriting
+                if (fs.existsSync(DB_PATH)) {
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    const failedPath = `${DB_PATH}.failed_${timestamp}`;
+                    fs.renameSync(DB_PATH, failedPath);
+                    console.warn(`⚠️ Failed DB preserved at: ${failedPath}`);
+                }
+                
                 fs.copyFileSync(snapshotDb, DB_PATH);
                 db = new Database(DB_PATH);
-                console.log('✅ Recovery successful.');
+                console.log('✅ Safe recovery successful using snapshot.');
             } catch (restoreErr: any) {
                 throw new Error(`Database Error: ${e.message}. Recovery failed: ${restoreErr.message}`);
             }
@@ -162,6 +205,52 @@ function initializeDatabase(basePath: string, companyId?: string) {
             throw new Error(`Database Error: ${e.message}. Path: ${DB_PATH}`);
         }
     }
+}
+
+function cleanupOldSnapshots(dir: string, maxFiles: number) {
+    try {
+        const files = fs.readdirSync(dir)
+            .filter(f => f.endsWith('.sqlite'))
+            .map(f => ({ name: f, stat: fs.statSync(path.join(dir, f)) }))
+            .sort((a, b) => b.stat.mtime.getTime() - a.stat.mtime.getTime());
+
+        if (files.length > maxFiles) {
+            for (let i = maxFiles; i < files.length; i++) {
+                fs.unlinkSync(path.join(dir, files[i].name));
+                console.log(`🗑️ Deleted old snapshot: ${files[i].name}`);
+            }
+        }
+    } catch (e) {
+        console.error(`❌ Failed to cleanup old snapshots:`, e);
+    }
+}
+
+let autoSnapshotInterval: NodeJS.Timeout | null = null;
+
+function startAutoSnapshot(basePath: string, _companyId: string) {
+    if (autoSnapshotInterval) clearInterval(autoSnapshotInterval);
+    
+    autoSnapshotInterval = setInterval(() => {
+        if (!db) return;
+        
+        try {
+            const paths = getAppPaths(basePath);
+            const autoBackupDir = path.join(paths.backups, 'AUTO_SNAPSHOTS');
+            if (!fs.existsSync(autoBackupDir)) fs.mkdirSync(autoBackupDir, { recursive: true });
+            
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const backupPath = path.join(autoBackupDir, `auto_db_${timestamp}.sqlite`);
+            
+            db.backup(backupPath)
+                .then(() => {
+                    console.log(`✅ Auto snapshot created: ${backupPath}`);
+                    cleanupOldSnapshots(autoBackupDir, 10); // Keep last 10 for auto
+                })
+                .catch(e => console.error(`❌ Failed to create auto snapshot:`, e));
+        } catch (e) {
+            console.error(`❌ Failed to create auto snapshot:`, e);
+        }
+    }, 30 * 60 * 1000); // Every 30 minutes
 }
 
 /**
@@ -623,7 +712,7 @@ ipcMain.handle('list-silos', async () => {
 
         const silos = fs.readdirSync(dataDir)
             .filter(name => fs.statSync(path.join(dataDir, name)).isDirectory())
-            .filter(name => name !== 'LOESCH_976374' && name !== '.icon-ico'); // Exclude known non-silo folders if any
+            .filter(name => name !== '.icon-ico'); // Exclude known non-silo folders if any
         
         return { success: true, silos };
     } catch (e: any) {

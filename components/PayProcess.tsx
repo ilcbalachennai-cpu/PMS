@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp, UploadCloud, AlertCircle, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord, View } from '../types';
+import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord, View, LicenseData, SettingsTab } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
@@ -14,7 +14,7 @@ import OTManager from './OTManager';
 interface PayProcessProps {
     employees: Employee[];
     onNavigate?: (view: View) => void;
-    setSettingsTab?: (tab: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS') => void;
+    setSettingsTab?: (tab: SettingsTab) => void;
     setEmployees?: (emps: Employee[]) => void;
     config: StatutoryConfig;
     companyProfile: CompanyProfile;
@@ -39,6 +39,7 @@ interface PayProcessProps {
     otRecords: OTRecord[];
     setOTRecords: React.Dispatch<React.SetStateAction<OTRecord[]>>;
     showAlert: any;
+    licenseInfo?: LicenseData;
 }
 
 // Global OS Detection for UI refinement
@@ -50,6 +51,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
     const [isImporting, setIsImporting] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const masterFileInputRef = useRef<HTMLInputElement>(null);
+    const payrollTabRef = useRef<HTMLDivElement>(null);
 
     // Compute lock status
     const isLocked = useMemo(() => {
@@ -63,6 +65,12 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             ((a.presentDays || 0) + (a.earnedLeave || 0) + (a.sickLeave || 0) + (a.casualLeave || 0) + (a.lopDays || 0)) > 0
         );
     }, [props.attendances, props.month, props.year]);
+
+    React.useEffect(() => {
+        if (activeTab === 'payroll' && payrollTabRef.current) {
+            payrollTabRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, [activeTab]);
 
     const TabButton = ({ id, label, icon: Icon, disabled = false }: { id: typeof activeTab, label: string, icon: any, disabled?: boolean }) => {
         const getDisabledMessage = () => {
@@ -394,6 +402,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                             <button
                                 onClick={downloadMasterTemplate}
                                 className="flex items-center gap-1.5 bg-slate-800 text-slate-200 px-4 py-2 rounded-lg font-bold uppercase tracking-wider transition-all border border-slate-700 hover:bg-slate-700 shadow-lg text-xs"
+                                title="Download consolidated master template"
                             >
                                 <FileSpreadsheet size={15} className="text-emerald-500" /> Master Template
                             </button>
@@ -567,7 +576,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     )}
                 </div>
 
-                <div className={activeTab === 'payroll' ? 'block' : 'hidden'}>
+                <div ref={payrollTabRef} className={activeTab === 'payroll' ? 'block' : 'hidden'}>
                     <PayrollProcessor
                         employees={props.employees}
                         config={props.config}
@@ -591,6 +600,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         otRecords={props.otRecords}
                         arrearHistory={props.arrearHistory}
                         showAlert={props.showAlert}
+                        licenseInfo={props.licenseInfo}
                     />
                 </div>
             </div>

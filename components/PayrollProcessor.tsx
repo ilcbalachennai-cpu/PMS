@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Save, RefreshCw, Lock, FileText, Eye, AlertCircle, AlertTriangle, X, CheckCircle, Download, Scale, HandCoins, Users, Calculator, Settings } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, FineRecord, OTRecord, ArrearBatch, View, SettingsTab } from '../types';
+import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, FineRecord, OTRecord, ArrearBatch, View, SettingsTab, LicenseData } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
 import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName, openSavedReport } from '../services/reportService';
 import { formatIndianNumber } from '../utils/formatters';
@@ -30,7 +30,8 @@ interface PayrollProcessorProps {
     arrearHistory?: ArrearBatch[];
     showAlert?: (type: ModalType, title: string, message: string, onConfirm?: () => void, onSecondary?: () => void, confirmLabel?: string, secondaryLabel?: string, cancelLabel?: string, autoCloseSecs?: number) => void;
     onNavigate?: (view: View) => void;
-    setSettingsTab?: (tab: 'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS') => void;
+    setSettingsTab?: (tab: SettingsTab) => void;
+    licenseInfo?: LicenseData;
 }
 
 const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
@@ -49,7 +50,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     arrearHistory = [],
     showAlert,
     onNavigate,
-    setSettingsTab
+    setSettingsTab,
+    licenseInfo
 }) => {
     const [results, setResults] = useState<PayrollResult[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -459,65 +461,98 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     const absentCount = activeCount - presentCount;
 
     // --- AGGREGATE TOTALS FOR TABLE SUMMARY ---
-    const tableTotals = useMemo(() => {
-        return results.reduce((acc, r) => ({
-            days: acc.days + (r.payableDays || 0),
-            basic: acc.basic + (r.earnings.basic || 0),
-            da: acc.da + (r.earnings.da || 0),
-            leaveEncash: acc.leaveEncash + (r.earnings.leaveEncashment || 0),
-            others: acc.others + ((r?.earnings?.total || 0) - ((r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.leaveEncashment || 0))),
-            gross: acc.gross + (r.earnings.total || 0),
-            pf: acc.pf + (r.deductions.epf || 0),
-            esi: acc.esi + (r.deductions.esi || 0),
-            ptTds: acc.ptTds + ((r.deductions.pt || 0) + (r.deductions.it || 0)),
-            advance: acc.advance + (r.deductions.advanceRecovery || 0),
-            dedn: acc.dedn + (r.deductions.total || 0),
-            net: acc.net + (r.netPay || 0)
-        }), { days: 0, basic: 0, da: 0, leaveEncash: 0, others: 0, gross: 0, pf: 0, esi: 0, ptTds: 0, advance: 0, dedn: 0, net: 0 });
-    }, [results]);
+    // const tableTotals = useMemo(() => {
+    //     return results.reduce((acc, r) => ({
+    //         days: acc.days + (r.payableDays || 0),
+    //         basic: acc.basic + (r.earnings.basic || 0),
+    //         da: acc.da + (r.earnings.da || 0),
+    //         leaveEncash: acc.leaveEncash + (r.earnings.leaveEncashment || 0),
+    //         others: acc.others + ((r?.earnings?.total || 0) - ((r?.earnings?.basic || 0) + (r?.earnings?.da || 0) + (r?.earnings?.leaveEncashment || 0))),
+    //         gross: acc.gross + (r.earnings.total || 0),
+    //         pf: acc.pf + (r.deductions.epf || 0),
+    //         esi: acc.esi + (r.deductions.esi || 0),
+    //         ptTds: acc.ptTds + ((r.deductions.pt || 0) + (r.deductions.it || 0)),
+    //         advance: acc.advance + (r.deductions.advanceRecovery || 0),
+    //         dedn: acc.dedn + (r.deductions.total || 0),
+    //         net: acc.net + (r.netPay || 0)
+    //     }), { days: 0, basic: 0, da: 0, leaveEncash: 0, others: 0, gross: 0, pf: 0, esi: 0, ptTds: 0, advance: 0, dedn: 0, net: 0 });
+    // }, [results]);
 
     // Dynamic Columns Definition
-    const ALL_COLUMNS = useMemo(() => ['days', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'others', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears', 'totalEarnings', 'epf', 'vpf', 'esi', 'advanceRecovery', 'pt_it', 'pt', 'it', 'lwf', 'fine', 'totalDeductions', 'netPay'], []);
+    const ALL_COLUMNS = useMemo(() => ['days', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'others', 'bonus', 'leaveEncashment', 'otAmount', 'arrears', 'totalEarnings', 'epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine', 'otherDeductions', 'totalDeductions', 'netPay'], []);
 
     const activeColumns = useMemo(() => {
+        let finalColumns: string[] = [];
         if (config.enableDynamicPaySheet) {
             const baseColumns = config.dynamicPaySheetColumns
                 ? config.dynamicPaySheetColumns.map(c => {
                     const cLower = c.toLowerCase();
                     const matchedKey = ALL_COLUMNS.find(k => k.toLowerCase() === cLower);
                     return matchedKey || c;
-                  }).filter(c => c !== 'empid' && c !== 'name' && c !== 'days')
-                : ['basic', 'da', 'leaveEncashment', 'others', 'totalEarnings', 'epf', 'esi', 'pt_it', 'advanceRecovery', 'totalDeductions', 'netPay'];
-                
-            // V03.01.07: Automatically add 'others' if any earnings component is left out
-            const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'leaveEncashment', 'otAmount', 'arrears'];
-            const missingEarnings = earningsKeys.filter(k => !baseColumns.includes(k));
+                  }).filter(c => c !== 'empid' && c !== 'name')
+                : ['days', 'basic', 'da', 'others', 'leaveEncashment', 'totalEarnings', 'epf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'totalDeductions', 'netPay'];
             
-            let finalColumns = [...baseColumns];
-            if (missingEarnings.length > 0 && !finalColumns.includes('others')) {
-                finalColumns.push('others');
-            }
-            
-            return finalColumns.sort((a, b) => ALL_COLUMNS.indexOf(a) - ALL_COLUMNS.indexOf(b));
+            finalColumns = [...baseColumns];
         } else {
             // Static order based on user's screenshot, with Leave shifted after Others
-            return ['basic', 'da', 'others', 'leaveEncashment', 'totalEarnings', 'epf', 'esi', 'pt_it', 'advanceRecovery', 'totalDeductions', 'netPay'];
+            finalColumns = ['days', 'basic', 'da', 'others', 'leaveEncashment', 'totalEarnings', 'epf', 'esi', 'pt_it', 'advanceRecovery', 'otherDeductions', 'totalDeductions', 'netPay'];
         }
-    }, [config.enableDynamicPaySheet, config.dynamicPaySheetColumns, ALL_COLUMNS]);
+
+        // Check if any employee has non-zero 'others' (Earnings)
+        const hasOthersBalance = results.some(r => {
+            const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears'];
+            const displayedEarningsKeys = earningsKeys.filter(k => finalColumns.includes(k) && k !== 'others');
+            const sumOfDisplayed = displayedEarningsKeys.reduce((acc, k) => acc + (r?.earnings?.[k as keyof typeof r.earnings] || 0), 0);
+            const othersVal = Math.round((r?.earnings?.total || 0) - sumOfDisplayed);
+            return othersVal !== 0;
+        });
+
+        // Check if any employee has non-zero 'otherDeductions'
+        const hasOtherDeductionsBalance = results.some(r => {
+            const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
+            const displayedDeductionKeys = deductionKeys.filter(k => finalColumns.includes(k) && k !== 'otherDeductions');
+            const sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => acc + (r?.deductions?.[k as keyof typeof r.deductions] || 0), 0);
+            const othersVal = Math.round((r?.deductions?.total || 0) - sumOfDisplayed);
+            return othersVal !== 0;
+        });
+
+        // Filter out 'others' if no balance
+        if (!hasOthersBalance) {
+            finalColumns = finalColumns.filter(c => c !== 'others');
+        } else if (!finalColumns.includes('others')) {
+            // Add 'others' if it has balance and was not in baseColumns
+            finalColumns.push('others');
+        }
+
+        // Filter out 'otherDeductions' if no balance
+        if (!hasOtherDeductionsBalance) {
+            finalColumns = finalColumns.filter(c => c !== 'otherDeductions');
+        } else if (!finalColumns.includes('otherDeductions')) {
+            // Add 'otherDeductions' if it has balance and was not in baseColumns
+            finalColumns.push('otherDeductions');
+        }
+
+        // Sort if in dynamic mode
+        if (config.enableDynamicPaySheet) {
+            return finalColumns.sort((a, b) => ALL_COLUMNS.indexOf(a) - ALL_COLUMNS.indexOf(b));
+        }
+        
+        return finalColumns;
+    }, [config.enableDynamicPaySheet, config.dynamicPaySheetColumns, ALL_COLUMNS, results]);
 
     const columnMap = useMemo(() => ({
-        days: { label: 'Days', className: 'text-center text-slate-300', value: (r: PayrollResult) => r.payableDays },
-        basic: { label: 'Basic', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.basic || 0) },
-        da: { label: 'DA', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.da || 0) },
-        retaining: { label: 'Retain', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.retainingAllowance || 0) },
-        hra: { label: 'HRA', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.hra || 0) },
-        conveyance: { label: 'Conv', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.conveyance || 0) },
-        washing: { label: 'Wash', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.washing || 0) },
-        attire: { label: 'Attire', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.attire || 0) },
-        special1: { label: 'Spl 1', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.special1 || 0) },
+        days: { label: 'Days', className: 'text-center text-slate-100', value: (r: PayrollResult) => r.payableDays },
+        basic: { label: 'Basic', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.basic || 0) },
+        da: { label: 'DA', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.da || 0) },
+        retaining: { label: 'Retain', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.retainingAllowance || 0) },
+        hra: { label: 'HRA', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.hra || 0) },
+        conveyance: { label: 'Conv', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.conveyance || 0) },
+        washing: { label: 'Wash', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.washing || 0) },
+        attire: { label: 'Attire', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.attire || 0) },
+        special1: { label: 'Spl 1', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special1 || 0) },
         others: { 
             label: 'Others', 
-            className: 'text-right text-slate-500', 
+            className: 'text-right text-slate-300', 
             value: (r: PayrollResult) => {
                 const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears'];
                 const displayedEarningsKeys = earningsKeys.filter(k => activeColumns.includes(k));
@@ -528,22 +563,35 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 return Math.round((r?.earnings?.total || 0) - sumOfDisplayed);
             }
         },
-        special2: { label: 'Spl 2', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.special2 || 0) },
-        special3: { label: 'Spl 3', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.special3 || 0) },
-        bonus: { label: 'Bonus', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.bonus || 0) },
-        leaveEncashment: { label: 'Leave', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.leaveEncashment || 0) },
-        otAmount: { label: 'OT', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.otAmount || 0) },
-        arrears: { label: 'Arrears', className: 'text-right text-slate-300', value: (r: PayrollResult) => Math.round(r?.earnings?.arrears || 0) },
+        special2: { label: 'Spl 2', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special2 || 0) },
+        special3: { label: 'Spl 3', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special3 || 0) },
+        bonus: { label: 'Bonus', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.bonus || 0) },
+        leaveEncashment: { label: 'Leave', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.leaveEncashment || 0) },
+        otAmount: { label: 'OT', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.otAmount || 0) },
+        arrears: { label: 'Arrears', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.arrears || 0) },
         totalEarnings: { label: 'Gross', className: 'text-right text-white font-black', value: (r: PayrollResult) => Math.round(r?.earnings?.total || 0) },
         epf: { label: 'PF', className: 'text-right text-blue-300', value: (r: PayrollResult) => Math.round(r?.deductions?.epf || 0) },
         vpf: { label: 'VPF', className: 'text-right text-blue-300', value: (r: PayrollResult) => Math.round(r?.deductions?.vpf || 0) },
         esi: { label: 'ESI', className: 'text-right text-pink-300', value: (r: PayrollResult) => Math.round(r?.deductions?.esi || 0) },
-        advanceRecovery: { label: 'Advance', className: 'text-right text-sky-300 font-black', value: (r: PayrollResult) => Math.round(r?.deductions?.advanceRecovery || 0) },
+        advanceRecovery: { label: 'ADV', className: 'text-right text-sky-300 font-black', value: (r: PayrollResult) => Math.round(r?.deductions?.advanceRecovery || 0) },
         pt_it: { label: 'PT/TDS', className: 'text-right text-amber-300', value: (r: PayrollResult) => Math.round((r?.deductions?.pt || 0) + (r?.deductions?.it || 0)) },
         pt: { label: 'PT', className: 'text-right text-amber-300', value: (r: PayrollResult) => Math.round(r?.deductions?.pt || 0) },
         it: { label: 'IT', className: 'text-right text-amber-300', value: (r: PayrollResult) => Math.round(r?.deductions?.it || 0) },
         lwf: { label: 'LWF', className: 'text-right text-slate-400', value: (r: PayrollResult) => Math.round(r?.deductions?.lwf || 0) },
         fine: { label: 'Fine', className: 'text-right text-red-300', value: (r: PayrollResult) => Math.round(r?.deductions?.fine || 0) },
+        otherDeductions: { 
+            label: 'Others', 
+            className: 'text-right text-purple-300', 
+            value: (r: PayrollResult) => {
+                const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
+                const displayedDeductionKeys = deductionKeys.filter(k => activeColumns.includes(k));
+                const sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => {
+                    const val = r?.deductions?.[k as keyof typeof r.deductions] || 0;
+                    return acc + val;
+                }, 0);
+                return Math.round((r?.deductions?.total || 0) - sumOfDisplayed);
+            }
+        },
         totalDeductions: { label: 'DEDN', className: 'text-right text-red-300', value: (r: PayrollResult) => Math.round(r?.deductions?.total || 0) },
         netPay: { label: 'Net Pay', className: 'text-right text-emerald-400 font-black bg-emerald-900/10', value: (r: PayrollResult) => Math.round(r?.netPay || 0) }
     }), [activeColumns]);
@@ -585,6 +633,18 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             observer.disconnect();
         };
     }, [results, activeColumns]);
+
+    const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'others', 'bonus', 'leaveEncashment', 'otAmount', 'arrears'];
+    const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'it', 'lwf', 'fine', 'otherDeductions', 'totalDeductions'];
+
+    const earningsCount = activeColumns.filter(c => earningsKeys.includes(c)).length;
+    const deductionCount = activeColumns.filter(c => deductionKeys.includes(c)).length;
+
+    const beforeEarningsCount = activeColumns.filter(c => !earningsKeys.includes(c) && !deductionKeys.includes(c) && ALL_COLUMNS.indexOf(c) < ALL_COLUMNS.indexOf('basic')).length + 1; // +1 for Employee Identity
+    
+    const betweenCount = activeColumns.filter(c => c === 'totalEarnings').length;
+    
+    const afterCount = activeColumns.filter(c => c === 'netPay').length + 1; // +1 for View
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -692,15 +752,21 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                         </div>
                         <div className="ml-auto">
                             <button
-                                onClick={handleNavigateToSettings}
-                                title={config.enableDynamicPaySheet ? "Change to Static PaySheet" : "Change to Dynamic PaySheet"}
-                                className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-700 transition-colors text-[10px] font-black uppercase tracking-wider"
+                                onClick={() => {
+                                    if (!licenseInfo?.splDynamic) {
+                                        showAlert?.('info', 'Premium Feature Locked', 'You need the premium access code to activate this feature. Please contact support to upgrade.');
+                                    } else {
+                                        handleNavigateToSettings();
+                                    }
+                                }}
+                                title={!licenseInfo?.splDynamic ? "You need the premium access code to activate this feature" : (config.enableDynamicPaySheet ? "Change to Static PaySheet" : "Change to Dynamic PaySheet")}
+                                className={`flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[12px] rounded-lg transition-all shadow-lg shadow-blue-900/20 ${!licenseInfo?.splDynamic ? 'opacity-40 cursor-not-allowed' : ''}`}
                             >
-                                <Settings size={12} className="text-blue-400" />
+                                {!licenseInfo?.splDynamic ? <Lock size={14} className="text-amber-500" /> : <Settings size={14} className="text-white" />}
                                 {config.enableDynamicPaySheet ? (
-                                    <span className="text-blue-400">Dynamic PaySheet</span>
+                                    <span>Dynamic PaySheet</span>
                                 ) : (
-                                    <span className="text-blue-400">Static PaySheet</span>
+                                    <span>Static PaySheet</span>
                                 )}
                             </button>
                         </div>
@@ -715,13 +781,30 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                     <div ref={tableWrapperRef} className="bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl max-h-[600px] overflow-auto custom-scrollbar max-w-full">
                         <table className="min-w-full text-left border-collapse">
                             <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-normal font-bold sticky top-0 z-20 shadow-md">
+                                <tr className="border-b border-slate-800 text-[9px] uppercase tracking-wider text-slate-500">
+                                    <th colSpan={beforeEarningsCount} className={`px-3 py-1 bg-[#0f172a] ${isSticky ? 'sticky left-0 z-30 shadow-[4px_0_4px_-4px_rgba(0,0,0,0.5)]' : ''}`}></th>
+                                    <th colSpan={earningsCount} className="px-1.5 py-1 text-center bg-[#0f172a]">
+                                        <span className="underline decoration-sky-500/50 underline-offset-2 font-black text-sky-400">Pay Breakup</span>
+                                    </th>
+                                    <th colSpan={betweenCount} className="px-1.5 py-1 bg-[#0f172a]"></th>
+                                    <th colSpan={deductionCount} className="px-1.5 py-1 text-center bg-[#0f172a]">
+                                        <span className="underline decoration-pink-500/50 underline-offset-2 font-black text-pink-400">Deduction Breakup</span>
+                                    </th>
+                                    <th colSpan={afterCount} className={`px-2 py-1 bg-[#0f172a] ${isSticky ? 'sticky right-0 z-30 shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.5)]' : ''}`}></th>
+                                </tr>
                                 <tr>
                                     <th className={`px-3 py-3 bg-[#0f172a] whitespace-nowrap ${isSticky ? 'sticky left-0 z-30 shadow-[4px_0_4px_-4px_rgba(0,0,0,0.5)]' : ''}`}>Employee Identity</th>
                                     {activeColumns.map(colId => {
                                         const col = columnMap[colId as keyof typeof columnMap];
                                         if (!col) return null;
+                                        // V03.01.07: Force Sky Blue for requested headers while maintaining alignment
+                                        const isRequestedSkyBlue = ['days', 'basic', 'da', 'leaveEncashment'].includes(colId);
+                                        const headerClassName = isRequestedSkyBlue 
+                                            ? col.className.replace('text-slate-300', 'text-sky-400') 
+                                            : col.className;
+                                        
                                         return (
-                                            <th key={colId} className={`px-1.5 py-3 bg-[#0f172a] whitespace-nowrap ${col.className}`}>
+                                            <th key={colId} className={`px-1.5 py-3 bg-[#0f172a] whitespace-nowrap ${headerClassName}`}>
                                                 {col.label}
                                             </th>
                                         );

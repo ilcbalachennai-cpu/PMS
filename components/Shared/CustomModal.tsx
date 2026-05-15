@@ -147,7 +147,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     </div>
                 </div>
 
-                <div className="p-2.5 bg-slate-900/20 overflow-hidden flex-1">
+                <div className="p-2.5 bg-slate-900/20 overflow-y-auto flex-1">
                     <div className="text-sm text-slate-300 leading-relaxed text-center font-medium">
                         {message}
                     </div>

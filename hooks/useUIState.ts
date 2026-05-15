@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
+import { SettingsTab } from '../types';
 
 export const useUIState = (activeCompanyId: string, employeesCount: number) => {
   const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${activeCompanyId}_${key}`;
 
-  const [settingsTab, setSettingsTab] = useState<'STATUTORY' | 'COMPANY' | 'DATA' | 'DEVELOPER' | 'LICENSE' | 'USERS'>(() => {
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(() => {
     const saved = sessionStorage.getItem('settings_initial_tab');
     if (saved) {
       sessionStorage.removeItem('settings_initial_tab');
       return saved as any;
     }
-    return 'COMPANY';
+    return SettingsTab.Company;
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isFullScreen, setIsFullScreen] = useState(false);

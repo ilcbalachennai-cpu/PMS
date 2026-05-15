@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ArrowRight, Lock, User as UserIcon, AlertCircle, IndianRupee, ShieldCheck, Maximize, Minimize, Power, Eye, EyeOff, Clock, Timer } from 'lucide-react';
 import { User as UserType } from '../types';
 import { MOCK_USERS, BRAND_CONFIG } from '../constants';
-import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense, requestResetOTP, updateCloudPassword, requestDeveloperOTP, verifyDeveloperOTP, verifyIdentityEmail, syncIdentityRepair, requestRestoreOTP, verifyRestoreOTP, trackActiveOfflineDay } from '../services/licenseService';
+import { validateLicenseStartup, trackCloudLogin, APP_VERSION, getAppDeveloper, getStoredLicense, requestResetOTP, updateCloudPassword, requestDeveloperOTP, verifyDeveloperOTP, verifyIdentityEmail, syncIdentityRepair, requestRestoreOTP, verifyRestoreOTP, trackActiveOfflineDay, getMachineId } from '../services/licenseService';
 import CustomModal from './Shared/CustomModal';
 import { Mail, CheckCircle2, ShieldAlert, Loader2 } from 'lucide-react';
 
@@ -292,7 +292,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
       const cleanPassword = password.trim();
 
       // --- V02.02.11: DEVELOPER SECURE BYPASS (OTP FIRST/MANDATORY) ---
-      // This ensures that 'VRANGA' always triggers a cloud credential check + OTP
+      // This ensures that 'SBOBBY12' always triggers a cloud credential check + OTP
       const isDev = cleanUsername.toLowerCase() === 'vranga';
       if (isDev) {
         console.log("🛠️ Developer high-priority bypass initiated:", cleanUsername);
@@ -317,6 +317,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
         }
 
         try {
+          // V03.01.07: Developer bypass for specific machine
+          const mid = await getMachineId();
+          const isDevMachine = mid === '05D02810-8051-7C4A-B33D-19383C3F3A2F';
+          
+          if (isDevMachine) {
+            console.log("✅ Dev Machine detected. Bypassing Developer OTP.");
+            onLogin(cloudDev || {
+              username: 'VRANGA',
+              password: 'Basupra@74',
+              role: 'Developer',
+              name: 'VRANGA (Developer)',
+              email: 'developer@bharatpay.com'
+            } as any);
+            return;
+          }
+
           // Step 1: Request OTP (GAS will verify cleanPassword vs Master_Config sheet)
           const res = await requestDeveloperOTP(cleanUsername, cleanPassword);
           if (res.success) {
@@ -679,7 +695,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
 
     setIsSyncing(true);
     try {
-      const res = await syncIdentityRepair(syncEmail, syncNewUID, syncNewPass);
+      const res = await syncIdentityRepair(syncEmail, syncNewUID, syncNewPass, syncedUserName);
       if (res.success) {
         setSyncStep('SUCCESS');
         // The service already calls validateLicenseStartup(true)
@@ -1289,10 +1305,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
               </div>
             )}
             {syncStep === 'EMAIL' && (
-              <div className="space-y-6">
-                <div className="flex flex-col items-center justify-center text-center space-y-3 mb-4">
-                  <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center">
-                    <Mail className="text-emerald-400" size={32} />
+              <div className="space-y-4">
+                <div className="flex flex-col items-center justify-center text-center space-y-2 mb-2">
+                  <div className="w-14 h-14 bg-emerald-500/10 rounded-full flex items-center justify-center">
+                    <Mail className="text-emerald-400" size={28} />
                   </div>
                   <div>
                     <h3 className="text-lg font-black text-white uppercase tracking-tight">Sync & Repair Account</h3>
@@ -1322,7 +1338,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
                   <button
                     type="submit"
                     disabled={isSyncing || !syncEmail}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs disabled:opacity-50"
                   >
                     {isSyncing ? <Loader2 className="animate-spin" size={18} /> : "Verify Identity"}
                   </button>

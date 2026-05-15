@@ -8,13 +8,7 @@ import { APP_VERSION, APP_PATCH_TIMESTAMP } from '../services/licenseService';
       // Clean the string from any leading/trailing whitespace including non-breaking spaces
       const cleanStr = str.trim().replace(/\u00a0/g, ' ');
       
-      // OPTION 1: Try native parsing first (handles full JS date strings like in the screenshot)
-      const nativeDate = new Date(cleanStr);
-      if (!isNaN(nativeDate.getTime()) && cleanStr.includes(':')) {
-        return nativeDate.getTime();
-      }
-
-      // OPTION 2: Manual parsing for dd-MM-yyyy HH:mm:ss
+      // ALWAYS use manual parsing for dd-MM-yyyy HH:mm:ss to avoid browser locale/guessing bugs
       const parts = cleanStr.split(/[\sT]+/).filter(Boolean);
       const datePart = parts[0];
       const timePart = parts[1] || '00:00:00';

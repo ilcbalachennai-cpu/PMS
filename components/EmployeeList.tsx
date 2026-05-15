@@ -4,7 +4,7 @@ import { Employee, User, CompanyProfile } from '../types';
 
 // Global OS Detection for UI refinement
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
-import { generateEmployeeXLSX, parseEmployeeXLSX, generateImportFailureReport } from '../services/excelService';
+import { generateEmployeeXLSX, parseEmployeeXLSX, generateImportFailureReport, generateEmployeeUpdateTemplateXLSX, parseEmployeeUpdateXLSX } from '../services/excelService';
 import { openSavedReport } from '../services/reportService';
 
 // Modular Components
@@ -227,6 +227,28 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         input.click();
     };
 
+    const handleImportUpdate = async () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.xlsx';
+        input.onchange = async (e: any) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            setIsImporting(true);
+            try {
+                const results = await parseEmployeeUpdateXLSX(file, employees);
+                if (results.success > 0 && results.updatedEmployees) {
+                    setEmployees(results.updatedEmployees);
+                    showAlert('success', 'Update Successful', `${results.success} Employees updated successfully.`, undefined, undefined, 'OK', undefined, undefined, 2);
+                }
+                setImportSummary(results);
+            } finally {
+                setIsImporting(false);
+            }
+        };
+        input.click();
+    };
+
     const handleExportSubmit = async () => {
         try {
             const usersStr = localStorage.getItem('app_users');
@@ -337,7 +359,24 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                             );
                         }
                     }}
+                    onDownloadUpdateTemplate={async () => {
+                        const path = await generateEmployeeUpdateTemplateXLSX(activeEmployees, companyProfile);
+                        if (path) {
+                            showAlert(
+                                'success',
+                                'Update Template Downloaded',
+                                'Employee update template with existing data has been saved to your reports folder.',
+                                () => openSavedReport(path),
+                                undefined,
+                                'Open Folder',
+                                undefined,
+                                undefined,
+                                2
+                            );
+                        }
+                    }}
                     onImportClick={handleImport}
+                    onImportUpdateClick={handleImportUpdate}
                     onExportClick={() => setExportModal({ ...exportModal, isOpen: true })}
                     onShowRejoin={() => setShowRejoinPanel(true)}
                     onAddNew={handleAddNew}

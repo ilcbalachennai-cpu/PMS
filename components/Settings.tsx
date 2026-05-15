@@ -60,7 +60,7 @@ const Settings: React.FC<SettingsProps> = ({
     leavePolicy, setLeavePolicy, onRestore, onNuclearReset, onPayrollReset, onDeepReset, initialTab = SettingsTab.Company, 
     setSettingsTab,
     userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange, 
-    showAlert, verifyLicense, activeCompanyId = 'default', onRescueOrganizations, onInitiateSecureDelete,
+    showAlert, verifyLicense, activeCompanyId = 'default', onRescueOrganizations,
     globalMonth = 'April', globalYear = 2025
 }) => {
     const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${key}_${activeCompanyId}`;
@@ -186,7 +186,7 @@ const Settings: React.FC<SettingsProps> = ({
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [isSqliteFile, setIsSqliteFile] = useState(false);
     const [isMachineLocked, setIsMachineLocked] = useState(false);
-    const [importIntoCurrent, setImportIntoCurrent] = useState(false);
+
     const [authPassword, setAuthPassword] = useState('');
     const [authError, setAuthError] = useState('');
     const [pendingAuthAction, setPendingAuthAction] = useState<(() => void) | null>(null);
@@ -215,9 +215,10 @@ const Settings: React.FC<SettingsProps> = ({
     const [licenseInfo, setLicenseInfo] = useState<LicenseData | null>(() => getStoredLicense());
     const [newLicenseKey, setNewLicenseKey] = useState('');
     const [newUserName, setNewUserName] = useState(licenseInfo?.userName || '');
-    const [newRegEmail, setNewRegEmail] = useState('');
-    const [newRegMobile, setNewRegMobile] = useState('');
+    const [newRegEmail, setNewRegEmail] = useState(licenseInfo?.registeredTo || '');
+    const [newRegMobile, setNewRegMobile] = useState(licenseInfo?.registeredMobile || '');
     const [newUserID, setNewUserID] = useState(licenseInfo?.userID || '');
+    const [newPassword, setNewPassword] = useState('');
     const [showResetModal, setShowResetModal] = useState(false);
     const [showPayrollResetModal, setShowPayrollResetModal] = useState(false);
     const [resetPassword, setResetPassword] = useState('');
@@ -751,7 +752,38 @@ const Settings: React.FC<SettingsProps> = ({
                 const data = JSON.parse(decryptedString);
                 setProcessProgress(70);
 
-                const targetId = activeCompanyId !== 'default' ? activeCompanyId : 'company_1';
+                // V03.01.07: Company ID Conflict Check
+                const rawProfile = data.company_profile || data.companyProfile || data.app_company_profile || {};
+                const backupCompanyId = rawProfile.id;
+                
+                let targetId = activeCompanyId !== 'default' ? activeCompanyId : 'company_1';
+                let conflictMessage = "";
+                
+                if (backupCompanyId && backupCompanyId !== activeCompanyId) {
+                    console.log(`[RESTORE] Conflict detected: Backup ID ${backupCompanyId} !== Active ID ${activeCompanyId}`);
+                    conflictMessage = `Restoring CompanyID (${backupCompanyId}) and current CompanyID (${activeCompanyId}) are different, hence not allowed to overwrite. Proceeding to restore as a separate entity with its original CompanyID.`;
+                    targetId = backupCompanyId;
+                } else {
+                    console.log(`[RESTORE] No conflict or matching ID: ${backupCompanyId}`);
+                    conflictMessage = `Restoring from backup "${backupCompanyId || 'Unknown'}". No CompanyID Conflict Detected. Overwriting company.`;
+                    targetId = backupCompanyId || targetId; // Use backup ID if available, else fallback
+                }
+                const companiesListRaw = localStorage.getItem('app_companies');
+                let companiesList: any[] = [];
+                try { companiesList = companiesListRaw ? JSON.parse(companiesListRaw) : []; } catch(e) {}
+                
+                const companyExists = companiesList.some((c: any) => c.id === targetId);
+                
+                if (companyExists) {
+                    const confirmOverwrite = window.confirm(`The Company ID [${targetId}] already exists in your Company List.\n\nWould you like to OVERWRITE it with the data from this backup?`);
+                    if (!confirmOverwrite) {
+                        console.log("[RESTORE] User cancelled restore because company already exists.");
+                        setIsProcessing(false);
+                        setProcessStatus('Restoration Cancelled');
+                        return;
+                    }
+                }
+
                 const getCKey = (key: string) => `${key}_${targetId}`;
 
                 setProcessStatus('Migrating local databases...');
@@ -779,10 +811,6 @@ const Settings: React.FC<SettingsProps> = ({
                 };
 
                 let restoredCount = 0;
-                const companiesListRaw = localStorage.getItem('app_companies');
-                let companiesList: any[] = [];
-                try { companiesList = companiesListRaw ? JSON.parse(companiesListRaw) : []; } catch(e) {}
-                
                 const restoredData: Record<string, any> = {};
                 Object.entries(keyMap).forEach(([storageKey, bundleKeys]) => {
                     let val = null;
@@ -877,6 +905,10 @@ const Settings: React.FC<SettingsProps> = ({
                                 <p className="text-xs text-slate-300 leading-relaxed font-medium italic">
                                     {`Successfully migrated ${restoredCount} data silos from the provided .enc backup file into ${companiesList.find(c => c.id === targetId)?.establishmentName || targetId}.`}
                                 </p>
+                                <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                                    <AlertCircle size={14} className="text-blue-400 shrink-0" />
+                                    <p className="text-[10px] text-blue-400 font-bold uppercase tracking-widest">{conflictMessage}</p>
+                                </div>
                                 <div className="h-px bg-slate-800/80 w-full" />
                                 <div className="space-y-1">
                                     <span className="text-[9px] text-slate-500 uppercase font-black block mb-1">Restored Records Breakdown</span>
@@ -969,15 +1001,13 @@ const Settings: React.FC<SettingsProps> = ({
                 
                 let targetCompanyId = activeCompanyId;
                 
-                if (!importIntoCurrent) {
-                    // Extract name from data to generate a specific ID
-                    const rawProfile = data.company_profile || data.app_company_profile || data.companyProfile || {};
-                    const establishmentName = rawProfile.establishmentName || 'COMPANY';
-                    targetCompanyId = generateCompanyId(establishmentName);
-                }
+                // V03.01.07: Always generate a standalone company ID for legacy migration to avoid data pollution
+                const rawProfile = data.company_profile || data.app_company_profile || data.companyProfile || {};
+                const establishmentName = rawProfile.establishmentName || 'COMPANY';
+                targetCompanyId = generateCompanyId(establishmentName);
                 
                 const getCKey = (key: string) => `${key}_${targetCompanyId}`;
-                console.log(`[MIGRATE] Target Company ID: ${targetCompanyId} (Import into current: ${importIntoCurrent})`);
+                console.log(`[MIGRATE] Standalone Target Company ID: ${targetCompanyId}`);
 
                 // V03.01.05: CRITICAL - Switch backend silo focus before writing migrated data
                 if (window.electronAPI?.switchCompanyData) {
@@ -985,7 +1015,6 @@ const Settings: React.FC<SettingsProps> = ({
                 }
 
                 // 2. Extract Profile
-                const rawProfile = data.company_profile || data.app_company_profile || data.companyProfile || {};
                 const newProfile = { ...INITIAL_COMPANY_PROFILE, ...rawProfile, id: targetCompanyId };
                 
                 // 3. Extrapolate data with CompanyID and link mappings
@@ -1651,12 +1680,24 @@ const Settings: React.FC<SettingsProps> = ({
 
             {activeTab === SettingsTab.Statutory && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-300">
-                    <div className="bg-amber-900/20 border border-amber-700/50 p-6 rounded-2xl flex gap-4 text-amber-200">
-                        <AlertCircle size={28} className="shrink-0 text-amber-400" />
-                        <div className="text-sm space-y-2">
-                            <p className="font-bold text-lg text-amber-400">Compliance & Parameter Configuration</p>
-                            <p className="text-slate-300">These Settings Define How PF, ESI, Leave Policy and Taxes are Calculated Establishment wise</p>
+                    <div className="bg-amber-900/20 border border-amber-700/50 p-6 rounded-2xl flex justify-between items-center text-amber-200">
+                        <div className="flex gap-4">
+                            <AlertCircle size={28} className="shrink-0 text-amber-400" />
+                            <div className="text-sm space-y-2">
+                                <p className="font-bold text-lg text-amber-400">Compliance & Parameter Configuration</p>
+                                <p className="text-slate-300 whitespace-nowrap">These Settings Define How PF, ESI, Leave Policy and Taxes are Calculated Establishment wise</p>
+                            </div>
                         </div>
+                        {profileData?.establishmentName && (
+                            <div className="flex flex-col items-end gap-1">
+                                <div className="text-xs font-bold text-amber-500 uppercase tracking-wider bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 whitespace-nowrap">
+                                    {profileData.establishmentName}
+                                </div>
+                                <div className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
+                                    ID: <span className="text-amber-500">{activeCompanyId}</span>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Statutory Calculation Configuration - NEW GLOBAL TOGGLE */}
@@ -2380,7 +2421,22 @@ const Settings: React.FC<SettingsProps> = ({
                 <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                     {/* ... Company Branding & Profile ... */}
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 shadow-xl overflow-hidden p-8">
-                        <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4"><ImageIcon className="text-amber-400" size={24} /><h3 className="font-bold text-sky-400 uppercase tracking-widest text-sm">Establishment Branding</h3></div>
+                        <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+                            <div className="flex items-center gap-3">
+                                <ImageIcon className="text-amber-400" size={24} />
+                                <h3 className="font-bold text-sky-400 uppercase tracking-widest text-sm">Establishment Branding</h3>
+                            </div>
+                            {profileData.establishmentName && (
+                                <div className="flex flex-col items-end gap-1">
+                                    <div className="text-xs font-bold text-amber-500 uppercase tracking-wider bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 whitespace-nowrap">
+                                        {profileData.establishmentName}
+                                    </div>
+                                    <div className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
+                                        ID: <span className="text-amber-500">{activeCompanyId}</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                         <div className="flex flex-col md:flex-row items-center gap-8">
                             <div className="relative group shrink-0">
                                 <div className="relative flex items-center justify-center w-32 h-32 rounded-full bg-[#0a0f1d] shadow-2xl overflow-hidden border-4 border-white"><img src={currentLogo} className="w-full h-full object-cover" alt="Establishment Logo" /></div>
@@ -2718,14 +2774,26 @@ const Settings: React.FC<SettingsProps> = ({
 
             {activeTab === 'DATA' && (
                 <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-                        <div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20">
-                            <Database size={24} />
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20">
+                                <Database size={24} />
+                            </div>
+                            <div>
+                                <h3 className="font-black text-white text-lg uppercase tracking-tighter">Data Management Center</h3>
+                                <p className="text-xs text-slate-400">Secure Backup, Restoration & System Maintenance</p>
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="font-black text-white text-lg uppercase tracking-tighter">Data Management Center</h3>
-                            <p className="text-xs text-slate-400">Secure Backup, Restoration & System Maintenance</p>
-                        </div>
+                        {profileData?.establishmentName && (
+                            <div className="flex flex-col items-end gap-1">
+                                <div className="text-xs font-bold text-amber-500 uppercase tracking-wider bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 whitespace-nowrap">
+                                    {profileData.establishmentName}
+                                </div>
+                                <div className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
+                                    ID: <span className="text-amber-500">{activeCompanyId}</span>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
 
@@ -2875,28 +2943,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 </button>
                             </div>
 
-                            {/* Permanent Deletion Card */}
-                            <div className="p-5 rounded-2xl border border-rose-900/30 bg-rose-900/5 hover:bg-rose-900/10 transition-colors flex flex-col justify-between group">
-                                <div>
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <div className="p-2 bg-rose-900/20 text-rose-500 rounded-lg group-hover:animate-bounce transition-all">
-                                            <Trash2 size={18} />
-                                        </div>
-                                        <h5 className="text-xs font-black text-rose-500 uppercase tracking-tighter">Permanent Organization Purge</h5>
-                                    </div>
-                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Delete <span className="text-rose-500 font-bold uppercase underline underline-offset-2">ENTIRE UNIT</span> for <span className="text-white font-bold">{companyProfile.establishmentName}</span> (<span className="text-sky-400 font-mono">{companyProfile.id}</span>) from database. This removes the organization from the selection gate entirely.</p>
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        if (onInitiateSecureDelete && activeCompanyId) {
-                                            onInitiateSecureDelete(activeCompanyId);
-                                        }
-                                    }}
-                                    className="mt-4 py-2.5 px-4 bg-rose-900/20 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-900/50 hover:border-rose-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-                                >
-                                    Delete This Company
-                                </button>
-                            </div>
+
 
                             {/* Factory Reset Card */}
                             <div className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-900/60 transition-colors flex flex-col justify-between group">
@@ -2916,38 +2963,38 @@ const Settings: React.FC<SettingsProps> = ({
                                     Initiate Factory Reset
                                 </button>
                             </div>
+
+                            {/* Organization Rescue Card */}
+                            <div className="p-5 rounded-2xl border border-emerald-900/30 bg-emerald-900/5 hover:bg-emerald-900/10 transition-colors flex flex-col justify-between group">
+                                <div>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="p-2 bg-emerald-900/20 text-emerald-400 rounded-lg group-hover:scale-110 transition-transform">
+                                            <FolderOpen size={18} />
+                                        </div>
+                                        <div>
+                                            <h5 className="text-xs font-black text-white uppercase tracking-tighter">Organization Rescue & Recovery</h5>
+                                            <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">Data Re-linking</span>
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">"Lost an organization after an update? This tool scans your storage for orphaned data folders and re-links them to your registry."</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        if (onRescueOrganizations) {
+                                            showAlert('confirm', 'Start Rescue Operation?', 'The system will scan for unlinked company folders. Found items will be added back to your organization list.', () => {
+                                                onRescueOrganizations();
+                                            });
+                                        }
+                                    }}
+                                    className="mt-4 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                                >
+                                    <RefreshCw size={14} /> Scan & Rescue Orphans
+                                </button>
+                            </div>
                         </div>
                     </div>
 
-                    {/* Organization Rescue Section - V03.01.04 */}
-                    <div className="bg-[#0f172a] p-6 rounded-2xl border border-emerald-900/20 hover:border-emerald-500/30 transition-all group shadow-lg">
-                        <div className="flex items-center gap-4 mb-4">
-                            <div className="p-3 bg-emerald-900/20 text-emerald-400 rounded-xl group-hover:scale-110 transition-transform">
-                                <FolderOpen size={24} />
-                            </div>
-                            <div>
-                                <h4 className="font-black text-white uppercase tracking-tighter">Organization Rescue & Recovery</h4>
-                                <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">Data Re-linking</span>
-                            </div>
-                        </div>
-                        <div className="space-y-4">
-                            <p className="text-[11px] text-slate-400 leading-relaxed italic">
-                                "Lost an organization after an update? This tool scans your storage for orphaned data folders and re-links them to your registry. Use this if you see folders in your Data directory that aren't showing up in the Dashboard."
-                            </p>
-                            <button
-                                onClick={() => {
-                                    if (onRescueOrganizations) {
-                                        showAlert('confirm', 'Start Rescue Operation?', 'The system will scan for unlinked company folders. Found items will be added back to your organization list.', () => {
-                                            onRescueOrganizations();
-                                        });
-                                    }
-                                }}
-                                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95"
-                            >
-                                <RefreshCw size={14} /> Scan & Rescue Orphans
-                            </button>
-                        </div>
-                    </div>
+
 
                     {/* Application Storage Section - SHIFTED TO BOTTOM */}
                     <div className="bg-[#0f172a] p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/30 transition-all group shadow-lg">
@@ -3088,30 +3135,7 @@ const Settings: React.FC<SettingsProps> = ({
                                     )}
                                 </div>
 
-                                {backupMode === 'MIGRATE' && (
-                                    <div className="flex flex-col p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
-                                        <div className="flex items-center gap-3">
-                                            <input 
-                                                type="checkbox" 
-                                                id="importCurrent"
-                                                className="w-4 h-4 accent-amber-500"
-                                                checked={importIntoCurrent}
-                                                onChange={(e) => setImportIntoCurrent(e.target.checked)}
-                                            />
-                                            <label htmlFor="importCurrent" className="text-[10px] font-bold text-amber-200/80 cursor-pointer uppercase tracking-tight">
-                                                Restore into current company profile
-                                            </label>
-                                        </div>
-                                        {importIntoCurrent && (
-                                            <p className="text-[9px] text-amber-500 font-black uppercase mt-2 ml-7 animate-in fade-in slide-in-from-top-1 flex items-center gap-2">
-                                                Target: {companyProfile.establishmentName}
-                                                <span className="px-1.5 py-0.5 bg-amber-500/20 rounded border border-amber-500/30 font-mono text-[8px] text-amber-400">
-                                                    {activeCompanyId}
-                                                </span>
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
+                                {/* V03.01.07: Removed 'Restore into current company profile' to avoid data pollution */}
 
                                 {processStatus && <p className="text-[10px] text-blue-400 font-bold text-center animate-pulse uppercase tracking-widest">{processStatus}</p>}
 
@@ -3249,6 +3273,16 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">System Activation & Machine Lock Status</p>
                                 </div>
                             </div>
+                            {profileData?.establishmentName && (
+                                <div className="flex flex-col items-end gap-1">
+                                    <div className="text-xs font-bold text-amber-500 uppercase tracking-wider bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 whitespace-nowrap">
+                                        {profileData.establishmentName}
+                                    </div>
+                                    <div className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
+                                        ID: <span className="text-amber-500">{activeCompanyId}</span>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -3333,10 +3367,10 @@ const Settings: React.FC<SettingsProps> = ({
                                         <input
                                             type="text"
                                             placeholder="Enter Full Name"
-                                            className="w-full bg-[#0a0f1d] opacity-60 cursor-not-allowed border border-white/5 rounded-xl p-3 text-white text-xs font-bold outline-none"
+                                            className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-pink-500/10 placeholder-gray-600 uppercase ${licenseInfo?.status === 'LICENSE ACTIVE' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                             value={newUserName}
-                                            readOnly
-                                            tabIndex={-1}
+                                            onChange={e => setNewUserName(e.target.value.toUpperCase())}
+                                            disabled={licenseInfo?.status === 'LICENSE ACTIVE'}
                                         />
                                     </div>
                                     <div className={isRestoringTrial ? "space-y-4" : "grid grid-cols-2 gap-4"}>
@@ -3344,11 +3378,11 @@ const Settings: React.FC<SettingsProps> = ({
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">User ID</label>
                                             <input
                                                 type="text"
-                                                placeholder="SBOBBY12"
-                                                className="w-full bg-[#0a0f1d] opacity-60 cursor-not-allowed border border-white/5 rounded-xl p-3 text-white text-xs font-mono outline-none"
+                                                placeholder="Enter User ID"
+                                                className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10 placeholder-gray-600 uppercase ${licenseInfo?.status === 'LICENSE ACTIVE' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                 value={newUserID}
-                                                readOnly
-                                                tabIndex={-1}
+                                                onChange={e => setNewUserID(e.target.value.toUpperCase())}
+                                                disabled={licenseInfo?.status === 'LICENSE ACTIVE'}
                                             />
                                         </div>
                                         {(!isRestoringTrial || showUpgradeField) && (
@@ -3357,13 +3391,14 @@ const Settings: React.FC<SettingsProps> = ({
                                                 <input
                                                     type="text"
                                                     placeholder="XXXX-XXXX-XXXX-XXXX"
-                                                    className="w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono uppercase outline-none transition-all focus:ring-4 focus:ring-pink-500/10"
+                                                    className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono uppercase outline-none transition-all focus:ring-4 focus:ring-pink-500/10 ${licenseInfo?.status === 'LICENSE ACTIVE' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                     value={newLicenseKey}
                                                     onChange={e => {
                                                         const val = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 16);
                                                         const formatted = val.match(/.{1,4}/g)?.join('-') || val;
                                                         setNewLicenseKey(formatted);
                                                     }}
+                                                    disabled={licenseInfo?.status === 'LICENSE ACTIVE'}
                                                 />
                                             </div>
                                         )}
@@ -3385,24 +3420,35 @@ const Settings: React.FC<SettingsProps> = ({
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Email ID</label>
                                             <input
                                                 type="email"
-                                                className={`w-full bg-[#0a0f1d] border border-white/5 rounded-xl p-3 text-white text-xs font-bold outline-none transition-all ${licenseInfo?.status === 'PENDING_RESTORE' ? 'focus:border-sky-500/50' : 'opacity-60 cursor-not-allowed'}`}
+                                                className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-pink-500/10 placeholder-gray-600 ${licenseInfo?.status === 'LICENSE ACTIVE' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                 value={newRegEmail}
-                                                onChange={(e) => licenseInfo?.status === 'PENDING_RESTORE' && setNewRegEmail(e.target.value)}
-                                                readOnly={licenseInfo?.status !== 'PENDING_RESTORE'}
+                                                onChange={(e) => setNewRegEmail(e.target.value)}
                                                 placeholder="Enter Registered Email"
+                                                disabled={licenseInfo?.status === 'LICENSE ACTIVE'}
                                             />
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Mobile No</label>
                                             <input
                                                 type="text"
-                                                className={`w-full bg-[#0a0f1d] border border-white/5 rounded-xl p-3 text-white text-xs font-mono outline-none transition-all ${licenseInfo?.status === 'PENDING_RESTORE' ? 'focus:border-sky-500/50' : 'opacity-60 cursor-not-allowed'}`}
+                                                className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10 placeholder-gray-600 ${licenseInfo?.status === 'LICENSE ACTIVE' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                 value={newRegMobile}
-                                                onChange={(e) => licenseInfo?.status === 'PENDING_RESTORE' && setNewRegMobile(e.target.value)}
-                                                readOnly={licenseInfo?.status !== 'PENDING_RESTORE'}
+                                                onChange={(e) => setNewRegMobile(e.target.value)}
                                                 placeholder="Enter Registered Mobile"
+                                                disabled={licenseInfo?.status === 'LICENSE ACTIVE'}
                                             />
                                         </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Password</label>
+                                        <input
+                                            type="password"
+                                            className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-pink-500/50 rounded-xl p-3 text-white text-xs font-mono outline-none transition-all focus:ring-4 focus:ring-pink-500/10 placeholder-gray-600 ${licenseInfo?.status === 'LICENSE ACTIVE' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            value={newPassword}
+                                            onChange={(e) => setNewPassword(e.target.value)}
+                                            placeholder="Enter Password"
+                                            disabled={licenseInfo?.status === 'LICENSE ACTIVE'}
+                                        />
                                     </div>
                                 </div>
 
@@ -3421,22 +3467,22 @@ const Settings: React.FC<SettingsProps> = ({
 
                                         if (bypassKeyCheck) {
                                             // --- TRIAL RESCUE PATH: Sync via Email/Mobile instead of Key ---
-                                            const syncRes = await validateLicenseStartup(true, newUserID, newRegEmail, newRegMobile);
+                                            const syncRes = await validateLicenseStartup(true, newUserID, newRegEmail, newRegMobile, newPassword);
                                             result = {
                                                 success: syncRes.valid,
-                                                message: syncRes.valid ? '✅ Trial Identity Restored: Your system has been successfully verified and synchronized via cloud records.' : (syncRes.message || 'Identity verification failed.')
+                                                message: syncRes.valid ? '✅ Trial Identity Restored: Your system has been successfully verified and synchronized via cloud records.' : (syncRes.message || 'Identity verification failed.'),
+                                                data: syncRes.data
                                             };
                                         } else {
                                             // --- FULL ACTIVATION PATH: Requires 16-Digit Key ---
-                                            result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile);
+                                            result = await activateFullLicense(newUserName, newUserID, newLicenseKey, newRegEmail, newRegMobile, newPassword);
                                         }
 
                                         setIsActivating(false);
                                         if (result.success) {
                                             // --- V02.02.21: HOT-SWAP DATA (Stay on page) ---
-                                            const updated = getStoredLicense();
-                                            if (updated) {
-                                                setLicenseInfo(updated);
+                                            if (result.data) {
+                                                setLicenseInfo(result.data);
                                                 setNewLicenseKey(''); // Clear the key field on success
                                             }
                                             
@@ -3448,8 +3494,8 @@ const Settings: React.FC<SettingsProps> = ({
                                             showAlert?.('danger', bypassKeyCheck ? 'Sync Failed' : 'Activation Failed', result.message);
                                         }
                                     }}
-                                    disabled={isActivating}
-                                    className="mt-4 w-full py-4 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white font-black uppercase text-sm rounded-xl shadow-xl shadow-pink-900/20 transition-all flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50"
+                                    disabled={isActivating || licenseInfo?.status === 'LICENSE ACTIVE'}
+                                    className={`mt-4 w-full py-4 text-white font-black uppercase text-sm rounded-xl shadow-xl transition-all flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50 ${licenseInfo?.status === 'LICENSE ACTIVE' ? 'bg-slate-700 shadow-none' : 'bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 shadow-pink-900/20'}`}
                                 >
                                     {isActivating ? <Loader2 size={20} className="animate-spin" /> : <Shield size={20} />}
                                     {isActivating ? 'Activating...' : 'Re-Activate System'}
@@ -3475,6 +3521,16 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Account Control & Access Permissions</p>
                                 </div>
                             </div>
+                            {profileData?.establishmentName && (
+                                <div className="flex flex-col items-end gap-1">
+                                    <div className="text-xs font-bold text-amber-500 uppercase tracking-wider bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 whitespace-nowrap">
+                                        {profileData.establishmentName}
+                                    </div>
+                                    <div className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
+                                        ID: <span className="text-amber-500">{activeCompanyId}</span>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

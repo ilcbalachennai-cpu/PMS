@@ -435,7 +435,7 @@ export enum SettingsTab {
 
 export interface LicenseData {
   key: string;
-  status: 'Active' | 'Inactive' | 'Expired' | 'Trial' | 'REGISTERED' | 'ACTIVE' | 'PENDING_RESTORE' | 'PENDING_SYNC';
+  status: 'Active' | 'Inactive' | 'Expired' | 'Trial' | 'REGISTERED' | 'ACTIVE' | 'PENDING_RESTORE' | 'PENDING_SYNC' | 'LICENSE ACTIVE';
   userName: string;
   userID: string;
   registeredTo: string; // Mail ID
@@ -447,6 +447,8 @@ export interface LicenseData {
   expiryDate: string;
   isTrial: boolean;
   checksum?: string; // For integrity check
+  splDynamic?: boolean; // Access to Dynamic Pay Sheet
+  splMIS?: boolean; // Access to MIS
 }
 
 export interface OTRecord {

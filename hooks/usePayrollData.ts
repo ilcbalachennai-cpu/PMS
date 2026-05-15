@@ -105,6 +105,39 @@ export const usePayrollData = (showAlert: any) => {
     return '../public/logo.png';
   });
 
+  // Cleanup missing companies on mount
+  useEffect(() => {
+    const cleanupCompanies = async () => {
+      if (!window.electronAPI?.listSilos) return;
+      
+      try {
+        const res = await window.electronAPI.listSilos();
+        if (res.success && res.silos) {
+          const foundSilos = res.silos as string[];
+          
+          setCompanies(prevCompanies => {
+            const filtered = prevCompanies.filter(c => foundSilos.includes(c.id));
+            
+            // Only update if something was actually removed
+            if (filtered.length !== prevCompanies.length) {
+              console.log(`[Cleanup] Removed ${prevCompanies.length - filtered.length} missing companies from registry.`);
+              localStorage.setItem('app_companies', JSON.stringify(filtered));
+              if (window.electronAPI?.dbSetGlobal) {
+                window.electronAPI.dbSetGlobal('app_companies', filtered);
+              }
+              return filtered;
+            }
+            return prevCompanies;
+          });
+        }
+      } catch (e) {
+        console.error("Cleanup failed", e);
+      }
+    };
+
+    cleanupCompanies();
+  }, [setCompanies]);
+
   // Save activeCompanyId and switch backend data silo
   useEffect(() => {
     let isMounted = true;
@@ -362,6 +395,11 @@ export const usePayrollData = (showAlert: any) => {
       return;
     }
 
+    if (id === activeCompanyId) {
+      showAlert('warning', 'Action Prohibited', "Can't DELETE the current company which is in open state. Please switch to another company first.");
+      return;
+    }
+
     const updated = companies.filter(c => c.id !== id);
     setCompanies(updated);
     localStorage.setItem('app_companies', JSON.stringify(updated));
@@ -381,45 +419,7 @@ export const usePayrollData = (showAlert: any) => {
     showAlert('success', 'Organization Removed', 'The organization and its physical data have been permanently deleted.');
   }, [companies, activeCompanyId, switchCompany, showAlert]);
 
-  const rescueOrganizations = useCallback(async () => {
-    if (!window.electronAPI?.listSilos) return;
-    
-    try {
-      const res = await window.electronAPI.listSilos();
-      if (res.success && res.silos) {
-        const foundSilos = res.silos as string[];
-        const existingIds = companies.map(c => c.id);
-        const missingSilos = foundSilos.filter(s => !existingIds.includes(s));
-        
-        if (missingSilos.length === 0) {
-          showAlert('info', 'No Orphans Found', 'All physical data folders are already linked to your organizations.');
-          return;
-        }
 
-        // Add missing silos to the registry
-        let newCompanies = [...companies];
-        for (const siloId of missingSilos) {
-          const rescued: CompanyProfile = {
-            ...INITIAL_COMPANY_PROFILE,
-            id: siloId,
-            establishmentName: siloId, // V03.01.05: No more 'Rescued:' prefix
-            cin: ''
-          };
-          newCompanies.push(rescued);
-        }
-
-        setCompanies(newCompanies);
-        localStorage.setItem('app_companies', JSON.stringify(newCompanies));
-        if (window.electronAPI?.dbSetGlobal) {
-          await window.electronAPI.dbSetGlobal('app_companies', newCompanies);
-        }
-        
-        showAlert('success', 'Recovery Successful', `${missingSilos.length} missing organizations have been re-linked to your system. Please update their names in Settings.`);
-      }
-    } catch (e) {
-      console.error("Rescue failed", e);
-    }
-  }, [companies, showAlert]);
 
 
 
@@ -672,7 +672,7 @@ export const usePayrollData = (showAlert: any) => {
     logoUrl, setLogoUrl,
     safeSave, handleRollover, handlePayrollReset, handleDeepReset, handleNuclearReset,
     isResetting, isHydrating,
-    companies, activeCompanyId, switchCompany, addCompany, deleteCompany, rescueOrganizations, purgeState,
+    companies, setCompanies, activeCompanyId, switchCompany, addCompany, deleteCompany, purgeState,
     triggerReload
   };
 };
