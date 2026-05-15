@@ -675,11 +675,12 @@ export const parseEmployeeUpdateXLSX = async (
                         isESIExempt: isTrue(getVal(['ESI Exempt (Yes/No)'])) || existingEmp.isESIExempt,
                         pfHigherPension: {
                             ...existingEmp.pfHigherPension,
-                            enabled: isTrue(getVal(['Higher Pension Enabled (Yes/No)'])) || existingEmp.pfHigherPension?.enabled,
+                            enabled: isTrue(getVal(['Higher Pension Enabled (Yes/No)'])) || existingEmp.pfHigherPension?.enabled || false,
                             contributedBefore2014: (getVal(['HP: Pre-2014 Contrib (Yes/No)']) as any) || existingEmp.pfHigherPension?.contributedBefore2014,
                             employeeContribution: (getVal(['HP: EE Contrib (Regular/Higher)']) as any) || existingEmp.pfHigherPension?.employeeContribution,
                             employerContribution: (getVal(['HP: ER Contrib (Regular/Higher)']) as any) || existingEmp.pfHigherPension?.employerContribution,
-                            isHigherPensionOpted: (getVal(['HP: Joint Option (Yes/No)']) as any) || existingEmp.pfHigherPension?.isHigherPensionOpted
+                            isHigherPensionOpted: (getVal(['HP: Joint Option (Yes/No)']) as any) || existingEmp.pfHigherPension?.isHigherPensionOpted,
+                            dojImpact: existingEmp.pfHigherPension?.dojImpact || ''
                         },
                         epfMembershipDate: parseIndDate(getVal(['HP: EPF Membership Date (DD-MM-YYYY)'])) || existingEmp.epfMembershipDate
                     };
