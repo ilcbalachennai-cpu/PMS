@@ -15,6 +15,7 @@ interface EmployeeTableProps {
     onDelete: (emp: Employee, e: React.MouseEvent) => void;
     calculateGrossWage: (emp: Employee) => number;
     currentUser?: User;
+    frozenEmployeeIds?: Set<string>;
 }
 
 const EmployeeTable: React.FC<EmployeeTableProps> = ({
@@ -24,7 +25,8 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
     onEdit,
     onDelete,
     calculateGrossWage,
-    currentUser
+    currentUser,
+    frozenEmployeeIds = new Set()
 }) => {
     return (
         <div className="lg:col-span-2 bg-[#1e293b] rounded-xl border border-slate-800 shadow-2xl overflow-hidden h-fit max-h-[800px] overflow-y-auto custom-scrollbar">
@@ -87,7 +89,7 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                                     >
                                         <Edit2 size={14} />
                                     </button>
-                                    {(currentUser?.role === 'Developer' || currentUser?.role === 'Administrator') && (
+                                    {(currentUser?.role === 'Developer' || currentUser?.role === 'Administrator') && !frozenEmployeeIds.has(emp.id) && (
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onDelete(emp, e); }}
                                             className="text-slate-400 hover:text-red-400 p-1.5 hover:bg-red-900/20 rounded-lg transition-all"

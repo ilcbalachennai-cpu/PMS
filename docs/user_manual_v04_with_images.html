@@ -652,25 +652,22 @@
         <h2>10. Data Management Functions</h2>
         <p>BharatPay Pro provides advanced data maintenance tools to ensure your establishment records remain healthy and secure. Each function is strictly scoped to the <strong>active establishment</strong> only.</p>
         
-        <h3>10.1 Backup Data (LOCAL SECURE BACKUP)</h3>
+        <h3>10.1 Backup Data</h3>
         <p>Creates a high-security encrypted snapshot (<code>.enc</code>) of the active establishment's database. It is recommended to perform a backup before every payroll finalization.</p>
 
-        <h3>10.2 Restore Data (UNIVERSAL RESTORATION)</h3>
+        <h3>10.2 Restore Data</h3>
         <p>Imports an existing backup into the current establishment silo. This will overwrite the current unit's data with the contents of the backup. Use this for data recovery or migration.</p>
 
-        <h3>10.3 Previous Version Data (LEGACY MIGRATION)</h3>
-        <p>Provides a seamless import path for legacy databases, restoring structured employee and historical pay records from previous V3 or V4 major versions into the new multi-unit environment.</p>
-
-        <h3>10.4 Partial Payroll Reset (ONLY PAY DATA RESET)</h3>
+        <h3>10.3 Partial Payroll Reset</h3>
         <p>Clears only the payroll results for the <strong>current active month</strong>. This allows you to start the monthly processing from scratch if errors are detected, without affecting your Employee Master or previous months' history.</p>
 
-        <h3>10.5 Factory Reset (Company Scope)</h3>
+        <h3>10.4 Factory Reset (Company Scope)</h3>
         <p>Wipes **all** data associated with the current establishment (Employees, Payroll History, and Settings). This action is permanent and requires the Administrator Password. Other establishments in your installation remain unaffected.</p>
 
-        <h3>10.6 Purge System Logs</h3>
+        <h3>10.5 Purge System Logs</h3>
         <p>Cleans the background activity logs and temporary calculation files. Regular purging helps maintain high application performance during complex payroll runs.</p>
 
-        <h3>10.7 Purge Company (Permanent Silo Deletion)</h3>
+        <h3>10.6 Purge Company (Permanent Silo Deletion)</h3>
         <p>Permanently deletes an entire establishment silo, erasing its sqlite database file and all physical folders from your installation. This frees up licensed company slots if an establishment is closed or created by mistake.</p>
         
         <div class="highlight-box warning">

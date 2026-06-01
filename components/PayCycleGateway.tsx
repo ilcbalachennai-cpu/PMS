@@ -9,15 +9,29 @@ interface PayCycleGatewayProps {
   setYear: (y: number) => void;
   onProceed: () => void;
   savedRecords: PayrollResult[];
+  hasPreviousYearData?: boolean;
+  activeFinancialYear?: string;
 }
 
-const PayCycleGateway: React.FC<PayCycleGatewayProps> = ({ month, year, setMonth, setYear, onProceed, savedRecords }) => {
+const PayCycleGateway: React.FC<PayCycleGatewayProps> = ({ month, year, setMonth, setYear, onProceed, savedRecords, hasPreviousYearData, activeFinancialYear }) => {
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   
   // Calculate next processing period based on finalized records
   const nextPeriod = useMemo(() => {
     const finalized = savedRecords.filter(r => r.status === 'Finalized');
-    if (finalized.length === 0) return null;
+    if (finalized.length === 0) {
+      if (hasPreviousYearData) {
+        let startYear = year;
+        if (activeFinancialYear) {
+          const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+          if (match) {
+            startYear = 2000 + parseInt(match[1]);
+          }
+        }
+        return { month: 'April', year: startYear };
+      }
+      return null;
+    }
 
     // Find latest finalized year and month
     let maxYear = 0;
@@ -35,7 +49,7 @@ const PayCycleGateway: React.FC<PayCycleGatewayProps> = ({ month, year, setMonth
     }
 
     return { month: months[targetMonthIdx], year: targetYear };
-  }, [savedRecords]);
+  }, [savedRecords, month, year, hasPreviousYearData]);
 
   // If nextPeriod exists, auto-force it
   React.useEffect(() => {

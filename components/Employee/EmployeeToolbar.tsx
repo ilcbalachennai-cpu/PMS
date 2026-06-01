@@ -15,6 +15,9 @@ interface EmployeeToolbarProps {
     onExportClick: () => void;
     onShowRejoin: () => void;
     onAddNew: () => void;
+    showFYFilter?: boolean;
+    onToggleFYFilter?: (val: boolean) => void;
+    activeFinancialYear?: string;
 }
 
 const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
@@ -30,7 +33,10 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
     onImportUpdateClick,
     onExportClick,
     onShowRejoin,
-    onAddNew
+    onAddNew,
+    showFYFilter,
+    onToggleFYFilter,
+    activeFinancialYear
 }) => {
     return (
         <div className="space-y-2">
@@ -100,16 +106,34 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
 
             {/* STATUS & SEARCH BOX */}
             <div className="flex items-center justify-between gap-4 px-2">
-                <div className="flex items-center gap-3 bg-[#0f172a]/80 border border-slate-800/60 px-4 py-2 rounded-full shadow-inner backdrop-blur-md shrink-0">
-                    <div className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_#10b981]"></span>
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 bg-[#0f172a]/80 border border-slate-800/60 px-4 py-2 rounded-full shadow-inner backdrop-blur-md shrink-0">
+                        <div className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_#10b981]"></span>
+                        </div>
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">
+                            {totalActiveLabel}: <span className="text-white ml-1 font-bold">{totalActive}</span>
+                            <span className="mx-2 text-slate-700">/</span>
+                            Limit: <span className="text-sky-400 font-bold">{limit}</span>
+                        </span>
                     </div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">
-                        {totalActiveLabel}: <span className="text-white ml-1 font-bold">{totalActive}</span>
-                        <span className="mx-2 text-slate-700">/</span>
-                        Limit: <span className="text-sky-400 font-bold">{limit}</span>
-                    </span>
+
+                    {showFYFilter !== undefined && activeFinancialYear && (
+                        <div className="hidden md:flex items-center bg-[#0f172a]/80 border border-slate-800/60 px-3 py-2 rounded-full shadow-inner backdrop-blur-md shrink-0 transition-colors hover:border-slate-700/80">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    checked={showFYFilter} 
+                                    onChange={e => onToggleFYFilter?.(e.target.checked)} 
+                                    className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500/50 cursor-pointer"
+                                />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 select-none">
+                                    {activeFinancialYear} Only
+                                </span>
+                            </label>
+                        </div>
+                    )}
                 </div>
 
                 <div className="relative flex-1 max-w-[400px] group lg:block hidden">

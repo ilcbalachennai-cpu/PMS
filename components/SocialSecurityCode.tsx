@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { ShieldCheck, Landmark, X, ReceiptText, Info, Calendar, Scale, BookOpen, Lock, Upload } from 'lucide-react';
+import { ShieldCheck, Landmark, X, ReceiptText, Info, Calendar, Scale, BookOpen, Lock, Upload, Calculator } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { PayrollResult, Employee, StatutoryConfig, CompanyProfile } from '../types';
 import {
@@ -8,6 +8,7 @@ import {
     getStandardFileName,
     openSavedReport
 } from '../services/reportService';
+import SSCodeWageSimulator from './SSCodeWageSimulator';
 
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
 
@@ -39,6 +40,7 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
     const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
 
     const [showLegalModal, setShowLegalModal] = useState(false);
+    const [showSimulator, setShowSimulator] = useState(false);
     const [impactModal, setImpactModal] = useState({
         isOpen: false,
         mode: 'Theoretical' as 'Theoretical' | 'Historical' | 'Excel',
@@ -296,7 +298,13 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
                         Under Section 2(88) of the SS Code 2020, "Wages" includes basic pay, DA, and retaining allowance. 
                         However, if the aggregate of specified exclusions (like HRA, Bonus, etc.) exceeds 50% of the total remuneration, the excess amount is deemed as wages for PF/ESI contributions.
                     </p>
-                    <button onClick={() => setShowLegalModal(true)} className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-tighter mt-2 underline underline-offset-4 decoration-dotted">View Comprehensive Legal Definition</button>
+                    <div className="flex items-center gap-6 mt-2">
+                        <button onClick={() => setShowLegalModal(true)} className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-tighter underline underline-offset-4 decoration-dotted">View Comprehensive Legal Definition</button>
+                        <button onClick={() => setShowSimulator(true)} className="text-[10px] font-black text-amber-400 hover:text-amber-300 uppercase tracking-tighter underline underline-offset-4 decoration-dotted flex items-center gap-1">
+                            <Calculator size={12} />
+                            Open Interactive Wage Simulator Template
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -591,6 +599,8 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
                     </div>
                 </div>
             )}
+
+            <SSCodeWageSimulator isOpen={showSimulator} onClose={() => setShowSimulator(false)} />
 
         </div>
     );

@@ -10,6 +10,9 @@ declare global {
             dbDelete: (key: string) => Promise<void>;
             restoreSqliteBackup: (path: string) => Promise<{ success: boolean; error?: string }>;
             runBackup: (data: string) => Promise<{ success: boolean; fileName?: string; error?: string }>;
+            wipeCompanyData: (companyId: string) => Promise<{ success: boolean; changes?: number; error?: string }>;
+            switchCompanyData: (companyId: string) => Promise<{ success: boolean; error?: string }>;
+            deleteSilo: (companyId: string) => Promise<{ success: boolean; error?: string }>;
         };
     }
 }

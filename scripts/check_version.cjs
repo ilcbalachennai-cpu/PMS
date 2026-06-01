@@ -25,5 +25,16 @@ if (pkgVersion !== serviceVersion) {
     process.exit(1);
 }
 
+const win10Script = pkg.scripts['build:win10'] || '';
+const win7Script = pkg.scripts['build:win7'] || '';
+const expectedArtifactFragment = `BPP_APP_V${pkgVersion}`;
+
+if (!win10Script.includes(expectedArtifactFragment) || !win7Script.includes(expectedArtifactFragment)) {
+    console.error('❌ Artifact Name Audit Failed!');
+    console.error(`   The build scripts in package.json do not contain the correct artifactName for version ${pkgVersion}.`);
+    console.error('   Please manually update the --config.nsis.artifactName in package.json scripts.');
+    process.exit(1);
+}
+
 console.log('✅ Version consistency audit passed.');
 process.exit(0);

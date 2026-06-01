@@ -3,8 +3,18 @@ import { useState, useEffect } from 'react';
 
 const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-export const usePayrollPeriod = (activeCompanyId: string = 'default') => {
-  const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${activeCompanyId}_${key}`;
+export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFinancialYear?: string) => {
+  const getCKey = (key: string) => {
+    if (activeCompanyId === 'default') return key;
+    const transactionalKeys = [
+      'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 
+      'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+    ];
+    if (activeFinancialYear && transactionalKeys.includes(key)) {
+      return `${key}_${activeFinancialYear}_${activeCompanyId}`;
+    }
+    return `${activeCompanyId}_${key}`;
+  };
 
   const [globalMonth, setGlobalMonth] = useState<string>('January');
   const [globalYear, setGlobalYear] = useState<number>(2026);
@@ -12,6 +22,13 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default') => {
 
   useEffect(() => {
     const fetchPeriod = async () => {
+      let baseYear = 2025;
+      if (activeFinancialYear) {
+        const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+        if (match) {
+          baseYear = 2000 + parseInt(match[1]);
+        }
+      }
       try {
         let history: any[] = [];
         let attendance: any[] = [];
@@ -41,7 +58,7 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default') => {
           return (Number(y) * 12) + idx;
         };
 
-        let lastLockedVal = getMonthValue('March', 2025);
+        let lastLockedVal = getMonthValue('March', baseYear);
         if (Array.isArray(history) && history.length > 0) {
           history.filter((h: any) => h.status === 'Finalized').forEach((h: any) => {
             const val = getMonthValue(h.month, h.year);
@@ -92,7 +109,7 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default') => {
         }
 
         // V03.01.04: Default to last frozen month if available, else standard baseline
-        if (lastLockedVal > getMonthValue('March', 2025)) {
+        if (lastLockedVal > getMonthValue('March', baseYear)) {
           setGlobalMonth(monthsArr[lastLockedVal % 12]);
           setGlobalYear(Math.floor(lastLockedVal / 12));
           return;
@@ -105,12 +122,12 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default') => {
       } catch (e) {
         console.error("Error determining default period:", e);
         setGlobalMonth('April');
-        setGlobalYear(2025);
+        setGlobalYear(baseYear);
       }
     };
 
     fetchPeriod();
-  }, [activeCompanyId]);
+  }, [activeCompanyId, activeFinancialYear]);
 
   return { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod };
 };

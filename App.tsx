@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, FC, useCallback } from 'react';
+import { useState, useEffect, useRef, FC, useCallback, useMemo } from 'react';
 import {
   LayoutDashboard, Users, Calculator, FileText, Settings as SettingsIcon,
   LogOut, Bot, ShieldCheck,
@@ -31,7 +31,7 @@ import { signalApplicationReady } from './components/Shared/GlobalRescueUI';
 import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount, requestResetOTP, verifyResetOTP } from './services/licenseService';
 import { parseExpiryDate, formatExpiryDate, generateCompanyId } from './utils/formatters';
 import { View, User, Employee, PayrollResult, CompanyProfile, StatutoryConfig, SettingsTab } from './types';
-import { BRAND_CONFIG, INITIAL_COMPANY_PROFILE } from './constants';
+import { BRAND_CONFIG, INITIAL_COMPANY_PROFILE, DEFAULT_LEAVE_POLICY } from './constants';
 
 // --- CUSTOM HOOKS ---
 import { useAlerts } from './hooks/useAlerts';
@@ -143,8 +143,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     arrearHistory, setArrearHistory, otRecords, setOTRecords, designations, setDesignations, divisions, setDivisions,
     branches, setBranches, sites, setSites, logoUrl, setLogoUrl,
     safeSave, handleRollover, handlePayrollReset, handleDeepReset, handleNuclearReset,
-    companies, setCompanies, activeCompanyId, switchCompany, addCompany, deleteCompany, isHydrating, isResetting, triggerReload: reloadData
+    companies, setCompanies, activeCompanyId, activeFinancialYear, availableFinancialYears, switchCompany, switchFinancialYear, addCompany, deleteCompany, isHydrating, isResetting, triggerReload: reloadData
   } = usePayrollData(showAlert);
+
 
   const rescueOrganizations = useCallback(async () => {
     if (!window.electronAPI?.listSilos) return;
@@ -161,7 +162,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           return;
         }
 
-        let selectedSilos: string[] = [...missingSilos]; // Default select all
+        let selectedSilos: string[] = []; // Start empty, user decides selection
 
         showAlert('confirm', 'Select Organizations to Rescue', (
           <div className="space-y-3 mt-2 max-h-48 overflow-y-auto p-2 bg-slate-900/50 rounded-xl border border-slate-700/50">
@@ -169,7 +170,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               <label key={siloId} className="flex items-center gap-3 p-2 hover:bg-slate-800/50 rounded-lg transition-colors cursor-pointer">
                 <input 
                   type="checkbox" 
-                  defaultChecked={true}
+                  defaultChecked={false}
                   onChange={(e) => {
                     if (e.target.checked) {
                       selectedSilos.push(siloId);
@@ -190,6 +191,25 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           if (selectedSilos.length === 0) {
             showAlert('warning', 'No Selection', 'Please select at least one organization to rescue.');
             return;
+          }
+
+          // --- V05.01.01: Limit Tracker Check for Rescue ---
+          const license = getStoredLicense();
+          const limit = license?.companyLimit || 1;
+          let lifetimeCount = parseInt(localStorage.getItem('app_lifetime_company_creations') || '0');
+          if (lifetimeCount === 0) lifetimeCount = companies.length;
+
+          if (lifetimeCount + selectedSilos.length > limit) {
+             const availableSlots = Math.max(0, limit - lifetimeCount);
+             showAlert('danger', 'License Limit Exceeded', `Your current license allows a maximum of ${limit} company creation(s). You have ${availableSlots} slot(s) remaining, but selected ${selectedSilos.length} organizations to rescue. Please select fewer or upgrade your license.`);
+             return;
+          }
+
+          // Increment the tracker securely
+          lifetimeCount += selectedSilos.length;
+          localStorage.setItem('app_lifetime_company_creations', lifetimeCount.toString());
+          if (window.electronAPI?.dbSetGlobal) {
+             await window.electronAPI.dbSetGlobal('app_lifetime_company_creations', lifetimeCount);
           }
 
           // Add selected silos to the registry
@@ -218,7 +238,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   }, [companies, showAlert, setCompanies]);
 
-  const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod(activeCompanyId);
+  const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod(activeCompanyId, activeFinancialYear);
+
+  // V04.00.05: Strict Financial Year Isolation Check
+  const isFYMismatch = useMemo(() => {
+    if (!activeFinancialYear) return false;
+    const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+    if (!match) return false;
+    
+    const startY = 2000 + parseInt(match[1]);
+    const endY = 2000 + parseInt(match[2]);
+    const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
+    
+    return isJanToMar ? globalYear !== endY : globalYear !== startY;
+  }, [globalMonth, globalYear, activeFinancialYear]);
 
   const { 
     latestAppVersion, setLatestAppVersion, 
@@ -231,13 +264,19 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     updateDownloaded,
     updateError, setUpdateError,
     downloadProgress,
-    isPatchNotice, isPatchMandatory, isSessionDismissed, patchSkipCount,
+    isPatchNotice, isPatchMandatory, isSessionDismissed, patchSkipCount, versionSkipCount,
     deploymentStep,
     handleUpdateNow, handleUpdateLater 
   } = useAppUpdate(showAlert, currentUser?.role === 'Developer');
 
   const [isInstalling, setIsInstalling] = useState(false);
   const [isAddingNewCompany, setIsAddingNewCompany] = useState(false);
+
+  // V04.01.05: Financial Year Switch Period Selector States
+  const [showFySwitchModal, setShowFySwitchModal] = useState(false);
+  const [pendingFySwitch, setPendingFySwitch] = useState<string | null>(null);
+  const [modalSwitchMonth, setModalSwitchMonth] = useState<string>('April');
+  const [modalSwitchYear, setModalSwitchYear] = useState<number>(2025);
 
 
   const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
@@ -258,18 +297,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   } = useUIState(activeCompanyId, employees.length);
 
   // --- V03.01.02: SMART GATE INITIALIZATION ---
-  // If there's exactly one company, start with the gate CLOSED to avoid selection flash.
-  const [isCompanyGateOpen, setIsCompanyGateOpen] = useState(() => {
-     if (isReloadingAfterReset) return false;
-     try {
-       const saved = localStorage.getItem('app_companies');
-       if (saved) {
-         const list = JSON.parse(saved);
-         return list.length !== 1; 
-       }
-     } catch (e) {}
-     return true;
-  });
+  // Start with the selection gate closed to directly load the Dashboard of the active company
+  const [isCompanyGateOpen, setIsCompanyGateOpen] = useState(false);
+
+  // --- V03.01.07: Hover Dropdown States ---
+  const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
+  const [showFyDropdown, setShowFyDropdown] = useState(false);
 
   // --- V03.01.02: AUTO-SELECT SINGLE COMPANY (Safety Sync) ---
   useEffect(() => {
@@ -279,6 +312,192 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       setIsCompanyGateOpen(false);
     }
   }, [currentUser, companies.length, isCompanyGateOpen, switchCompany]);
+
+  // --- JIT FINANCIAL YEAR BALANCE CARRY-FORWARD & INITIALIZATION ---
+  useEffect(() => {
+    if (isHydrating || isResetting || !activeFinancialYear || !activeCompanyId || employees.length === 0) return;
+
+    if (activeView === View.PayProcess) {
+      // 1. Check if April is in draft mode (no month finalized in history)
+      const isAnyFinalized = payrollHistory.some((r: any) => r.status === 'Finalized');
+      if (isAnyFinalized) return;
+
+      // 2. Check if the opening balance is missing
+      const isMissing = leaveLedgers.length === 0 || 
+                        leaveLedgers.length < employees.length;
+
+      if (isMissing) {
+        console.log(`[JIT Rollover] Accessing Process Payroll and April is in draft with missing opening balances. Running carry-forward...`);
+        
+        const runJITRollover = async () => {
+          const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+          if (!match) return;
+
+          const start = parseInt(match[1]);
+          const prevStart = String(start - 1).padStart(2, '0');
+          const prevFY = `FY${prevStart}-${start}`;
+
+          const prevLeaveLedgerKey = `app_leave_ledgers_${prevFY}_${activeCompanyId}`;
+          const prevAdvanceLedgerKey = `app_advance_ledgers_${prevFY}_${activeCompanyId}`;
+          const unscopedLeaveKey = `app_leave_ledgers_${activeCompanyId}`;
+          const unscopedAdvanceKey = `app_advance_ledgers_${activeCompanyId}`;
+
+          let prevLeaveLedgers: any[] = [];
+          let prevAdvanceLedgers = [];
+
+          if (window.electronAPI?.dbGet) {
+            let loadedFromMarchSnapshot = false;
+
+            // Prioritize March finalized payroll history snapshot as ground truth
+            const prevPayrollHistoryKey = `app_payroll_history_${prevFY}_${activeCompanyId}`;
+            const histRes = await window.electronAPI.dbGet(prevPayrollHistoryKey);
+            if (histRes.success && histRes.data) {
+              const history = typeof histRes.data === 'string' ? JSON.parse(histRes.data) : histRes.data;
+              const marchEntries = Array.isArray(history) ? history.filter((r: any) => r.month === 'March' && r.status === 'Finalized') : [];
+              if (marchEntries.length > 0) {
+                prevLeaveLedgers = marchEntries.map((r: any) => {
+                  const snap = r.leaveSnapshot || {};
+                  return {
+                    employeeId: r.employeeId,
+                    el: snap.el || { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
+                    sl: snap.sl || { eligible: 0, availed: 0, balance: 0 },
+                    cl: snap.cl || { availed: 0, accumulation: 0, balance: 0 },
+                    companyId: activeCompanyId
+                  };
+                });
+                loadedFromMarchSnapshot = true;
+                console.log(`[JIT Rollover] Preferred and loaded ${prevLeaveLedgers.length} records from March payroll history snapshot.`);
+              }
+            }
+
+            // Fallback to previous living document if March finalized payroll is not available
+            if (!loadedFromMarchSnapshot) {
+              const leaveRes = await window.electronAPI.dbGet(prevLeaveLedgerKey);
+              if (leaveRes.success && leaveRes.data) {
+                prevLeaveLedgers = typeof leaveRes.data === 'string' ? JSON.parse(leaveRes.data) : leaveRes.data;
+              } else if (prevFY === 'FY25-26') {
+                const unscopedLeaveRes = await window.electronAPI.dbGet(unscopedLeaveKey);
+                if (unscopedLeaveRes.success && unscopedLeaveRes.data) {
+                  prevLeaveLedgers = typeof unscopedLeaveRes.data === 'string' ? JSON.parse(unscopedLeaveRes.data) : unscopedLeaveRes.data;
+                }
+              }
+            }
+
+            // Fetch advance
+            const advanceRes = await window.electronAPI.dbGet(prevAdvanceLedgerKey);
+            if (advanceRes.success && advanceRes.data) {
+              prevAdvanceLedgers = typeof advanceRes.data === 'string' ? JSON.parse(advanceRes.data) : advanceRes.data;
+            } else if (prevFY === 'FY25-26') {
+              const unscopedAdvanceRes = await window.electronAPI.dbGet(unscopedAdvanceKey);
+              if (unscopedAdvanceRes.success && unscopedAdvanceRes.data) {
+                prevAdvanceLedgers = typeof unscopedAdvanceRes.data === 'string' ? JSON.parse(unscopedAdvanceRes.data) : unscopedAdvanceRes.data;
+              }
+            }
+          }
+
+          let baseYear = 2000 + start;
+
+          const loadedPolicy = leavePolicy || DEFAULT_LEAVE_POLICY;
+
+          // 3. Compute next leave ledgers
+          const nextLeaveLedgers = employees.map((emp) => {
+            const dojDate = emp ? new Date(emp.doj) : new Date(0);
+            dojDate.setHours(0, 0, 0, 0);
+
+            const nextPeriodEnd = new Date(baseYear, 3, 30);
+            nextPeriodEnd.setHours(23, 59, 59, 999);
+            const isEligible = dojDate <= nextPeriodEnd;
+
+            const elCredit = isEligible ? (loadedPolicy?.el?.maxPerYear || 18) / 12 : 0;
+            const slCredit = isEligible ? (loadedPolicy?.sl?.maxPerYear || 12) / 12 : 0;
+            const clCredit = isEligible ? (loadedPolicy?.cl?.maxPerYear || 12) / 12 : 0;
+
+            const l = Array.isArray(prevLeaveLedgers) ? prevLeaveLedgers.find((pl: any) => pl.employeeId === emp.id) : null;
+            const currentRecord = leaveLedgers.find((cl: any) => cl.employeeId === emp.id);
+
+            const availedEL = currentRecord?.el?.availed || 0;
+            const encashedEL = currentRecord?.el?.encashed || 0;
+            const availedSL = currentRecord?.sl?.availed || 0;
+            const availedCL = currentRecord?.cl?.availed || 0;
+
+            let carryEL = 0;
+            let carrySL = 0;
+            let carryCL = 0;
+
+            if (l) {
+              const prevELBal = l.el?.balance || 0;
+              const prevSLBal = l.sl?.balance || 0;
+              const prevCLBal = l.cl?.balance || 0;
+
+              carryEL = isEligible ? Math.min(prevELBal, loadedPolicy?.el?.maxCarryForward || 30) : 0;
+              carrySL = isEligible ? Math.min(prevSLBal, loadedPolicy?.sl?.maxCarryForward || 0) : 0;
+              carryCL = isEligible ? Math.min(prevCLBal, loadedPolicy?.cl?.maxCarryForward || 0) : 0;
+            } else {
+               const initBalances = (emp.initialOpeningBalances as any) || {};
+               const initEL = initBalances.el || 0;
+               const initSL = initBalances.sl || 0;
+               const initCL = initBalances.cl || 0;
+
+              carryEL = isEligible ? initEL : 0;
+              carrySL = isEligible ? initSL : 0;
+              carryCL = isEligible ? initCL : 0;
+            }
+
+            return {
+              employeeId: emp.id,
+              el: { opening: carryEL, eligible: elCredit, encashed: encashedEL, availed: availedEL, balance: carryEL + elCredit - encashedEL - availedEL },
+              sl: { eligible: slCredit, availed: availedSL, balance: carrySL + slCredit - availedSL },
+              cl: { availed: availedCL, accumulation: carryCL, balance: carryCL + clCredit - availedCL },
+              companyId: activeCompanyId
+            };
+          });
+
+          // 4. Compute next advance ledgers
+          const nextAdvanceLedgers = employees.map((emp) => {
+            const a = Array.isArray(prevAdvanceLedgers) ? prevAdvanceLedgers.find((pa: any) => pa.employeeId === emp.id) : null;
+            const currentRecord = advanceLedgers.find((ca: any) => ca.employeeId === emp.id);
+
+            const carryOpening = a ? (a.balance || 0) : 0;
+            const emiCount = a ? (a.emiCount || 0) : 0;
+
+            const totalAdvance = currentRecord?.totalAdvance || 0;
+            const manualPayment = currentRecord?.manualPayment || 0;
+            const paidAmount = currentRecord?.paidAmount || 0;
+            const recovery = currentRecord?.recovery || (emiCount > 0 ? Math.min(Math.round(carryOpening / emiCount), carryOpening) : 0);
+            const balance = Math.max(0, carryOpening + totalAdvance - recovery - manualPayment - paidAmount);
+
+            return {
+              employeeId: emp.id,
+              opening: carryOpening,
+              totalAdvance: totalAdvance,
+              manualPayment: manualPayment,
+              paidAmount: paidAmount,
+              emiCount: emiCount,
+              recovery: recovery,
+              balance: balance,
+              monthlyInstallment: emiCount,
+              companyId: activeCompanyId
+            };
+          });
+
+          // 5. Update State & Persist
+          setLeaveLedgers(nextLeaveLedgers);
+          setAdvanceLedgers(nextAdvanceLedgers);
+          
+          await safeSave('app_leave_ledgers', nextLeaveLedgers);
+          await safeSave('app_advance_ledgers', nextAdvanceLedgers);
+          console.log(`[JIT Rollover] Successfully carried forward and saved leave and advance ledgers.`);
+        };
+
+        runJITRollover().catch(err => {
+          console.error("JIT rollover error:", err);
+        });
+      }
+    }
+  }, [
+    activeView, activeFinancialYear, activeCompanyId, employees, leaveLedgers, advanceLedgers,
+    payrollHistory, leavePolicy, isHydrating, isResetting, safeSave, setLeaveLedgers, setAdvanceLedgers
+  ]);
 
   const [isPurgeMode, setIsPurgeMode] = useState(false);
   const [showPurgeAuthModal, setShowPurgeAuthModal] = useState(false);
@@ -626,6 +845,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   }, [connStatus.isOnline, verifyLicense]);
 
   const safeNavigate = (view: View, tab?: string) => {
+    const latestYear = availableFinancialYears.length > 0 
+      ? availableFinancialYears[availableFinancialYears.length - 1] 
+      : activeFinancialYear;
+
     if (activeView === View.Settings && isSettingsDirty && view !== View.Settings) {
       showAlert(
         'confirm',
@@ -634,7 +857,25 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         () => { /* Stay - Do nothing */ },
         () => {
           setIsSettingsDirty(false);
-          // Navigation period synchronization removed as per user request to keep processing month visible in reports
+          
+          if (view === View.PayProcess && activeFinancialYear && latestYear && activeFinancialYear !== latestYear) {
+            showAlert(
+              'confirm',
+              'Switch to Current Financial Year',
+              `You are attempting to Process Payroll, this would switch the Financial Year to the Current Financial Year (${latestYear.replace('-', ' ')}).`,
+              () => {
+                switchFinancialYear(latestYear);
+                setActiveView(view);
+                if (tab) setSettingsTab(tab as any);
+              },
+              () => {},
+              'Proceed',
+              undefined,
+              'Cancel'
+            );
+            return;
+          }
+          
           setActiveView(view);
           if (tab) setSettingsTab(tab as any);
         },
@@ -644,7 +885,23 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       return;
     }
 
-    // Navigation period synchronization removed as per user request to keep processing month visible in reports
+    if (view === View.PayProcess && activeFinancialYear && latestYear && activeFinancialYear !== latestYear) {
+      showAlert(
+        'confirm',
+        'Switch to Current Financial Year',
+        `You are attempting to Process Payroll, this would switch the Financial Year to the Current Financial Year (${latestYear.replace('-', ' ')}).`,
+        () => {
+          switchFinancialYear(latestYear);
+          setActiveView(view);
+          if (tab) setSettingsTab(tab as any);
+        },
+        () => {},
+        'Proceed',
+        undefined,
+        'Cancel'
+      );
+      return;
+    }
 
     setActiveView(view);
     if (tab) {
@@ -673,15 +930,37 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [hasAgreedLegal, setHasAgreedLegal] = useState(() => {
     const lastAgreedDate = localStorage.getItem('app_legal_agreed_date');
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     return lastAgreedDate === today;
   });
 
-  const handleAcceptLegal = () => {
-    const today = new Date().toISOString().split('T')[0];
+  useEffect(() => {
+    const verifyAgreedDate = async () => {
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      if (hasAgreedLegal) return;
+
+      if (window.electronAPI?.dbGet) {
+        const res = await window.electronAPI.dbGet('app_legal_agreed_date');
+        if (res.success && res.data === today) {
+          setHasAgreedLegal(true);
+          localStorage.setItem('app_legal_agreed_date', today);
+        }
+      }
+    };
+    verifyAgreedDate();
+  }, [hasAgreedLegal]);
+
+  const handleAcceptLegal = async () => {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     setHasAgreedLegal(true);
     setShowLegalModal(false);
     localStorage.setItem('app_legal_agreed_date', today);
+    if (window.electronAPI?.dbSet) {
+      await window.electronAPI.dbSet('app_legal_agreed_date', today);
+    }
     showAlert('success', 'Compliance Acknowledged', 'Legal terms accepted for today.');
   };
 
@@ -747,7 +1026,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers,
     payrollHistory, fines, leavePolicy, arrearHistory, otRecords, logoUrl,
     designations, divisions, branches, sites, isSetupComplete, safeSave,
-    activeCompanyId, isHydrating, isResetting
+    activeCompanyId, activeFinancialYear, isHydrating, isResetting
   });
 
   // --- Specialized Effects ---
@@ -839,7 +1118,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     if (licenseStatus.valid && licenseStatus.data) {
       if (licenseStatus.data.latestVersion) setLatestAppVersion(licenseStatus.data.latestVersion);
       if (licenseStatus.data.downloadUrl) setDownloadUrl(licenseStatus.data.downloadUrl);
-      if (licenseStatus.data.patchTimestamp) setLatestPatchTimestamp(licenseStatus.data.patchTimestamp);
+      if (licenseStatus.data.patchTimestamp) {
+        setLatestPatchTimestamp(licenseStatus.data.patchTimestamp);
+        localStorage.setItem('app_latest_patch_timestamp', licenseStatus.data.patchTimestamp);
+      }
     }
   }, [licenseStatus.valid, licenseStatus.data, setLatestAppVersion, setDownloadUrl, setLatestPatchTimestamp]);
 
@@ -863,17 +1145,53 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   }, [isReloadingAfterReset]);
 
-  // Auto Logout Timer
+  // Auto Logout Timer (Throttling-Proof & Background-Safe)
   useEffect(() => {
     if (!currentUser) return; // Only track when logged in
 
-    let timeoutId: NodeJS.Timeout;
+    localStorage.setItem('app_last_activity_time', String(Date.now()));
 
-    const resetTimer = () => {
-      clearTimeout(timeoutId);
-      // 10 minutes = 600000 ms
-      timeoutId = setTimeout(async () => {
+    let lastX = -1;
+    let lastY = -1;
+    const MOVE_THRESHOLD = 5; // Ignored if moved less than 5 pixels (DPI jitter / layout scroll)
+
+    const updateActivity = (e: Event) => {
+      if (e.type === 'mousemove') {
+        const me = e as MouseEvent;
+        // Skip synthetic mousemove events triggered by layout/marquee updates when cursor is parked
+        if (me.movementX === 0 && me.movementY === 0) return;
+        
+        if (lastX !== -1 && lastY !== -1) {
+          const deltaX = Math.abs(me.clientX - lastX);
+          const deltaY = Math.abs(me.clientY - lastY);
+          if (deltaX < MOVE_THRESHOLD && deltaY < MOVE_THRESHOLD) {
+            // Ignore minor subpixel scaling jitter or marquee layout oscillation
+            return;
+          }
+        }
+        lastX = me.clientX;
+        lastY = me.clientY;
+        console.log(`[ActivityTracker] Real Mouse Move: clientX=${me.clientX}, clientY=${me.clientY}`);
+      } else {
+        console.log(`[ActivityTracker] User Interaction: type=${e.type}`);
+      }
+      localStorage.setItem('app_last_activity_time', String(Date.now()));
+    };
+
+    const events = ['mousemove', 'keydown', 'mousedown', 'touchstart'];
+    events.forEach(e => window.addEventListener(e, updateActivity));
+
+    // Check every 10 seconds if we have been inactive for more than 9 minutes (540000 ms)
+    const checkInterval = setInterval(async () => {
+      const lastActive = localStorage.getItem('app_last_activity_time') || Date.now();
+      const elapsed = Date.now() - Number(lastActive);
+      
+      // If idle time exceeds threshold AND no active update is downloading
+      if (elapsed > 540000 && !isUpdateDownloading) {
+        console.log("[ActivityTracker] Idle threshold reached! Triggering logout...");
+        clearInterval(checkInterval);
         sessionStorage.setItem('logout_reason', 'timeout');
+        
         // Report auto-logout to cloud to clear "LIVE" status
         if (currentUser && currentUser.role !== 'Developer') {
           try {
@@ -883,17 +1201,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         }
         closeAlert();
         logout();
-      }, 600000);
-    };
-
-    const events = ['mousemove', 'keydown', 'mousedown', 'touchstart'];
-    events.forEach(e => window.addEventListener(e, resetTimer));
-
-    resetTimer();
+      }
+    }, 10000); // Check every 10 seconds
 
     return () => {
-      clearTimeout(timeoutId);
-      events.forEach(e => window.removeEventListener(e, resetTimer));
+      clearInterval(checkInterval);
+      events.forEach(e => window.removeEventListener(e, updateActivity));
     };
   }, [currentUser, logout]);
 
@@ -1164,13 +1477,31 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       setActiveView(View.Settings);
       setSettingsTab(SettingsTab.Company);
       setSkipSetupRedirect(false);
-      showAlert('success', 'Setup Complete', `BharatPay Pro is now ready for ${profileToSave.establishmentName}.`, () => {
-          if (requiresReload) window.location.reload();
-      });
+      showAlert(
+          'success', 
+          'Setup Complete', 
+          'You have sucessfully installed the Aplication do read the User info docuement before Using the application', 
+          () => {
+              const api = (window as any).electronAPI;
+              if (api && api.openUserManual) {
+                  api.openUserManual();
+              }
+              if (requiresReload) window.location.reload();
+          },
+          () => {
+              if (requiresReload) window.location.reload();
+          },
+          'Read User Info',
+          'Continue'
+      );
     }
   };
 
   const handleLogoutAction = () => {
+    if (isUpdateDownloading) {
+      showAlert('warning', 'Update in Progress', 'A new version is currently downloading in the background. Please wait for the download to complete before logging out or closing the application.');
+      return;
+    }
     if (activeView === View.Settings && isSettingsDirty) {
       showAlert('warning', 'Unsaved Changes', 'You are about to sign out with unsaved configuration changes. These changes will be lost. Proceed anyway?', () => {
         setIsSettingsDirty(false);
@@ -1200,6 +1531,13 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     const result = await handleRollover(globalMonth, globalYear, monthsArr, updatedHistory);
     if (result) {
       const { nextMonth, nextYear, backupRes, backupFileName } = result;
+      // V04.00.03: Auto-Advance Financial Year on March -> April Rollover
+      if (globalMonth === 'March' && nextMonth === 'April') {
+         const newFy = `FY${String(nextYear).slice(-2)}-${String(nextYear + 1).slice(-2)}`;
+         // Switch the silo automatically so new data lands in the new FY
+         switchFinancialYear(newFy);
+      }
+
       setGlobalMonth(nextMonth);
       setGlobalYear(nextYear);
       if (backupRes.success) {
@@ -1248,15 +1586,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   };
 
-  const getFinancialYearLabel = () => {
-    const isJanToMar = ['January', 'February', 'March'].includes(globalMonth);
-    const startYear = isJanToMar ? globalYear - 1 : globalYear;
-    return `FY ${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)} ACTIVE`;
-  };
+
 
   const effectiveUser = (currentUser || { id: 'setup', name: 'Initial Setup', role: 'Administrator', username: 'setup', password: '', email: '' }) as User;
   const isSettingsAccessible = effectiveUser.role === 'Developer' || effectiveUser.role === 'Administrator';
-  const isNavLocked = employees.length === 0;
+  const isNavLocked = employees.length === 0 && companies.length <= 1;
 
   // --- V03.01.02: Normalizing Render Path to Prevent Hook Violations ---
   const isExpired = licenseStatus.message === 'LICENSE EXPIRED' || (licenseStatus.data?.isExpired);
@@ -1267,6 +1601,16 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const showStartupOverlay = isStartupTimerActive || isAppDirectoryConfigured === null || !licenseStatus.checked;
   const showLicenseGate = licenseStatus.checked && (isExpired || isTampered || isSyncBlocked);
+
+  const hasPreviousYearData = useMemo(() => {
+    if (!activeFinancialYear || !availableFinancialYears.length) return false;
+    const parseFY = (s: string) => {
+      const match = s.match(/FY(\d{2})-(\d{2})/);
+      return match ? parseInt(match[1]) : 0;
+    };
+    const currentVal = parseFY(activeFinancialYear);
+    return availableFinancialYears.some(fy => parseFY(fy) < currentVal);
+  }, [activeFinancialYear, availableFinancialYears]);
 
   return (
     <div className={`flex h-[100dvh] overflow-hidden bg-[#020617] text-white ${isWin7 ? 'is-win7' : ''}`}>
@@ -1417,7 +1761,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         </div>
       )}
 
-      {(showRegistrationManual || isRestorationForced || (companies.length === 0) || isReloadingAfterReset) ? (
+      {(showRegistrationManual || isRestorationForced || (companies.length === 0)) ? (
         <Registration
           onComplete={handleRegistrationComplete}
           onRestore={() => window.location.reload()}
@@ -1579,6 +1923,15 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     {/* Add New Company Button */}
                     <button 
                       onClick={() => {
+                        const license = getStoredLicense();
+                        const limit = license?.companyLimit || 1;
+                        const lifetimeCount = parseInt(localStorage.getItem('app_lifetime_company_creations') || '0');
+                        
+                        if (lifetimeCount >= limit) {
+                          showAlert?.('danger', 'License Limit Reached', `Your current license allows a maximum of ${limit} company creation(s). You have reached your lifetime limit and cannot create any more companies. Upgrade your license to create more.`);
+                          return;
+                        }
+
                         setIsAddingNewCompany(true);
                         setShowRegistrationManual(true);
                         setIsCompanyGateOpen(false);
@@ -1815,7 +2168,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               )}
             </div>
             <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
-              <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={(isNavLocked || isCompanyGateOpen) && activeView !== View.Dashboard} />
+              <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isCompanyGateOpen && activeView !== View.Dashboard} />
               <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
               <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
               <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
@@ -1841,7 +2194,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
             <header className="bg-[#0f172a]/95 backdrop-blur-md border-b border-slate-800 h-16 flex items-center justify-between px-8 shrink-0 z-30">
               <div className="flex items-center gap-4 shrink-0 mr-4">
-                <div className={`relative ${activeView === View.Dashboard ? 'group/company' : 'cursor-not-allowed opacity-80'}`}>
+                <div 
+                  className={`relative ${activeView === View.Dashboard ? 'group/company' : 'cursor-not-allowed opacity-80'}`}
+                  onMouseEnter={() => activeView === View.Dashboard && setShowCompanyDropdown(true)}
+                  onMouseLeave={() => setShowCompanyDropdown(false)}
+                >
                   <button 
                     disabled={activeView !== View.Dashboard}
                     className={`flex items-center gap-3 bg-[#1e293b] px-4 py-2 rounded-xl border border-slate-700 transition-all ${activeView === View.Dashboard ? 'hover:bg-[#2d3b50] group-hover/company:border-blue-500/50' : ''}`}
@@ -1895,16 +2252,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                   </button>
                   
                   {/* Company Switcher Dropdown - Only Rendered/Visible on Dashboard */}
-                  {activeView === View.Dashboard && (
-                    <div className="absolute top-full left-0 mt-2 w-72 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl opacity-0 invisible group-hover/company:opacity-100 group-hover/company:visible transition-all z-[100] overflow-hidden">
-                      <div className="p-4 bg-[#0f172a] border-b border-slate-800">
+                  {activeView === View.Dashboard && showCompanyDropdown && (
+                    <div className="absolute top-full left-0 pt-1.5 w-72 z-[100] animate-in fade-in slide-in-from-top-1 duration-150">
+                      <div className="bg-[#1e293b] border-2 border-blue-500/80 rounded-2xl shadow-[0_0_20px_rgba(59,130,246,0.3)] overflow-hidden">
+                        <div className="p-4 bg-[#0f172a] border-b border-slate-800">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Select Organization</span>
                       </div>
                       <div className="max-h-64 overflow-y-auto custom-scrollbar">
                         {companies.map(c => (
                           <button 
                             key={c.id}
-                            onClick={() => handleSwitchCompanyWithGate(c.id)}
+                            onClick={() => {
+                              handleSwitchCompanyWithGate(c.id);
+                              setShowCompanyDropdown(false);
+                            }}
                             className={`w-full flex items-center gap-3 p-4 text-left hover:bg-blue-900/20 transition-all border-b border-slate-800/50 last:border-0 ${activeCompanyId === c.id ? 'bg-blue-900/40 border-l-4 border-l-blue-500' : ''}`}
                           >
                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${activeCompanyId === c.id ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
@@ -1949,6 +2310,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         </button>
                       </div>
                     </div>
+                  </div>
                   )}
                 </div>
               </div>
@@ -1977,12 +2339,59 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     <div className="px-3 py-1 bg-slate-900 border border-slate-800/80 rounded-md shadow-sm relative z-0">
                       <span className="text-[9px] text-[#FFD700] uppercase tracking-[0.2em] font-black">VERSION {APP_VERSION}</span>
                     </div>
-                    <div className="px-4 py-1.5 bg-[#020617] border border-emerald-800/60 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-slow-pulse -mt-1.5 relative z-10">
-                      <span className="text-[10px] font-black text-[#10b981] uppercase tracking-widest flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 bg-[#10b981] rounded-full shadow-[0_0_8px_#10b981]"></div>
-                        {getFinancialYearLabel()}
-                      </span>
-                    </div>
+                        <div className="px-4 py-2.5 bg-[#0b0f19] border border-slate-700/80 rounded-full shadow-2xl -mt-2 relative z-10 flex items-center gap-2.5">
+                          <CalendarClock size={15} className="text-white shrink-0 animate-none" />
+                          {activeView === View.PayProcess || activeView === View.Settings || activeView === View.AI_Assistant || activeView === View.Utilities ? (
+                            <span className="text-[15px] font-black text-white uppercase tracking-widest select-none cursor-default" title="Financial Year selection is disabled in this view">
+                              {activeFinancialYear ? activeFinancialYear.replace('-', ' ') : ''} ACTIVE
+                            </span>
+                          ) : (
+                            <div 
+                              className="relative"
+                              onMouseEnter={() => setShowFyDropdown(true)}
+                              onMouseLeave={() => setShowFyDropdown(false)}
+                            >
+                              <button
+                                className="flex items-center gap-1.5 text-[15px] font-black text-white uppercase tracking-widest outline-none cursor-pointer"
+                              >
+                                <span>{activeFinancialYear ? activeFinancialYear.replace('-', ' ') : ''} ACTIVE</span>
+                                <span className="text-[10px] text-white/90 select-none pointer-events-none">▼</span>
+                              </button>
+
+                              {showFyDropdown && (
+                                <div className="absolute right-0 top-full pt-1.5 w-56 z-[100] animate-in fade-in slide-in-from-top-1 duration-150">
+                                  <div className="bg-[#1e293b] border-2 border-blue-500/80 rounded-2xl shadow-[0_0_20px_rgba(59,130,246,0.3)] overflow-hidden">
+                                    <div className="p-3 bg-[#0f172a] border-b border-slate-800">
+                                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Select Financial Year</span>
+                                    </div>
+                                    <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                                      {availableFinancialYears.map(fy => (
+                                        <button
+                                          key={fy}
+                                          onClick={() => {
+                                            setPendingFySwitch(fy);
+                                            // Pre-populate target months/years based on selected FY
+                                            const match = fy.match(/FY(\d{2})-(\d{2})/);
+                                            if (match) {
+                                              const startY = 2000 + parseInt(match[1]);
+                                              setModalSwitchMonth('April');
+                                              setModalSwitchYear(startY);
+                                            }
+                                            setShowFySwitchModal(true);
+                                            setShowFyDropdown(false);
+                                          }}
+                                          className={`w-full flex items-center gap-3 p-3.5 text-left hover:bg-blue-900/20 transition-all border-b border-slate-800/50 last:border-0 text-xs font-bold ${activeFinancialYear === fy ? 'text-blue-400 bg-blue-950/20 border-l-4 border-l-blue-500' : 'text-slate-300'}`}
+                                        >
+                                          {fy.replace('-', ' ')} ACTIVE
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                   </div>
                 </div>
             </header>
@@ -2028,17 +2437,93 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 </div>
               )}
 
-              <div className="p-8 max-w-7xl mx-auto">
-                {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={safeNavigate} />}
-                {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} />}
-                {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} onNavigate={safeNavigate} setSettingsTab={setSettingsTab} licenseInfo={licenseInfo || undefined} />}
+              <div className="p-8 max-w-7xl mx-auto relative">
+                {isFYMismatch && [View.Dashboard, View.PayProcess, View.Reports, View.Statutory, View.MIS, View.SSCode, View.PFCalculator].includes(activeView) && (
+                  <div className="absolute inset-0 z-[50] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-300 rounded-3xl m-8">
+                     <div className="bg-rose-950/40 border border-rose-500/50 rounded-3xl p-10 max-w-lg text-center shadow-[0_0_50px_rgba(225,29,72,0.15)] flex flex-col items-center">
+                        <div className="w-16 h-16 bg-rose-500/20 text-rose-400 rounded-full flex items-center justify-center mb-6 animate-pulse shadow-inner border border-rose-500/30">
+                          <AlertTriangle size={32} />
+                        </div>
+                        <h2 className="text-2xl font-black text-white uppercase tracking-tight mb-2">Financial Year Mismatch</h2>
+                        <div className="h-1 w-12 bg-rose-500 rounded-full mb-6"></div>
+                        <p className="text-slate-300 text-sm leading-relaxed mb-6">
+                          The selected period (<strong className="text-white">{globalMonth} {globalYear}</strong>) falls outside the active data silo (<strong className="text-rose-400">{activeFinancialYear}</strong>).
+                        </p>
+
+                        <div className="w-full flex flex-col gap-4 border-t border-rose-500/20 pt-6">
+                          <span className="text-[10px] font-black text-rose-400 uppercase tracking-widest text-left">
+                            Select Financial Year to Switch
+                          </span>
+                          
+                          <div className="flex flex-col gap-2.5 w-full">
+                            {availableFinancialYears.map(fy => {
+                              // Calculate if this year matches the selected month & year
+                              const match = fy.match(/FY(\d{2})-(\d{2})/);
+                              let isTarget = false;
+                              if (match) {
+                                const startY = 2000 + parseInt(match[1]);
+                                const endY = startY + 1;
+                                const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                                const monthIdx = months.indexOf(globalMonth);
+                                const selectedYear = globalYear;
+                                if (monthIdx < 3) { // Jan, Feb, Mar
+                                  isTarget = (selectedYear === endY);
+                                } else { // Apr to Dec
+                                  isTarget = (selectedYear === startY);
+                                }
+                              }
+
+                              return (
+                                <button
+                                  key={fy}
+                                  onClick={() => {
+                                    setPendingFySwitch(fy);
+                                    const match = fy.match(/FY(\d{2})-(\d{2})/);
+                                    if (match) {
+                                      const startY = 2000 + parseInt(match[1]);
+                                      if (isTarget) {
+                                        setModalSwitchMonth(globalMonth);
+                                        setModalSwitchYear(globalYear);
+                                      } else {
+                                        setModalSwitchMonth('April');
+                                        setModalSwitchYear(startY);
+                                      }
+                                    }
+                                    setShowFySwitchModal(true);
+                                  }}
+                                  className={`w-full flex items-center justify-between px-5 py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider transition-all border ${
+                                    isTarget 
+                                      ? 'bg-gradient-to-r from-emerald-600/35 to-teal-600/35 border-emerald-500/60 text-white hover:from-emerald-500/40 hover:to-teal-500/40 shadow-[0_0_20px_rgba(16,185,129,0.15)] hover:scale-[1.02] active:scale-[98]'
+                                      : 'bg-slate-900/60 border-slate-700/80 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5">
+                                    <CalendarClock size={14} className={isTarget ? "text-emerald-400 animate-pulse" : "text-slate-400"} />
+                                    <span>{fy.replace('-', ' ')}</span>
+                                  </div>
+                                  {isTarget && (
+                                    <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded-full text-[9px] font-black tracking-widest border border-emerald-500/30">
+                                      RECOMMENDED
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                     </div>
+                  </div>
+                )}
+                {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={safeNavigate} activeFinancialYear={activeFinancialYear} />}
+                {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} />}
+                {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} onNavigate={safeNavigate} setSettingsTab={setSettingsTab} licenseInfo={licenseInfo || undefined} hasPreviousYearData={hasPreviousYearData} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} onNavigate={safeNavigate} />}
                 {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} />}
                 {activeView === View.MIS && <MISDashboard payrollHistory={payrollHistory} employees={employees} companyProfile={companyProfile} showAlert={showAlert} />}
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                 {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} />}
-                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} />}
+                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
               {/* --- Database Password Gate Modal --- */}
@@ -2228,7 +2713,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
 
       <UpdatePortal 
-        isOpen={((showUpdateNotice || isPatchNotice || isUpdatePreparing || showBackgroundNotice || updateDownloaded || updateError === 'SECURITY_VIOLATION' || isInstalling) && !isSessionDismissed) || updateError === 'SECURITY_VIOLATION' || isInstalling}
+        isOpen={((showUpdateNotice || isPatchNotice || isUpdatePreparing || showBackgroundNotice || updateDownloaded || updateError === 'SECURITY_VIOLATION' || isInstalling) && (!isSessionDismissed || isPatchMandatory)) || updateError === 'SECURITY_VIOLATION' || isInstalling}
         state={
           isInstalling ? 'INSTALLING' :
           updateError === 'SECURITY_VIOLATION' ? 'VIOLATION' :
@@ -2243,6 +2728,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         isPreparing={isUpdatePreparing}
         downloadProgress={downloadProgress}
         patchSkipCount={patchSkipCount}
+        versionSkipCount={versionSkipCount}
         deploymentStep={deploymentStep}
         onUpdateNow={() => handleUpdateNow(async () => {
           setIsInstalling(true);
@@ -2251,7 +2737,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           for (const k of keysToPersist) {
             const val = localStorage.getItem(k);
             if (val && (window as any).electronAPI) {
-              await (window as any).electronAPI.dbSet(k, val.startsWith('{') || val.startsWith('[') ? JSON.parse(val) : val);
+              const isGlobalKey = ['app_users', 'app_license_secure', 'app_data_size', 'app_setup_complete'].includes(k);
+              const dbSetFn = isGlobalKey
+                ? ((window as any).electronAPI.dbSetGlobal || (window as any).electronAPI.dbSet)
+                : (window as any).electronAPI.dbSet;
+              await dbSetFn(k, val.startsWith('{') || val.startsWith('[') ? JSON.parse(val) : val);
             }
           }
         })}
@@ -2307,6 +2797,88 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <p className="mt-8 text-[10px] text-slate-500 font-bold uppercase tracking-widest">
               Security Protocol V02.02.18 Enabled
             </p>
+          </div>
+        </div>
+      )}      {/* --- V04.01.05: FINANCIAL YEAR SWITCH PERIOD SELECTOR MODAL --- */}
+      {showFySwitchModal && pendingFySwitch && (
+        <div className="fixed inset-0 z-[10000] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-8 max-w-sm w-full text-center shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col items-center">
+            <div className="w-12 h-12 bg-indigo-600/20 text-indigo-400 rounded-full flex items-center justify-center mb-5 border border-indigo-500/30">
+              <CalendarClock size={24} />
+            </div>
+            
+            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-2">Select Processing Period</h3>
+            <p className="text-slate-400 text-xs leading-relaxed mb-6">
+              Please choose the starting Month & Year for entering the <strong className="text-indigo-400 font-bold">{pendingFySwitch.replace('-', ' ')}</strong> silo.
+            </p>
+
+            <div className="flex gap-2 w-full mb-6">
+              <div className="flex-1 text-left">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 ml-1">Month</label>
+                <select
+                  value={modalSwitchMonth}
+                  onChange={(e) => setModalSwitchMonth(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700/80 px-3 py-2.5 rounded-xl text-xs font-bold text-white outline-none focus:border-indigo-500 cursor-pointer"
+                  title="Select Month"
+                  aria-label="Select Month"
+                >
+                  {['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'].map(m => (
+                    <option key={m} value={m} className="bg-slate-950 text-white">{m}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="w-28 text-left">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 ml-1">Year</label>
+                <select
+                  value={modalSwitchYear}
+                  onChange={(e) => setModalSwitchYear(parseInt(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-700/80 px-3 py-2.5 rounded-xl text-xs font-bold text-white outline-none focus:border-indigo-500 cursor-pointer"
+                  title="Select Year"
+                  aria-label="Select Year"
+                >
+                  {(() => {
+                    const match = pendingFySwitch.match(/FY(\d{2})-(\d{2})/);
+                    if (match) {
+                      const startY = 2000 + parseInt(match[1]);
+                      const endY = 2000 + parseInt(match[2]);
+                      return [startY, endY].map(y => (
+                        <option key={y} value={y} className="bg-slate-950 text-white">{y}</option>
+                      ));
+                    }
+                    return null;
+                  })()}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-3 w-full">
+              <button
+                onClick={() => {
+                  setShowFySwitchModal(false);
+                  setPendingFySwitch(null);
+                }}
+                className="flex-1 py-3 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs uppercase tracking-widest rounded-xl transition-all border border-slate-700/50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  switchFinancialYear(pendingFySwitch);
+                  setGlobalMonth(modalSwitchMonth);
+                  setGlobalYear(modalSwitchYear);
+                  
+                  localStorage.setItem(`app_selected_month_${activeCompanyId}_${pendingFySwitch}`, modalSwitchMonth);
+                  localStorage.setItem(`app_selected_year_${activeCompanyId}_${pendingFySwitch}`, String(modalSwitchYear));
+                  
+                  setShowFySwitchModal(false);
+                  setPendingFySwitch(null);
+                }}
+                className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-[0_4px_20px_rgba(99,102,241,0.3)] hover:scale-[1.02] active:scale-98"
+              >
+                Enter Year
+              </button>
+            </div>
           </div>
         </div>
       )}

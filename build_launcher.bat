@@ -13,14 +13,14 @@ if exist "%CSC%" (
     echo [INFO] Found Compiler at %CSC%
     echo [INFO] Working...
 
-    if exist Launch_BPP_V9.exe del Launch_BPP_V9.exe
+    if exist Launch_BPP_V10.exe del Launch_BPP_V10.exe
 
-    "%CSC%" /target:exe /out:Launch_BPP_V9.exe /optimize /win32icon:"release\.icon-ico\icon.ico" Launcher.cs
+    "%CSC%" /target:exe /out:Launch_BPP_V10.exe /optimize /win32icon:"release\.icon-ico\icon.ico" Launcher.cs
 
-    if exist Launch_BPP_V9.exe (
+    if exist Launch_BPP_V10.exe (
         echo.
         echo ========================================
-        echo  SUCCESS: Launch_BPP_V9.exe created.
+        echo  SUCCESS: Launch_BPP_V10.exe created.
         echo ========================================
     ) else (
         echo.

@@ -17,6 +17,7 @@ interface DashboardProps {
   setMonth: (m: string) => void;
   setYear: (y: number) => void;
   onNavigate: (view: View, tab?: string) => void;
+  activeFinancialYear?: string;
 }
 
 const MONTHS_LIST = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -30,16 +31,49 @@ const getLastProcessedPeriod = (history: PayrollResult[]) => {
   return { month: sorted[0].month, year: sorted[0].year };
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attendances, payrollHistory, month, year, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attendances, payrollHistory, month, year, onNavigate, activeFinancialYear }) => {
 
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
-  const months = MONTHS_LIST;
+
+  const CHRONO_ORDER = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
+
+  const availableMonths = useMemo(() => {
+    if (payrollHistory.length === 0) return MONTHS_LIST;
+    const unique = Array.from(new Set(payrollHistory.map(r => r.month)));
+    return unique.sort((a, b) => CHRONO_ORDER.indexOf(a) - CHRONO_ORDER.indexOf(b));
+  }, [payrollHistory, CHRONO_ORDER]);
 
   // Local picker state — always defaults to last processed month, not the global period
   const lastProcessed = useMemo(() => getLastProcessedPeriod(payrollHistory), [payrollHistory]);
   const [localMonth, setLocalMonth] = useState<string>(() => lastProcessed?.month || month);
   const [localYear, setLocalYear] = useState<number>(() => lastProcessed?.year || year);
+
+  const handleMonthChange = (selectedMonth: string) => {
+    setLocalMonth(selectedMonth);
+    const match = payrollHistory.find(r => r.month === selectedMonth);
+    if (match) {
+      setLocalYear(match.year);
+    } else {
+      const fyMatch = activeFinancialYear?.match(/FY(\d{2})-(\d{2})/);
+      if (fyMatch) {
+        const startYear = 2000 + parseInt(fyMatch[1]);
+        const isNextYear = ['January', 'February', 'March'].includes(selectedMonth);
+        setLocalYear(isNextYear ? startYear + 1 : startYear);
+      }
+    }
+  };
+
+  // V04.02.01: Keep local picker in sync when payrollHistory changes (e.g. after changing financial year or restoring backup)
+  React.useEffect(() => {
+    if (lastProcessed) {
+      setLocalMonth(lastProcessed.month);
+      setLocalYear(lastProcessed.year);
+    } else {
+      setLocalMonth(month);
+      setLocalYear(year);
+    }
+  }, [lastProcessed, month, year]);
 
   const QuickLinks = ({ centered = false }: { centered?: boolean }) => (
     <div className={`grid grid-cols-1 ${centered ? 'md:grid-cols-2 max-w-3xl' : 'md:grid-cols-2 lg:grid-cols-4'} gap-4 w-full`}>
@@ -259,10 +293,10 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
               title="Select Month"
               aria-label="Select Month"
               value={localMonth}
-              onChange={e => setLocalMonth(e.target.value)}
+              onChange={e => handleMonthChange(e.target.value)}
               className="bg-[#0f172a] border border-slate-700 rounded-md px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-bold"
             >
-              {months.map(m => <option key={m} value={m}>{m}</option>)}
+              {availableMonths.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
             <select
               title="Select Year"

@@ -17,10 +17,12 @@ export const useAuth = () => {
   const handleLogin = useCallback((user: User) => {
     setCurrentUser(user);
     sessionStorage.setItem('app_session_user', JSON.stringify(user));
+    sessionStorage.removeItem('patch_session_suppressed');
   }, []);
 
   const logout = useCallback(() => {
     sessionStorage.removeItem('app_session_user');
+    sessionStorage.removeItem('patch_session_suppressed');
     setCurrentUser(null);
   }, []);
 

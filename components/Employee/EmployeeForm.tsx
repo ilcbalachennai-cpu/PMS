@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import {
-    X, User2, Plus, Edit2, Camera, Upload,
+    X, User2, Plus, Edit2, Camera, Upload, Download,
     FileText, Save, Home, MapPinned, Landmark,
     Briefcase, ShieldCheck, ShieldAlert, UserMinus, Lock, BookOpen
 } from 'lucide-react';
@@ -173,13 +173,55 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                     <span className={`text-[9px] font-bold uppercase ${hasDoc ? 'text-emerald-400' : 'text-slate-400'}`}>{docType.label}</span>
                                                     <span className="text-[8px] text-slate-500">.PDF / .JPG / .PNG</span>
                                                 </div>
-                                                <div className="flex gap-2">
+                                                <div className="flex gap-2 items-center">
+                                                    {docType.key !== 'resume' && (
+                                                        <div className="flex gap-1 border-r border-slate-800 pr-2 mr-1">
+                                                            <button 
+                                                                type="button" 
+                                                                title={`Preview Blank ${docType.label} Format`} 
+                                                                aria-label={`Preview Blank ${docType.label} Format`} 
+                                                                onClick={async () => {
+                                                                    // @ts-ignore
+                                                                    if (window.electronAPI && window.electronAPI.handleStatutoryForm) {
+                                                                        // @ts-ignore
+                                                                        const res = await window.electronAPI.handleStatutoryForm(docType.label, 'preview');
+                                                                        if (!res.success) alert(`Failed to open preview: ${res.error}`);
+                                                                    } else {
+                                                                        alert("Electron Bridge not ready. Please close the app window and restart your 'npm run dev:electron' terminal to register the new code!");
+                                                                    }
+                                                                }} 
+                                                                className="p-1 text-slate-400 hover:text-amber-400 rounded transition-colors cursor-pointer"
+                                                            >
+                                                                <BookOpen size={13} />
+                                                            </button>
+                                                            <button 
+                                                                type="button" 
+                                                                title={`Download Blank ${docType.label} Format`} 
+                                                                aria-label={`Download Blank ${docType.label} Format`} 
+                                                                onClick={async () => {
+                                                                    // @ts-ignore
+                                                                    if (window.electronAPI && window.electronAPI.handleStatutoryForm) {
+                                                                        // @ts-ignore
+                                                                        const res = await window.electronAPI.handleStatutoryForm(docType.label, 'download');
+                                                                        if (!res.success && res.error !== 'Download canceled') {
+                                                                            alert(`Download failed: ${res.error}`);
+                                                                        }
+                                                                    } else {
+                                                                        alert("Electron Bridge not ready. Please close the app window and restart your 'npm run dev:electron' terminal to register the new code!");
+                                                                    }
+                                                                }} 
+                                                                className="p-1 text-slate-400 hover:text-sky-400 rounded transition-colors cursor-pointer"
+                                                            >
+                                                                <Download size={13} />
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                     {hasDoc && (
                                                         <>
                                                             <button type="button" onClick={() => {
                                                                 onPreviewDoc(hasDoc, `${newEmpForm.name || 'Employee'} - ${docType.label}`);
-                                                            }} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors" title={`Preview ${docType.label}`} aria-label={`Preview ${docType.label}`}><FileText size={12} /></button>
-                                                            <button type="button" title={`Remove ${docType.label}`} aria-label={`Remove ${docType.label}`} onClick={() => {
+                                                            }} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors" title={`Preview Employee's ${docType.label}`} aria-label={`Preview Employee's ${docType.label}`}><FileText size={12} /></button>
+                                                            <button type="button" title={`Remove Employee's ${docType.label}`} aria-label={`Remove Employee's ${docType.label}`} onClick={() => {
                                                                 setNewEmpForm(prev => ({
                                                                     ...prev,
                                                                     employeeDocuments: {
@@ -191,7 +233,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                         </>
                                                     )}
                                                     {!hasDoc && (
-                                                        <button type="button" title={`Upload ${docType.label}`} aria-label={`Upload ${docType.label}`} onClick={() => docType.ref.current?.click()} className="p-1.5 bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 rounded-lg transition-colors"><Upload size={14} /></button>
+                                                        <button type="button" title={`Upload Employee's ${docType.label}`} aria-label={`Upload Employee's ${docType.label}`} onClick={() => docType.ref.current?.click()} className="p-1.5 bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 rounded-lg transition-colors"><Upload size={14} /></button>
                                                     )}
                                                 </div>
                                                 <input ref={docType.ref} title={`Upload ${docType.label}`} aria-label={`Upload ${docType.label}`} type="file" className="hidden" accept=".pdf,image/jpeg,image/png" onChange={(e) => handleDocumentUpload(e, docType.key as keyof Required<Employee>['employeeDocuments'])} />

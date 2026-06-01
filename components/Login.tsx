@@ -861,7 +861,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
                 <div className="space-y-1">
                   <h4 className="text-[11px] font-black text-red-400 uppercase tracking-[0.2em]">Session Expired</h4>
                   <p className="text-xs text-red-200 leading-relaxed font-medium">
-                    Session Inactive for over 10 minutes.<br /> 
+                    Session Inactive for over 9 minutes.<br /> 
                     Please relogin to access the application.
                   </p>
                 </div>
@@ -964,6 +964,18 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
 
                     const admin = localUsers.find(u => u.role === 'Administrator');
                     const payrollUser = localUsers.find(u => u.role === 'User');
+                    const license = getStoredLicense();
+
+                    const getBestID = (user: any) => {
+                      if (!user) return '';
+                      if (license && license.userID && license.userID.toUpperCase() !== 'TRIAL' && license.userID.toUpperCase() !== 'RESCUE') {
+                        return license.userID;
+                      }
+                      return user.username;
+                    };
+
+                    const adminID = getBestID(admin);
+                    const payrollID = getBestID(payrollUser);
 
                     const buttons = [
                       // Admin Slot
@@ -971,13 +983,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
                         key="admin"
                         onClick={() => {
                           if (admin) {
-                            const license = getStoredLicense();
-                            const bestID = (license && license.userID &&
-                              license.userID.toUpperCase() !== 'TRIAL' &&
-                              license.userID.toUpperCase() !== 'RESCUE')
-                              ? license.userID
-                              : admin.username;
-                            autofill(bestID);
+                            autofill(adminID);
                           }
                         }}
                         disabled={!admin || isLocked}
@@ -991,13 +997,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
                       >
                         <ShieldCheck className={`${admin ? 'text-blue-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
                         <span className={`text-[10px] font-bold ${admin ? 'text-blue-500' : 'text-slate-500'} truncate w-full px-1`}>
-                          {admin ? admin.name : 'ADMIN INACTIVE'}
+                          {admin ? adminID : 'ADMIN INACTIVE'}
                         </span>
                       </button>,
                       // User Slot (Payroll Executive)
                       <button
                         key="user"
-                        onClick={() => payrollUser && autofill(payrollUser.username)}
+                        onClick={() => payrollUser && autofill(payrollID)}
                         disabled={!payrollUser || isLocked}
                         type="button"
                         title={payrollUser ? `Login as ${payrollUser.name}` : 'Payroll user not active'}
@@ -1009,7 +1015,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
                       >
                         <UserIcon className={`${payrollUser ? 'text-emerald-500' : 'text-slate-500'} mb-1 group-hover:scale-110 transition-transform`} size={16} />
                         <span className={`text-[10px] font-bold ${payrollUser ? 'text-emerald-500' : 'text-slate-500'} truncate w-full px-1`}>
-                          {payrollUser ? payrollUser.name : 'PAYROLL INACTIVE'}
+                          {payrollUser ? payrollID : 'PAYROLL INACTIVE'}
                         </span>
                       </button>,
                       // Developer Bypass Slot (Only in Local Dev or Authorized)

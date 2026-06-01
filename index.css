@@ -260,6 +260,18 @@ input, select, textarea {
   border-color: #334155 !important; /* slate-700 - Brighter */
 }
 
+/* Win7 Select Option Contrast Fix */
+.is-win7 select option {
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+}
+
+/* Global Select Option Style */
+select option {
+  background-color: #1e293b;
+  color: #ffffff;
+}
+
 @keyframes loading-progress {
   0% { width: 0%; }
   50% { width: 70%; }
@@ -268,4 +280,14 @@ input, select, textarea {
 
 .animate-loading-progress {
   animation: loading-progress 2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Hide number input spinner arrows globally */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] {
+  appearance: textfield;
 }

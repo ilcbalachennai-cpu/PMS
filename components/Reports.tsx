@@ -46,6 +46,7 @@ interface ReportsProps {
     showAlert: any;
     latestFrozenPeriod: { month: string; year: number } | null;
     onNavigate: (view: any, tab?: string) => void;
+    activeFinancialYear?: string;
 }
 
 const Reports: React.FC<ReportsProps> = ({
@@ -66,7 +67,8 @@ const Reports: React.FC<ReportsProps> = ({
     onRollover,
     arrearHistory,
     showAlert: _showAlert,
-    onNavigate
+    onNavigate,
+    activeFinancialYear
 }) => {
     const [reportType, setReportType] = useState<string>('Pay Sheet');
     const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
@@ -204,6 +206,15 @@ const Reports: React.FC<ReportsProps> = ({
         return `${year}-${String(mIdx + 1).padStart(2, '0')}-${lastDay}`;
     };
 
+    const getPrevMonthEnd = () => {
+        const mIdx = months.indexOf(month);
+        const prevDate = new Date(year, mIdx, 0);
+        const pY = prevDate.getFullYear();
+        const pM = prevDate.getMonth() + 1;
+        const pD = prevDate.getDate();
+        return `${pY}-${String(pM).padStart(2, '0')}-${String(pD).padStart(2, '0')}`;
+    };
+
 
     const handleReportTypeChange = (type: string) => {
         setReportType(type);
@@ -315,7 +326,8 @@ const Reports: React.FC<ReportsProps> = ({
             const backupRes = await window.electronAPI.createDataBackup({
                 fileName: backupFileName,
                 subfolder: companyProfile.establishmentName,
-                encryptionKey: encryptionKey
+                encryptionKey: encryptionKey,
+                financialYear: activeFinancialYear
             });
 
 
@@ -347,7 +359,7 @@ const Reports: React.FC<ReportsProps> = ({
         const zw = currentResults.filter(r => r.payableDays === 0 || (r.earnings?.total || 0) === 0);
 
         if (zw.length > 0) {
-            const defaultDOL = getPayrollPeriodStart();
+            const defaultDOL = getPrevMonthEnd();
             const initialExitData: Record<string, { dol: string, reason: string }> = {};
             zw.forEach(r => {
                 const emp = employees.find(e => e.id === r.employeeId);
@@ -1029,7 +1041,7 @@ const Reports: React.FC<ReportsProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
                 {/* Report Selection */}
-                <div className={`lg:col-span-2 bg-[#1e293b] rounded-2xl border border-slate-800 p-6 shadow-xl transition-opacity ${!isLocked && reportType !== 'Arrear Report' ? 'opacity-70' : 'opacity-100'}`}>
+                <div className={`lg:col-span-2 bg-[#1e293b] rounded-2xl border border-slate-800 p-6 shadow-xl transition-opacity ${!isLocked ? 'opacity-70' : 'opacity-100'}`}>
                     <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-800 pb-2">Select Report</h3>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                         {[
@@ -1040,22 +1052,36 @@ const Reports: React.FC<ReportsProps> = ({
                             { id: 'Advance Shortfall', icon: Wallet, label: 'Advance Shortfall' },
                             { id: 'Arrear Report', icon: TrendingUp, label: 'Arrear Salary Report' },
                         ].map(item => {
-                            const isDisabled = item.id === 'Arrear Report' && !hasArrearData;
+                            const isDraftDisabled = !isLocked;
+                            const isDisabled = (item.id === 'Arrear Report' && !hasArrearData) || isDraftDisabled;
                             return (
                                 <button
                                     key={item.id}
                                     onClick={() => !isDisabled && handleReportTypeChange(item.id)}
                                     disabled={isDisabled}
-                                    title={isDisabled ? "No arrear data for selected month" : `Select ${item.label}`}
-                                    aria-label={isDisabled ? "No arrear data" : `Select ${item.label}`}
-                                    className={`flex flex-col items-center justify-center gap-3 p-4 rounded-xl border transition-all ${reportType === item.id
-                                        ? (isWin7
-                                            ? 'bg-blue-600 border-white/50 text-white shadow-[0_0_30px_rgba(37,99,235,0.5)] scale-105 ring-2 ring-white/30'
-                                            : 'bg-blue-600 border-blue-500 text-white shadow-lg scale-105')
-                                        : isDisabled
+                                    title={
+                                        isDraftDisabled 
+                                            ? "Freeze payroll to unlock this report" 
+                                            : (item.id === 'Arrear Report' && !hasArrearData)
+                                                ? "No arrear data for selected month"
+                                                : `Select ${item.label}`
+                                    }
+                                    aria-label={
+                                        isDraftDisabled 
+                                            ? "Lock payroll to unlock this report" 
+                                            : (item.id === 'Arrear Report' && !hasArrearData)
+                                                ? "No arrear data"
+                                                : `Select ${item.label}`
+                                    }
+                                    className={`flex flex-col items-center justify-center gap-3 p-4 rounded-xl border transition-all ${
+                                        isDisabled
                                             ? 'bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed grayscale'
-                                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-800'
-                                        }`}
+                                            : reportType === item.id
+                                                ? (isWin7
+                                                    ? 'bg-blue-600 border-white/50 text-white shadow-[0_0_30px_rgba(37,99,235,0.5)] scale-105 ring-2 ring-white/30'
+                                                    : 'bg-blue-600 border-blue-500 text-white shadow-lg scale-105')
+                                                : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-800'
+                                    }`}
                                 >
                                     <item.icon size={24} />
                                     <span className="text-xs font-bold text-center">{item.label}</span>
@@ -1066,7 +1092,7 @@ const Reports: React.FC<ReportsProps> = ({
                 </div>
 
                 {/* Configuration & Action */}
-                <div className="bg-[#1e293b] rounded-2xl border border-slate-800 p-6 shadow-xl flex flex-col justify-between">
+                <div className={`bg-[#1e293b] rounded-2xl border border-slate-800 p-6 shadow-xl flex flex-col justify-between transition-opacity ${!isLocked ? 'opacity-70' : 'opacity-100'}`}>
                     <div>
                         <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-800 pb-2">Configuration</h3>
                         <div className="space-y-4">
@@ -1074,8 +1100,36 @@ const Reports: React.FC<ReportsProps> = ({
                                 <div className="space-y-2">
                                     <label className="text-xs font-bold text-slate-500">Output Format</label>
                                     <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
-                                        <button onClick={() => setFormat('PDF')} title="Set format to PDF" aria-label="Set format to PDF" className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${format === 'PDF' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>PDF</button>
-                                        <button onClick={() => setFormat('Excel')} title="Set format to Excel" aria-label="Set format to Excel" className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${format === 'Excel' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>Excel</button>
+                                        <button
+                                            disabled={!isLocked}
+                                            onClick={() => setFormat('PDF')}
+                                            title={!isLocked ? "Freeze payroll to configure report format" : "Set format to PDF"}
+                                            aria-label="Set format to PDF"
+                                            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${
+                                                !isLocked
+                                                    ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed'
+                                                    : format === 'PDF'
+                                                        ? 'bg-red-600 text-white shadow-lg'
+                                                        : 'text-slate-400 hover:text-white'
+                                            }`}
+                                        >
+                                            PDF
+                                        </button>
+                                        <button
+                                            disabled={!isLocked}
+                                            onClick={() => setFormat('Excel')}
+                                            title={!isLocked ? "Freeze payroll to configure report format" : "Set format to Excel"}
+                                            aria-label="Set format to Excel"
+                                            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${
+                                                !isLocked
+                                                    ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed'
+                                                    : format === 'Excel'
+                                                        ? 'bg-emerald-600 text-white shadow-lg'
+                                                        : 'text-slate-400 hover:text-white'
+                                            }`}
+                                        >
+                                            Excel
+                                        </button>
                                     </div>
                                 </div>
                             ) : (
@@ -1092,10 +1146,17 @@ const Reports: React.FC<ReportsProps> = ({
                                             {(['all', 'site', 'branch', 'division'] as const).map(f => (
                                                 <button
                                                     key={f}
+                                                    disabled={!isLocked}
                                                     onClick={() => { setPaySheetFilter(f); setPaySheetFilterValue(''); }}
-                                                    title={`Filter by ${f}`}
+                                                    title={!isLocked ? "Freeze payroll to configure filters" : `Filter by ${f}`}
                                                     aria-label={`Filter by ${f}`}
-                                                    className={`flex-1 py-1.5 text-[10px] uppercase font-black rounded-md transition-all ${paySheetFilter === f ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}
+                                                    className={`flex-1 py-1.5 text-[10px] uppercase font-black rounded-md transition-all ${
+                                                        !isLocked
+                                                            ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed'
+                                                            : paySheetFilter === f
+                                                                ? 'bg-indigo-600 text-white'
+                                                                : 'text-slate-500 hover:text-white'
+                                                    }`}
                                                 >
                                                     {f}
                                                 </button>
@@ -1109,10 +1170,11 @@ const Reports: React.FC<ReportsProps> = ({
                                                 Select {paySheetFilter === 'site' ? 'Site' : paySheetFilter === 'branch' ? 'Branch' : 'Division'}
                                             </label>
                                             <select
+                                                disabled={!isLocked}
                                                 value={paySheetFilterValue}
                                                 onChange={e => setPaySheetFilterValue(e.target.value)}
-                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors"
-                                                title={`Select ${paySheetFilter}`}
+                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title={!isLocked ? "Freeze payroll to configure filters" : `Select ${paySheetFilter}`}
                                                 aria-label={`Select ${paySheetFilter}`}
                                             >
                                                 <option value="" className="bg-[#0f172a] text-white">-- Select {paySheetFilter === 'site' ? 'Site' : paySheetFilter === 'branch' ? 'Branch' : 'Division'} --</option>
@@ -1132,16 +1194,19 @@ const Reports: React.FC<ReportsProps> = ({
 
 
                                     {format === 'PDF' && (
-                                        <div className="flex items-center gap-3 p-3 bg-indigo-900/10 border border-indigo-500/20 rounded-xl mt-4 cursor-pointer hover:bg-indigo-900/20 transition-all">
+                                        <div className={`flex items-center gap-3 p-3 bg-indigo-900/10 border border-indigo-500/20 rounded-xl mt-4 transition-all ${
+                                            !isLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-indigo-900/20'
+                                        }`}>
                                             <input 
                                                 id="useLegacyDesign"
                                                 type="checkbox" 
-                                                title="Use Legacy MS Access Layout"
+                                                disabled={!isLocked}
+                                                title={!isLocked ? "Freeze payroll to configure layout" : "Use Legacy MS Access Layout"}
                                                 checked={useLegacyDesign} 
                                                 onChange={() => setUseLegacyDesign(!useLegacyDesign)}
-                                                className="w-4 h-4 rounded border-indigo-500 text-indigo-600 focus:ring-indigo-500 bg-slate-900" 
+                                                className="w-4 h-4 rounded border-indigo-500 text-indigo-600 focus:ring-indigo-500 bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed" 
                                             />
-                                            <label htmlFor="useLegacyDesign" className="cursor-pointer">
+                                            <label htmlFor="useLegacyDesign" className={!isLocked ? "cursor-not-allowed" : "cursor-pointer"}>
                                                 <p className="text-[11px] font-bold text-indigo-400">Use Legacy MS Access Layout</p>
                                                 <p className="text-[9px] text-slate-500">Enable 4-row employee blocks (Form B Style)</p>
                                             </label>
@@ -1158,10 +1223,17 @@ const Reports: React.FC<ReportsProps> = ({
                                             {(['all', 'site', 'branch', 'division'] as const).map(f => (
                                                 <button
                                                     key={f}
+                                                    disabled={!isLocked}
                                                     onClick={() => { setPaySlipFilter(f); setPaySlipFilterValue(''); setSelectedEmployeeId('all'); }}
-                                                    title={`Filter Slips by ${f}`}
+                                                    title={!isLocked ? "Freeze payroll to configure filters" : `Filter Slips by ${f}`}
                                                     aria-label={`Filter Slips by ${f}`}
-                                                    className={`flex-1 py-1.5 text-[10px] uppercase font-black rounded-md transition-all ${paySlipFilter === f ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}
+                                                    className={`flex-1 py-1.5 text-[10px] uppercase font-black rounded-md transition-all ${
+                                                        !isLocked
+                                                            ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed'
+                                                            : paySlipFilter === f
+                                                                ? 'bg-indigo-600 text-white'
+                                                                : 'text-slate-500 hover:text-white'
+                                                    }`}
                                                 >
                                                     {f}
                                                 </button>
@@ -1173,10 +1245,11 @@ const Reports: React.FC<ReportsProps> = ({
                                         <div className="space-y-2 animate-in fade-in zoom-in-95">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Select Employee</label>
                                             <select
+                                                disabled={!isLocked}
                                                 value={selectedEmployeeId}
                                                 onChange={e => setSelectedEmployeeId(e.target.value)}
-                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors custom-scrollbar"
-                                                title="Select Employee for Pay Slip"
+                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors custom-scrollbar disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title={!isLocked ? "Freeze payroll to configure filters" : "Select Employee for Pay Slip"}
                                                 aria-label="Select Employee for Pay Slip"
                                             >
                                                 <option value="all" className="bg-[#0f172a] text-white">All Employees</option>
@@ -1198,10 +1271,11 @@ const Reports: React.FC<ReportsProps> = ({
                                                 Select {paySlipFilter === 'site' ? 'Site' : paySlipFilter === 'branch' ? 'Branch' : 'Division'}
                                             </label>
                                             <select
+                                                disabled={!isLocked}
                                                 value={paySlipFilterValue}
                                                 onChange={e => setPaySlipFilterValue(e.target.value)}
-                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors"
-                                                title={`Select ${paySlipFilter}`}
+                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title={!isLocked ? "Freeze payroll to configure filters" : `Select ${paySlipFilter}`}
                                                 aria-label={`Select ${paySlipFilter}`}
                                             >
                                                 <option value="" className="bg-[#0f172a] text-white">-- Select {paySlipFilter === 'site' ? 'Site' : paySlipFilter === 'branch' ? 'Branch' : 'Division'} --</option>
@@ -1235,11 +1309,12 @@ const Reports: React.FC<ReportsProps> = ({
                                 <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-2">
                                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Select Arrear Batch</label>
                                     <select
+                                        disabled={!isLocked}
                                         value={arrearSelectedPeriod}
                                         onChange={e => setArrearSelectedPeriod(e.target.value)}
-                                        title="Select Arrear Batch"
+                                        title={!isLocked ? "Freeze payroll to configure filters" : "Select Arrear Batch"}
                                         aria-label="Select Arrear Batch"
-                                        className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-bold outline-none focus:border-indigo-500 transition-colors"
+                                        className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-bold outline-none focus:border-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         {arrearHistory.map(b => (
                                             <option key={`${b.month}-${b.year}`} value={`${b.month}-${b.year}`} className="bg-[#0f172a] text-white">
@@ -1257,7 +1332,7 @@ const Reports: React.FC<ReportsProps> = ({
                         disabled={isGenerating}
                         title={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
                         aria-label={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
-                        className={`w-full py-4 font-black rounded-xl shadow-lg flex items-center justify-center gap-3 transition-all mt-6 ${(reportType !== 'Arrear Report' && !isLocked)
+                        className={`w-full py-4 font-black rounded-xl shadow-lg flex items-center justify-center gap-3 transition-all mt-6 ${!isLocked
                             ? 'bg-slate-800 hover:bg-slate-700 text-amber-500 border border-slate-600'
                             : (isWin7
                                 ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl border border-white/20'
@@ -1266,7 +1341,7 @@ const Reports: React.FC<ReportsProps> = ({
                     >
                         {isGenerating ? (
                             <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" />
-                        ) : (reportType !== 'Arrear Report' && !isLocked) ? (
+                        ) : !isLocked ? (
                             <>
                                 <Lock size={20} /> LOCK PAYROLL TO DOWNLOAD (CLICK HERE)
                             </>

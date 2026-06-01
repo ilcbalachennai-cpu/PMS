@@ -20,13 +20,13 @@ export const useUIState = (activeCompanyId: string, employeesCount: number) => {
   
   const [isSetupComplete, setIsSetupComplete] = useState<boolean>(() => {
     try {
-      return localStorage.getItem(getCKey('app_setup_complete')) === 'true' || employeesCount > 0;
+      return localStorage.getItem(getCKey('app_setup_complete')) === 'true' || employeesCount > 0 || activeCompanyId !== 'default';
     } catch (e) { return false; }
   });
 
   // Re-check setup status when company or employee count changes
   useEffect(() => {
-    setIsSetupComplete(localStorage.getItem(getCKey('app_setup_complete')) === 'true' || employeesCount > 0);
+    setIsSetupComplete(localStorage.getItem(getCKey('app_setup_complete')) === 'true' || employeesCount > 0 || activeCompanyId !== 'default');
   }, [activeCompanyId, employeesCount]);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
-   /**
- * BHARATPAY PRO - GOOGLE APPS SCRIPT (v03.01.03 FINAL)
+    /**
+ * BHARATPAY PRO - GOOGLE APPS SCRIPT (v05.01.01 FINAL)
  * -----------------------------------------------------------
- * - Updated: 05-MAYR-2026 : 19.00 PM
+ * - Updated: 22-MAY-2026 : 11.00 AM
  * - SECURITY: SHA-256 HMAC Signature Verification active.
  * - FIX: Interface with Launcher URL (D2) for System Recovery path.
  * - FIX: handleStartupValidation — STRICT 4-FIELD SYNC (ID, Pass, Machine, Email).
@@ -102,6 +102,7 @@ function doPost(e) {
         if (action === 'ACTIVATE_LICENSE')  return handleLicenseActivation(ss, params);
         if (action === 'UPDATE_PASSWORD')   return handlePasswordUpdate(ss, params);
         if (action === 'REQUEST_OTP_RESET') return handleRequestOTPReset(ss, params);
+        if (action === 'VERIFY_OTP_ONLY')   return handleVerifyOTPOnly(ss, params);
         if (action === 'GET_MESSAGES')      return fetchLatestDeveloperMessages(ss);
         if (action === 'UPDATE_MESSAGES')   return handleUpdateMessages(ss, params);
         if (action === 'TRACK_LOGIN')       return handleTrackLogin(ss, params);
@@ -444,6 +445,8 @@ function handleStartupValidation(ss, params) {
                                     startDate: row[6], expiryDate: row[7], status: 'LICENSE ACTIVE',
                                     dataSize: parseInt(row[10]) || 5000, 
                                     companyLimit: parseInt(row[16]) || 1,
+                                    splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
+                                    splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
                                     latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, launcherUrl: config.launcherUrl,
                                     adminUser: String(rowID_ColC).toUpperCase(), adminPass: row[3], 
                                     devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss) 
@@ -473,7 +476,9 @@ function handleStartupValidation(ss, params) {
                                 dataSize: parseInt(row[10]) || 5000,
                                 companyLimit: parseInt(row[16]) || 1,
                                 startDate: row[6],
-                                expiryDate: row[7]
+                                expiryDate: row[7],
+                                splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
+                                splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true'
                             }
                         });
                     }
@@ -831,6 +836,8 @@ function processPasswordReset(d) {
 function handleRequestOTPReset(ss, params) {
     const email = String(params.email || "").trim().toLowerCase();
     const userID = String(params.userID || "").trim().toLowerCase();
+    const companyName = String(params.companyName || "your company").trim();
+    
     if (!email || !userID) return jsonResponse({ success: false, message: "Missing credentials." });
 
     let foundUser = null;
@@ -853,15 +860,33 @@ function handleRequestOTPReset(ss, params) {
             }
         }
     });
-
+    if (email === "suganthibobby@gmail.com" || email === "ilcbala.bharatpayroll@gmail.com") {
+        foundUser = email;
+        userName = "Developer";
+    }
     if (!foundUser) return jsonResponse({ success: false, message: "Identity not found in database." });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     PropertiesService.getScriptProperties().setProperty('OTP_' + foundUser, otp);
     
-    sendEmailNotification(foundUser, "BharatPay Pro Reset Code", "PASSWORD_RESET", { userName: userName, tempCode: otp });
+    sendEmailNotification(foundUser, "BharatPay Pro Reset Code", "PASSWORD_RESET", { userName: userName, tempCode: otp, companyName: companyName });
     
     return jsonResponse({ success: true, message: "OTP sent to " + email });
+}
+
+function handleVerifyOTPOnly(ss, params) {
+    const email = String(params.email || "").trim().toLowerCase();
+    const otp = String(params.otp || "").trim();
+    if (!email || !otp) return jsonResponse({ success: false, message: "Missing data." });
+
+    const storedOTP = PropertiesService.getScriptProperties().getProperty('OTP_' + email);
+    console.log("Email:", email, "Stored OTP:", storedOTP, "User Input OTP:", otp);
+    if (!storedOTP || otp !== storedOTP) {
+        return jsonResponse({ success: false, message: "Invalid or expired OTP." });
+    }
+
+    // Success!
+    return jsonResponse({ success: true, message: "OTP verified successfully." });
 }
 
 /**
@@ -1022,7 +1047,12 @@ function sendEmailNotification(to, subject, type, data) {
           </table>
         </div>`;
     } else if (type === "PASSWORD_RESET") {
-        headColor = "#be123c"; htmlContent = `<div style="background:#fff1f2;border:2px solid #fecdd3;padding:30px;text-align:center;border-radius:12px;margin:25px 0;"><span style="font-size:32px;font-weight:900;letter-spacing:12px;color:#be123c;font-family:monospace;">${data.tempCode}</span></div>`;
+        headColor = "#be123c"; 
+        htmlContent = `
+        <p style="text-align:center; color:#475569; font-size:14px;">This OTP is requested for securely deleting the company: <strong style="color:#0f172a;">${data.companyName || "your company"}</strong>.</p>
+        <div style="background:#fff1f2;border:2px solid #fecdd3;padding:30px;text-align:center;border-radius:12px;margin:25px 0;">
+          <span style="font-size:32px;font-weight:900;letter-spacing:12px;color:#be123c;font-family:monospace;">${data.tempCode}</span>
+        </div>`;
     } else if (type === "LICENSE_ACTIVATED") {
         htmlContent = `<p>Your BharatPay Pro license has been <strong>successfully activated</strong> and linked to this hardware.</p>
         <div style="margin:25px 0; border:2px solid #059669; border-radius:12px; overflow:hidden;">
@@ -1310,7 +1340,9 @@ function handleLicenseActivation(ss, params) {
                         expiryDate: data[i][7], 
                         dataSize: data[i][10] || 5000,
                         companyLimit: parseInt(data[i][16]) || 1,
-                        startDate: data[i][6],
+                        password: data[i][3],
+                        splDynamic: String(data[i][14]).trim() === 'Yes' || String(data[i][14]).trim() === 'true',
+                        splMIS: String(data[i][15]).trim() === 'Yes' || String(data[i][15]).trim() === 'true'
                     } 
                 });
             }

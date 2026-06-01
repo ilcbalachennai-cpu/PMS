@@ -8,6 +8,7 @@ export interface ServiceRecord {
 export interface LeaveLedger {
   companyId?: string;
   employeeId: string;
+  financialYear?: string;
   // Added 'availed' to el structure
   el: { opening: number; eligible: number; encashed: number; availed: number; balance: number };
   sl: { eligible: number; availed: number; balance: number };
@@ -17,6 +18,7 @@ export interface LeaveLedger {
 export interface AdvanceLedger {
   companyId?: string;
   employeeId: string;
+  financialYear?: string;
   opening: number;          // Carry-forward from previous month
   totalAdvance: number;     // New advance given this month
   emiCount: number;         // Number of installments (used when manualPayment is 0)
@@ -449,6 +451,7 @@ export interface LicenseData {
   checksum?: string; // For integrity check
   splDynamic?: boolean; // Access to Dynamic Pay Sheet
   splMIS?: boolean; // Access to MIS
+  companyLimit?: number; // Multi-company creation limit
 }
 
 export interface OTRecord {

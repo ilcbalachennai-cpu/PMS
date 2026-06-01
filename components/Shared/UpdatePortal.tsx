@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
   RefreshCw, Loader2, ShieldAlert, 
-  ArrowRight, X, Wrench,
+  ArrowRight, Wrench,
   Database, Download, CheckCircle2,
   Zap, Hash, Shield
 } from 'lucide-react';
@@ -18,6 +18,7 @@ interface UpdatePortalProps {
   isPreparing?: boolean;
   downloadProgress?: number;
   patchSkipCount?: number;
+  versionSkipCount?: number;
   deploymentStep?: number;
 }
 
@@ -33,6 +34,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   isPreparing = false,
   downloadProgress = 0,
   patchSkipCount = 0,
+  versionSkipCount = 0,
   deploymentStep: externalStep
 }) => {
   const [secondsLeft, setSecondsLeft] = React.useState(20);
@@ -180,23 +182,32 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   // ── RENDER: TOAST ──
   if (state === 'TOAST') {
     return (
-      <div className="fixed bottom-6 right-6 z-[60] bg-slate-900/90 backdrop-blur-xl border border-blue-500/30 p-5 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] max-w-sm animate-in slide-in-from-bottom-5 duration-500 overflow-hidden flex gap-4">
-        <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/80"></div>
-        <div className="shrink-0 p-3 bg-blue-500/10 rounded-xl flex items-center justify-center relative overflow-hidden">
-          <RefreshCw className="text-blue-400 animate-spin-slow relative z-10" size={24} />
-          <div className="absolute inset-0 bg-blue-500/5 animate-pulse"></div>
-        </div>
-        <div className="flex-1">
-          <div className="flex items-center justify-between mb-1">
-            <h4 className="font-black text-white text-xs uppercase tracking-widest">Update Available</h4>
-            <button onClick={onClose} title="Close" className="text-slate-500 hover:text-white transition-colors"><X size={14} /></button>
+      <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/75 backdrop-blur-sm animate-in fade-in duration-300">
+        <div className="bg-slate-900/95 border border-blue-500/30 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.8)] max-w-sm w-full relative overflow-hidden flex flex-col items-center text-center gap-5">
+          <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/80"></div>
+          
+          <div className="p-4 bg-blue-500/10 rounded-full flex items-center justify-center relative overflow-hidden w-16 h-16">
+            <RefreshCw className="text-blue-400 animate-spin-slow relative z-10" size={32} />
+            <div className="absolute inset-0 bg-blue-500/5 animate-pulse"></div>
           </div>
-          <p className="text-slate-400 text-[10px] leading-tight mb-4 font-bold opacity-80 uppercase tracking-tighter">
-             Version {version} is ready for deployment.
-          </p>
-          <div className="flex gap-2">
-            <button onClick={onUpdateNow} className="flex-1 bg-blue-600 hover:bg-blue-500 py-2 rounded-lg text-white text-[9px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95">Update Now</button>
-            <button onClick={onUpdateLater} className="flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg text-slate-300 text-[9px] font-black uppercase tracking-widest transition-all">Next Login</button>
+          
+          <div className="space-y-2">
+            <h4 className="font-black text-white text-base uppercase tracking-wider">Update Available</h4>
+            <p className="text-slate-400 text-xs leading-relaxed font-bold opacity-80 uppercase tracking-tighter">
+               Version <span className="text-[#FFD700] font-black">v{version}</span> is ready for deployment.
+            </p>
+            {versionSkipCount !== undefined && (
+              <p className="text-[10px] text-white font-black uppercase tracking-[0.4em] pt-1">
+                  Postpone <span className="text-white">{versionSkipCount} / 3</span>
+              </p>
+            )}
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-3 w-full pt-2">
+            <button onClick={onUpdateNow} className="flex-1 bg-blue-600 hover:bg-blue-500 py-3 rounded-xl text-white text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95">Update Now</button>
+            {!isMandatory && (
+              <button onClick={onUpdateLater} className="flex-1 bg-slate-800 hover:bg-slate-700 py-3 rounded-xl text-slate-300 text-[10px] font-black uppercase tracking-widest transition-all">Next Login</button>
+            )}
           </div>
         </div>
       </div>

@@ -12,8 +12,8 @@ using System.Reflection;
 [assembly: AssemblyCompany("ILCBala")]
 [assembly: AssemblyProduct("BharatPay Pro")]
 [assembly: AssemblyCopyright("© 2026 ILCBala. All rights reserved.")]
-[assembly: AssemblyFileVersion("1.0.0.9")]
-[assembly: AssemblyVersion("1.0.0.9")]
+[assembly: AssemblyFileVersion("1.0.0.10")]
+[assembly: AssemblyVersion("1.0.0.10")]
 
 namespace BharatPayLauncher
 {
@@ -120,8 +120,10 @@ namespace BharatPayLauncher
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", APP_NAME, EXE_NAME),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), APP_NAME, EXE_NAME),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), APP_NAME, EXE_NAME),
+                Path.Combine(@"D:\BharatPayRoll\", APP_NAME, EXE_NAME),
+                Path.Combine(@"E:\BharatPayRoll\", APP_NAME, EXE_NAME),
                 Path.Combine(@"D:\", APP_NAME, EXE_NAME),
-                Path.Combine(@"C:\", APP_NAME, EXE_NAME)
+                Path.Combine(@"E:\", APP_NAME, EXE_NAME)
             };
 
             foreach (var path in commonPaths)
@@ -176,7 +178,14 @@ namespace BharatPayLauncher
                 
                 client.DownloadProgressChanged += (sender, e) =>
                 {
-                    Console.Write(("\r⏳ Progress: " + e.ProgressPercentage + "%").PadRight(40));
+                    if (e.TotalBytesToReceive > 0)
+                    {
+                        Console.Write(("\r⏳ Progress: " + e.ProgressPercentage + "%  (" + (e.BytesReceived / 1024 / 1024) + " MB / " + (e.TotalBytesToReceive / 1024 / 1024) + " MB)").PadRight(60));
+                    }
+                    else
+                    {
+                        Console.Write(("\r⏳ Downloading... " + (e.BytesReceived / 1024 / 1024) + " MB received").PadRight(60));
+                    }
                 };
 
                 bool downloadFinished = false;

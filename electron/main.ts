@@ -64,8 +64,13 @@ const getAppPaths = (base: string) => {
         // Case: User selected the 'BharatPP' folder itself
         root = base;
     } else {
-        // Case: New installation or empty folder, default to appending BharatPP
-        root = path.join(base, 'BharatPP');
+        // Case: New installation or empty folder
+        // V04.00.02: Prevent nested BharatPP folder creation if already pointing to Dev/Prod root
+        if (base.endsWith('BharatPP') || base.endsWith('BharatPP_Dev')) {
+            root = base;
+        } else {
+            root = path.join(base, 'BharatPP');
+        }
     }
 
     return {
@@ -301,6 +306,27 @@ function ensureDatabase() {
     return false;
 }
 
+/**
+ * 📁 RECURSIVELY COPY DIRECTORIES SYNC
+ * Safely copies folder structures and assets.
+ */
+function copyRecursiveSync(src: string, dest: string) {
+    if (!fs.existsSync(src)) return;
+    if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        if (entry.isDirectory()) {
+            copyRecursiveSync(srcPath, destPath);
+        } else {
+            try {
+                fs.copyFileSync(srcPath, destPath);
+            } catch (e) {} // ignore locked/busy file errors
+        }
+    }
+}
+
 
 // Deferring DB initialization to app.whenReady() for Ultra-Fast Startup.
 
@@ -320,15 +346,45 @@ function createWindow() {
         autoHideMenuBar: true,
         show: false, // Don't show until ready-to-show
     });
-
     mainWindow.once('ready-to-show', () => {
         if (mainWindow) mainWindow.show();
+    });
+
+    mainWindow.on('close', (e) => {
+        if (isUpdateDownloading) {
+            e.preventDefault();
+            closeRequested = true;
+            dialog.showMessageBox(mainWindow!, {
+                type: 'info',
+                title: 'Update in Progress',
+                message: 'A new version is currently downloading in the background.\n\nThe application will close automatically upon completion to apply the update. Please wait.',
+                buttons: ['OK']
+            });
+        }
+    });
+
+    // We will export a method for the downloader to call when finished
+    ipcMain.handle('check-close-requested', () => {
+        if (closeRequested) {
+            app.quit();
+        }
     });
 
     if (isDev) {
         mainWindow.loadURL('http://localhost:3000');
     } else {
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+        
+        // Disable DevTools in Production Environment
+        mainWindow.webContents.on('devtools-opened', () => {
+            mainWindow?.webContents.closeDevTools();
+        });
+        
+        mainWindow.webContents.on('before-input-event', (event, input) => {
+            if ((input.control && input.shift && input.key.toLowerCase() === 'i') || input.key === 'F12') {
+                event.preventDefault();
+            }
+        });
     }
 
     mainWindow.on('closed', () => {
@@ -341,15 +397,23 @@ function createWindow() {
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock && !isDev) {
-  // A second instance tried to launch — show a warning and quit.
-  dialog.showErrorBox(
-    '⚠  BharatPay Pro — Already Running',
-    'BharatPay Pro is already open on this machine.\n\n' +
-    'Only one session is allowed at a time.\n\n' +
-    'Please switch to the existing window.\n' +
-    'If the app is unresponsive, close it from the Windows Taskbar and try again.'
-  );
-  app.quit();
+  // A second instance tried to launch — show the custom already running UI.
+  app.whenReady().then(() => {
+    const errorWin = new BrowserWindow({
+      width: 420,
+      height: 380,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      alwaysOnTop: true,
+      webPreferences: { 
+        nodeIntegration: false, 
+        contextIsolation: true 
+      }
+    });
+    errorWin.loadFile(path.join(__dirname, 'already-running.html'));
+    errorWin.on('closed', () => app.quit());
+  });
 } else {
   // If a second instance attempts while we are the primary, focus our window (only in prod).
   app.on('second-instance', () => {
@@ -360,6 +424,16 @@ if (!gotTheLock && !isDev) {
   });
 }
 // ─────────────────────────────────────────────────────────────────────────
+
+// --- V05.02.09: HARDWARE ACCELERATION FALLBACK FOR LEGACY OS ---
+// Detect Windows 7 (NT 6.1) or older Electron versions to prevent WebGL/GLES crashes on old Intel Graphics
+const isWin7 = os.platform() === 'win32' && parseInt(os.release().split('.')[0]) <= 6;
+const isLegacyElectron = parseInt(process.versions.electron.split('.')[0]) < 30;
+
+if (isWin7 || isLegacyElectron || process.argv.includes('--disable-gpu')) {
+    console.warn('⚠️ Legacy OS or GPU Disabled Flag detected. Disabling Hardware Acceleration to prevent GLES crashes.');
+    app.disableHardwareAcceleration();
+}
 
 app.whenReady().then(() => {
     // ── ULTRA-FAST STARTUP (V02.02.26) ──
@@ -420,6 +494,63 @@ ipcMain.handle('select-app-directory', async () => {
 
 ipcMain.handle('initialize-app-directory', async (_, selectedPath: string) => {
     try {
+        // ENFORCE ISOLATION: Prevent nesting BharatPP inside BPP_APP
+        if (selectedPath.endsWith('BPP_APP') || selectedPath.endsWith('BPP_APP\\') || selectedPath.endsWith('BPP_APP/')) {
+            selectedPath = path.dirname(selectedPath);
+        }
+
+        if (appBasePath && appBasePath !== selectedPath) {
+            console.log(`[IPC] Migrating from ${appBasePath} to ${selectedPath}`);
+            const oldPaths = getAppPaths(appBasePath);
+            const newPaths = getAppPaths(selectedPath);
+            
+            // 1. Migrate registry active_db.sqlite
+            const oldRegistry = path.join(appBasePath, 'active_db.sqlite');
+            const newRegistry = path.join(selectedPath, 'active_db.sqlite');
+            if (fs.existsSync(oldRegistry) && !fs.existsSync(newRegistry)) {
+                try {
+                    fs.copyFileSync(oldRegistry, newRegistry);
+                    console.log(`[IPC] Copied registry DB to ${newRegistry}`);
+                } catch (e) {
+                    console.error('[IPC] Failed to copy registry DB:', e);
+                }
+            }
+            
+            // Reusing top-level copyRecursiveSync to migrate directories safely
+
+            // 2. Migrate data folder
+            // If the old data exists, and the new destination data folder doesn't exist or is empty
+            if (fs.existsSync(oldPaths.data)) {
+                if (!fs.existsSync(newPaths.data)) {
+                    fs.mkdirSync(newPaths.data, { recursive: true });
+                }
+                
+                // Only copy if destination is mostly empty to avoid overwriting existing data
+                const newFiles = fs.readdirSync(newPaths.data);
+                if (newFiles.length === 0 || (newFiles.length === 1 && newFiles[0] === 'active_db.sqlite')) {
+                    console.log(`[IPC] Migrating data folder from ${oldPaths.data} to ${newPaths.data}`);
+                    
+                    // Copy Data folder contents
+                    copyRecursiveSync(oldPaths.data, newPaths.data);
+                    
+                    // Copy Reports folder
+                    if (fs.existsSync(oldPaths.reports)) copyRecursiveSync(oldPaths.reports, newPaths.reports);
+                    
+                    // Copy Backups folder
+                    if (fs.existsSync(oldPaths.backups)) copyRecursiveSync(oldPaths.backups, newPaths.backups);
+                    
+                    // Copy Templates folder
+                    if (fs.existsSync(oldPaths.templates)) copyRecursiveSync(oldPaths.templates, newPaths.templates);
+                }
+            }
+            
+            // Close the current DB before initializing the new one
+            if (db) {
+                try { db.close(); } catch (e) {}
+                db = null;
+            }
+        }
+
         initializeDatabase(selectedPath);
         appBasePath = selectedPath;
         saveAppConfig({ ...getAppConfig(), appBasePath });
@@ -585,6 +716,14 @@ ipcMain.handle('open-user-manual', async () => {
                 
                 const content = fs.readFileSync(manualPath);
                 fs.writeFileSync(tempManualPath, content as any);
+
+                // Copy manual image assets to temp folder so they render correctly in production
+                const srcAssetsDir = path.join(appRoot, 'docs', 'assets');
+                const destAssetsDir = path.join(tempDir, 'assets');
+                if (fs.existsSync(srcAssetsDir)) {
+                    copyRecursiveSync(srcAssetsDir, destAssetsDir);
+                    console.log(`[IPC] Copied user manual assets to: ${destAssetsDir}`);
+                }
                 
                 console.log(`[IPC] Extracted manual to temp: ${tempManualPath}`);
                 await shell.openPath(tempManualPath);
@@ -602,6 +741,81 @@ ipcMain.handle('open-user-manual', async () => {
         throw new Error(`User manual not found. Please ensure 'docs/user_manual.html' exists.`);
     } catch (e: any) {
         console.error('[IPC] Open user manual failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+// 2e. Statutory Forms Handling (Preview & Save blank templates)
+ipcMain.handle('handle-statutory-form', async (_, { formName, action }) => {
+    try {
+        console.log(`[IPC] handle-statutory-form requested for: ${formName}, action: ${action}`);
+        
+        const isDev = !app.isPackaged;
+        const appRoot = isDev ? process.cwd() : app.getAppPath();
+        
+        // Map friendly names to real files in docs directory
+        const formMap: Record<string, string> = {
+            'ESI Form 1': 'ESI_Form-1 Latest.pdf',
+            'PF Form 2': 'PF_Form 2-Revised.pdf',
+            'PF Form 11': 'PF_Form11 Revised.pdf'
+        };
+
+        const fileName = formMap[formName];
+        if (!fileName) {
+            throw new Error(`Unsupported statutory form: ${formName}`);
+        }
+
+        const sourcePath = path.join(appRoot, 'docs', fileName);
+        const fallbackPath = path.resolve(__dirname, '..', 'docs', fileName);
+        console.log(`[IPC] Resolved statutory form source path: ${sourcePath}`);
+
+        if (!fs.existsSync(sourcePath)) {
+            // Check fallback resolve path
+            if (!fs.existsSync(fallbackPath)) {
+                throw new Error(`Statutory form file not found.\n- Source: ${sourcePath}\n- Fallback: ${fallbackPath}\n- AppRoot: ${appRoot}\n- __dirname: ${__dirname}`);
+            }
+        }
+        
+        const actualSourcePath = fs.existsSync(sourcePath) ? sourcePath : fallbackPath;
+
+        if (action === 'preview') {
+            // Extract to temp folder to avoid ASAR path issues on default PDF viewers
+            const tempDir = app.getPath('temp');
+            const tempFormPath = path.join(tempDir, fileName);
+            
+            const content = fs.readFileSync(actualSourcePath);
+            fs.writeFileSync(tempFormPath, new Uint8Array(content));
+            
+            console.log(`[IPC] Extracted statutory form for preview: ${tempFormPath}`);
+            const openError = await shell.openPath(tempFormPath);
+            if (openError) {
+                console.warn(`[IPC] shell.openPath failed with error: ${openError}. Falling back to openExternal...`);
+                // Fallback: Open with default web browser using file:// protocol
+                const fileUrl = `file:///${tempFormPath.replace(/\\/g, '/')}`;
+                await shell.openExternal(fileUrl);
+            }
+            return { success: true };
+        } else if (action === 'download') {
+            // Prompt user where to save the file
+            const result = await dialog.showSaveDialog({
+                title: `Download Blank ${formName}`,
+                defaultPath: path.join(app.getPath('downloads'), fileName),
+                filters: [{ name: 'PDF Documents', extensions: ['pdf'] }]
+            });
+
+            if (result.canceled || !result.filePath) {
+                return { success: false, error: 'Download canceled' };
+            }
+
+            const content = fs.readFileSync(actualSourcePath);
+            fs.writeFileSync(result.filePath, new Uint8Array(content));
+            console.log(`[IPC] Downloaded statutory form successfully to: ${result.filePath}`);
+            return { success: true, savedPath: result.filePath };
+        }
+
+        throw new Error(`Invalid action: ${action}`);
+    } catch (e: any) {
+        console.error('[IPC] Handle statutory form failed:', e);
         return { success: false, error: e.message };
     }
 });
@@ -660,7 +874,23 @@ ipcMain.handle('db-set', async (_, { key, value }) => {
 ipcMain.handle('db-get', async (_, key) => {
     try {
         if (!ensureDatabase()) return { success: true, data: null };
-        const row = db!.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string };
+        let row = db!.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
+        
+        // ── Robust Registry Fallback for Global Keys ──
+        const globalKeys = ['app_companies', 'app_active_company_id', 'app_license_secure', 'app_users', 'app_machine_id', 'app_setup_complete', 'app_developer_secure'];
+        if (!row && appBasePath && globalKeys.includes(key as string)) {
+            const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+            if (fs.existsSync(rootDbPath)) {
+                try {
+                    const rootDb = new Database(rootDbPath);
+                    row = rootDb.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
+                    rootDb.close();
+                } catch (err) {
+                    console.warn('[IPC] Failed to fetch key from root registry database:', err);
+                }
+            }
+        }
+        
         return { success: true, data: row ? JSON.parse(row.value) : null };
     } catch (e: any) {
         return { success: false, error: e.message };
@@ -682,21 +912,90 @@ ipcMain.handle('db-get-all', async () => {
     try {
         if (!db) return { success: true, data: [] };
         const rows = db.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
-        return { success: true, data: rows.map(r => ({ key: r.key, value: JSON.parse(r.value) })) };
+        const mergedData = rows.map(r => ({ key: r.key, value: JSON.parse(r.value) }));
+        
+        // ── Robust Registry Merging ──
+        if (appBasePath) {
+            const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+            if (fs.existsSync(rootDbPath)) {
+                try {
+                    const rootDb = new Database(rootDbPath);
+                    const globalKeys = ['app_companies', 'app_active_company_id'];
+                    for (const key of globalKeys) {
+                        const exists = mergedData.some(item => item.key === key);
+                        if (!exists) {
+                            const row = rootDb.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
+                            if (row) {
+                                mergedData.push({ key, value: JSON.parse(row.value) });
+                            }
+                        }
+                    }
+                    rootDb.close();
+                } catch (err) {
+                    console.warn('[IPC] Failed to merge keys from root registry database:', err);
+                }
+            }
+        }
+        
+        return { success: true, data: mergedData };
     } catch (e: any) {
         return { success: false, error: e.message };
     }
 });
 
+ipcMain.handle('db-get-global', async (_, key) => {
+    try {
+        console.log(`[db-get-global] Requested key: ${key}. appBasePath: ${appBasePath}`);
+        if (!appBasePath) return null;
+        
+        const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+        console.log(`[db-get-global] DB Path: ${rootDbPath}. Exists? ${fs.existsSync(rootDbPath)}`);
+        if (!fs.existsSync(rootDbPath)) return null;
+        
+        const rootDb = new Database(rootDbPath, { readonly: true });
+        // Use readonly connection to avoid locking issues just for a read!
+        // V03.00.00: It used to do CREATE TABLE IF NOT EXISTS store, but readonly DBs can't.
+        // Assuming store already exists.
+        const stmt = rootDb.prepare('SELECT value FROM store WHERE key = ?');
+        const row = stmt.get(key) as { value: string } | undefined;
+        rootDb.close();
+        
+        console.log(`[db-get-global] Row found? ${!!row}`);
+        
+        if (row && row.value) {
+           try {
+              return JSON.parse(row.value);
+           } catch (e) {
+              return row.value;
+           }
+        }
+        return null;
+    } catch (e) {
+        console.warn(`[IPC] Failed to get global key ${key}:`, e);
+        return null;
+    }
+});
+
 ipcMain.handle('db-set-global', async (_, { key, value }) => {
     try {
-        // Always write to the ROOT database (Registry)
+        // 1. Always write to the ROOT database (Registry)
         const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
         const rootDb = new Database(rootDbPath);
         rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
         const stmt = rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
         stmt.run(key, JSON.stringify(value));
         rootDb.close();
+        
+        // 2. ALSO write to the currently active isolated database connection as a backup silo!
+        if (db) {
+            try {
+                const activeStmt = db.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+                activeStmt.run(key, JSON.stringify(value));
+            } catch (activeErr) {
+                console.warn('[IPC] Failed to replicate global key in active database:', activeErr);
+            }
+        }
+        
         return { success: true };
     } catch (e: any) {
         return { success: false, error: e.message };
@@ -721,22 +1020,92 @@ ipcMain.handle('list-silos', async () => {
     }
 });
 
+async function robustRm(targetPath: string, maxRetries = 15, delayMs = 300) {
+    if (!fs.existsSync(targetPath)) return;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            fs.rmSync(targetPath, { recursive: true, force: true });
+            console.log(`[robustRm] Successfully deleted ${targetPath} on attempt ${attempt}`);
+            return;
+        } catch (err: any) {
+            console.warn(`[robustRm] Attempt ${attempt} failed to delete ${targetPath}. Error: ${err.message}`);
+            if (attempt === maxRetries) {
+                throw err;
+            }
+            // Yield the event loop asynchronously to allow the OS and Node to release lock handles
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+    }
+}
+
 ipcMain.handle('delete-silo', async (_, companyId: string) => {
     try {
         if (!appBasePath) throw new Error("App storage not initialized");
         if (!companyId || companyId === 'default') throw new Error("Invalid company ID for deletion");
         
+        console.log(`[IPC] delete-silo request for company: ${companyId}`);
+        
+        // V04.01.07: Safely close database connection first if the silo to delete is currently active
+        if (activeCompanyId === companyId) {
+            console.log(`[IPC] Silo is currently active: ${companyId}. Closing SQLite connection to release file locks before physical folder deletion.`);
+            if (db) {
+                try {
+                    db.pragma('wal_checkpoint(TRUNCATE)');
+                    db.close();
+                } catch (dbErr: any) {
+                    console.error(`[IPC] Failed to close SQLite database for active silo:`, dbErr);
+                }
+                db = null;
+            }
+            // Yield to let OS release file locks
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+        // Physically delete the silo folder completely
         const paths = getAppPaths(appBasePath);
         const siloPath = path.join(paths.data, companyId);
         
         if (fs.existsSync(siloPath)) {
-            console.log(`[IPC] Deleting physical silo folder: ${siloPath}`);
-            fs.rmSync(siloPath, { recursive: true, force: true });
+            try {
+                await robustRm(siloPath, 15, 300); // 15 attempts, 300ms delay = 4.5 seconds max
+                console.log(`[IPC] Physical silo folder deleted successfully: ${siloPath}`);
+            } catch (fsErr: any) {
+                console.error(`[IPC] Physical silo folder deletion failed:`, fsErr);
+                throw fsErr;
+            }
+        } else {
+            console.log(`[IPC] Physical silo folder did not exist on disk: ${siloPath}`);
         }
         
         return { success: true };
     } catch (e: any) {
         console.error('[IPC] delete-silo failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+// V04.01.07: Dedicated in-place wipe for the currently active company silo.
+// This avoids ANY file system operations (no close, no rmSync, no re-open),
+// preventing Windows EBUSY locks that caused indefinite hangs during restore.
+ipcMain.handle('wipe-company-data', async (_, companyId: string) => {
+    try {
+        if (!db) throw new Error("Database not initialized");
+        if (!companyId || companyId === 'default') throw new Error("Invalid company ID");
+
+        console.log(`[IPC] wipe-company-data: in-place purge for ${companyId}`);
+
+        // Purge all rows except the three protected system keys.
+        // Using != (not LIKE without wildcards) for clarity and correctness.
+        const stmt = db.prepare(
+            `DELETE FROM store WHERE key != 'app_users' AND key != 'app_license_secure' AND key != 'app_developer_secure'`
+        );
+        const result = stmt.run();
+        console.log(`[IPC] wipe-company-data: purged ${result.changes} rows for ${companyId}`);
+
+        return { success: true, changes: result.changes };
+    } catch (e: any) {
+        console.error('[IPC] wipe-company-data failed:', e);
         return { success: false, error: e.message };
     }
 });
@@ -792,8 +1161,9 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
     try {
         const fileName = typeof arg === 'string' ? arg : arg.fileName;
         const subfolder = typeof arg === 'object' ? arg.subfolder : '';
+        const financialYear = (typeof arg === 'object' && arg.financialYear) ? arg.financialYear : null;
 
-        console.log(`[IPC] create-data-backup requested: ${fileName} in subfolder: ${subfolder}`);
+        console.log(`[IPC] create-data-backup requested: ${fileName} in subfolder: ${subfolder}, financialYear: ${financialYear || 'ALL'}`);
         console.log(`[IPC] Current DB instance: ${db ? 'Present' : 'NULL'}`);
         console.log(`[IPC] Current appBasePath: ${appBasePath}`);
 
@@ -820,11 +1190,21 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
         const finalPath = path.join(targetDir, `${fileName}.enc`);
 
         
-        console.log(`[IPC] Creating filtered backup (excluding user/license data)...`);
+        console.log(`[IPC] Creating filtered backup (excluding user/license data, scoped to ${financialYear || 'all FYs'})...`);
         const backupDb = new Database(tempPath);
         backupDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
         
-        const rows = db!.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
+        const rawRows = db!.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
+        
+        // Filter rows based on financial year if specified
+        const rows = financialYear
+            ? rawRows.filter(row => {
+                if (row.key.includes('_FY')) {
+                    return row.key.includes(`_${financialYear}_`);
+                }
+                return true;
+            })
+            : rawRows;
         
         const excludedKeys = [
             'app_license_secure', 
@@ -1017,22 +1397,50 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
             db.pragma('journal_mode = WAL');
         }
         
-        // 4.5 Check for Company Name conflict
-        const backupProfileRow = rows.find(r => r.key === 'company_profile');
+        // 4.5 Check for Company Name conflict (V04.01.02: Supports app_ prefixed & scoped keys, and case-insensitive check)
+        const activeId = activeCompanyId;
+        let backupProfileRow = null;
+        if (activeId && activeId !== 'default') {
+            backupProfileRow = rows.find(r => r.key === `app_company_profile_${activeId}`);
+        }
+        if (!backupProfileRow) {
+            backupProfileRow = rows.find(r => r.key === 'app_company_profile' || r.key === 'company_profile');
+        }
+        if (!backupProfileRow && activeId && activeId !== 'default') {
+            backupProfileRow = rows.find(r => r.key.startsWith('app_company_profile_') && r.key.includes(activeId));
+        }
+        if (!backupProfileRow) {
+            backupProfileRow = rows.find(r => r.key.startsWith('app_company_profile') || r.key === 'company_profile');
+        }
+
         if (backupProfileRow) {
             try {
                 const backupProfile = JSON.parse(backupProfileRow.value);
-                const backupName = backupProfile.establishmentName;
+                const backupName = backupProfile.establishmentName || backupProfile.tradeName;
                 
-                const activeProfileRow = db.prepare('SELECT value FROM store WHERE key = ?').get('company_profile') as { value: string } | undefined;
+                let activeProfileRow = null;
+                if (activeId && activeId !== 'default') {
+                    activeProfileRow = db.prepare("SELECT value FROM store WHERE key = ?").get(`app_company_profile_${activeId}`) as { value: string } | undefined;
+                }
+                if (!activeProfileRow) {
+                    activeProfileRow = db.prepare("SELECT value FROM store WHERE key = 'app_company_profile' OR key = 'company_profile'").get() as { value: string } | undefined;
+                }
+                if (!activeProfileRow) {
+                    activeProfileRow = db.prepare("SELECT value FROM store WHERE key LIKE 'app_company_profile%' OR key = 'company_profile'").get() as { value: string } | undefined;
+                }
+
                 if (activeProfileRow) {
                     const activeProfile = JSON.parse(activeProfileRow.value);
-                    const activeName = activeProfile.establishmentName;
+                    const activeName = activeProfile.establishmentName || activeProfile.tradeName;
                     
-                    if (backupName && activeName && backupName !== activeName) {
-                        sourceDb.close();
-                        fs.unlinkSync(tempRestorePath);
-                        return { success: false, error: `Data restoration failed due to conflict in Company Name. Backup belongs to '${backupName}', but active company is '${activeName}'.` };
+                    if (backupName && activeName) {
+                        const bNameClean = backupName.trim().toUpperCase();
+                        const aNameClean = activeName.trim().toUpperCase();
+                        if (bNameClean !== aNameClean) {
+                            sourceDb.close();
+                            fs.unlinkSync(tempRestorePath);
+                            return { success: false, error: `Data Restoration Failed: Company Name Mismatch. The backup belongs to '${bNameClean}', but your active importing company is '${aNameClean}'.` };
+                        }
                     }
                 }
             } catch (e) {
@@ -1041,9 +1449,11 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
         }
         
         // 5. Merge rows into active database, skipping excluded keys
+        const deleteStmt = db.prepare(`DELETE FROM store WHERE key NOT IN (${excludedKeys.map(() => '?').join(',')})`);
         const upsertStmt = db.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
         
         db.transaction(() => {
+            deleteStmt.run(...excludedKeys);
             for (const row of rows) {
                 if (!excludedKeys.includes(row.key)) {
                     upsertStmt.run(row.key, row.value);
@@ -1220,17 +1630,20 @@ ipcMain.handle('find-bpp-app', async () => {
 
             drives.forEach(drive => {
                 potentialRoots.push(path.join(drive, 'BPP_APP'));
+                potentialRoots.push(path.join(drive, 'BharatPayRoll', 'BPP_APP'));
                 potentialRoots.push(path.join(drive, 'BPP', 'BPP_APP')); // Check subfolder too
             });
         } catch (e) {
             // Fallback if WMIC fails
             ['C:', 'D:', 'E:', 'F:', 'G:', 'H:'].forEach(d => {
                 potentialRoots.push(path.join(d, '/', 'BPP_APP'));
+                potentialRoots.push(path.join(d, '/', 'BharatPayRoll', 'BPP_APP'));
             });
         }
 
         // 2. Add User Home
         potentialRoots.push(path.join(app.getPath('home'), 'BPP_APP'));
+        potentialRoots.push(path.join(app.getPath('home'), 'BharatPayRoll', 'BPP_APP'));
 
         // 3. Scan for first existing one
         for (const p of potentialRoots) {
@@ -1255,7 +1668,11 @@ ipcMain.handle('find-bpp-app', async () => {
 const INSTALLER_NAME = 'bpp_installer.exe';
 const getInstallerPath = () => path.join(os.tmpdir(), INSTALLER_NAME);
 
+let isUpdateDownloading = false;
+let closeRequested = false;
+
 ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedHash?: string) => {
+    isUpdateDownloading = true;
     return new Promise((resolve) => {
         try {
             const dest = getInstallerPath();
@@ -1300,6 +1717,7 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
                         if (String.fromCharCode(buffer[0], buffer[1]) !== 'MZ') {
                             console.error('❌ Security Violation: Downloaded file is not a valid Windows Executable.');
                             fs.unlinkSync(dest);
+                            isUpdateDownloading = false;
                             resolve({ success: false, error: 'INVALID_BINARY_TYPE' });
                             return;
                         }
@@ -1323,6 +1741,7 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
                             if (calculatedHash.toLowerCase() !== expectedHash.toLowerCase()) {
                                 console.error(`❌ Security Violation: Hash Mismatch!\nExpected: ${expectedHash}\nActual: ${calculatedHash}`);
                                 fs.unlinkSync(dest);
+                                isUpdateDownloading = false;
                                 resolve({ success: false, error: 'SECURITY_HASH_MISMATCH' });
                                 return;
                             }
@@ -1330,6 +1749,7 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
                         } catch (hashErr: any) {
                             console.error('❌ Hash calculation failed:', hashErr);
                             fs.unlinkSync(dest);
+                            isUpdateDownloading = false;
                             resolve({ success: false, error: 'Integrity check failed' });
                             return;
                         }
@@ -1338,15 +1758,18 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
                     BrowserWindow.getAllWindows().forEach(win => {
                         win.webContents.send('update-download-complete');
                     });
+                    isUpdateDownloading = false;
                     console.log(`✅ Update download finished. Total Bytes: ${fs.statSync(dest).size}`);
                     resolve({ success: true, path: dest });
+                    if (closeRequested) app.quit();
                 });
-                
                 response.on('error', (err: any) => {
                     file.end();
                     fs.unlink(dest, () => { });
                     console.error('❌ Update download stream failed:', err);
+                    isUpdateDownloading = false;
                     resolve({ success: false, error: err.message });
+                    if (closeRequested) app.quit();
                 });
             });
 
@@ -1354,7 +1777,9 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
                 file.end();
                 fs.unlink(dest, () => { });
                 console.error('❌ Update request failed:', err);
+                isUpdateDownloading = false;
                 resolve({ success: false, error: err.message });
+                if (closeRequested) app.quit();
             });
             
             request.end();

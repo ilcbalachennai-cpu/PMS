@@ -68,14 +68,16 @@ interface EmployeeListProps {
     ) => void;
     globalMonth: string;
     globalYear: number;
+    activeFinancialYear?: string;
 }
 
 const EmployeeList: React.FC<EmployeeListProps> = ({
     employees, setEmployees, onAddEmployee, onBulkAddEmployees,
     designations, divisions, branches, sites, currentUser, companyProfile, dataSizeLimit, showAlert,
-    globalMonth, globalYear
+    globalMonth, globalYear, activeFinancialYear
 }) => {
     // --- State Management ---
+    const [filterByFY, setFilterByFY] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedEmp, setSelectedEmp] = useState<Employee | null>(null);
     const [isAdding, setIsAdding] = useState(false);
@@ -91,6 +93,38 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     const [authModal, setAuthModal] = useState({ isOpen: false, password: '', error: '', targetEmp: null as Employee | null, mode: 'DELETE' as 'DELETE' | 'EXPORT' | 'REJOIN' | 'UNLOCK_SEPARATION' });
     const [deleteModal, setDeleteModal] = useState({ isOpen: false, employee: null as Employee | null });
     const [exportModal, setExportModal] = useState({ isOpen: false, format: 'Excel' as 'Excel' | 'PDF', selectedColumns: AVAILABLE_COLUMNS.map(c => c.key), password: '', error: '' });
+    const [frozenEmployeeIds, setFrozenEmployeeIds] = useState<Set<string>>(new Set());
+
+    React.useEffect(() => {
+        const fetchFrozenIds = async () => {
+            try {
+                // @ts-ignore
+                if (window.electronAPI) {
+                    // @ts-ignore
+                    const res = await window.electronAPI.dbGetAll();
+                    if (res && res.success && res.data) {
+                        const ids = new Set<string>();
+                        for (const item of res.data) {
+                            if (item.key.startsWith('app_payroll_history')) {
+                                const history = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
+                                if (Array.isArray(history)) {
+                                    history.forEach((r: any) => {
+                                        if (r.status === 'Finalized') {
+                                            ids.add(r.employeeId);
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                        setFrozenEmployeeIds(ids);
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to fetch frozen employee IDs:", err);
+            }
+        };
+        fetchFrozenIds();
+    }, [activeFinancialYear, employees]);
 
     // --- Refs ---
     const photoInputRef = useRef<HTMLInputElement>(null);
@@ -114,7 +148,25 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     const [newEmpForm, setNewEmpForm] = useState<Partial<Employee>>(INITIAL_FORM_STATE);
 
     // --- Derived Data ---
-    const activeEmployees = useMemo(() => employees.filter(e => !e.dol), [employees]);
+    const fyEndDate = useMemo(() => {
+        if (!activeFinancialYear) return null;
+        const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+        if (!match) return null;
+        const endYear = 2000 + parseInt(match[2]);
+        return new Date(`${endYear}-03-31T23:59:59Z`);
+    }, [activeFinancialYear]);
+
+    const activeEmployees = useMemo(() => {
+        let list = employees.filter(e => !e.dol);
+        if (filterByFY && fyEndDate) {
+            list = list.filter(e => {
+                if (!e.doj) return true;
+                return new Date(e.doj) <= fyEndDate;
+            });
+        }
+        return list;
+    }, [employees, filterByFY, fyEndDate]);
+
     const exEmployees = useMemo(() => employees.filter(e => e.dol), [employees]);
 
     const filteredEmployees = useMemo(() =>
@@ -161,8 +213,80 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         setIsSeparationUnlocked(false);
     };
 
-    const handleDeleteClick = (emp: Employee, e: React.MouseEvent) => {
+    const handleDeleteClick = async (emp: Employee, e: React.MouseEvent) => {
         e.stopPropagation();
+
+        // Check if employee has finalized payroll records to protect historical data integrity
+        try {
+            // @ts-ignore
+            if (window.electronAPI) {
+                // @ts-ignore
+                const res = await window.electronAPI.dbGetAll();
+                if (res && res.success && res.data) {
+                    let hasFrozenWages = false;
+                    let hasDraftWages = false;
+                    
+                    for (const item of res.data) {
+                        if (item.key.startsWith('app_payroll_history')) {
+                            const history = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
+                            if (Array.isArray(history)) {
+                                const records = history.filter(r => r.employeeId === emp.id);
+                                if (records.some(r => r.status === 'Finalized')) {
+                                    hasFrozenWages = true;
+                                    break;
+                                } else if (records.length > 0) {
+                                    hasDraftWages = true;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (hasFrozenWages) {
+                        showAlert(
+                            'danger',
+                            'Deletion Blocked',
+                            `Past Pay Data Exist for this Employee, Deletion not Possible`,
+                            undefined, undefined, 'Understood'
+                        );
+                        return; // Block deletion
+                    }
+
+                    if (hasDraftWages) {
+                        showAlert(
+                            'confirm',
+                            'Warning',
+                            'Draft Pay Data Exisit for this employee, deletion will remove the Employee along with Pay Data',
+                            () => {
+                                setAuthModal({ isOpen: true, password: '', error: '', targetEmp: emp, mode: 'DELETE' });
+                            },
+                            undefined,
+                            'Proceed',
+                            undefined,
+                            'Cancel'
+                        );
+                        return; // Wait for user confirmation in the alert
+                    }
+
+                    // Neither frozen nor draft wages exist (clean employee)
+                    showAlert(
+                        'confirm',
+                        'Warning',
+                        'Employee Deletion is intiated before Process Payroll',
+                        () => {
+                            setAuthModal({ isOpen: true, password: '', error: '', targetEmp: emp, mode: 'DELETE' });
+                        },
+                        undefined,
+                        'Proceed',
+                        undefined,
+                        'Cancel'
+                    );
+                    return;
+                }
+            }
+        } catch (err) {
+            console.error("Failed to check payroll history:", err);
+        }
+
         setAuthModal({ isOpen: true, password: '', error: '', targetEmp: emp, mode: 'DELETE' });
     };
 
@@ -380,6 +504,9 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     onExportClick={() => setExportModal({ ...exportModal, isOpen: true })}
                     onShowRejoin={() => setShowRejoinPanel(true)}
                     onAddNew={handleAddNew}
+                    showFYFilter={filterByFY}
+                    onToggleFYFilter={setFilterByFY}
+                    activeFinancialYear={activeFinancialYear}
                 />
             </div>
 
@@ -395,6 +522,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                             onDelete={handleDeleteClick}
                             calculateGrossWage={calculateGrossWage}
                             currentUser={currentUser}
+                            frozenEmployeeIds={frozenEmployeeIds}
                         />
                     </div>
                     <div className="xl:col-span-1 space-y-6">

@@ -40,6 +40,8 @@ interface PayProcessProps {
     setOTRecords: React.Dispatch<React.SetStateAction<OTRecord[]>>;
     showAlert: any;
     licenseInfo?: LicenseData;
+    hasPreviousYearData?: boolean;
+    activeFinancialYear?: string;
 }
 
 // Global OS Detection for UI refinement
@@ -370,6 +372,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 setYear={props.setYear}
                 onProceed={() => setIsGatewayOpen(false)}
                 savedRecords={props.savedRecords}
+                hasPreviousYearData={props.hasPreviousYearData}
+                activeFinancialYear={props.activeFinancialYear}
             />
         );
     }

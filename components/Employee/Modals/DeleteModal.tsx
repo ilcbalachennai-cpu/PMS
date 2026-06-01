@@ -30,7 +30,9 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
                     <div className="p-4 bg-red-900/10 border border-red-900/20 rounded-xl flex gap-4">
                         <AlertCircle className="text-red-400 shrink-0" size={24} />
                         <div className="text-xs text-red-300 leading-relaxed font-medium">
-                            CAUTION: You are about to permanently purge <span className="text-white font-bold">{employee.name} ({employee.id})</span> from the master records. This action cannot be undone and will affect historical payroll references.
+                            CAUTION: You are about to permanently purge <span className="text-white font-bold">{employee.name} ({employee.id})</span> from the master records. This action cannot be undone. 
+                            <br/><br/>
+                            <span className="text-[10px] text-red-400/80">Note: Purging is only permitted for employees with no finalized payroll records. To remove an employee with payroll history, use the "Date of Leaving" option instead.</span>
                         </div>
                     </div>
                     <div className="flex gap-4">

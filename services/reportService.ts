@@ -669,7 +669,7 @@ export const generateStateAdvanceRegister = async (results: PayrollResult[], emp
     const title = `${stateName} Shops & Establishment Act\n${formName} - Register of Advances (${month} ${year})`;
     const fileName = getStandardFileName(`${stateName.replace(/\s+/g, '')}_${formName.split(' ')[0]}_AdvReg`, companyProfile, month, year);
 
-    return await generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile, { 3: { halign: 'right' }, 5: { halign: 'center' }, 6: { halign: 'right' }, 7: { halign: 'right' } });
+    return await generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile, { 3: { halign: 'right' }, 5: { halign: 'center' }, 6: { halign: 'right' }, 7: { halign: 'right', fontStyle: 'bold' } });
 };
 
 export const generateSimplePaySheetPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, subtitle?: string, customFilename?: string, config?: StatutoryConfig): Promise<string | null> => {
@@ -1031,11 +1031,31 @@ export const generateBankStatementPDF = async (results: PayrollResult[], employe
     return await generatePDFTableReport(`Bank Statement - ${month} ${year}`, headers, data, fileName, 'p', '', companyProfile, { 4: { halign: 'right' } });
 };
 
-export const generateLeaveLedgerReport = async (_results: PayrollResult[], employees: Employee[], leaveLedgers: LeaveLedger[], month: string, year: number, _format: string, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateLeaveLedgerReport = async (results: PayrollResult[], employees: Employee[], leaveLedgers: LeaveLedger[], month: string, year: number, _format: string, companyProfile: CompanyProfile): Promise<string | null> => {
     const headers = ['ID', 'Name', 'EL Open', 'EL Credit', 'EL Used', 'EL Bal', 'SL Bal', 'CL Bal'];
-    const data = employees.map(e => { const l = leaveLedgers.find(led => led.employeeId === e.id); if (!l) return [e.id, e.name, '-', '-', '-', '-', '-', '-']; return [e.id, e.name, l.el.opening, l.el.eligible, (l.el.availed + l.el.encashed), l.el.balance, l.sl.balance, l.cl.balance]; });
+    const data = employees.map(e => {
+        const r = results.find(res => res.employeeId === e.id);
+        const l = r?.leaveSnapshot || leaveLedgers.find(led => led.employeeId === e.id);
+        if (!l) return [e.id, e.name, '-', '-', '-', '-', '-', '-'];
+        const elUsed = (l.el.availed || 0) + (l.el.encashed || 0);
+        return [
+            e.id,
+            e.name,
+            l.el.opening ?? 0,
+            l.el.eligible ?? 0,
+            elUsed,
+            l.el.balance ?? 0,
+            l.sl.balance ?? 0,
+            l.cl.balance ?? 0
+        ];
+    });
     const fileName = getStandardFileName('LeaveLedger', companyProfile, month, year);
-    return await generatePDFTableReport(`Leave Ledger - ${month} ${year}`, headers, data, fileName, 'l', '', companyProfile);
+    const colStyles = {
+        5: { fontStyle: 'bold' },
+        6: { fontStyle: 'bold' },
+        7: { fontStyle: 'bold' }
+    };
+    return await generatePDFTableReport(`Leave Ledger - ${month} ${year}`, headers, data, fileName, 'l', '', companyProfile, colStyles);
 };
 
 export const generateAdvanceShortfallReport = async (data: any[], month: string, year: number, format: 'PDF' | 'Excel', companyProfile: CompanyProfile): Promise<string | null> => {
@@ -4121,6 +4141,426 @@ export const generateEmployeesLeftPDF = async (employees: Employee[], month: str
     });
 
     const fileName = getStandardFileName('Employees_Left', companyProfile, month, year);
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+
+    if (!res.success) {
+        doc.save(`${fileName}.pdf`);
+        return null;
+    }
+    return res.path || null;
+};
+
+export const generateContractorMappingText = async (
+    results: PayrollResult[],
+    employees: Employee[],
+    siteFilter: string,
+    companyProfile: CompanyProfile,
+    month: string,
+    year: number
+): Promise<string | null> => {
+    const lines: string[] = [];
+    
+    results.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (emp && (!siteFilter || emp.site === siteFilter)) {
+            const uan = emp.uanc || '';
+            const name = emp.name || '';
+            const pfWages = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0));
+            const days = r.payableDays || 0;
+            
+            // Only include employees who actually earned PF wages this month
+            if (pfWages > 0) {
+                lines.push(`${uan}#~#${name}#~#${pfWages}#~#${days}`);
+            }
+        }
+    });
+
+    if (lines.length === 0) {
+        throw new Error(`No employees found${siteFilter ? ` deployed at site: ${siteFilter}` : ''} for ${month} ${year}`);
+    }
+
+    const content = lines.join('\r\n');
+    const u8 = new TextEncoder().encode(content);
+    const fileName = getStandardFileName(`Contractor_Mapping${siteFilter ? `_${siteFilter}` : ''}`, companyProfile, month, year);
+    const res = await electronSaveReport(fileName + '.txt', u8, 'txt', companyProfile.establishmentName);
+
+    if (!res.success) {
+        throw new Error(res.error || 'Failed to save Contractor Mapping report');
+    }
+    return res.path || null;
+};
+
+export const generateContractorMappingPDF = async (
+    results: PayrollResult[],
+    employees: Employee[],
+    siteFilter: string,
+    companyProfile: CompanyProfile,
+    month: string,
+    year: number
+): Promise<string | null> => {
+    // 1. Gather rows
+    const tableData: any[] = [];
+    let slNo = 1;
+
+    results.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (emp && (!siteFilter || emp.site === siteFilter)) {
+            const uan = emp.uanc || '-';
+            const name = emp.name || '';
+            const pfWages = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0));
+            const days = r.payableDays || 0;
+            
+            // Only include employees who actually earned PF wages this month
+            if (pfWages > 0) {
+                tableData.push([
+                    slNo++,
+                    uan,
+                    name,
+                    pfWages,
+                    days
+                ]);
+            }
+        }
+    });
+
+    if (tableData.length === 0) {
+        throw new Error(`No employees found${siteFilter ? ` deployed at site: ${siteFilter}` : ''} for ${month} ${year}`);
+    }
+
+    // 2. Initialize jsPDF
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = 210; // A4 portrait width in mm
+    let y = 15;
+
+    // Report Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('CONTRACTOR MAPPING REPORT', pageW / 2, y, { align: 'center' }); y += 10;
+
+    // Header metadata block requested by user:
+    // Name of The Contractor: 
+    // Month : 
+    // Year : 
+    doc.setFontSize(10);
+    
+    doc.setFont('helvetica', 'bold');
+    doc.text('Name of The Contractor:', 15, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(companyProfile.establishmentName || '', 60, y);
+    y += 6;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Month:', 15, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(month, 30, y);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Year:', 70, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(String(year), 82, y);
+
+    if (siteFilter) {
+        doc.setFont('helvetica', 'bold');
+        doc.text('Site:', 120, y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(siteFilter, 132, y);
+    }
+    y += 10;
+
+    // 3. Render Table
+    autoTable(doc, {
+        head: [['Sl No', 'UAN', 'Name', 'Wages', 'No. of days']],
+        body: tableData,
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 9, cellPadding: 3 },
+        headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+        columnStyles: {
+            0: { halign: 'center', cellWidth: 15 },
+            1: { halign: 'center', cellWidth: 35 },
+            2: { halign: 'left' },
+            3: { halign: 'right', cellWidth: 30 },
+            4: { halign: 'center', cellWidth: 25 }
+        }
+    });
+
+    // 4. Save using electronSaveReport
+    const fileName = getStandardFileName(`Contractor_Mapping${siteFilter ? `_${siteFilter}` : ''}`, companyProfile, month, year);
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+
+    if (!res.success) {
+        doc.save(`${fileName}.pdf`);
+        return null;
+    }
+    return res.path || null;
+};
+
+export const generatePrincipalMappingText = async (
+    results: PayrollResult[],
+    employees: Employee[],
+    siteFilter: string,
+    estCode: string,
+    empType: string,
+    companyProfile: CompanyProfile,
+    month: string,
+    year: number
+): Promise<string | null> => {
+    const lines: string[] = [];
+    
+    results.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (emp && (!siteFilter || emp.site === siteFilter)) {
+            const uan = emp.uanc || '';
+            const name = emp.name || '';
+            const pfWages = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0));
+            if (pfWages > 0) {
+                lines.push(`${uan}#~#${name}#~#${estCode}#~#${empType}`);
+            }
+        }
+    });
+
+    if (lines.length === 0) {
+        throw new Error(`No employees found${siteFilter ? ` deployed at site: ${siteFilter}` : ''} for ${month} ${year}`);
+    }
+
+    const content = lines.join('\r\n');
+    const u8 = new TextEncoder().encode(content);
+    const fileName = getStandardFileName(`Principal_Employer_Mapping${siteFilter ? `_${siteFilter}` : ''}`, companyProfile, month, year);
+    const res = await electronSaveReport(fileName + '.txt', u8, 'txt', companyProfile.establishmentName);
+
+    if (!res.success) {
+        throw new Error(res.error || 'Failed to save Principal Employer Mapping report');
+    }
+    return res.path || null;
+};
+
+export const generatePrincipalMappingPDF = async (
+    results: PayrollResult[],
+    employees: Employee[],
+    siteFilter: string,
+    estCode: string,
+    empType: string,
+    companyProfile: CompanyProfile,
+    month: string,
+    year: number
+): Promise<string | null> => {
+    // 1. Gather rows
+    const tableData: any[] = [];
+    let slNo = 1;
+
+    results.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (emp && (!siteFilter || emp.site === siteFilter)) {
+            const uan = emp.uanc || '-';
+            const name = emp.name || '';
+            const pfWages = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0));
+            
+            // Only include employees who actually earned PF wages this month
+            if (pfWages > 0) {
+                tableData.push([
+                    slNo++,
+                    uan,
+                    name,
+                    estCode,
+                    empType
+                ]);
+            }
+        }
+    });
+
+    if (tableData.length === 0) {
+        throw new Error(`No employees found${siteFilter ? ` deployed at site: ${siteFilter}` : ''} for ${month} ${year}`);
+    }
+
+    // 2. Initialize jsPDF
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = 210; // A4 portrait width in mm
+    let y = 15;
+
+    // Report Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('PRINCIPAL EMPLOYER MAPPING REPORT', pageW / 2, y, { align: 'center' }); y += 10;
+
+    // Header metadata block:
+    // Name of The Principal Employer:
+    // Report for the Month and Year:
+    doc.setFontSize(10);
+    
+    doc.setFont('helvetica', 'bold');
+    doc.text('Name of The Principal Employer:', 15, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(companyProfile.establishmentName || '', 74, y);
+    y += 6;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Report for the Month:', 15, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(month, 55, y);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Year:', 90, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(String(year), 102, y);
+
+    if (siteFilter) {
+        doc.setFont('helvetica', 'bold');
+        doc.text('Site:', 130, y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(siteFilter, 142, y);
+    }
+    y += 10;
+
+    // 3. Render Table
+    autoTable(doc, {
+        head: [['Sl No', 'UAN', 'Name of The Principal Employee', 'Establishment Code (EST_CODE)', 'Employee Type (EMP_TYPE)']],
+        body: tableData,
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 8.5, cellPadding: 3 },
+        headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+        columnStyles: {
+            0: { halign: 'center', cellWidth: 15 },
+            1: { halign: 'center', cellWidth: 30 },
+            2: { halign: 'left' },
+            3: { halign: 'center', cellWidth: 45 },
+            4: { halign: 'center', cellWidth: 40 }
+        }
+    });
+
+    // 4. Save using electronSaveReport
+    const fileName = getStandardFileName(`Principal_Employer_Mapping${siteFilter ? `_${siteFilter}` : ''}`, companyProfile, month, year);
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+
+    if (!res.success) {
+        doc.save(`${fileName}.pdf`);
+        return null;
+    }
+    return res.path || null;
+};
+
+export const generateESIIPMappingText = async (
+    results: PayrollResult[],
+    employees: Employee[],
+    siteFilter: string,
+    contractorCode: string,
+    contractorName: string,
+    companyProfile: CompanyProfile,
+    month: string,
+    year: number
+): Promise<string | null> => {
+    const lines: string[] = [];
+    
+    results.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (emp && (!siteFilter || emp.site === siteFilter) && !emp.isESIExempt && emp.esiNumber) {
+            lines.push(`${contractorCode}#~#${contractorName}#~#${emp.esiNumber}#~#${emp.name}`);
+        }
+    });
+
+    if (lines.length === 0) {
+        throw new Error(`No active ESI employees found${siteFilter ? ` deployed at site: ${siteFilter}` : ''} for ${month} ${year}`);
+    }
+
+    const content = lines.join('\r\n');
+    const u8 = new TextEncoder().encode(content);
+    const fileName = getStandardFileName(`ESI_IP_Mapping${siteFilter ? `_${siteFilter}` : ''}`, companyProfile, month, year);
+    const res = await electronSaveReport(fileName + '.txt', u8, 'txt', companyProfile.establishmentName);
+
+    if (!res.success) {
+        throw new Error(res.error || 'Failed to save ESI IP Mapping report');
+    }
+    return res.path || null;
+};
+
+export const generateESIIPMappingPDF = async (
+    results: PayrollResult[],
+    employees: Employee[],
+    siteFilter: string,
+    contractorCode: string,
+    contractorName: string,
+    companyProfile: CompanyProfile,
+    month: string,
+    year: number
+): Promise<string | null> => {
+    const tableData: any[] = [];
+    let slNo = 1;
+
+    results.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (emp && (!siteFilter || emp.site === siteFilter) && !emp.isESIExempt && emp.esiNumber) {
+            tableData.push([
+                slNo++,
+                contractorCode,
+                contractorName,
+                emp.esiNumber,
+                emp.name
+            ]);
+        }
+    });
+
+    if (tableData.length === 0) {
+        throw new Error(`No active ESI employees found${siteFilter ? ` deployed at site: ${siteFilter}` : ''} for ${month} ${year}`);
+    }
+
+    // Initialize jsPDF
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = 210;
+    let y = 15;
+
+    // Report Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('ESI IP MAPPING REPORT', pageW / 2, y, { align: 'center' }); y += 10;
+
+    // Header metadata block:
+    doc.setFontSize(10);
+    
+    doc.setFont('helvetica', 'bold');
+    doc.text('Name of The Contractor:', 15, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(companyProfile.establishmentName || '', 60, y);
+    y += 6;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Report for the Month:', 15, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(month, 55, y);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Year:', 90, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(String(year), 102, y);
+
+    if (siteFilter) {
+        doc.setFont('helvetica', 'bold');
+        doc.text('Site:', 130, y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(siteFilter, 142, y);
+    }
+    y += 10;
+
+    // Render Table
+    autoTable(doc, {
+        head: [['Sl No', 'ContractorCode', 'Contractor Name', 'IPNumber', 'IP Name']],
+        body: tableData,
+        startY: y,
+        theme: 'grid',
+        styles: { fontSize: 8.5, cellPadding: 3 },
+        headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+        columnStyles: {
+            0: { halign: 'center', cellWidth: 15 },
+            1: { halign: 'center', cellWidth: 35 },
+            2: { halign: 'left' },
+            3: { halign: 'center', cellWidth: 35 },
+            4: { halign: 'left' }
+        }
+    });
+
+    const fileName = getStandardFileName(`ESI_IP_Mapping${siteFilter ? `_${siteFilter}` : ''}`, companyProfile, month, year);
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
 

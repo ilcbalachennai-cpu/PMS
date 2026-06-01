@@ -69,11 +69,36 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 setIsFetchedIdentity(true);
                 setEmailVerifyState('verified');
                 setStep(4); // Skip to Choice (Restore vs Manual)
+                setShowCompanyInput(true); // Direct to Create Establishment form (Image 2)
             } else {
                 setProfile(INITIAL_COMPANY_PROFILE);
             }
         }
     }, [isNewCompany]);
+
+    // Prompt new users to read the manual upon startup
+    useEffect(() => {
+        if (!isNewCompany) {
+            const license = getStoredLicense();
+            if (!license && showAlert) {
+                showAlert(
+                    'info',
+                    'Welcome to BharatPay Pro',
+                    'Since this is a fresh installation, we highly recommend reading the User Info document for important setup and directory guidelines before you proceed with Identity Verification.',
+                    () => {
+                        const api = (window as any).electronAPI;
+                        if (api && api.openUserManual) {
+                            api.openUserManual();
+                        }
+                    },
+                    () => {},
+                    'Read User Info',
+                    'Continue'
+                );
+            }
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Email OTP Verification State
     type EmailVerifyState = 'idle' | 'sending' | 'otp_pending' | 'verifying' | 'verified';
@@ -87,6 +112,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
     const [showCompanyInput, setShowCompanyInput] = useState(false);
     const [companyName, setCompanyName] = useState('');
     const [companyPass, setCompanyPass] = useState('');
+    const [companyPan, setCompanyPan] = useState('');
     const [showPin, setShowPin] = useState(false);
     const [encryptionKey, setEncryptionKey] = useState('');
 
@@ -356,10 +382,42 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 const mid = localStorage.getItem('app_machine_id');
                 const size = localStorage.getItem('app_data_size');
 
-                // Surgical Clear: Remove only data keys, PROTECT system and identity keys
+                // --- V05.01.01: Limit Tracker & Target ID Gen ---
+                let targetCompanyId = activeCompanyId || 'default';
+                
+                if (isNewCompany) {
+                    const license = getStoredLicense();
+                    const limit = license?.companyLimit || 1;
+                    let lifetimeCount = parseInt(localStorage.getItem('app_lifetime_company_creations') || '0');
+                    const savedCosStr = localStorage.getItem('app_companies');
+                    const savedCos = savedCosStr ? JSON.parse(savedCosStr) : [];
+                    
+                    if (lifetimeCount === 0) lifetimeCount = savedCos.length;
+                    
+                    if (lifetimeCount >= limit) {
+                        console.warn("⚠️ Restore blocked due to lifetime limit.");
+                        setError(`License Limit Reached: Your license allows a maximum of ${limit} company creation(s). You cannot restore a new organization because you have reached your lifetime limit.`);
+                        setIsProcessing(false);
+                        return;
+                    }
+                    
+                    // Generate new ID based on the profile name in the backup, or fallback to timestamp
+                    const profileData = data['companyProfile'] || data['app_company_profile'];
+                    const estName = profileData?.establishmentName ? profileData.establishmentName.trim().replace(/[^a-zA-Z0-9]/g, '_').toUpperCase() : `COMP_${Date.now()}`;
+                    targetCompanyId = `${estName}_${Math.floor(1000 + Math.random() * 9000)}`;
+                    
+                    // Increment tracker immediately
+                    lifetimeCount += 1;
+                    localStorage.setItem('app_lifetime_company_creations', lifetimeCount.toString());
+                    if ((window as any).electronAPI?.dbSetGlobal) {
+                        (window as any).electronAPI.dbSetGlobal('app_lifetime_company_creations', lifetimeCount).catch(()=>{});
+                    }
+                }
+
+                // Surgical Clear: Remove only data keys for the target, PROTECT system and identity keys
                 Object.keys(localStorage).forEach(key => {
-                    const isScoped = activeCompanyId && key.startsWith(`${activeCompanyId}_app_`);
-                    const isLegacy = key.startsWith('app_');
+                    const isScoped = key.startsWith(`${targetCompanyId}_app_`);
+                    const isLegacy = key.startsWith('app_') && (targetCompanyId === 'default' || !isNewCompany);
 
                     if (isScoped || isLegacy) {
                         const isSystemKey = key.includes('license') ||
@@ -367,6 +425,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                             key === 'app_setup_complete' ||
                             key === 'app_companies' ||
                             key === 'app_active_company_id' ||
+                            key === 'app_lifetime_company_creations' ||
                             key === 'app_data_size';
                         if (!isSystemKey) {
                             localStorage.removeItem(key);
@@ -379,8 +438,8 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
                 // HELPER: Get company-aware key
                 const getCKey = (key: string) => {
-                    if (!activeCompanyId || activeCompanyId === 'default') return key;
-                    return `${activeCompanyId}_${key}`;
+                    if (!targetCompanyId || targetCompanyId === 'default') return key;
+                    return `${targetCompanyId}_${key}`;
                 };
 
                 // Restore Core Keys (Unified & Legacy Fallback)
@@ -405,12 +464,22 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     if (savedCos) {
                         try {
                             const cos = JSON.parse(savedCos);
-                            const idx = cos.findIndex((c: any) => c.id === activeCompanyId);
+                            const idx = cos.findIndex((c: any) => c.id === targetCompanyId);
                             if (idx !== -1) {
-                                cos[idx] = { ...profile, id: activeCompanyId };
+                                cos[idx] = { ...profile, id: targetCompanyId };
+                                localStorage.setItem('app_companies', JSON.stringify(cos));
+                            } else {
+                                cos.push({ ...profile, id: targetCompanyId });
                                 localStorage.setItem('app_companies', JSON.stringify(cos));
                             }
                         } catch (e) {}
+                    } else {
+                        localStorage.setItem('app_companies', JSON.stringify([{ ...profile, id: targetCompanyId }]));
+                    }
+                    
+                    // Auto-switch to the newly restored company
+                    if (isNewCompany) {
+                        localStorage.setItem('app_active_company_id', targetCompanyId);
                     }
                 }
                 if (attendance) localStorage.setItem(getCKey('app_attendance'), JSON.stringify(attendance));
@@ -441,6 +510,97 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 localStorage.setItem('app_setup_complete', 'true');
                 sessionStorage.setItem('app_session_user', JSON.stringify(adminUser));
 
+                // ── SQLite Synchronized Persistence Failsafe ──
+                // Surgical validation to persist all restored keys immediately to the active SQLite connection
+                if ((window as any).electronAPI) {
+                    const api = (window as any).electronAPI;
+                    try {
+                        if (api.dbSet) {
+                            if (employees) {
+                                await api.dbSet(getCKey('app_employees'), employees);
+                                await api.dbSet('app_employees', employees);
+                            }
+                            if (config) {
+                                await api.dbSet(getCKey('app_config'), config);
+                                await api.dbSet('app_config', config);
+                            }
+                            if (profile) {
+                                await api.dbSet(getCKey('app_company_profile'), profile);
+                                await api.dbSet('app_company_profile', profile);
+                            }
+                            if (attendance) {
+                                await api.dbSet(getCKey('app_attendance'), attendance);
+                                await api.dbSet('app_attendance', attendance);
+                            }
+                            if (leaveLedgers) {
+                                await api.dbSet(getCKey('app_leave_ledgers'), leaveLedgers);
+                                await api.dbSet('app_leave_ledgers', leaveLedgers);
+                            }
+                            if (advanceLedgers) {
+                                await api.dbSet(getCKey('app_advance_ledgers'), advanceLedgers);
+                                await api.dbSet('app_advance_ledgers', advanceLedgers);
+                            }
+                            if (payrollHistory) {
+                                await api.dbSet(getCKey('app_payroll_history'), payrollHistory);
+                                await api.dbSet('app_payroll_history', payrollHistory);
+                            }
+                            if (fines) {
+                                await api.dbSet(getCKey('app_fines'), fines);
+                                await api.dbSet('app_fines', fines);
+                            }
+                            if (leavePolicy) {
+                                await api.dbSet(getCKey('app_leave_policy'), leavePolicy);
+                                await api.dbSet('app_leave_policy', leavePolicy);
+                            }
+                            if (arrearHistory) {
+                                await api.dbSet(getCKey('app_arrear_history'), arrearHistory);
+                                await api.dbSet('app_arrear_history', arrearHistory);
+                            }
+                            if (logo) {
+                                await api.dbSet(getCKey('app_logo'), logo);
+                                await api.dbSet('app_logo', logo);
+                            }
+
+                            if (masters) {
+                                if (masters.designations) {
+                                    await api.dbSet(getCKey('app_master_designations'), masters.designations);
+                                    await api.dbSet('app_master_designations', masters.designations);
+                                }
+                                if (masters.divisions) {
+                                    await api.dbSet(getCKey('app_master_divisions'), masters.divisions);
+                                    await api.dbSet('app_master_divisions', masters.divisions);
+                                }
+                                if (masters.branches) {
+                                    await api.dbSet(getCKey('app_master_branches'), masters.branches);
+                                    await api.dbSet('app_master_branches', masters.branches);
+                                }
+                                if (masters.sites) {
+                                    await api.dbSet(getCKey('app_master_sites'), masters.sites);
+                                    await api.dbSet('app_master_sites', masters.sites);
+                                }
+                            }
+
+                            await api.dbSet('app_users', [adminUser]);
+                            await api.dbSet('app_setup_complete', 'true');
+                            if (activeCompanyId) {
+                                await api.dbSet(`${activeCompanyId}_app_setup_complete`, 'true');
+                            }
+                        }
+
+                        if (api.dbSetGlobal) {
+                            const updatedCos = localStorage.getItem('app_companies');
+                            if (updatedCos) {
+                                await api.dbSetGlobal('app_companies', JSON.parse(updatedCos));
+                            }
+                            if (activeCompanyId) {
+                                await api.dbSetGlobal('app_active_company_id', activeCompanyId);
+                            }
+                        }
+                    } catch (syncErr) {
+                        console.error('SQLite Restore Persistence Sync Failure:', syncErr);
+                    }
+                }
+
                 await delay(800);
                 setIsProcessing(false);
                 if (showAlert) {
@@ -462,6 +622,18 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
 
     const handleFreshSetup = async () => {
+        const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+        if (!companyPan.trim()) {
+            setError('Permanent Account Number (PAN) is required.');
+            containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+        }
+        if (!panRegex.test(companyPan.trim().toUpperCase())) {
+            setError('Invalid PAN Format. Must be in the standard format (e.g., ABCDE1234F).');
+            containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+        }
+
         setIsProcessing(true);
 
         // Sync Password to Cloud (Wait for result to ensure integrity)
@@ -473,7 +645,12 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
 
         // Pre-fill empty data to bypass steps 4 and 5
         onComplete({
-            companyProfile: { ...INITIAL_COMPANY_PROFILE, establishmentName: companyName, dashboardPassword: companyPass },
+            companyProfile: { 
+                ...INITIAL_COMPANY_PROFILE, 
+                establishmentName: companyName.trim().toUpperCase(), 
+                pan: companyPan.trim().toUpperCase(),
+                dashboardPassword: companyPass 
+            },
             statutoryConfig: INITIAL_STATUTORY_CONFIG,
 
             adminUser: {
@@ -927,24 +1104,57 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                     {step === 4 && (
                         <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                             {!showRestoreFields && !showCompanyInput ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {!isResetMode && (
-                                        <div
-                                            onClick={() => setShowRestoreFields(true)}
-                                            className="bg-[#0f172a] p-6 rounded-2xl border-2 border-slate-800 hover:border-blue-500/50 transition-all cursor-pointer group flex flex-col items-center text-center"
-                                        >
-                                            <div className="w-12 h-12 rounded-full bg-blue-900/20 text-blue-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                                                <Database size={28} />
-                                            </div>
-                                            <h3 className="text-lg font-bold mb-1 text-slate-100">Restore Data Backup</h3>
-                                            <p className="text-xs text-slate-400 leading-relaxed px-2">Recommended if you have a backup of employees, profiles, and attendance.</p>
-                                            <div className="mt-4 px-5 py-1.5 bg-blue-600 group-hover:bg-blue-700 text-white font-bold rounded-lg transition-colors text-sm">Select Backup File</div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in slide-in-from-bottom-4 duration-500">
+                                    {/* Link Data Folder Option */}
+                                    <div
+                                        onClick={async () => {
+                                            try {
+                                                const api = (window as any).electronAPI;
+                                                if (!api) return;
+                                                const result = await api.selectAppDirectory();
+                                                if (result && result.success && result.path) {
+                                                    setIsProcessing(true);
+                                                    const initResult = await api.initializeAppDirectory(result.path);
+                                                    if (initResult && initResult.success) {
+                                                        // Successfully linked, reload app to pick up db
+                                                        window.location.reload();
+                                                    } else {
+                                                        setError(initResult.message || "Failed to link data folder.");
+                                                        setIsProcessing(false);
+                                                    }
+                                                }
+                                            } catch (err: any) {
+                                                setError(err.message || "Failed to link data folder.");
+                                                setIsProcessing(false);
+                                            }
+                                        }}
+                                        className={`bg-[#0f172a] p-8 rounded-2xl border-2 border-slate-800 hover:border-amber-500/50 transition-all cursor-pointer group flex flex-col items-center text-center`}
+                                    >
+                                        <div className="w-16 h-16 rounded-full bg-amber-900/20 text-amber-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                                            <Database size={32} />
                                         </div>
-                                    )}
+                                        <h3 className="text-xl font-bold mb-3 text-slate-100">Link Data Folder</h3>
+                                        <p className="text-sm text-slate-400 leading-relaxed px-4">Link an existing Data folder without copying. Best for moving installations or recovering old data.</p>
+                                        <div className="mt-8 px-6 py-2 bg-amber-600 group-hover:bg-amber-700 text-white font-bold rounded-lg transition-colors flex items-center gap-2">Select Location <ArrowRight size={16} /></div>
+                                    </div>
 
+                                    {/* Restore Option */}
+                                    <div
+                                        onClick={() => setShowRestoreFields(true)}
+                                        className={`bg-[#0f172a] p-8 rounded-2xl border-2 border-slate-800 hover:border-blue-500/50 transition-all cursor-pointer group flex flex-col items-center text-center`}
+                                    >
+                                        <div className="w-16 h-16 rounded-full bg-blue-900/20 text-blue-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                                            <Database size={32} />
+                                        </div>
+                                        <h3 className="text-xl font-bold mb-3 text-slate-100">Restore Data Backup</h3>
+                                        <p className="text-sm text-slate-400 leading-relaxed px-4">Recommended if you have a backup of employees, profiles, and attendance (.enc or .sqlite).</p>
+                                        <div className="mt-8 px-6 py-2 bg-blue-600 group-hover:bg-blue-700 text-white font-bold rounded-lg transition-colors flex items-center gap-2">Select Backup File <ArrowRight size={16} /></div>
+                                    </div>
+
+                                    {/* Manual Config Option */}
                                     <div
                                         onClick={() => setShowCompanyInput(true)}
-                                        className={`bg-[#0f172a] ${isResetMode ? 'md:col-span-2' : ''} p-8 rounded-2xl border-2 border-slate-800 hover:border-emerald-500/50 transition-all cursor-pointer group flex flex-col items-center text-center`}
+                                        className={`bg-[#0f172a] p-8 rounded-2xl border-2 border-slate-800 hover:border-emerald-500/50 transition-all cursor-pointer group flex flex-col items-center text-center`}
                                     >
                                         <div className="w-16 h-16 rounded-full bg-emerald-900/20 text-emerald-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                             <Building2 size={32} />
@@ -960,26 +1170,37 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                         <Building2 className="text-emerald-400" size={24} />
                                         <h3 className="font-bold text-lg text-white uppercase tracking-tight">Create Establishment</h3>
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="grid grid-cols-2 gap-6">
                                         <div className="space-y-3">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Establishment Name *</label>
                                             <input
                                                 type="text"
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all font-black uppercase tracking-wide"
-                                                placeholder="ENTER COMPANY NAME"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all font-black uppercase tracking-wide placeholder:text-slate-600"
+                                                placeholder="E.G. ABC PVT LTD"
                                                 value={companyName}
                                                 onChange={e => setCompanyName(e.target.value.toUpperCase())}
                                                 autoFocus
                                             />
                                         </div>
                                         <div className="space-y-3">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">PAN *</label>
+                                            <input
+                                                type="text"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all font-black uppercase tracking-wider placeholder:text-slate-600"
+                                                placeholder="E.G. ABCPBL2345E"
+                                                maxLength={10}
+                                                value={companyPan}
+                                                onChange={e => setCompanyPan(e.target.value.toUpperCase().slice(0, 10))}
+                                            />
+                                        </div>
+                                        <div className="space-y-3 col-span-2">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Database Access Password (Optional)</label>
                                             <div className="relative">
                                                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                                                 <input
                                                     type={showPin ? "text" : "password"}
-                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 pl-12 pr-12 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-bold"
-                                                    placeholder="Leave blank for no password"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 pl-12 pr-12 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-bold placeholder:text-slate-600"
+                                                    placeholder="E.G. LEAVE BLANK OR ENTER PASSWORD"
                                                     value={companyPass}
                                                     onChange={e => setCompanyPass(e.target.value)}
                                                 />
@@ -995,12 +1216,21 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                     </div>
 
                                     <div className="flex justify-between pt-4">
-                                        <button onClick={() => setShowCompanyInput(false)} className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all uppercase tracking-widest text-xs flex items-center gap-2">
+                                        <button 
+                                            onClick={() => {
+                                                if (isNewCompany) {
+                                                    window.location.reload();
+                                                } else {
+                                                    setShowCompanyInput(false);
+                                                }
+                                            }} 
+                                            className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all uppercase tracking-widest text-xs flex items-center gap-2"
+                                        >
                                             Cancel
                                         </button>
                                         <button
                                             onClick={handleFreshSetup}
-                                            disabled={!companyName.trim() || isProcessing}
+                                            disabled={!companyName.trim() || !companyPan.trim() || isProcessing}
                                             className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-2"
                                         >
                                             {isProcessing ? <Loader2 className="animate-spin" size={18} /> : 'Initialize Unit'}
@@ -1020,7 +1250,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                             <input
                                                 ref={backupFileRef}
                                                 type="file"
-                                                accept=".enc"
+                                                accept=".enc,.sqlite"
                                                 title="Select Backup File"
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-400 file:bg-blue-600 file:border-none file:text-white file:px-4 file:py-1.5 file:rounded-lg file:mr-4 file:font-bold hover:file:bg-blue-700"
                                                 onChange={(e) => {

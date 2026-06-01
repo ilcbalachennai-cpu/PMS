@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openItemPath: (filePath: string) =>
         ipcRenderer.invoke('open-item-path', filePath),
     openUserManual: () => ipcRenderer.invoke('open-user-manual'),
+    handleStatutoryForm: (formName: string, action: 'preview' | 'download') =>
+        ipcRenderer.invoke('handle-statutory-form', { formName, action }),
     getOSVersion: () => ipcRenderer.invoke('get-os-version'),
     setFullScreen: (flag: boolean) => ipcRenderer.invoke('set-fullscreen', flag),
     getIsFullScreen: () => ipcRenderer.invoke('get-fullscreen'),
@@ -54,9 +56,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getIsDev: () => process.env.NODE_ENV === 'development',
     switchCompanyData: (companyId: string) => ipcRenderer.invoke('switch-company-data', companyId),
     dbSetGlobal: (key: string, value: any) => ipcRenderer.invoke('db-set-global', { key, value }),
+    dbGetGlobal: (key: string) => ipcRenderer.invoke('db-get-global', key),
     wipeAllData: () => ipcRenderer.invoke('wipe-all-data'),
     listSilos: () => ipcRenderer.invoke('list-silos'),
-    deleteSilo: (companyId: string) => ipcRenderer.invoke('delete-silo', companyId)
+    deleteSilo: (companyId: string) => ipcRenderer.invoke('delete-silo', companyId),
+    wipeCompanyData: (companyId: string) => ipcRenderer.invoke('wipe-company-data', companyId)
 });
 
 console.log("EB: Electron Bridge (electronAPI) Initialized");

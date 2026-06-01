@@ -3,8 +3,8 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "03.02.06";
-export const APP_PATCH_TIMESTAMP = "09-05-2026 19:43:41"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_VERSION = "05.02.08";
+export const APP_PATCH_TIMESTAMP = "28-05-2026 17:24:00"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -291,6 +291,7 @@ export const getStoredLicense = (): LicenseData | null => {
       data.expiryDate = '31-12-2026';
       data.splDynamic = true;
       data.splMIS = true;
+      data.companyLimit = 10; // For local multi-company testing
     }
 
     return data;
@@ -474,6 +475,7 @@ export const registerTrial = async (
         isTrial: true,
         splDynamic: respData.splDynamic === 'Yes' || respData.splDynamic === true,
         splMIS: respData.splMIS === 'Yes' || respData.splMIS === true,
+        companyLimit: Number(respData.companyLimit || 1),
         checksum: ''
       };
 
@@ -561,6 +563,7 @@ export const activateFullLicense = async (
         isTrial: false,
         splDynamic: respData.splDynamic === 'Yes' || respData.splDynamic === true,
         splMIS: respData.splMIS === 'Yes' || respData.splMIS === true,
+        companyLimit: Number(respData.companyLimit || 1),
         checksum: ''
       };
 
@@ -889,6 +892,7 @@ export const validateLicenseStartup = async (
                   isTrial: false,
                   splDynamic: result.data.splDynamic === 'Yes' || result.data.splDynamic === true,
                   splMIS: result.data.splMIS === 'Yes' || result.data.splMIS === true,
+                  companyLimit: Number(result.data.companyLimit || 1),
                   checksum: ""
                 };
 
@@ -919,7 +923,8 @@ export const validateLicenseStartup = async (
                 registeredTo: result.data.registeredTo || '',
                 registeredMobile: String(result.data.registeredMobile || ''),
                 splDynamic: result.data.splDynamic === 'Yes' || result.data.splDynamic === true,
-                splMIS: result.data.splMIS === 'Yes' || result.data.splMIS === true
+                splMIS: result.data.splMIS === 'Yes' || result.data.splMIS === true,
+                companyLimit: Number(result.data.companyLimit || 1)
               } as LicenseData;
 
               // Force status to PENDING_RESTORE as required by the cloud
@@ -983,6 +988,7 @@ export const validateLicenseStartup = async (
               isTrial: cloudIsTrial,
               splDynamic: cloudData.splDynamic === 'Yes' || cloudData.splDynamic === true,
               splMIS: cloudData.splMIS === 'Yes' || cloudData.splMIS === true,
+              companyLimit: Number(cloudData.companyLimit || 1),
               checksum: ""
             };
 
@@ -1072,6 +1078,16 @@ export const validateLicenseStartup = async (
               storageUpdated = true;
             }
 
+            // Sync companyLimit from cloud
+            if (cloudData.companyLimit !== undefined) {
+              const incomingCompanyLimit = Number(cloudData.companyLimit || 1);
+              if (incomingCompanyLimit !== activeLicense.companyLimit) {
+                console.log(`🏢 Company Limit Sync: ${activeLicense.companyLimit} -> ${incomingCompanyLimit}`);
+                activeLicense.companyLimit = incomingCompanyLimit;
+                storageUpdated = true;
+              }
+            }
+
             if (storageUpdated) {
               activeLicense.checksum = generateChecksum(activeLicense);
               const scrambled = scramble(JSON.stringify(activeLicense));
@@ -1080,7 +1096,6 @@ export const validateLicenseStartup = async (
               if (window.electronAPI) window.electronAPI.dbSet(storageKey, scrambled);
               console.log("✅ License successfully sync-updated from cloud.");
             }
-
             // 4. Version Check
             if (cloudData.latestVersion) {
               localStorage.setItem('app_latest_version', cloudData.latestVersion);
@@ -1093,6 +1108,19 @@ export const validateLicenseStartup = async (
               if (cloudData.updateHashWin10) localStorage.setItem('app_update_hash_win10', cloudData.updateHashWin10);
               if (cloudData.updateHashWin7) localStorage.setItem('app_update_hash_win7', cloudData.updateHashWin7);
               if (cloudData.sha256) localStorage.setItem('app_update_hash', cloudData.sha256);
+
+              const api = (window as any).electronAPI;
+              const dbSetFn = api?.dbSetGlobal || api?.dbSet;
+              if (dbSetFn) {
+                dbSetFn('app_latest_version', cloudData.latestVersion).catch(() => {});
+                if (cloudData.downloadUrl) dbSetFn('app_download_url', cloudData.downloadUrl).catch(() => {});
+                if (cloudData.downloadUrlWin7) dbSetFn('app_download_url_win7', cloudData.downloadUrlWin7).catch(() => {});
+                if (cloudData.launcherUrl) dbSetFn('app_launcher_url', cloudData.launcherUrl).catch(() => {});
+                if (cloudData.patchTimestamp) dbSetFn('app_latest_patch_timestamp', cloudData.patchTimestamp).catch(() => {});
+                if (cloudData.updateHashWin10) dbSetFn('app_update_hash_win10', cloudData.updateHashWin10).catch(() => {});
+                if (cloudData.updateHashWin7) dbSetFn('app_update_hash_win7', cloudData.updateHashWin7).catch(() => {});
+                if (cloudData.sha256) dbSetFn('app_update_hash', cloudData.sha256).catch(() => {});
+              }
             }
 
             // 4. Smart Admin Recovery & Sync
@@ -1505,6 +1533,14 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
         localStorage.setItem('app_latest_version', result.latestVersion);
         if (result.launcherUrl) localStorage.setItem('app_launcher_url', result.launcherUrl);
         if (result.patchTimestamp) localStorage.setItem('app_latest_patch_timestamp', result.patchTimestamp);
+
+        const api = (window as any).electronAPI;
+        const dbSetFn = api?.dbSetGlobal || api?.dbSet;
+        if (dbSetFn) {
+          dbSetFn('app_latest_version', result.latestVersion).catch(() => {});
+          if (result.launcherUrl) dbSetFn('app_launcher_url', result.launcherUrl).catch(() => {});
+          if (result.patchTimestamp) dbSetFn('app_latest_patch_timestamp', result.patchTimestamp).catch(() => {});
+        }
       }
 
       if (updated || force || versionInfo) {

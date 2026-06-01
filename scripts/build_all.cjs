@@ -1,7 +1,7 @@
 const { execSync } = require('child_process');
 
 /**
- * Unified Build Runner for BPP_APP_V03.01.05
+ * Unified Build Runner for BPP_APP_V05.02.08
  * Usage: 
  *   npm run generate:exe Both
  *   npm run generate:exe CreateWin10
@@ -19,7 +19,7 @@ function run(command) {
     }
 }
 
-console.log('--- BPP Unified Build System (v03.01.05) ---');
+console.log('--- BPP Unified Build System (v05.02.08) ---');
 
 if (arg === 'both') {
     console.log('📝 Mode: Generating BOTH Windows 10 and Windows 7 executables...');

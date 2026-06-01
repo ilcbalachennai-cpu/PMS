@@ -1,5 +1,5 @@
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   Employee, StatutoryConfig, CompanyProfile, PayrollResult, 
   Attendance, LeaveLedger, AdvanceLedger, FineRecord, 
@@ -16,6 +16,7 @@ export const usePayrollData = (showAlert: any) => {
   const [isHydrating, setIsHydrating] = useState(true);
   const [reloadTrigger, setReloadTrigger] = useState(0);
   const triggerReload = () => setReloadTrigger(prev => prev + 1);
+  const lastCompanyIdRef = useRef<string>('');
 
   // --- MULTI-COMPANY STATE ---
   const [companies, setCompanies] = useState<CompanyProfile[]>(() => {
@@ -46,15 +47,55 @@ export const usePayrollData = (showAlert: any) => {
     return 'default';
   });
 
+  const [activeFinancialYear, setActiveFinancialYear] = useState<string>(() => {
+    const saved = localStorage.getItem('app_active_financial_year');
+    if (saved && saved !== 'undefined') return saved;
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const startYear = now.getMonth() >= 3 ? currentYear : currentYear - 1;
+    return `FY${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)}`;
+  });
+
+  const [availableFinancialYears, setAvailableFinancialYears] = useState<string[]>(() => {
+    const list = new Set<string>();
+    list.add('FY24-25');
+    list.add('FY25-26');
+    list.add('FY26-27');
+    list.add('FY27-28');
+    
+    const saved = localStorage.getItem('app_active_financial_year');
+    if (saved && saved !== 'undefined') {
+      list.add(saved);
+    }
+    
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const startYear = now.getMonth() >= 3 ? currentYear : currentYear - 1;
+    const currentFY = `FY${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)}`;
+    const nextFY = `FY${String(startYear + 1).slice(-2)}-${String(startYear + 2).slice(-2)}`;
+    list.add(currentFY);
+    list.add(nextFY);
+    
+    return Array.from(list).sort();
+  });
+
   // Helper to get company-specific key
   // V03.01.03: In the physical isolation model, we use FLAT keys inside silos.
   // We only use the activeCompanyId for storage path isolation, not for key prefixing.
   const getCKey = useCallback((key: string) => {
-    // V03.01.05: Double-Lock Isolation. 
-    // We append the unique ID to EVERY key to ensure total data integrity
-    // across both LocalStorage and physical silos.
+    // V04.00.00: Financial Year Scoping (Option 1)
+    // Transactional data gets suffixed with BOTH Financial Year and Company ID.
+    // Master data gets suffixed with ONLY Company ID.
+    const transactionalKeys = [
+      'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 
+      'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+    ];
+    
+    if (transactionalKeys.includes(key)) {
+      return `${key}_${activeFinancialYear}_${activeCompanyId}`;
+    }
     return `${key}_${activeCompanyId}`;
-  }, [activeCompanyId]);
+  }, [activeCompanyId, activeFinancialYear]);
 
   // --- STATE INITIALIZATION (Now company-aware) ---
   // --- STATE INITIALIZATION (Now company-aware) ---
@@ -161,43 +202,431 @@ export const usePayrollData = (showAlert: any) => {
           await window.electronAPI.switchCompanyData(activeCompanyId);
           await new Promise(resolve => setTimeout(resolve, 500));
 
-          const dbRes = await window.electronAPI.dbGetAll();
+          let dbRes = await window.electronAPI.dbGetAll();
           if (dbRes.success && Array.isArray(dbRes.data)) {
+            // V04.01.02: JIT Partitioning Bridge for Legacy Monolithic Keys
+            let needsReFetch = false;
+            const legacyKeysToPartition = ['app_payroll_history', 'app_attendance', 'app_fines', 'app_arrear_history', 'app_ot_records'];
+            for (const baseKey of legacyKeysToPartition) {
+               const legacyItem = dbRes.data.find((item: any) => item.key === `${baseKey}_${activeCompanyId}` || item.key === baseKey);
+               if (legacyItem) {
+                  try {
+                     const rawArray = typeof legacyItem.value === 'string' ? JSON.parse(legacyItem.value) : legacyItem.value;
+                     if (Array.isArray(rawArray) && rawArray.length > 0) {
+                        const partitions: Record<string, any[]> = {};
+                        rawArray.forEach((record: any) => {
+                           const m = record.month;
+                           const y = Number(record.year);
+                           if (m && !isNaN(y)) {
+                              const startY = (m === 'January' || m === 'February' || m === 'March') ? y - 1 : y;
+                              const endY = startY + 1;
+                              const fy = `FY${String(startY).slice(-2)}-${String(endY).slice(-2)}`;
+                              if (!partitions[fy]) partitions[fy] = [];
+                              partitions[fy].push(record);
+                           }
+                        });
+
+                        for (const [fy, records] of Object.entries(partitions)) {
+                           const fyKey = `${baseKey}_${fy}_${activeCompanyId}`;
+                           if (window.electronAPI?.dbSet) {
+                              await window.electronAPI.dbSet(fyKey, records);
+                           }
+                        }
+                        if (window.electronAPI?.dbDelete) {
+                           await window.electronAPI.dbDelete(legacyItem.key);
+                        }
+                        needsReFetch = true;
+                     }
+                  } catch (e) {
+                     console.error(`JIT Partitioning failed for ${baseKey}:`, e);
+                  }
+               }
+            }
+
+            if (needsReFetch) {
+               dbRes = await window.electronAPI.dbGetAll();
+            }
+
             const siloData: Record<string, any> = {};
+            
+            // Generate exact targeted keys based on current FY and Company
+            const expectedKeys = {
+              app_employees: getCKey('app_employees'),
+              app_config: getCKey('app_config'),
+              app_company_profile: getCKey('app_company_profile'),
+              app_attendance: getCKey('app_attendance'),
+              app_payroll_history: getCKey('app_payroll_history'),
+              app_leave_ledgers: getCKey('app_leave_ledgers'),
+              app_advance_ledgers: getCKey('app_advance_ledgers'),
+              app_fines: getCKey('app_fines'),
+              app_leave_policy: getCKey('app_leave_policy'),
+              app_arrear_history: getCKey('app_arrear_history'),
+              app_ot_records: getCKey('app_ot_records'),
+              app_master_designations: getCKey('app_master_designations'),
+              app_master_divisions: getCKey('app_master_divisions'),
+              app_master_branches: getCKey('app_master_branches'),
+              app_master_sites: getCKey('app_master_sites'),
+              app_logo: getCKey('app_logo'),
+            };
+
+            const fySet = new Set<string>();
+            let maxPayrollVal = -1;
+            let maxPayrollFY = '';
+            const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
             dbRes.data.forEach((item: { key: string, value: any }) => {
               const key = item.key;
               const value = typeof item.value === 'string' ? item.value : JSON.stringify(item.value);
-              // 1. If the key ends with our active ID, it's our target data (Double-Lock)
-              if (activeCompanyId && key.endsWith(`_${activeCompanyId}`)) {
-                const flatKey = key.split(`_${activeCompanyId}`)[0];
-                siloData[flatKey] = value;
-              } 
-              // 2. Fallback for legacy flat keys in the silo (e.g., "app_employees")
-              // We identify these as keys that start with "app_" but don't have the activeCompanyId suffix
-              else if (key.startsWith('app_') && !key.endsWith(`_${activeCompanyId}`)) {
-                if (!siloData[key]) {
-                  siloData[key] = value;
+              
+              // Dynamically extract available Financial Years for this company
+              if (key.endsWith(`_${activeCompanyId}`)) {
+                 const match = key.match(/_(FY\d{2}-\d{2})_/);
+                 if (match) {
+                    let hasRealData = false;
+                    try {
+                       const parsed = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
+                       if (Array.isArray(parsed) && parsed.length > 0) {
+                          if (key.startsWith('app_attendance_FY')) {
+                             hasRealData = parsed.some((r: any) => r.presentDays > 0 || r.earnedLeave > 0 || r.sickLeave > 0 || r.casualLeave > 0 || r.lopDays > 0);
+                          } else if (key.startsWith('app_ot_records_FY')) {
+                             hasRealData = parsed.some((r: any) => (r.otHours || 0) > 0 || (r.otAmount || 0) > 0);
+                          } else if (key.startsWith('app_fines_FY')) {
+                             hasRealData = parsed.some((r: any) => (r.amount || 0) > 0);
+                          } else if (key.startsWith('app_advance_ledgers_FY') || key.startsWith('app_leave_ledgers_FY')) {
+                             // Ledgers always have base records, so only consider them data if there's actual history/usage
+                             hasRealData = parsed.some((r: any) => (r.history && r.history.length > 0) || r.usedEL > 0 || r.usedSL > 0 || r.usedCL > 0);
+                          } else {
+                             // Payroll history or anything else with length > 0 is real data
+                             hasRealData = true;
+                          }
+                       } else if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0 && !Array.isArray(parsed)) {
+                          hasRealData = true; // Non-empty object
+                       }
+                    } catch (e) {
+                       // If not JSON, but not empty string
+                       if (value !== '[]' && value !== '{}' && value !== '""' && value !== '') {
+                          hasRealData = true;
+                       }
+                    }
+                    
+                    if (hasRealData) {
+                        fySet.add(match[1]);
+                    }
+                 }
+              }
+
+              // V04.03.01: Find the latest processed/confirmed payroll records across all years to auto-default the year on load
+              if (key.startsWith('app_payroll_history_FY') && key.endsWith(`_${activeCompanyId}`)) {
+                 try {
+                    const records = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
+                    if (Array.isArray(records) && records.length > 0) {
+                       records.forEach((r: any) => {
+                          const mIdx = monthsArr.indexOf(r.month);
+                          if (mIdx !== -1) {
+                             const val = (r.year * 12) + mIdx;
+                             if (val > maxPayrollVal) {
+                                maxPayrollVal = val;
+                                const match = key.match(/_(FY\d{2}-\d{2})_/);
+                                if (match) {
+                                   maxPayrollFY = match[1];
+                                }
+                             }
+                          }
+                       });
+                    }
+                 } catch (e) {
+                    console.error("Error parsing payroll history in usePayrollData:", e);
+                 }
+              }
+
+              Object.entries(expectedKeys).forEach(([baseKey, fullTargetKey]) => {
+                if (key === fullTargetKey) {
+                  // Perfect match for current FY and Company
+                  siloData[baseKey] = value;
+                } else if (key === `${baseKey}_${activeCompanyId}` && !siloData[baseKey]) {
+                  // Fallback: Data exists from BEFORE the FY update (Legacy Double-Lock)
+                  siloData[baseKey] = value;
+                } else if (key === baseKey && !siloData[baseKey]) {
+                  // Fallback: Really old Flat key data
+                  siloData[baseKey] = value;
                 }
+              });
+
+              // V04.00.07: Nuclear Cleanup for errant FY23-24 test data
+              if (key.includes('_FY23-24_') && window.electronAPI?.dbDelete) {
+                 window.electronAPI.dbDelete(key).catch(() => {});
+                 fySet.delete('FY23-24'); // Ensure it's removed from the set
               }
             });
 
-            Object.entries(siloData).forEach(([fKey, value]) => {
-              localStorage.setItem(`${fKey}_${activeCompanyId}`, value);
+            // Calculate previous Financial Year carry-forwards if current transactional data is missing or not frozen/confirmed
+            let isAnyFinalized = false;
+            if (siloData['app_payroll_history']) {
               try {
-                const parsed = JSON.parse(value);
-                if (fKey === 'app_employees') setEmployees(parsed);
-                if (fKey === 'app_config') setConfig(parsed);
-                if (fKey === 'app_company_profile') setCompanyProfile(parsed);
-                if (fKey === 'app_attendance') setAttendances(parsed);
-                if (fKey === 'app_payroll_history') setPayrollHistory(parsed);
-                if (fKey === 'app_leave_ledgers') setLeaveLedgers(parsed);
-                if (fKey === 'app_advance_ledgers') setAdvanceLedgers(parsed);
-                if (fKey === 'app_fines') setFines(parsed);
-                if (fKey === 'app_leave_policy') setLeavePolicy(parsed);
-                if (fKey === 'app_master_designations') setDesignations(parsed);
-                if (fKey === 'app_master_divisions') setDivisions(parsed);
-                if (fKey === 'app_master_branches') setBranches(parsed);
-                if (fKey === 'app_master_sites') setSites(parsed);
+                const parsedHistory = typeof siloData['app_payroll_history'] === 'string'
+                  ? JSON.parse(siloData['app_payroll_history'])
+                  : siloData['app_payroll_history'];
+                if (Array.isArray(parsedHistory)) {
+                  isAnyFinalized = parsedHistory.some((r: any) => r.status === 'Finalized');
+                }
+              } catch (e) {
+                console.error("Error parsing payroll history for carry forward check:", e);
+              }
+            }
+
+            const prevFY = (() => {
+              const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+              if (match) {
+                const start = parseInt(match[1]);
+                const end = parseInt(match[2]);
+                const prevStart = String(start - 1).padStart(2, '0');
+                const prevEnd = String(end - 1).padStart(2, '0');
+                return `FY${prevStart}-${prevEnd}`;
+              }
+              return null;
+            })();
+
+            if (prevFY) {
+              const prevLeaveLedgerKey = `app_leave_ledgers_${prevFY}_${activeCompanyId}`;
+              const prevAdvanceLedgerKey = `app_advance_ledgers_${prevFY}_${activeCompanyId}`;
+              
+              let prevLeaveItem = dbRes.data.find((item: any) => item.key === prevLeaveLedgerKey);
+              if (!prevLeaveItem && prevFY === 'FY25-26') {
+                const unscopedKey = `app_leave_ledgers_${activeCompanyId}`;
+                prevLeaveItem = dbRes.data.find((item: any) => item.key === unscopedKey);
+              }
+              
+              let prevAdvanceItem = dbRes.data.find((item: any) => item.key === prevAdvanceLedgerKey);
+              if (!prevAdvanceItem && prevFY === 'FY25-26') {
+                const unscopedKey = `app_advance_ledgers_${activeCompanyId}`;
+                prevAdvanceItem = dbRes.data.find((item: any) => item.key === unscopedKey);
+              }
+              
+              // 1. Leave Ledgers Carry-Forward
+              if (!siloData['app_leave_ledgers'] || siloData['app_leave_ledgers'] === '[]') {
+                try {
+                  let prevLeaveLedgers: any[] = [];
+                  let loadedFromMarchSnapshot = false;
+                  
+                  // Prioritize March finalized payroll history snapshot as ground truth
+                  const prevPayrollHistoryKey = `app_payroll_history_${prevFY}_${activeCompanyId}`;
+                  const prevPayrollItem = dbRes.data.find((item: any) => item.key === prevPayrollHistoryKey);
+                  if (prevPayrollItem) {
+                    const history = typeof prevPayrollItem.value === 'string' ? JSON.parse(prevPayrollItem.value) : prevPayrollItem.value;
+                    const marchEntries = Array.isArray(history) ? history.filter((r: any) => r.month === 'March' && r.status === 'Finalized') : [];
+                    if (marchEntries.length > 0) {
+                      prevLeaveLedgers = marchEntries.map((r: any) => {
+                        const snap = r.leaveSnapshot || {};
+                        return {
+                          employeeId: r.employeeId,
+                          el: snap.el || { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 },
+                          sl: snap.sl || { eligible: 0, availed: 0, balance: 0 },
+                          cl: snap.cl || { availed: 0, accumulation: 0, balance: 0 },
+                          companyId: activeCompanyId
+                        };
+                      });
+                      loadedFromMarchSnapshot = true;
+                      console.log(`[usePayrollData] Preferred and loaded ${prevLeaveLedgers.length} records from March payroll history snapshot.`);
+                    }
+                  }
+                  
+                  // Fallback to previous living document if March finalized payroll is not available
+                  if (!loadedFromMarchSnapshot) {
+                    prevLeaveLedgers = prevLeaveItem 
+                      ? (typeof prevLeaveItem.value === 'string' ? JSON.parse(prevLeaveItem.value) : prevLeaveItem.value)
+                      : [];
+                  }
+                    
+                  console.log(`[usePayrollData] Carrying forward leave balances to ${activeFinancialYear} (Source: ${prevLeaveItem ? prevLeaveItem.key : 'Master Card'}, Overwrite allowed: ${!isAnyFinalized})...`);
+                  
+                  const loadedEmployees = siloData['app_employees'] ? JSON.parse(siloData['app_employees']) : [];
+                  const loadedPolicy = siloData['app_leave_policy'] ? JSON.parse(siloData['app_leave_policy']) : DEFAULT_LEAVE_POLICY;
+                  
+                  let baseYear = 2026;
+                  const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+                  if (match) {
+                    baseYear = 2000 + parseInt(match[1]);
+                  }
+                  
+                  const nextLeaveLedgers = loadedEmployees.map((emp: any) => {
+                    const dojDate = emp ? new Date(emp.doj) : new Date(0);
+                    dojDate.setHours(0, 0, 0, 0);
+                    
+                    // April end of new year
+                    const nextPeriodEnd = new Date(baseYear, 3, 30); // April 30th
+                    nextPeriodEnd.setHours(23, 59, 59, 999);
+                    const isEligible = dojDate <= nextPeriodEnd;
+                    
+                    const elCredit = isEligible ? (loadedPolicy?.el?.maxPerYear || 18) / 12 : 0;
+                    const slCredit = isEligible ? (loadedPolicy?.sl?.maxPerYear || 12) / 12 : 0;
+                    const clCredit = isEligible ? (loadedPolicy?.cl?.maxPerYear || 12) / 12 : 0;
+                    
+                    const l = Array.isArray(prevLeaveLedgers) ? prevLeaveLedgers.find((pl: any) => pl.employeeId === emp.id) : null;
+                    
+                    let carryEL = 0;
+                    let carrySL = 0;
+                    let carryCL = 0;
+                    
+                    if (l) {
+                      const prevELBal = l.el?.balance || 0;
+                      const prevSLBal = l.sl?.balance || 0;
+                      const prevCLBal = l.cl?.balance || 0;
+                      
+                      carryEL = isEligible ? Math.min(prevELBal, loadedPolicy?.el?.maxCarryForward || 30) : 0;
+                      carrySL = isEligible ? Math.min(prevSLBal, loadedPolicy?.sl?.maxCarryForward || 0) : 0;
+                      carryCL = isEligible ? Math.min(prevCLBal, loadedPolicy?.cl?.maxCarryForward || 0) : 0;
+                    } else {
+                      // Fallback to employee master card initialOpeningBalances
+                      const initBalances = emp.initialOpeningBalances || {};
+                      const initEL = initBalances.el || 0;
+                      const initSL = initBalances.sl || 0;
+                      const initCL = initBalances.cl || 0;
+                      
+                      carryEL = isEligible ? initEL : 0;
+                      carrySL = isEligible ? initSL : 0;
+                      carryCL = isEligible ? initCL : 0;
+                    }
+                    
+                    return {
+                      employeeId: emp.id,
+                      el: { opening: carryEL, eligible: elCredit, encashed: 0, availed: 0, balance: carryEL + elCredit },
+                      sl: { eligible: slCredit, availed: 0, balance: carrySL + slCredit },
+                      cl: { availed: 0, accumulation: carryCL, balance: carryCL + clCredit },
+                      companyId: activeCompanyId
+                    };
+                  });
+                  
+                  siloData['app_leave_ledgers'] = JSON.stringify(nextLeaveLedgers);
+                  // Persist to new year in DB immediately
+                  if (window.electronAPI?.dbSet) {
+                    window.electronAPI.dbSet(getCKey('app_leave_ledgers'), nextLeaveLedgers).catch((e: any) => {
+                      console.error("Auto save carried leave ledgers failed:", e);
+                    });
+                  }
+                } catch (err) {
+                  console.error("Failed to carry forward leave ledgers:", err);
+                }
+              }
+
+              // 2. Advance Ledgers Carry-Forward
+              if (!siloData['app_advance_ledgers'] || siloData['app_advance_ledgers'] === '[]') {
+                try {
+                  const prevAdvanceLedgers = prevAdvanceItem
+                    ? (typeof prevAdvanceItem.value === 'string' ? JSON.parse(prevAdvanceItem.value) : prevAdvanceItem.value)
+                    : [];
+                    
+                  console.log(`[usePayrollData] Carrying forward advance balances to ${activeFinancialYear} (Source: ${prevAdvanceItem ? prevAdvanceItem.key : 'Zeros'}, Overwrite allowed: ${!isAnyFinalized})...`);
+                  
+                  const loadedEmployees = siloData['app_employees'] ? JSON.parse(siloData['app_employees']) : [];
+                  
+                  const nextAdvanceLedgers = loadedEmployees.map((emp: any) => {
+                    const a = Array.isArray(prevAdvanceLedgers) ? prevAdvanceLedgers.find((pa: any) => pa.employeeId === emp.id) : null;
+                    
+                    const carryOpening = a ? (a.balance || 0) : 0;
+                    const emiCount = a ? (a.emiCount || 0) : 0;
+                    const recovery = emiCount > 0 ? Math.min(Math.round(carryOpening / emiCount), carryOpening) : 0;
+                    const balance = Math.max(0, carryOpening - recovery);
+                    
+                    return {
+                      employeeId: emp.id,
+                      opening: carryOpening,
+                      totalAdvance: 0,
+                      manualPayment: 0,
+                      paidAmount: 0,
+                      emiCount: emiCount,
+                      recovery: recovery,
+                      balance: balance,
+                      monthlyInstallment: emiCount,
+                      companyId: activeCompanyId
+                    };
+                  });
+                  
+                  siloData['app_advance_ledgers'] = JSON.stringify(nextAdvanceLedgers);
+                  // Persist to new year in DB immediately
+                  if (window.electronAPI?.dbSet) {
+                    window.electronAPI.dbSet(getCKey('app_advance_ledgers'), nextAdvanceLedgers).catch((e: any) => {
+                      console.error("Auto save carried advance ledgers failed:", e);
+                    });
+                  }
+                } catch (err) {
+                  console.error("Failed to carry forward advance ledgers:", err);
+                }
+              }
+            }
+
+
+             // V04.00.06: Ghost Year Auto-Correction & Switched Company Latest FY Auto-Selection
+             const isCompanySwitch = lastCompanyIdRef.current !== activeCompanyId;
+             lastCompanyIdRef.current = activeCompanyId;
+
+             if (fySet.size === 0) {
+                fySet.add(activeFinancialYear); // Brand new DB, keep the default
+             } else {
+                const validYears = Array.from(fySet).sort();
+                const latestYear = validYears[validYears.length - 1];
+                
+                // V04.03.01: Auto-select active FY based on the last confirmed/processed payroll data to keep Dashboard in perfect sync
+                const targetDefaultFY = maxPayrollFY || latestYear;
+                
+                if (isCompanySwitch || !fySet.has(activeFinancialYear)) {
+                   if (activeFinancialYear !== targetDefaultFY) {
+                      console.log(`[usePayrollData] Auto-selecting active FY based on last processed payroll data: ${targetDefaultFY}`);
+                      setActiveFinancialYear(targetDefaultFY);
+                      localStorage.setItem('app_active_financial_year', targetDefaultFY);
+                   }
+                }
+             }
+
+             const now = new Date();
+             const currentYear = now.getFullYear();
+             const startYear = now.getMonth() >= 3 ? currentYear : currentYear - 1;
+             const activeFyFallback = `FY${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)}`;
+             fySet.add(activeFyFallback);
+             
+             setAvailableFinancialYears(Array.from(fySet).sort());
+
+            // V04.00.01: Aggressive LocalStorage Cleanup
+            // Clean up ALL dynamically generated app_ keys to free up quota before hydrating.
+            // This prevents the 5MB browser quota crash when switching FYs or Companies.
+            const keysToKeep = ['app_active_company_id', 'app_companies', 'app_users', 'app_license_secure', 'app_machine_id', 'settings_initial_tab', 'app_active_financial_year', 'app_legal_agreed_date'];
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+               const k = localStorage.key(i);
+               if (k && k.startsWith('app_') && !keysToKeep.includes(k) && !k.startsWith('app_msg_dismissed') && !k.includes('app_setup_complete')) {
+                  localStorage.removeItem(k);
+               }
+            }
+
+            Object.entries(siloData).forEach(([fKey, value]) => {
+              // Ensure we save it back with the STRICT correct scoping
+              try {
+                localStorage.setItem(getCKey(fKey), value);
+              } catch (quotaErr) {
+                console.warn(`[usePayrollData] LocalStorage write skipped for ${fKey} due to quota limit:`, quotaErr);
+              }
+              try {
+                if (fKey === 'app_logo') {
+                  try {
+                    const parsedLogo = value.startsWith('"') ? JSON.parse(value) : value;
+                    setLogoUrl(parsedLogo);
+                  } catch {
+                    setLogoUrl(value);
+                  }
+                } else {
+                  const parsed = JSON.parse(value);
+                  if (fKey === 'app_employees') setEmployees(parsed);
+                  if (fKey === 'app_config') setConfig(parsed);
+                  if (fKey === 'app_company_profile') setCompanyProfile(parsed);
+                  if (fKey === 'app_attendance') setAttendances(parsed);
+                  if (fKey === 'app_payroll_history') setPayrollHistory(parsed);
+                  if (fKey === 'app_leave_ledgers') setLeaveLedgers(parsed);
+                  if (fKey === 'app_advance_ledgers') setAdvanceLedgers(parsed);
+                  if (fKey === 'app_fines') setFines(parsed);
+                  if (fKey === 'app_leave_policy') setLeavePolicy(parsed);
+                  if (fKey === 'app_master_designations') setDesignations(parsed);
+                  if (fKey === 'app_master_divisions') setDivisions(parsed);
+                  if (fKey === 'app_master_branches') setBranches(parsed);
+                  if (fKey === 'app_master_sites') setSites(parsed);
+                }
               } catch (e) {}
             });
 
@@ -231,7 +660,7 @@ export const usePayrollData = (showAlert: any) => {
 
     performSync();
     return () => { isMounted = false; clearTimeout(safetyTimeout); };
-  }, [activeCompanyId, reloadTrigger]);
+  }, [activeCompanyId, activeFinancialYear, reloadTrigger]);
 
 
   // Update companies list when profile changes
@@ -249,6 +678,36 @@ export const usePayrollData = (showAlert: any) => {
       });
     }
   }, [companyProfile, activeCompanyId]);
+
+  // V04.03.02: JIT Hydration for missing app_companies in LocalStorage
+  // (Crucial for when backend registry is intact but renderer cache was wiped)
+  useEffect(() => {
+    if (companies.length === 0 && window.electronAPI?.dbGetGlobal) {
+      window.electronAPI.dbGetGlobal('app_companies').then((res: any) => {
+        if (res) {
+          try {
+            const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              console.log("[usePayrollData] Successfully recovered app_companies from global registry");
+              setCompanies(parsed);
+              localStorage.setItem('app_companies', JSON.stringify(parsed));
+              
+              // --- V05 BREAK LOOP ---
+              if (localStorage.getItem('app_is_reset_mode') === 'true') {
+                 localStorage.removeItem('app_is_reset_mode');
+                 window.location.reload();
+              }
+            }
+          } catch (e) {
+            console.error("Failed to parse app_companies during JIT hydration", e);
+          }
+        }
+      });
+    } else if (companies.length > 0 && localStorage.getItem('app_is_reset_mode') === 'true') {
+        localStorage.removeItem('app_is_reset_mode');
+        window.location.reload();
+    }
+  }, [companies.length]);
 
   // --- DATA RE-HYDRATION ON COMPANY SWITCH ---
   useEffect(() => {
@@ -294,12 +753,12 @@ export const usePayrollData = (showAlert: any) => {
           setLogoUrl(savedLogo);
         }
       } else {
-        setLogoUrl('../public/logo.png');
+        setLogoUrl(prev => prev && prev.startsWith('data:') ? prev : '../public/logo.png');
       }
     } catch (e) {
-      setLogoUrl('../public/logo.png');
+      setLogoUrl(prev => prev && prev.startsWith('data:') ? prev : '../public/logo.png');
     }
-  }, [activeCompanyId, isResetting, reloadTrigger]);
+  }, [activeCompanyId, activeFinancialYear, isResetting, reloadTrigger, getCKey]);
 
   // --- PERSISTENCE HELPERS ---
   const safeSave = useCallback(async (key: string, data: any) => {
@@ -355,7 +814,15 @@ export const usePayrollData = (showAlert: any) => {
     setTimeout(() => setIsResetting(false), 50);
   }, []);
 
-  // --- MULTI-COMPANY HANDLERS ---
+  // --- HANDLERS ---
+  const switchFinancialYear = useCallback((fy: string) => {
+    if (fy === activeFinancialYear) return;
+    
+    purgeState();
+    setActiveFinancialYear(fy);
+    localStorage.setItem('app_active_financial_year', fy);
+  }, [activeFinancialYear, purgeState]);
+
   const switchCompany = useCallback((id: string) => {
     if (id === activeCompanyId) return;
     
@@ -370,8 +837,19 @@ export const usePayrollData = (showAlert: any) => {
     const updated = [...companies, newCompany];
     setCompanies(updated);
     localStorage.setItem('app_companies', JSON.stringify(updated));
+    
+    // --- LIFETIME CREATION TRACKER ---
+    let lifetimeCount = parseInt(localStorage.getItem('app_lifetime_company_creations') || '0');
+    // If uninitialized, seed with current companies length before adding
+    if (lifetimeCount === 0) {
+      lifetimeCount = companies.length;
+    }
+    lifetimeCount += 1;
+    localStorage.setItem('app_lifetime_company_creations', lifetimeCount.toString());
+
     if (window.electronAPI?.dbSetGlobal) {
       await window.electronAPI.dbSetGlobal('app_companies', updated);
+      await window.electronAPI.dbSetGlobal('app_lifetime_company_creations', lifetimeCount);
     }
     
     // Switch to new silo
@@ -409,7 +887,11 @@ export const usePayrollData = (showAlert: any) => {
 
     // V03.01.04: Physical cleanup
     if (window.electronAPI?.deleteSilo) {
-      await window.electronAPI.deleteSilo(id);
+      const res = await window.electronAPI.deleteSilo(id);
+      if (res && res.success === false) {
+        showAlert('error', 'Folder Deletion Failed', `Could not delete the company's physical folder: ${res.error || 'Unknown Error'}. Please ensure no files inside are open in another application and try again.`);
+        return;
+      }
     }
 
     if (activeCompanyId === id) {
@@ -437,7 +919,8 @@ export const usePayrollData = (showAlert: any) => {
       const backupRes = await window.electronAPI.createDataBackup({
         fileName: backupFileName,
         subfolder: companyProfile.establishmentName,
-        encryptionKey: encryptionKey
+        encryptionKey: encryptionKey,
+        financialYear: activeFinancialYear
       });
 
       const currentIdx = monthsArr.indexOf(globalMonth);
@@ -446,104 +929,75 @@ export const usePayrollData = (showAlert: any) => {
       if (currentIdx === 11) { nextMonth = monthsArr[0]; nextYear = globalYear + 1; }
       else { nextMonth = monthsArr[currentIdx + 1]; }
 
-      setAttendances(prev => prev.map(a => a.month === globalMonth && a.year === globalYear ? { ...a, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0, encashedDays: 0 } : a));
-      setAdvanceLedgers(prev => {
-        const currentHistory = updatedHistory || payrollHistory;
-        const finalizedResults = currentHistory.filter(r => r.month === globalMonth && r.year === globalYear && r.status === 'Finalized');
-        return prev.map(a => {
-          const payrollResult = finalizedResults.find(r => r.employeeId === a.employeeId);
-          const actualRecovered = payrollResult ? (payrollResult.deductions?.advanceRecovery ?? 0) : 0;
-          const carryOpening = Math.max(0, (a.opening || 0) + (a.totalAdvance || 0) - actualRecovered);
-          
-          // Decrement EMI count if recovery happened, but keep at least 1 if balance remains
-          const nextEmiCount = carryOpening > 0 
-            ? Math.max(1, (a.emiCount || 0) - (actualRecovered > 0 ? 1 : 0)) 
-            : 0;
-            
-          let nextRecovery = nextEmiCount > 0 ? Math.min(Math.round(carryOpening / nextEmiCount), carryOpening) : 0;
-          return { 
-            ...a, 
-            opening: carryOpening, 
-            totalAdvance: 0, 
-            manualPayment: 0, 
-            paidAmount: 0, 
-            monthlyInstallment: 0, 
-            emiCount: nextEmiCount, 
-            recovery: nextRecovery, 
-            balance: Math.max(0, carryOpening - nextRecovery) 
-          };
-        });
+      // Compute Next States
+      const nextAttendances = attendances.map(a => a.month === globalMonth && a.year === globalYear ? { ...a, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0, encashedDays: 0 } : a);
+      
+      const currentHistory = updatedHistory || payrollHistory;
+      const finalizedResults = currentHistory.filter(r => r.month === globalMonth && r.year === globalYear && r.status === 'Finalized');
+      
+      const nextAdvanceLedgers = advanceLedgers.map(a => {
+        const payrollResult = finalizedResults.find(r => r.employeeId === a.employeeId);
+        const actualRecovered = payrollResult ? (payrollResult.deductions?.advanceRecovery ?? 0) : 0;
+        const carryOpening = Math.max(0, (a.opening || 0) + (a.totalAdvance || 0) - actualRecovered);
+        const nextEmiCount = carryOpening > 0 ? Math.max(1, (a.emiCount || 0) - (actualRecovered > 0 ? 1 : 0)) : 0;
+        const nextRecovery = nextEmiCount > 0 ? Math.min(Math.round(carryOpening / nextEmiCount), carryOpening) : 0;
+        return { ...a, opening: carryOpening, totalAdvance: 0, manualPayment: 0, paidAmount: 0, monthlyInstallment: 0, emiCount: nextEmiCount, recovery: nextRecovery, balance: Math.max(0, carryOpening - nextRecovery) };
       });
-      setLeaveLedgers(prev => {
-        const currentHistory = updatedHistory || payrollHistory;
-        const finalizedResults = currentHistory.filter(r => r.month === globalMonth && r.year === globalYear && r.status === 'Finalized');
-        
-        return prev.map(l => {
-          const payrollResult = finalizedResults.find(r => r.employeeId === l.employeeId);
-          const emp = employees.find(e => e.id === l.employeeId);
-          
-          // Determine if employee has joined by the end of the next month
-          const dojDate = emp ? new Date(emp.doj) : new Date(0);
-          dojDate.setHours(0, 0, 0, 0);
-          const nextPeriodEnd = new Date(nextYear, monthsArr.indexOf(nextMonth) + 1, 0);
-          nextPeriodEnd.setHours(23, 59, 59, 999);
-          
-          const isEligible = dojDate <= nextPeriodEnd;
 
-          let prevELBal = l.el.balance;
-          let prevSLBal = l.sl.balance;
-          let prevCLBal = l.cl.balance;
-
-          if (payrollResult && payrollResult.leaveSnapshot) {
-            prevELBal = payrollResult.leaveSnapshot.el.balance;
-            prevSLBal = payrollResult.leaveSnapshot.sl.balance;
-            prevCLBal = payrollResult.leaveSnapshot.cl.balance;
-          }
-
-          // Case: If employee hasn't joined by the end of NEXT month, they stay at 0
-          // Case: If they JOIN in the next month, their opening is 0, but they get credit
-          const elCredit = isEligible ? (leavePolicy?.el?.maxPerYear || 18) / 12 : 0;
-          const slCredit = isEligible ? (leavePolicy?.sl?.maxPerYear || 12) / 12 : 0;
-          const clCredit = isEligible ? (leavePolicy?.cl?.maxPerYear || 12) / 12 : 0;
-
-          const isAprilReset = nextMonth === 'April';
-
-           // Capped Carry Forward Logic based on Annual Leave Policy
-           const carryEL = isEligible ? Math.min(prevELBal, isAprilReset ? (leavePolicy?.el?.maxCarryForward || 30) : 999) : 0;
-           const carrySL = isEligible ? (isAprilReset ? Math.min(prevSLBal, leavePolicy?.sl?.maxCarryForward || 0) : prevSLBal) : 0;
-           const carryCL = isEligible ? (isAprilReset ? Math.min(prevCLBal, leavePolicy?.cl?.maxCarryForward || 0) : prevCLBal) : 0;
-
-           return {
-             ...l,
-             el: { 
-               opening: carryEL, 
-               eligible: elCredit, 
-               encashed: 0, 
-               availed: 0, 
-               balance: carryEL + elCredit 
-             },
-             sl: { 
-               eligible: slCredit, 
-               availed: 0, 
-               balance: carrySL + slCredit 
-             },
-             cl: { 
-               availed: 0, 
-               accumulation: carryCL, 
-               balance: carryCL + clCredit 
-             }
-          };
-        });
+      const nextLeaveLedgers = leaveLedgers.map(l => {
+        const payrollResult = finalizedResults.find(r => r.employeeId === l.employeeId);
+        const emp = employees.find(e => e.id === l.employeeId);
+        const dojDate = emp ? new Date(emp.doj) : new Date(0);
+        dojDate.setHours(0, 0, 0, 0);
+        const nextPeriodEnd = new Date(nextYear, monthsArr.indexOf(nextMonth) + 1, 0);
+        nextPeriodEnd.setHours(23, 59, 59, 999);
+        const isEligible = dojDate <= nextPeriodEnd;
+        let prevELBal = l.el.balance; let prevSLBal = l.sl.balance; let prevCLBal = l.cl.balance;
+        if (payrollResult && payrollResult.leaveSnapshot) {
+          prevELBal = payrollResult.leaveSnapshot.el.balance; prevSLBal = payrollResult.leaveSnapshot.sl.balance; prevCLBal = payrollResult.leaveSnapshot.cl.balance;
+        }
+        const elCredit = isEligible ? (leavePolicy?.el?.maxPerYear || 18) / 12 : 0;
+        const slCredit = isEligible ? (leavePolicy?.sl?.maxPerYear || 12) / 12 : 0;
+        const clCredit = isEligible ? (leavePolicy?.cl?.maxPerYear || 12) / 12 : 0;
+        const isAprilReset = nextMonth === 'April';
+        const carryEL = isEligible ? Math.min(prevELBal, isAprilReset ? (leavePolicy?.el?.maxCarryForward || 30) : 999) : 0;
+        const carrySL = isEligible ? (isAprilReset ? Math.min(prevSLBal, leavePolicy?.sl?.maxCarryForward || 0) : prevSLBal) : 0;
+        const carryCL = isEligible ? (isAprilReset ? Math.min(prevCLBal, leavePolicy?.cl?.maxCarryForward || 0) : prevCLBal) : 0;
+        return {
+           ...l,
+           el: { opening: carryEL, eligible: elCredit, encashed: 0, availed: 0, balance: carryEL + elCredit },
+           sl: { eligible: slCredit, availed: 0, balance: carrySL + slCredit },
+           cl: { availed: 0, accumulation: carryCL, balance: carryCL + clCredit }
+        };
       });
-      setFines(prev => prev.filter(f => !(f.month === globalMonth && f.year === globalYear)));
-      setOTRecords(prev => prev.filter(f => !(f.month === globalMonth && f.year === globalYear)));
+
+      const nextFines = fines.filter(f => !(f.month === globalMonth && f.year === globalYear));
+      const nextOTRecords = otRecords.filter(f => !(f.month === globalMonth && f.year === globalYear));
+
+      setAttendances(nextAttendances);
+      setAdvanceLedgers(nextAdvanceLedgers);
+      setLeaveLedgers(nextLeaveLedgers);
+      setFines(nextFines);
+      setOTRecords(nextOTRecords);
+
+      // V04.00.04: If rolling over from March to April, physically persist the carry-forwards to the NEW FY silo
+      if (globalMonth === 'March' && nextMonth === 'April' && window.electronAPI?.dbSet) {
+          const targetFY = `FY${String(nextYear).slice(-2)}-${String(nextYear + 1).slice(-2)}`;
+          // We manually craft the keys to bypass activeFinancialYear since it hasn't switched yet
+          const overrideCKey = (k: string) => `${k}_${targetFY}_${activeCompanyId}`;
+          await window.electronAPI.dbSet(overrideCKey('app_attendance'), nextAttendances);
+          await window.electronAPI.dbSet(overrideCKey('app_advance_ledgers'), nextAdvanceLedgers);
+          await window.electronAPI.dbSet(overrideCKey('app_leave_ledgers'), nextLeaveLedgers);
+          await window.electronAPI.dbSet(overrideCKey('app_fines'), nextFines);
+          await window.electronAPI.dbSet(overrideCKey('app_ot_records'), nextOTRecords);
+      }
       
       return { nextMonth, nextYear, backupRes, backupFileName };
     } catch (e: any) {
       showAlert('error', 'Rollover Failed', `Critical error during month initialization: ${e.message}`);
       return null;
     }
-  }, [companyProfile, payrollHistory, showAlert]);
+  }, [companyProfile, payrollHistory, showAlert, activeFinancialYear, activeCompanyId]);
 
   const handlePayrollReset = useCallback(async () => {
     setIsResetting(true);
@@ -589,8 +1043,13 @@ export const usePayrollData = (showAlert: any) => {
     }, undefined, 'RELOAD NOW', undefined, undefined, 5, false, 'Disk Cleanup in Progress...');
   }, [showAlert, activeCompanyId, getCKey]);
 
-  const handleDeepReset = useCallback(async () => {
+  const handleDeepReset = useCallback(async (deleteFolder = true) => {
     setIsResetting(true);
+    
+    // 1. Determine updated companies array
+    const updatedCompanies = companies.filter(c => c.id !== activeCompanyId);
+    
+    // 2. Wipe the keys for the active company
     const keysToWipe = [
       'app_employees', 'app_config', 'app_company_profile',
       'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
@@ -598,31 +1057,66 @@ export const usePayrollData = (showAlert: any) => {
       'app_master_designations', 'app_master_divisions', 'app_master_branches', 'app_master_sites'
     ];
 
+    // Wipe active company keys from local storage only to prevent SQLite locks before physical folder deletion
     for (const k of keysToWipe) {
       localStorage.removeItem(getCKey(k));
       localStorage.removeItem(k);
-      
-      if ((window as any).electronAPI?.dbDelete) {
-        try {
-          if (k === 'app_config' || k === 'app_company_profile' || k === 'app_leave_policy') {
-            await (window as any).electronAPI.dbSet(getCKey(k), {});
-            await (window as any).electronAPI.dbSet(k, {});
-          } else {
-            await (window as any).electronAPI.dbDelete(getCKey(k));
-            await (window as any).electronAPI.dbDelete(k);
-          }
-        } catch (e) { console.error(`Error wiping ${k}`, e); }
+    }
+
+    // 3. Clear/delete the SQLite database silo
+    if (deleteFolder && (window as any).electronAPI?.deleteSilo) {
+      try {
+        const res = await (window as any).electronAPI.deleteSilo(activeCompanyId);
+        if (res && res.success === false) {
+          showAlert('error', 'Folder Deletion Failed', `Could not delete the company's physical folder: ${res.error || 'Unknown Error'}. Please ensure no files inside are open in another application and try again.`);
+          setIsResetting(false);
+          return;
+        }
+      } catch (e) {
+        console.error("Error calling deleteSilo", e);
+        showAlert('error', 'Folder Deletion Failed', `An unexpected error occurred: ${(e as any).message || e}`);
+        setIsResetting(false);
+        return;
       }
     }
 
-    localStorage.setItem('app_setup_complete', 'false');
-    localStorage.setItem('app_is_reset_mode', 'true');
+    // 4. Update the global companies list
+    localStorage.setItem('app_companies', JSON.stringify(updatedCompanies));
+    if ((window as any).electronAPI?.dbSetGlobal) {
+      try {
+        await (window as any).electronAPI.dbSetGlobal('app_companies', updatedCompanies);
+      } catch (e) { console.error("Error updating app_companies globally", e); }
+    }
 
-    showAlert('success', 'Deep Reset Complete', 'The active company has been wiped to a factory state. System will now reload.', () => {
-      sessionStorage.setItem('app_is_reloading_after_reset', 'true');
-      window.location.reload();
-    }, undefined, 'RELOAD NOW', undefined, undefined, 5, false, 'Factory Reset in Progress...');
-  }, [showAlert]);
+    // 5. Determine the next company or setup mode
+    if (updatedCompanies.length > 0) {
+      const nextCompany = updatedCompanies[0];
+      localStorage.setItem('app_active_company_id', nextCompany.id);
+      localStorage.setItem('app_setup_complete', 'true');
+      
+      const successMsg = deleteFolder
+        ? `The company '${companyProfile?.establishmentName || activeCompanyId}' has been completely deleted and its physical folders purged. The system will now reload to load your remaining company: '${nextCompany.establishmentName}'.`
+        : `The company '${companyProfile?.establishmentName || activeCompanyId}' has been removed from active registries. The physical folders remain intact. The system will now reload to load your remaining company: '${nextCompany.establishmentName}'.`;
+
+      showAlert('success', 'Company Removed Successfully', successMsg, () => {
+        sessionStorage.setItem('app_is_reloading_after_reset', 'true');
+        window.location.reload();
+      }, undefined, 'LOAD NEXT COMPANY', undefined, undefined, 5, false, 'Switching Silos...');
+    } else {
+      localStorage.removeItem('app_active_company_id');
+      localStorage.setItem('app_setup_complete', 'false');
+      localStorage.setItem('app_is_reset_mode', 'true');
+      
+      const successMsg = deleteFolder
+        ? 'All registered companies have been completely removed and physical folders purged. System will now reload to Setup Mode.'
+        : 'All registered companies have been removed from active registries (folders remain intact). System will now reload to Setup Mode.';
+
+      showAlert('success', 'All Companies Removed', successMsg, () => {
+        sessionStorage.setItem('app_is_reloading_after_reset', 'true');
+        window.location.reload();
+      }, undefined, 'ENTER SETUP MODE', undefined, undefined, 5, false, 'Preparing Setup Environment...');
+    }
+  }, [showAlert, activeCompanyId, companies, getCKey, companyProfile]);
 
   const handleNuclearReset = useCallback(async () => {
     setIsResetting(true);
@@ -672,7 +1166,7 @@ export const usePayrollData = (showAlert: any) => {
     logoUrl, setLogoUrl,
     safeSave, handleRollover, handlePayrollReset, handleDeepReset, handleNuclearReset,
     isResetting, isHydrating,
-    companies, setCompanies, activeCompanyId, switchCompany, addCompany, deleteCompany, purgeState,
+    companies, setCompanies, activeCompanyId, activeFinancialYear, availableFinancialYears, switchCompany, switchFinancialYear, addCompany, deleteCompany, purgeState,
     triggerReload
   };
 };

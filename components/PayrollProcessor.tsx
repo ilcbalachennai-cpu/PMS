@@ -495,7 +495,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             finalColumns = [...baseColumns];
         } else {
             // Static order based on user's screenshot, with Leave shifted after Others
-            finalColumns = ['days', 'basic', 'da', 'others', 'leaveEncashment', 'totalEarnings', 'epf', 'esi', 'pt_it', 'advanceRecovery', 'otherDeductions', 'totalDeductions', 'netPay'];
+            finalColumns = ['days', 'basic', 'da', 'others', 'leaveEncashment', 'totalEarnings', 'epf', 'esi', 'pt', 'it', 'advanceRecovery', 'otherDeductions', 'totalDeductions', 'netPay'];
         }
 
         // Check if any employee has non-zero 'others' (Earnings)
@@ -511,7 +511,13 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         const hasOtherDeductionsBalance = results.some(r => {
             const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
             const displayedDeductionKeys = deductionKeys.filter(k => finalColumns.includes(k) && k !== 'otherDeductions');
-            const sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => acc + (r?.deductions?.[k as keyof typeof r.deductions] || 0), 0);
+            let sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => acc + (r?.deductions?.[k as keyof typeof r.deductions] || 0), 0);
+            
+            // Explicitly add grouped columns if they are displayed
+            if (finalColumns.includes('pt_it')) {
+                sumOfDisplayed += (r?.deductions?.pt || 0) + (r?.deductions?.it || 0);
+            }
+            
             const othersVal = Math.round((r?.deductions?.total || 0) - sumOfDisplayed);
             return othersVal !== 0;
         });
@@ -585,10 +591,16 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             value: (r: PayrollResult) => {
                 const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
                 const displayedDeductionKeys = deductionKeys.filter(k => activeColumns.includes(k));
-                const sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => {
+                let sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => {
                     const val = r?.deductions?.[k as keyof typeof r.deductions] || 0;
                     return acc + val;
                 }, 0);
+
+                // Explicitly add grouped columns if they are displayed
+                if (activeColumns.includes('pt_it')) {
+                    sumOfDisplayed += (r?.deductions?.pt || 0) + (r?.deductions?.it || 0);
+                }
+
                 return Math.round((r?.deductions?.total || 0) - sumOfDisplayed);
             }
         },
@@ -774,7 +786,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
                     {config.enableDynamicPaySheet && (
                         <div ref={topScrollRef} className="overflow-auto custom-scrollbar max-w-full bg-[#111827] rounded-lg border border-slate-800 p-1 mb-2">
-                            <div style={{ width: `${tableWidth}px` }} className="h-1"></div>
+                            <style>{`#top-scroll-inner { width: ${tableWidth}px; }`}</style>
+                            <div id="top-scroll-inner" className="h-1"></div>
                         </div>
                     )}
 
@@ -928,8 +941,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
             {previewRecord && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl shadow-2xl flex flex-col relative" style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>
-                        <div className="sticky top-0 bg-slate-100 border-b border-slate-200 p-4 flex justify-between items-center z-10" style={{ backgroundColor: '#f1f5f9' }}><h3 className="font-bold text-slate-700 flex items-center gap-2"><FileText size={18} className="text-blue-600" /> Pay Slip Preview</h3><button title="Close Preview" aria-label="Close Preview" onClick={() => setPreviewRecord(null)} className="p-2 hover:bg-red-100 text-slate-500 hover:text-red-500 rounded-full transition-colors"><X size={20} /></button></div>
+                    <div className="bg-white text-[#0f172a] w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl shadow-2xl flex flex-col relative">
+                        <div className="sticky top-0 bg-[#f1f5f9] border-b border-slate-200 p-4 flex justify-between items-center z-10"><h3 className="font-bold text-slate-700 flex items-center gap-2"><FileText size={18} className="text-blue-600" /> Pay Slip Preview</h3><button title="Close Preview" aria-label="Close Preview" onClick={() => setPreviewRecord(null)} className="p-2 hover:bg-red-100 text-slate-500 hover:text-red-500 rounded-full transition-colors"><X size={20} /></button></div>
                         <div className="p-8 space-y-6 print:p-0">
                             <div className="text-center space-y-1 border-b-2 border-slate-800 pb-4"><h2 className="text-2xl font-black text-slate-900 uppercase">{companyProfile.establishmentName}</h2><p className="text-xs text-slate-600 font-medium whitespace-pre-wrap px-12">{[companyProfile.doorNo, companyProfile.buildingName, companyProfile.street, companyProfile.area, companyProfile.city, companyProfile.state, companyProfile.pincode].filter(Boolean).join(', ')}</p><h3 className="text-lg font-bold text-slate-800 mt-2 uppercase underline decoration-2 underline-offset-4 decoration-slate-400">Pay Slip - {month} {year}</h3></div>
                             {(() => {

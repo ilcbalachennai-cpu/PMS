@@ -32,7 +32,13 @@ import {
     generateConsolidatedBonusReport,
     generateConsolidatedGratuityReport,
     generateLWFReport,
-    generateConsolidatedLWFReport
+    generateConsolidatedLWFReport,
+    generateContractorMappingText,
+    generateContractorMappingPDF,
+    generatePrincipalMappingText,
+    generatePrincipalMappingPDF,
+    generateESIIPMappingText,
+    generateESIIPMappingPDF
 } from '../services/reportService';
 
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
@@ -76,7 +82,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     attendances = [],
     advanceLedgers = [],
     arrearHistory = [],
-    showAlert: _showAlert
+    showAlert: _showAlert,
+    latestFrozenPeriod
 }) => {
     const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const currentYear = new Date().getFullYear();
@@ -84,7 +91,13 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
     const [selectedState, setSelectedState] = useState<string>(companyProfile.state || 'Tamil Nadu');
     const [rangeModal, setRangeModal] = useState({ isOpen: false, reportType: '', fromMonth: globalMonth, fromYear: globalYear, toMonth: globalMonth, toYear: globalYear });
+    const [mappingModal, setMappingModal] = useState({ isOpen: false, type: 'Contractor' as 'Contractor' | 'Principal' | 'ESI', format: 'Text' as 'Text' | 'PDF', siteFilter: '', estCode: '', empType: 'Contract Employee' });
     const [msgModal, setMsgModal] = useState({ isOpen: false, title: '', message: '', type: 'error' as 'error' | 'success' | 'info', onConfirm: null as any });
+    const uniqueSites = useMemo(() => 
+        Array.from(new Set(employees.map(e => e.site).filter(Boolean)))
+            .filter(site => site !== 'Contract Employee' && site !== 'Contractor Employee'),
+        [employees]
+    );
 
     const [taxReportMode, setTaxReportMode] = useState<'Month' | 'Period'>('Month');
     const [taxFromMonth, setTaxFromMonth] = useState(globalMonth);
@@ -93,6 +106,13 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     const [taxToYear, setTaxToYear] = useState(globalYear);
 
     const currentForms = useMemo(() => STATE_FORM_MAPPINGS[selectedState] || STATE_FORM_MAPPINGS['Default'], [selectedState]);
+
+    const isCurrentPeriodConfirmed = useMemo(() => {
+        if (!latestFrozenPeriod) return false;
+        const currentVal = (globalYear * 12) + monthsArr.indexOf(globalMonth);
+        const frozenVal = (latestFrozenPeriod.year * 12) + monthsArr.indexOf(latestFrozenPeriod.month);
+        return currentVal <= frozenVal;
+    }, [globalMonth, globalYear, latestFrozenPeriod]);
 
     // Sync tax period with global period when global period changes
     useEffect(() => {
@@ -109,6 +129,38 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     };
 
     const handleDownload = async (reportName: string, format: 'PDF' | 'Excel' | 'Text') => {
+        const isPeriodConfirmed = (m: string, y: number): boolean => {
+            if (!latestFrozenPeriod) return false;
+            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const currentVal = (y * 12) + months.indexOf(m);
+            const frozenVal = (latestFrozenPeriod.year * 12) + months.indexOf(latestFrozenPeriod.month);
+            return currentVal <= frozenVal;
+        };
+
+        if (taxReportMode === 'Period' && ['PT Report', 'TDS Report', 'Gratuity', 'Bonus', 'LWF Report'].includes(reportName)) {
+            if (!isPeriodConfirmed(taxToMonth, taxToYear)) {
+                setMsgModal({ 
+                    isOpen: true, 
+                    title: 'Draft Period Blocked', 
+                    message: `Consolidated statutory reports can only be generated up to frozen/confirmed periods. The target end period ${taxToMonth} ${taxToYear} is currently in draft (not finalized).`, 
+                    type: 'error', 
+                    onConfirm: null 
+                });
+                return;
+            }
+        } else {
+            if (!isPeriodConfirmed(globalMonth, globalYear)) {
+                setMsgModal({ 
+                    isOpen: true, 
+                    title: 'Draft Period Blocked', 
+                    message: `Statutory reports can only be generated for frozen/confirmed periods. The period ${globalMonth} ${globalYear} is currently in draft (not finalized). Please finalize the payroll for this period first.`, 
+                    type: 'error', 
+                    onConfirm: null 
+                });
+                return;
+            }
+        }
+
         const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
         const fileName = getStandardFileName(reportName, companyProfile, globalMonth, globalYear);
         let savedPath: string | null = null;
@@ -186,6 +238,26 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
     const handleGenerateRange = async () => {
         setRangeModal(p => ({ ...p, isOpen: false }));
+
+        const isPeriodConfirmed = (m: string, y: number): boolean => {
+            if (!latestFrozenPeriod) return false;
+            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const currentVal = (y * 12) + months.indexOf(m);
+            const frozenVal = (latestFrozenPeriod.year * 12) + months.indexOf(latestFrozenPeriod.month);
+            return currentVal <= frozenVal;
+        };
+
+        if (!isPeriodConfirmed(rangeModal.toMonth, rangeModal.toYear)) {
+            setMsgModal({ 
+                isOpen: true, 
+                title: 'Draft Period Blocked', 
+                message: `Range-based statutory reports can only be generated up to frozen/confirmed periods. The target end period ${rangeModal.toMonth} ${rangeModal.toYear} is currently in draft (not finalized).`, 
+                type: 'error', 
+                onConfirm: null 
+            });
+            return;
+        }
+
         let savedPath: string | null = null;
         try {
             if (rangeModal.reportType === 'Form 5') {
@@ -197,6 +269,69 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 savedPath = await generatePFForm6A(payrollHistory, employees, config, rangeModal.fromMonth, rangeModal.fromYear, rangeModal.toMonth, rangeModal.toYear, companyProfile);
             }
             if (savedPath) _showAlert('success', 'Range Report Generated', 'Saved to your reports folder.', () => openSavedReport(savedPath));
+        } catch (err: any) { setMsgModal({ isOpen: true, title: 'Error', message: err.message, type: 'error', onConfirm: null }); }
+    };
+
+    const handleGenerateMapping = async () => {
+        setMappingModal(p => ({ ...p, isOpen: false }));
+
+        const isPeriodConfirmed = (m: string, y: number): boolean => {
+            if (!latestFrozenPeriod) return false;
+            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const currentVal = (y * 12) + months.indexOf(m);
+            const frozenVal = (latestFrozenPeriod.year * 12) + months.indexOf(latestFrozenPeriod.month);
+            return currentVal <= frozenVal;
+        };
+
+        if (!isPeriodConfirmed(globalMonth, globalYear)) {
+            setMsgModal({ 
+                isOpen: true, 
+                title: 'Draft Period Blocked', 
+                message: `${mappingModal.type} Mapping can only be generated for frozen/confirmed periods. The period ${globalMonth} ${globalYear} is currently in draft (not finalized).`, 
+                type: 'error', 
+                onConfirm: null 
+            });
+            return;
+        }
+
+        try {
+            const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
+            let savedPath: string | null = null;
+            if (mappingModal.type === 'Contractor') {
+                if (mappingModal.format === 'PDF') {
+                    savedPath = await generateContractorMappingPDF(currentData, employees, mappingModal.siteFilter, companyProfile, globalMonth, globalYear);
+                } else {
+                    savedPath = await generateContractorMappingText(currentData, employees, mappingModal.siteFilter, companyProfile, globalMonth, globalYear);
+                }
+            } else if (mappingModal.type === 'ESI') {
+                if (mappingModal.format === 'PDF') {
+                    savedPath = await generateESIIPMappingPDF(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, companyProfile, globalMonth, globalYear);
+                } else {
+                    savedPath = await generateESIIPMappingText(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, companyProfile, globalMonth, globalYear);
+                }
+            } else {
+                if (mappingModal.format === 'PDF') {
+                    savedPath = await generatePrincipalMappingPDF(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, companyProfile, globalMonth, globalYear);
+                } else {
+                    savedPath = await generatePrincipalMappingText(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, companyProfile, globalMonth, globalYear);
+                }
+            }
+            if (savedPath) {
+                const extension = mappingModal.format === 'PDF' ? 'pdf' : 'txt';
+                const fileLabel = mappingModal.type === 'ESI' ? 'ESI IP Mapping' : `${mappingModal.type} Mapping`;
+                const fileName = getStandardFileName(fileLabel.replace(/\s+/g, '_'), companyProfile, globalMonth, globalYear) + '.' + extension;
+                _showAlert('success', `${mappingModal.type === 'ESI' ? 'ESI IP' : mappingModal.type} Mapping Generated`, `Saved as ${fileName}`, () => openSavedReport(savedPath), undefined, 'Open Report', undefined, undefined, 2);
+                
+                // Reset/clear modal fields and close
+                setMappingModal({
+                    isOpen: false,
+                    type: 'Contractor',
+                    format: 'Text',
+                    siteFilter: '',
+                    estCode: '',
+                    empType: 'Contract Employee'
+                });
+            }
         } catch (err: any) { setMsgModal({ isOpen: true, title: 'Error', message: err.message, type: 'error', onConfirm: null }); }
     };
 
@@ -231,6 +366,11 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                                     <button onClick={() => r.action('Excel')} className="text-[9px] font-black text-slate-400 hover:text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800 hover:border-slate-600 transition-colors" title="Download XLSX">XLSX</button>
                                     <button onClick={() => r.action('PDF')} className="text-[9px] font-black text-slate-400 hover:text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800 hover:border-slate-600 transition-colors" title="Download PDF">PDF</button>
                                 </>
+                            ) : r.format === 'TXT_PDF' ? (
+                                <>
+                                    <button onClick={() => r.action('Text')} className="text-[9px] font-black text-slate-400 hover:text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800 hover:border-slate-600 transition-colors" title="Download TXT">TXT</button>
+                                    <button onClick={() => r.action('PDF')} className="text-[9px] font-black text-slate-400 hover:text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800 hover:border-slate-600 transition-colors" title="Download PDF">PDF</button>
+                                </>
                             ) : (
                                 <button onClick={() => r.action()} className="text-[9px] font-black text-slate-400 hover:text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800 hover:border-slate-600 transition-colors ">{r.format || 'PDF'}</button>
                             )}
@@ -252,6 +392,14 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     <p className="text-slate-400 text-xs mt-1 font-medium">Official PF, ESI, and Labour Law Returns.</p>
                 </div>
                 <div className="flex items-center gap-3">
+                    <div className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${
+                        isCurrentPeriodConfirmed 
+                            ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/20' 
+                            : 'bg-amber-950/40 text-amber-400 border border-amber-500/20'
+                    }`}>
+                        <div className={`w-1.5 h-1.5 rounded-full ${isCurrentPeriodConfirmed ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+                        {isCurrentPeriodConfirmed ? 'Frozen / Confirmed' : 'Draft Period'}
+                    </div>
                     <select title="Select Month" value={globalMonth} onChange={e => setGlobalMonth(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500">
                         {monthsArr.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
@@ -270,7 +418,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     { label: 'PF ECR Arear ( Excel Backup)', action: () => handleDownload('PF ECR Arrears', 'Excel'), format: 'XLSX', textColor: 'text-amber-400' },
                     { label: 'Form 12A', action: () => handleDownload('Form 12A', 'PDF') },
                     { label: 'Form 3A', action: () => openRangeModal('Form 3A'), format: 'PDF' },
-                    { label: 'Form 6A', action: () => openRangeModal('Form 6A'), format: 'PDF' }
+                    { label: 'Form 6A', action: () => openRangeModal('Form 6A'), format: 'PDF' },
+                    { label: 'Contractor Mapping', action: (fmt) => setMappingModal(p => ({ ...p, isOpen: true, type: 'Contractor', format: fmt })), format: 'TXT_PDF', textColor: 'text-indigo-400' },
+                    { label: 'Principal Employer Mapping', action: (fmt) => setMappingModal(p => ({ ...p, isOpen: true, type: 'Principal', format: fmt, empType: 'Contract Employee' })), format: 'TXT_PDF', textColor: 'text-indigo-400' }
                 ]} />
 
                 <ReportCard title="ESI Act, 1948" icon={ShieldCheck} color="pink" reports={[
@@ -278,7 +428,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     { label: 'Form 5 (Contribution)', action: () => openRangeModal('Form 5'), format: 'PDF' },
                     { label: 'ESI Exit/OoC IP', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' },
                     { label: 'Employees Joined During the Month', action: (fmt) => handleDownload('Employees Joined', fmt), format: 'BOTH', textColor: 'text-sky-400' },
-                    { label: 'Employees Left During the Month', action: (fmt) => handleDownload('Employees Left', fmt), format: 'BOTH', textColor: 'text-rose-400' }
+                    { label: 'Employees Left During the Month', action: (fmt) => handleDownload('Employees Left', fmt), format: 'BOTH', textColor: 'text-rose-400' },
+                    { label: 'IP Mapping with Contractor/Principal Employer', action: (fmt) => setMappingModal({ isOpen: true, type: 'ESI', format: fmt, siteFilter: '', estCode: '', empType: companyProfile.establishmentName || '' }), format: 'TXT_PDF', textColor: 'text-indigo-400' }
                 ]} />
 
                 <ReportCard 
@@ -405,6 +556,86 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         <h3 className="text-lg font-bold text-white uppercase">{msgModal.title}</h3>
                         <p className="text-slate-400 text-sm">{msgModal.message}</p>
                         <button onClick={() => setMsgModal(p => ({ ...p, isOpen: false }))} className="w-full py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition-all">Dismiss</button>
+                    </div>
+                </div>
+            )}
+
+            {mappingModal.isOpen && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 p-8 shadow-2xl relative">
+                        <button title="Close" onClick={() => setMappingModal(p => ({ ...p, isOpen: false, siteFilter: '', estCode: '', empType: 'Contract Employee' }))} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
+                        <h3 className="text-lg font-black text-white italic uppercase tracking-tighter mb-6 flex items-center gap-2">
+                            <ShieldCheck className="text-indigo-500" size={24} /> {mappingModal.type === 'ESI' ? 'ESI IP Mapping' : `${mappingModal.type} Mapping`}
+                        </h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Select Site of Deployment</label>
+                                <select 
+                                    title="Site"
+                                    value={mappingModal.siteFilter} 
+                                    onChange={e => {
+                                        const site = e.target.value;
+                                        setMappingModal(p => ({ ...p, siteFilter: site }));
+                                    }} 
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
+                                >
+                                    <option value="">-- All Sites --</option>
+                                    {uniqueSites.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                            </div>
+                            
+                            {mappingModal.type === 'Principal' && (
+                                <>
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Establishment Code (EST_CODE)</label>
+                                        <input 
+                                            type="text" 
+                                            value={mappingModal.estCode} 
+                                            onChange={e => setMappingModal(p => ({ ...p, estCode: e.target.value }))}
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
+                                            placeholder="e.g. TNMAS000000"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Employee Type (EMP_TYPE)</label>
+                                        <select 
+                                            title="Employee Type"
+                                            value={mappingModal.empType} 
+                                            onChange={e => setMappingModal(p => ({ ...p, empType: e.target.value }))}
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
+                                        >
+                                            <option value="Direct Employee">Direct Employee</option>
+                                            <option value="Contract Employee">Contract Employee</option>
+                                        </select>
+                                    </div>
+                                </>
+                            )}
+                            {mappingModal.type === 'ESI' && (
+                                <>
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Contractor Code (ContractorCode)</label>
+                                        <input 
+                                            type="text" 
+                                            value={mappingModal.estCode} 
+                                            onChange={e => setMappingModal(p => ({ ...p, estCode: e.target.value }))}
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
+                                            placeholder="e.g. Contractor Subcode"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Contractor Name</label>
+                                        <input 
+                                            type="text" 
+                                            value={mappingModal.empType} 
+                                            onChange={e => setMappingModal(p => ({ ...p, empType: e.target.value }))}
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
+                                            placeholder="e.g. Company Name"
+                                        />
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <button onClick={handleGenerateMapping} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl mt-6 transition-colors">Generate Mapping File</button>
                     </div>
                 </div>
             )}
