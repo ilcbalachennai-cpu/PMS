@@ -368,7 +368,7 @@ Permanently deletes an entire establishment silo, erasing its sqlite database fi
 
 ### 12.3 Important Troubleshooting
 > [!IMPORTANT]
-> **IN CASE THE APP FAILS TO LOAD OR IS CORRUPTED**, go to the main installation folder (e.g., `D:\BharatPayRoll`) and **DOUBLE CLICK THE Launch_BPP executable (e.g., `Launch_BPP_V10.exe`)** to download/install fresh and launch the app again without any errors.
+> **IN CASE THE APP FAILS TO LOAD OR IS CORRUPTED**, go to the main installation folder (e.g., `D:\BharatPayRoll`) and **DOUBLE CLICK THE Launch_BPP_Installer.exe** to download/install fresh and launch the app again without any errors.
 
 ---
 *© 2026 BharatPay Pro. All Rights Reserved. (Version 05.02.06)*

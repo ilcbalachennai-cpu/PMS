@@ -3,7 +3,7 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "05.02.08";
+export const APP_VERSION = "06.01.01";
 export const APP_PATCH_TIMESTAMP = "28-05-2026 17:24:00"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
@@ -104,6 +104,19 @@ export const checkOnlineStatus = async (): Promise<{ isOnline: boolean }> => {
     return { isOnline: !!response };
   } catch (e) {
     return { isOnline: false };
+  }
+};
+
+/**
+ * Logs an audit event to the file system if running in Electron
+ */
+export const logAuditEvent = (type: string, message: string, metadata?: any) => {
+  try {
+    if ((window as any).electronAPI && (window as any).electronAPI.logAuditEvent) {
+      (window as any).electronAPI.logAuditEvent({ type, message, metadata }).catch(() => {});
+    }
+  } catch (e) {
+    console.error("Audit log error:", e);
   }
 };
 
@@ -599,6 +612,7 @@ export const activateFullLicense = async (
       if (!syncResult.valid) {
         // --- ROLLBACK INCONSISTENT IDENTITY ---
         console.error("❌ [SYNC] Identity mismatch. Rolling back activation...");
+        logAuditEvent('IDENTITY_SYNC_FAILED', 'Identity mismatch detected during activation sync', { userID, email, mobile });
         if (prevLicense) {
           localStorage.setItem('app_license_secure', prevLicense);
           if ((window as any).electronAPI) await (window as any).electronAPI.dbSet('app_license_secure', prevLicense);
@@ -629,6 +643,11 @@ export const activateFullLicense = async (
         console.error(`❌ [FIDELITY] Identity Mismatch Detected!`);
         console.log(`Cloud Data: Email[${cloudEmailRaw}] Mobile[${cloudMobileRaw}] (Normalized: ${cloudEmail} / ${cloudMobile})`);
         console.log(`Typed Data: Email[${email}] Mobile[${mobile}] (Normalized: ${typedEmail} / ${typedMobile})`);
+        
+        logAuditEvent('FIDELITY_MISMATCH', 'Fidelity check failed during activation', { 
+          cloudData: { email: cloudEmailRaw, mobile: cloudMobileRaw }, 
+          typedData: { email, mobile } 
+        });
 
         // Rollback
         if (prevLicense) {
@@ -947,7 +966,23 @@ export const validateLicenseStartup = async (
               if (window.electronAPI) window.electronAPI.dbSet(dataSizeKey, String(currentLicense.dataSize));
 
               console.log(`🏷️ [SYNC] Local status overwriten to PENDING_RESTORE (${cloudIsTrial ? 'TRIAL' : 'FULL'}). Data Limit: ${currentLicense.dataSize}`);
+            } else if (stored) {
+              // --- V05.02.10: Ensure License is NOT deleted when data is missing ---
+              stored.status = 'PENDING_RESTORE';
+              stored.checksum = generateChecksum(stored);
+              const scrambled = scramble(JSON.stringify(stored));
+              localStorage.setItem(storageKey, scrambled);
+              if ((window as any).electronAPI) {
+                await (window as any).electronAPI.dbSet(storageKey, scrambled);
+              }
+              console.log(`🏷️ [SYNC] Local status overwriten to PENDING_RESTORE (Fallback).`);
             }
+            
+            logAuditEvent('IDENTITY_RESTORE_REQUIRED', 'Startup validation blocked by identity mismatch', { 
+              machineId: currentMachineId, 
+              localUsers: users.length, 
+              attemptedID: attemptedID 
+            });
 
             incrementSyncRetryCount();
             return {

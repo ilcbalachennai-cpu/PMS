@@ -108,7 +108,7 @@ import { APP_VERSION, APP_PATCH_TIMESTAMP } from '../services/licenseService';
     } catch (e) { return false; }
   };
 
-export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false) => {
+export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, username?: string, userEmail?: string) => {
   const [latestAppVersion, setLatestAppVersion] = useState<string | null>(localStorage.getItem('app_latest_version'));
   const [latestPatchTimestamp, setLatestPatchTimestamp] = useState<string | null>(localStorage.getItem('app_latest_patch_timestamp'));
   const [appStartupTime] = useState(Date.now());
@@ -261,7 +261,13 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false) => {
         await new Promise(r => setTimeout(r, 2000));
         
         setDeploymentStep(5); // APPLYing
-        await new Promise(r => setTimeout(r, 3000));
+        
+        // Use this step time to safely flush and close the SQLite database
+        try {
+            await (window as any).electronAPI.prepareForInstall();
+        } catch (e) {
+            console.warn("prepareForInstall warning:", e);
+        }
 
         // 🏆 SUCCESS STATE: Final feedback before restart
         setDeploymentStep(6); 
@@ -288,7 +294,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false) => {
 
         localStorage.removeItem('app_update_ready');
         // @ts-ignore - Pass silent flag for patches
-        const result = await (window as any).electronAPI.backupAndInstall({ silent: isPatchNotice });
+        const result = await (window as any).electronAPI.backupAndInstall({ silent: isPatchNotice, username, userEmail });
         if (result && result.success === false) {
            showAlert('error', 'Restart Failed', `The update was downloaded but the installer could not be launched automatically: ${result.error || 'Unknown error'}. Please try restarting the app manually.`);
         }

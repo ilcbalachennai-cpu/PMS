@@ -1043,45 +1043,56 @@ export const usePayrollData = (showAlert: any) => {
     }, undefined, 'RELOAD NOW', undefined, undefined, 5, false, 'Disk Cleanup in Progress...');
   }, [showAlert, activeCompanyId, getCKey]);
 
-  const handleDeepReset = useCallback(async (deleteFolder = true) => {
-    setIsResetting(true);
+  const handleDeepReset = useCallback(async (deleteFolder = true, targetCompanyId?: string) => {
+    const purgeId = targetCompanyId || activeCompanyId;
+    const isPurgingActive = purgeId === activeCompanyId;
+
+    if (isPurgingActive) {
+        setIsResetting(true);
+    }
     
     // 1. Determine updated companies array
-    const updatedCompanies = companies.filter(c => c.id !== activeCompanyId);
+    const updatedCompanies = companies.filter(c => c.id !== purgeId);
     
-    // 2. Wipe the keys for the active company
-    const keysToWipe = [
-      'app_employees', 'app_config', 'app_company_profile',
-      'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
-      'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_ot_records', 'app_logo',
-      'app_master_designations', 'app_master_divisions', 'app_master_branches', 'app_master_sites'
-    ];
+    const targetProfile = companies.find(c => c.id === purgeId);
 
-    // Wipe active company keys from local storage only to prevent SQLite locks before physical folder deletion
-    for (const k of keysToWipe) {
-      localStorage.removeItem(getCKey(k));
-      localStorage.removeItem(k);
+    
+    // 2. Wipe the keys for the active company ONLY IF purging active
+    if (isPurgingActive) {
+      const keysToWipe = [
+        'app_employees', 'app_config', 'app_company_profile',
+        'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
+        'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_ot_records', 'app_logo',
+        'app_master_designations', 'app_master_divisions', 'app_master_branches', 'app_master_sites'
+      ];
+
+      // Wipe active company keys from local storage only to prevent SQLite locks before physical folder deletion
+      for (const k of keysToWipe) {
+        localStorage.removeItem(getCKey(k));
+        localStorage.removeItem(k);
+      }
     }
 
     // 3. Clear/delete the SQLite database silo
     if (deleteFolder && (window as any).electronAPI?.deleteSilo) {
       try {
-        const res = await (window as any).electronAPI.deleteSilo(activeCompanyId);
+        const res = await (window as any).electronAPI.deleteSilo(purgeId);
         if (res && res.success === false) {
           showAlert('error', 'Folder Deletion Failed', `Could not delete the company's physical folder: ${res.error || 'Unknown Error'}. Please ensure no files inside are open in another application and try again.`);
-          setIsResetting(false);
+          if (isPurgingActive) setIsResetting(false);
           return;
         }
       } catch (e) {
         console.error("Error calling deleteSilo", e);
         showAlert('error', 'Folder Deletion Failed', `An unexpected error occurred: ${(e as any).message || e}`);
-        setIsResetting(false);
+        if (isPurgingActive) setIsResetting(false);
         return;
       }
     }
 
     // 4. Update the global companies list
     localStorage.setItem('app_companies', JSON.stringify(updatedCompanies));
+    setCompanies(updatedCompanies);
     if ((window as any).electronAPI?.dbSetGlobal) {
       try {
         await (window as any).electronAPI.dbSetGlobal('app_companies', updatedCompanies);
@@ -1089,14 +1100,23 @@ export const usePayrollData = (showAlert: any) => {
     }
 
     // 5. Determine the next company or setup mode
+    if (!isPurgingActive) {
+      const successMsg = deleteFolder
+        ? `The company '${targetProfile?.establishmentName || purgeId}' (ID: ${purgeId}) has been completely deleted and its physical folders purged.`
+        : `The company '${targetProfile?.establishmentName || purgeId}' (ID: ${purgeId}) has been removed from active registries. The physical folders remain intact.`;
+
+      showAlert('success', 'Company Removed Successfully', successMsg);
+      return;
+    }
+
     if (updatedCompanies.length > 0) {
       const nextCompany = updatedCompanies[0];
       localStorage.setItem('app_active_company_id', nextCompany.id);
       localStorage.setItem('app_setup_complete', 'true');
       
       const successMsg = deleteFolder
-        ? `The company '${companyProfile?.establishmentName || activeCompanyId}' has been completely deleted and its physical folders purged. The system will now reload to load your remaining company: '${nextCompany.establishmentName}'.`
-        : `The company '${companyProfile?.establishmentName || activeCompanyId}' has been removed from active registries. The physical folders remain intact. The system will now reload to load your remaining company: '${nextCompany.establishmentName}'.`;
+        ? `The company '${targetProfile?.establishmentName || purgeId}' (ID: ${purgeId}) has been completely deleted and its physical folders purged. The system will now reload to load your remaining company: '${nextCompany.establishmentName}' (ID: ${nextCompany.id}).`
+        : `The company '${targetProfile?.establishmentName || purgeId}' (ID: ${purgeId}) has been removed from active registries. The physical folders remain intact. The system will now reload to load your remaining company: '${nextCompany.establishmentName}' (ID: ${nextCompany.id}).`;
 
       showAlert('success', 'Company Removed Successfully', successMsg, () => {
         sessionStorage.setItem('app_is_reloading_after_reset', 'true');
@@ -1108,8 +1128,8 @@ export const usePayrollData = (showAlert: any) => {
       localStorage.setItem('app_is_reset_mode', 'true');
       
       const successMsg = deleteFolder
-        ? 'All registered companies have been completely removed and physical folders purged. System will now reload to Setup Mode.'
-        : 'All registered companies have been removed from active registries (folders remain intact). System will now reload to Setup Mode.';
+        ? `The company '${targetProfile?.establishmentName || purgeId}' (ID: ${purgeId}) has been completely deleted and its physical folders purged. System will now reload to Setup Mode.`
+        : `The company '${targetProfile?.establishmentName || purgeId}' (ID: ${purgeId}) has been removed from active registries (folders remain intact). System will now reload to Setup Mode.`;
 
       showAlert('success', 'All Companies Removed', successMsg, () => {
         sessionStorage.setItem('app_is_reloading_after_reset', 'true');

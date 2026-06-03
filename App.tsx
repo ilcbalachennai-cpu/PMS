@@ -267,7 +267,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     isPatchNotice, isPatchMandatory, isSessionDismissed, patchSkipCount, versionSkipCount,
     deploymentStep,
     handleUpdateNow, handleUpdateLater 
-  } = useAppUpdate(showAlert, currentUser?.role === 'Developer');
+  } = useAppUpdate(showAlert, currentUser?.role === 'Developer', currentUser?.username, currentUser?.email);
 
   const [isInstalling, setIsInstalling] = useState(false);
   const [isAddingNewCompany, setIsAddingNewCompany] = useState(false);

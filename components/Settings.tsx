@@ -14,7 +14,7 @@ import CryptoJS from 'crypto-js';
 import {
     fetchLatestMessages, updateDeveloperMessages, activateFullLicense,
     getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
-    requestResetOTP, getAppDeveloper
+    requestResetOTP, getAppDeveloper, APP_VERSION, APP_PATCH_TIMESTAMP
 } from '../services/licenseService';
 import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, generateBackupFilename } from '../utils/formatters';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
@@ -37,7 +37,7 @@ interface SettingsProps {
     onRestore: () => void;
     onNuclearReset: () => void;
     onPayrollReset: () => Promise<void>;
-    onDeepReset: (deleteFolder?: boolean) => Promise<void>;
+    onDeepReset: (deleteFolder?: boolean, targetCompanyId?: string) => Promise<void>;
     initialTab?: SettingsTab;
     setSettingsTab?: (tab: SettingsTab) => void;
     userRole?: string;
@@ -113,6 +113,7 @@ const Settings: React.FC<SettingsProps> = ({
     const [saved, setSaved] = useState(false);
     const [selectedStatePreset, setSelectedStatePreset] = useState<string>('Tamil Nadu');
     const [selectedLWFState, setSelectedLWFState] = useState<string>('Tamil Nadu');
+    const [targetPurgeCompanyId, setTargetPurgeCompanyId] = useState<string>(activeCompanyId);
 
     // V03.01.07: Sync local state when props change (e.g. after switching companies)
     useEffect(() => {
@@ -1835,7 +1836,7 @@ const Settings: React.FC<SettingsProps> = ({
 
         if (isAuthorized) {
             setIsProcessing(true);
-            await onDeepReset(purgeScope === 'COMPLETE');
+            await onDeepReset(purgeScope === 'COMPLETE', targetPurgeCompanyId || activeCompanyId);
             setIsProcessing(false);
             setShowResetModal(false);
         } else {
@@ -2909,7 +2910,51 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
             )}
 
-            {activeTab === 'DEVELOPER' && userRole === 'Developer' && (
+            
+                      {/* --- V05.02.10: Dev Diagnostic Timestamps --- */}
+                      <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl relative mt-8">
+                          <div className="p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 border-b border-slate-700/50 flex justify-between items-center">
+                              <div className="flex items-center gap-3">
+                                  <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg">
+                                      <Info size={20} />
+                                  </div>
+                                  <div>
+                                      <h3 className="text-white font-black tracking-tight text-sm">App Patch Diagnostics</h3>
+                                      <p className="text-[10px] text-slate-400">Live Timestamp Validation Variables</p>
+                                  </div>
+                              </div>
+                          </div>
+                          <div className="p-6">
+                              <div className="grid grid-cols-2 gap-4 text-xs">
+                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Compiled Executable Version</p>
+                                      <p className="text-amber-400 font-mono font-bold">{APP_VERSION}</p>
+                                  </div>
+                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Cloud App_Config Version</p>
+                                      <p className="text-amber-400 font-mono font-bold">{localStorage.getItem('app_latest_version') || 'Unknown'}</p>
+                                  </div>
+                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Compiled Baseline Timestamp</p>
+                                      <p className="text-blue-400 font-mono font-bold">{APP_PATCH_TIMESTAMP}</p>
+                                  </div>
+                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Local Active Timestamp (activeTs)</p>
+                                      <p className="text-blue-400 font-mono font-bold">{localStorage.getItem('app_active_patch_ts') || 'Unknown'}</p>
+                                  </div>
+                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700 col-span-2">
+                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Cloud Live Timestamp (latestTs)</p>
+                                      <p className="text-emerald-400 font-mono font-bold">{localStorage.getItem('app_latest_patch_timestamp') || 'Unknown'}</p>
+                                  </div>
+                              </div>
+                              <p className="mt-4 text-[10px] text-slate-500 leading-relaxed text-center">
+                                  For a patch to trigger, <strong className="text-slate-300">Cloud Live Timestamp</strong> must be strictly newer than <strong className="text-slate-300">Local Active Timestamp</strong>.<br/>
+                                  Additionally, <strong className="text-slate-300">Compiled Executable Version</strong> must not be higher than <strong className="text-slate-300">Cloud App_Config Version</strong>.
+                              </p>
+                          </div>
+                      </div>
+
+              {activeTab === 'DEVELOPER' && userRole === 'Developer' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 p-8 shadow-xl">
                         <div className="flex items-center justify-between border-b border-slate-800 pb-6 mb-6">
@@ -3240,46 +3285,6 @@ const Settings: React.FC<SettingsProps> = ({
                                 </button>
                             </div>
 
-                            {/* Deep Reset Card */}
-                            <div className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-900/60 transition-colors flex flex-col justify-between group">
-                                <div>
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <div className="p-2 bg-pink-900/20 text-pink-500 rounded-lg group-hover:scale-110 transition-transform">
-                                            <ShieldAlert size={18} />
-                                        </div>
-                                        <h5 className="text-xs font-black text-pink-400 uppercase tracking-tighter">PURG COMPANY</h5>
-                                    </div>
-                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Permanently <span className="text-pink-500 font-bold underline underline-offset-2">REMOVE</span> the organization <span className="text-white font-bold">{companyProfile.establishmentName}</span> <span className="text-blue-400 font-mono">({activeCompanyId})</span>. Click <span className="text-pink-500 font-black">Initiate Purge</span> to choose between removing the company from the registry list only or completely deleting its physical data folder from disk.</p>
-                                </div>
-                                <button
-                                    onClick={() => requireAuth(() => { setShowResetModal(true); setResetMode('DEEP'); setResetPassword(''); setResetError(''); })}
-                                    className="mt-4 py-2.5 px-4 bg-pink-900/20 hover:bg-pink-600 text-pink-500 hover:text-white border border-pink-900/50 hover:border-pink-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-                                >
-                                    Initiate Purge
-                                </button>
-                            </div>
-
-
-
-                            {/* Factory Reset Card */}
-                            <div className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-900/60 transition-colors flex flex-col justify-between group">
-                                <div>
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <div className="p-2 bg-red-900/20 text-red-500 rounded-lg group-hover:scale-110 transition-transform">
-                                            <Trash2 size={18} />
-                                        </div>
-                                        <h5 className="text-xs font-black text-red-400 uppercase tracking-tighter">Factory Reset - full reset</h5>
-                                    </div>
-                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Perform a full <span className="text-red-500 font-bold underline underline-offset-2">Wipe-Out</span> of ALL data across ALL companies, identities, and settings. Used for system decommissioning.</p>
-                                </div>
-                                <button
-                                    onClick={() => requireAuth(() => { setShowResetModal(true); setResetMode('FACTORY'); setResetPassword(''); setResetError(''); })}
-                                    className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-                                >
-                                    Initiate Factory Reset
-                                </button>
-                            </div>
-
                             {/* Organization Rescue Card */}
                             <div className="p-5 rounded-2xl border border-emerald-900/30 bg-emerald-900/5 hover:bg-emerald-900/10 transition-colors flex flex-col justify-between group">
                                 <div>
@@ -3305,6 +3310,57 @@ const Settings: React.FC<SettingsProps> = ({
                                     className="mt-4 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
                                 >
                                     <RefreshCw size={14} /> Scan & Rescue Orphans
+                                </button>
+                            </div>
+
+                            {/* Deep Reset Card */}
+                            <div className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-900/60 transition-colors flex flex-col justify-between group">
+                                <div>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="p-2 bg-pink-900/20 text-pink-500 rounded-lg group-hover:scale-110 transition-transform">
+                                            <ShieldAlert size={18} />
+                                        </div>
+                                        <h5 className="text-xs font-black text-pink-400 uppercase tracking-tighter">PURGE COMPANY</h5>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Permanently <span className="text-pink-500 font-bold underline underline-offset-2">REMOVE</span> an organization. Click <span className="text-pink-500 font-black">Initiate Purge</span> to choose between removing the company from the registry list only or completely deleting its physical data folder from disk.</p>
+                                </div>
+                                <button
+                                    onClick={() => requireAuth(() => { 
+                                        setShowResetModal(true); 
+                                        setResetMode('DEEP'); 
+                                        setResetPassword(''); 
+                                        setResetError(''); 
+                                        const otherCompanies = JSON.parse(localStorage.getItem('app_companies') || '[]').filter((c: any) => c.id !== activeCompanyId);
+                                        if (otherCompanies.length > 0) {
+                                            setTargetPurgeCompanyId(otherCompanies[0].id);
+                                        } else {
+                                            setTargetPurgeCompanyId('');
+                                        }
+                                    })}
+                                    className="mt-4 py-2.5 px-4 bg-pink-900/20 hover:bg-pink-600 text-pink-500 hover:text-white border border-pink-900/50 hover:border-pink-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                >
+                                    Initiate Purge
+                                </button>
+                            </div>
+
+
+
+                            {/* Factory Reset Card */}
+                            <div className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-900/60 transition-colors flex flex-col justify-between group">
+                                <div>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="p-2 bg-red-900/20 text-red-500 rounded-lg group-hover:scale-110 transition-transform">
+                                            <Trash2 size={18} />
+                                        </div>
+                                        <h5 className="text-xs font-black text-red-400 uppercase tracking-tighter">Factory Reset - full reset</h5>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Perform a full <span className="text-red-500 font-bold underline underline-offset-2">Wipe-Out</span> of ALL data across ALL companies, identities, and settings. Used for system decommissioning.</p>
+                                </div>
+                                <button
+                                    onClick={() => requireAuth(() => { setShowResetModal(true); setResetMode('FACTORY'); setResetPassword(''); setResetError(''); })}
+                                    className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                >
+                                    Initiate Factory Reset
                                 </button>
                             </div>
                         </div>
@@ -3354,9 +3410,9 @@ const Settings: React.FC<SettingsProps> = ({
 
 
             {
-                showResetModal && (
+                showResetModal && resetMode === 'FACTORY' && (
                     <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div className={`bg-[#1e293b] w-full max-w-sm rounded-2xl border shadow-2xl p-6 flex flex-col gap-4 relative ${resetMode === 'DEEP' ? 'border-pink-900/50' : 'border-red-900/50'}`}>
+                        <div className={`bg-[#1e293b] w-full max-w-sm rounded-2xl border shadow-2xl p-6 flex flex-col gap-4 relative border-red-900/50`}>
                             {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label={`Close ${resetMode} Reset Modal`}><X size={20} /></button>}
                             <div className="flex flex-col items-center gap-2">
                                 <div className={`p-4 rounded-full border mb-2 ${resetMode === 'DEEP' ? 'bg-pink-900/20 text-pink-500 border-pink-900/50' : 'bg-red-900/20 text-red-500 border-red-900/50'}`}><AlertTriangle size={32} /></div>
@@ -4309,16 +4365,34 @@ const Settings: React.FC<SettingsProps> = ({
             {
                 showResetModal && resetMode === 'DEEP' && (
                     <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-pink-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                        <div className="bg-[#1e293b] w-full max-w-sm max-h-[90vh] overflow-y-auto custom-scrollbar rounded-2xl border border-pink-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
                             {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Deep Reset Modal"><X size={20} /></button>}
                             <div className="flex flex-col items-center gap-2">
                                 <div className="p-4 bg-pink-900/20 text-pink-500 rounded-full border border-pink-900/50 mb-2"><ShieldAlert size={32} /></div>
                                 <h3 className="text-xl font-black text-white text-center italic uppercase tracking-tighter">PURGE COMPANY</h3>
                                 <p className="text-xs text-pink-300 text-center leading-relaxed font-medium">
                                     {purgeScope === 'COMPLETE' 
-                                        ? `CRITICAL WARNING: This action is IRREVERSIBLE and will permanently delete ${profileData?.establishmentName || companyProfile.establishmentName} (${activeCompanyId}) and completely wipe its physical folders from disk.`
-                                        : `WARNING: This action will remove ${profileData?.establishmentName || companyProfile.establishmentName} (${activeCompanyId}) from the list of active companies. Its physical database folder will remain intact.`}
+                                        ? `CRITICAL WARNING: This action is IRREVERSIBLE and will permanently delete the selected company and completely wipe its physical folders from disk.`
+                                        : `WARNING: This action will remove the selected company from the list of active companies. Its physical database folder will remain intact.`}
                                 </p>
+                            </div>
+
+                            <div className="flex flex-col gap-2 bg-slate-900/40 p-1.5 rounded-xl border border-slate-800">
+                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-2 pt-1">Select Company to Purge</span>
+                                <select
+                                    title="Select Company to Purge"
+                                    value={targetPurgeCompanyId}
+                                    onChange={(e) => setTargetPurgeCompanyId(e.target.value)}
+                                    className="w-full bg-[#0f172a] border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-2 outline-none focus:border-amber-500 transition-colors font-mono"
+                                >
+                                    {(JSON.parse(localStorage.getItem('app_companies') || '[]'))
+                                        .filter((c: any) => c.id !== activeCompanyId)
+                                        .map((c: any) => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.establishmentName} ({c.id})
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
 
                             <div className="flex flex-col gap-2 bg-slate-900/40 p-1.5 rounded-xl border border-slate-800">

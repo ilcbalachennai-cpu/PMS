@@ -202,7 +202,92 @@ namespace BharatPayLauncher
                 }
                 
                 Console.WriteLine("\n✅ Download Complete. Executing Setup...");
-                Process.Start(tempFile);
+                
+                // --- NEW LAUNCHER AUDIT WRAPPER ---
+                string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "bpp_launcher_install_error.log");
+                string ps1Path = Path.Combine(Path.GetTempPath(), "bpp_launcher_audit.ps1");
+                string safeTempFile = tempFile.Replace("\\", "\\\\");
+                string safeLogPath = logPath.Replace("\\", "\\\\");
+
+                                string psScript = @"
+$logPath = """ + safeLogPath + @"
+$timestamp = Get-Date
+
+$logs = @(
+    ""--- BPP Launcher Audit Log ---"",
+    ""Date: $timestamp"",
+    ""Context: New Installation via Launcher"",
+    ""Starting primary installer...""
+)
+
+$proc = Start-Process -FilePath """ + safeTempFile + @""" -PassThru -Wait
+$exitCode = $proc.ExitCode
+$logs += ""Primary Installer Exit Code: $exitCode""
+
+if ($exitCode -eq 0) {
+    $logs += ""Installation Successful!""
+} else {
+    $logs += ""Installation failed. Attempting Auto-Correction as Administrator...""
+    try {
+        $proc2 = Start-Process -FilePath """ + safeTempFile + @""" -Verb RunAs -PassThru -Wait
+        $fallbackCode = $proc2.ExitCode
+        $logs += ""Fallback Installer Exit Code: $fallbackCode""
+
+        if ($fallbackCode -eq 0) {
+            $logs += ""Auto-Correction Successful!""
+        } else {
+            $logs += ""Auto-Correction Failed! Triggering Developer Handoff...""
+            $failed = $true
+        }
+    } catch {
+        $logs += ""Fallback failed to launch: $_""
+        $failed = $true
+    }
+}
+
+# ENCRYPT THE LOG
+$secret = ""BPP_AUDIT_LOG_SECURE_2026""
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$key = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($secret))
+
+$aes = [System.Security.Cryptography.Aes]::Create()
+$aes.Key = $key
+$aes.GenerateIV()
+$iv = $aes.IV
+$encryptor = $aes.CreateEncryptor()
+
+$logString = $logs -join ""[NEWLINE]""
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($logString.Replace(""[NEWLINE]"", [char]10))
+$encrypted = $encryptor.TransformFinalBlock($bytes, 0, $bytes.Length)
+
+$ivHex = [System.BitConverter]::ToString($iv).Replace(""-"", """").ToLower()
+$encryptedHex = [System.BitConverter]::ToString($encrypted).Replace(""-"", """").ToLower()
+$finalString = $ivHex + "":"" + $encryptedHex
+
+[System.IO.File]::WriteAllText($logPath, $finalString)
+
+if ($failed) {
+    Add-Type -AssemblyName System.Web
+    $subject = [System.Web.HttpUtility]::UrlEncode(""BPP Launcher Audit Log - Failed"")
+    $body = [System.Web.HttpUtility]::UrlEncode(""Launcher installation failed.[NEWLINE][NEWLINE]Please attach the ENCRYPTED log file located at:[NEWLINE]$logPath"".Replace(""[NEWLINE]"", [char]10))
+    $mailto = ""mailto:ilcbala.bharatpayroll@gmail.com?subject=$subject&body=$body""
+
+    Start-Process $mailto
+
+    Add-Type -AssemblyName PresentationFramework
+    [System.Windows.MessageBox]::Show(""Installation Failed! An email draft has been opened. Please attach the encrypted log file located at $logPath and send it to the developer."", ""Installation Error"", ""OK"", ""Error"")
+}
+";
+                File.WriteAllText(ps1Path, psScript);
+                
+                ProcessStartInfo psi = new ProcessStartInfo()
+                {
+                    FileName = "powershell",
+                    Arguments = string.Format("-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{0}\"", ps1Path),
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                Process.Start(psi);
             }
         }
 

@@ -114,7 +114,7 @@ function initializeDatabase(basePath: string, companyId?: string) {
 
     // DEBUG TRACER: Write current state to a file for diagnosis
     try {
-        const debugInfo = `[${new Date().toISOString()}] ID: ${activeCompanyId} | DIR: ${dataDir}\n`;
+        const debugInfo = `[${new Date().toLocaleString()}] ID: ${activeCompanyId} | DIR: ${dataDir}\n`;
         fs.appendFileSync(path.join(paths.data, 'silo_debug.txt'), debugInfo);
     } catch (e) {}
 
@@ -249,13 +249,13 @@ function startAutoSnapshot(basePath: string, _companyId: string) {
             db.backup(backupPath)
                 .then(() => {
                     console.log(`✅ Auto snapshot created: ${backupPath}`);
-                    cleanupOldSnapshots(autoBackupDir, 10); // Keep last 10 for auto
+                    cleanupOldSnapshots(autoBackupDir, 24); // Keep last 24 for auto (2 hours)
                 })
                 .catch(e => console.error(`❌ Failed to create auto snapshot:`, e));
         } catch (e) {
             console.error(`❌ Failed to create auto snapshot:`, e);
         }
-    }, 30 * 60 * 1000); // Every 30 minutes
+    }, 5 * 60 * 1000); // Every 5 minutes
 }
 
 /**
@@ -857,14 +857,39 @@ ipcMain.handle('send-email', async (_, { smtpConfig, mailOptions }) => {
     }
 });
 // 3. Simple Key-Value Store
+const GLOBAL_KEYS = [
+    'app_companies', 
+    'app_active_company_id', 
+    'app_license_secure', 
+    'app_users', 
+    'app_machine_id', 
+    'app_setup_complete', 
+    'app_developer_secure', 
+    'app_config', 
+    'app_data_size', 
+    'app_company_limit', 
+    'app_logo'
+];
+
 ipcMain.handle('db-set', async (_, { key, value }) => {
     try {
-        if (!ensureDatabase()) {
-            throw new Error("Storage not configured. Database unavailable.");
+        if (GLOBAL_KEYS.includes(key as string)) {
+            if (!appBasePath) throw new Error("Storage path not set");
+            const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+            const rootDb = new Database(rootDbPath);
+            rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+            const stmt = rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+            stmt.run(key, JSON.stringify(value));
+            rootDb.close();
+            return { success: true };
+        } else {
+            if (!ensureDatabase()) {
+                throw new Error("Storage not configured. Database unavailable.");
+            }
+            const stmt = db!.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+            stmt.run(key, JSON.stringify(value));
+            return { success: true };
         }
-        const stmt = db!.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
-        stmt.run(key, JSON.stringify(value));
-        return { success: true };
     } catch (e: any) {
         return { success: false, error: e.message };
     }
@@ -873,21 +898,23 @@ ipcMain.handle('db-set', async (_, { key, value }) => {
 
 ipcMain.handle('db-get', async (_, key) => {
     try {
-        if (!ensureDatabase()) return { success: true, data: null };
-        let row = db!.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
-        
-        // ── Robust Registry Fallback for Global Keys ──
-        const globalKeys = ['app_companies', 'app_active_company_id', 'app_license_secure', 'app_users', 'app_machine_id', 'app_setup_complete', 'app_developer_secure'];
-        if (!row && appBasePath && globalKeys.includes(key as string)) {
-            const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
-            if (fs.existsSync(rootDbPath)) {
-                try {
-                    const rootDb = new Database(rootDbPath);
-                    row = rootDb.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
-                    rootDb.close();
-                } catch (err) {
-                    console.warn('[IPC] Failed to fetch key from root registry database:', err);
+        let row: { value: string } | undefined;
+        if (GLOBAL_KEYS.includes(key as string)) {
+            if (appBasePath) {
+                const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+                if (fs.existsSync(rootDbPath)) {
+                    try {
+                        const rootDb = new Database(rootDbPath, { readonly: true });
+                        row = rootDb.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
+                        rootDb.close();
+                    } catch (err) {
+                        console.warn('[IPC] Failed to fetch key from root registry database:', err);
+                    }
                 }
+            }
+        } else {
+            if (ensureDatabase() && db) {
+                row = db.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
             }
         }
         
@@ -900,8 +927,20 @@ ipcMain.handle('db-get', async (_, key) => {
 
 ipcMain.handle('db-delete', async (_, key) => {
     try {
-        if (!db) return { success: true };
-        db.prepare('DELETE FROM store WHERE key = ?').run(key);
+        if (GLOBAL_KEYS.includes(key as string)) {
+            if (appBasePath) {
+                const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+                if (fs.existsSync(rootDbPath)) {
+                    const rootDb = new Database(rootDbPath);
+                    rootDb.prepare('DELETE FROM store WHERE key = ?').run(key);
+                    rootDb.close();
+                }
+            }
+        } else {
+            if (db) {
+                db.prepare('DELETE FROM store WHERE key = ?').run(key);
+            }
+        }
         return { success: true };
     } catch (e: any) {
         return { success: false, error: e.message };
@@ -910,22 +949,28 @@ ipcMain.handle('db-delete', async (_, key) => {
 
 ipcMain.handle('db-get-all', async () => {
     try {
-        if (!db) return { success: true, data: [] };
-        const rows = db.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
-        const mergedData = rows.map(r => ({ key: r.key, value: JSON.parse(r.value) }));
+        const mergedData: any[] = [];
         
-        // ── Robust Registry Merging ──
+        // 1. Get all silo keys
+        if (db) {
+            const rows = db.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
+            mergedData.push(...rows.map(r => ({ key: r.key, value: JSON.parse(r.value) })));
+        }
+        
+        // 2. ── Strict Registry Merging ──
         if (appBasePath) {
             const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
             if (fs.existsSync(rootDbPath)) {
                 try {
-                    const rootDb = new Database(rootDbPath);
-                    const globalKeys = ['app_companies', 'app_active_company_id'];
-                    for (const key of globalKeys) {
-                        const exists = mergedData.some(item => item.key === key);
-                        if (!exists) {
-                            const row = rootDb.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
-                            if (row) {
+                    const rootDb = new Database(rootDbPath, { readonly: true });
+                    for (const key of GLOBAL_KEYS) {
+                        const row = rootDb.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
+                        if (row) {
+                            // Replace if somehow it exists in silo (legacy data cleanup), otherwise push
+                            const existingIndex = mergedData.findIndex(item => item.key === key);
+                            if (existingIndex >= 0) {
+                                mergedData[existingIndex].value = JSON.parse(row.value);
+                            } else {
                                 mergedData.push({ key, value: JSON.parse(row.value) });
                             }
                         }
@@ -978,23 +1023,13 @@ ipcMain.handle('db-get-global', async (_, key) => {
 
 ipcMain.handle('db-set-global', async (_, { key, value }) => {
     try {
-        // 1. Always write to the ROOT database (Registry)
+        // 1. Always write to the ROOT database (Registry) ONLY
         const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
         const rootDb = new Database(rootDbPath);
         rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
         const stmt = rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
         stmt.run(key, JSON.stringify(value));
         rootDb.close();
-        
-        // 2. ALSO write to the currently active isolated database connection as a backup silo!
-        if (db) {
-            try {
-                const activeStmt = db.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
-                activeStmt.run(key, JSON.stringify(value));
-            } catch (activeErr) {
-                console.warn('[IPC] Failed to replicate global key in active database:', activeErr);
-            }
-        }
         
         return { success: true };
     } catch (e: any) {
@@ -1058,6 +1093,9 @@ ipcMain.handle('delete-silo', async (_, companyId: string) => {
                 }
                 db = null;
             }
+            // CRITICAL FIX: Clear activeCompanyId so subsequent dbSet calls (e.g. from React state updates)
+            // don't recreate the folder via ensureDatabase -> initializeDatabase.
+            activeCompanyId = null;
             // Yield to let OS release file locks
             await new Promise(resolve => setTimeout(resolve, 1000));
         }

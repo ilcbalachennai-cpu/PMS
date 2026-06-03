@@ -35,14 +35,25 @@ interface RegistrationProps {
         adminUser: User;
     }) => void;
     onRestore: () => void;
-    showAlert?: (type: 'success' | 'error' | 'info' | 'warning' | 'confirm', title: string, message: string, onConfirm?: () => void) => void;
-    isResetMode?: boolean;
+    showAlert?: (
+        type: 'success' | 'error' | 'info' | 'warning' | 'confirm',
+        title: string,
+        message: string | React.ReactNode,
+        onConfirm?: () => void,
+        onSecondaryConfirm?: () => void,
+        confirmLabel?: string,
+        secondaryConfirmLabel?: string,
+        cancelLabel?: string,
+        autoCloseSecs?: number,
+        autoClose?: boolean,
+        progressText?: string
+    ) => void;
     onSystemRepair?: () => void;
     isNewCompany?: boolean;
     activeCompanyId?: string;
 }
 
-const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert, isResetMode, onSystemRepair, isNewCompany, activeCompanyId }) => {
+const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert, onSystemRepair, isNewCompany, activeCompanyId }) => {
     const [step, setStep] = useState(1);
     const [userName, setUserName] = useState('');
     const [userID, setUserID] = useState('');
@@ -1116,6 +1127,23 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                     setIsProcessing(true);
                                                     const initResult = await api.initializeAppDirectory(result.path);
                                                     if (initResult && initResult.success) {
+                                                        // --- V05.02.10: Link Data Folder Password Fix ---
+                                                        // Ensure the newly registered admin credentials are saved locally
+                                                        // so that the background license check during boot has a password to send.
+                                                        const adminUser = {
+                                                            username: userID || 'admin',
+                                                            password: adminPassword,
+                                                            name: userName || 'System Administrator',
+                                                            role: 'Administrator',
+                                                            email: regEmail || 'admin@bharatpay.com'
+                                                        };
+                                                        localStorage.setItem('app_users', JSON.stringify([adminUser]));
+                                                        localStorage.setItem('app_setup_complete', 'true');
+                                                        if (api.dbSet) {
+                                                            await api.dbSet('app_users', [adminUser]);
+                                                            await api.dbSet('app_setup_complete', 'true');
+                                                        }
+                                                        
                                                         // Successfully linked, reload app to pick up db
                                                         window.location.reload();
                                                     } else {
