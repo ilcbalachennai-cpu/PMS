@@ -3410,7 +3410,7 @@ const Settings: React.FC<SettingsProps> = ({
 
 
             {
-                showResetModal && resetMode === 'FACTORY' && (
+                showResetModal && (resetMode === 'FACTORY' || resetMode === 'DEEP') && (
                     <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                         <div className={`bg-[#1e293b] w-full max-w-sm rounded-2xl border shadow-2xl p-6 flex flex-col gap-4 relative border-red-900/50`}>
                             {!isProcessing && <button onClick={() => setShowResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label={`Close ${resetMode} Reset Modal`}><X size={20} /></button>}

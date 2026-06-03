@@ -51,6 +51,7 @@ interface RegistrationProps {
     onSystemRepair?: () => void;
     isNewCompany?: boolean;
     activeCompanyId?: string;
+    isResetMode?: boolean;
 }
 
 const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, showAlert, onSystemRepair, isNewCompany, activeCompanyId }) => {
