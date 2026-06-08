@@ -43,7 +43,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   const progRef1 = React.useRef<HTMLDivElement>(null);
   const progRef2 = React.useRef<HTMLDivElement>(null);
   const progRef3 = React.useRef<HTMLDivElement>(null);
-  const [restartCountdown, setRestartCountdown] = React.useState(3);
+
 
   // Use external step if provided, otherwise fallback to local simulation
   const effectiveStep = externalStep !== undefined ? externalStep : installStep;
@@ -82,7 +82,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
 
     if (state === 'INSTALLING') {
       setInstallStep(3); // Reset to EXTRACT
-      setRestartCountdown(3); 
+
 
       timer = setInterval(() => {
         setInstallStep(prev => {
@@ -96,17 +96,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
     };
   }, [state]);
 
-  // Restart countdown logic (V02.02.26.1: Increased robustness)
-  React.useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (state === 'INSTALLING' && effectiveStep === 6) {
-       setRestartCountdown(3); // Reset to 3 when success begins
-       timer = setInterval(() => {
-          setRestartCountdown(prev => (prev > 0 ? prev - 1 : 0));
-       }, 1000);
-    }
-    return () => { if (timer) clearInterval(timer); };
-  }, [state, effectiveStep]);
+
 
   // Marquee Indicator Animation Logic
   React.useEffect(() => {
@@ -424,15 +414,15 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
                         </h2>
                         <div className={`h-1 w-10 transition-colors duration-1000 ${effectiveStep === 6 ? 'bg-emerald-500' : 'bg-blue-600'} mx-auto rounded-full`}></div>
                         <p className={`text-[10px] font-bold uppercase tracking-[0.2em] leading-relaxed transition-colors duration-500 ${effectiveStep === 6 ? 'text-emerald-500' : 'text-slate-500'}`}>
-                            {effectiveStep === 3 ? "Extracting Secure Pack..." :
+                          {effectiveStep === 3 ? "Extracting Secure Pack..." :
                              effectiveStep === 4 ? "Validating Cryptographic Signatures..." :
                              effectiveStep === 5 ? "Applying Core Patch..." :
                              "Software maintenance applied successfully!"}
                         </p>
                         {effectiveStep === 6 && (
                             <div className="flex flex-col gap-1 mt-2">
-                                <p className="text-white text-[12px] font-black uppercase tracking-[0.3em] animate-pulse">Restarting System</p>
-                                <p className="text-emerald-500 text-[10px] font-black opacity-80 uppercase tracking-widest">In {restartCountdown} Seconds...</p>
+                                <p className="text-white text-[12px] font-black uppercase tracking-[0.2em] animate-pulse">INSTALLING BACKGROUND PATCH</p>
+                                <p className="text-emerald-500 text-[10px] font-black opacity-80 uppercase tracking-widest">PLEASE STAY CONNECTED. PATCH WILL UPDATE AND RESTART THE APP IN 10-15 SECONDS.</p>
                             </div>
                         )}
                         <div className="flex justify-center mt-2">

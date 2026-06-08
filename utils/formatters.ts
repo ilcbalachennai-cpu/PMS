@@ -134,6 +134,18 @@ export const generateBackupFilename = (establishmentName: string, dataMonth: str
   const year = today.getFullYear();
   const backupDateStr = `${day}${monthName}${year}`; // e.g., 04May2026
 
-  return `${firstWord}_${monthLabel}_${dataYear}_${backupDateStr}.enc`;
+  return `${firstWord}_FB_${monthLabel}_${dataYear}_${backupDateStr}.enc`;
 };
 
+export const getCompanyBackupFolder = (establishmentName: string, id: string): string => {
+    const firstWord = (establishmentName || 'COMPANY')
+      .trim()
+      .split(/\s+/)[0]
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .toUpperCase();
+    
+    const idParts = (id || '').split('_');
+    const numericPart = idParts.length > 1 ? idParts[idParts.length - 1] : '';
+
+    return `BK_${firstWord}_${numericPart}`;
+};

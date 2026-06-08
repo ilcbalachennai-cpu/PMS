@@ -119,10 +119,66 @@ const Reports: React.FC<ReportsProps> = ({
     const [pinShow, setPinShow] = useState(false);
     const pinVerifyBtnRef = useRef<HTMLButtonElement>(null);
 
-
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const currentYear = new Date().getFullYear();
-    const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+
+
+    const CHRONO_ORDER = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
+
+    const [startYear, endYear] = useMemo(() => {
+        if (!activeFinancialYear) return [new Date().getFullYear(), new Date().getFullYear()];
+        const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+        if (match) {
+            return [2000 + parseInt(match[1], 10), 2000 + parseInt(match[2], 10)];
+        }
+        return [new Date().getFullYear(), new Date().getFullYear()];
+    }, [activeFinancialYear]);
+
+    const yearOptions = useMemo(() => {
+        if (savedRecords.length === 0) {
+            if (startYear === endYear) return [startYear];
+            return [startYear, endYear];
+        }
+        const uniqueYears = Array.from(new Set(savedRecords.map(r => r.year)));
+        return uniqueYears.sort((a, b) => a - b);
+    }, [savedRecords, startYear, endYear]);
+
+    const selectableMonths = useMemo(() => {
+        if (savedRecords.length === 0) return CHRONO_ORDER;
+        const unique = Array.from(new Set(savedRecords.map(r => r.month)));
+        return unique.sort((a, b) => CHRONO_ORDER.indexOf(a) - CHRONO_ORDER.indexOf(b));
+    }, [savedRecords, CHRONO_ORDER]);
+
+    useEffect(() => {
+        const isMonthValid = selectableMonths.length === 0 || selectableMonths.includes(month);
+        const isYearValid = yearOptions.length === 0 || yearOptions.includes(year);
+
+        if (!isMonthValid || !isYearValid) {
+            if (savedRecords.length > 0) {
+                // Find the first available record chronologically
+                const autoMonth = selectableMonths[0];
+                const match = savedRecords.find(r => r.month === autoMonth);
+                if (match) {
+                    setMonth(match.month);
+                    setYear(match.year);
+                }
+            } else {
+                // Fallback if no records
+                const isNextYear = ['January', 'February', 'March'].includes(month);
+                setYear(isNextYear ? endYear : startYear);
+            }
+        }
+    }, [selectableMonths, yearOptions, month, year, savedRecords, setMonth, setYear, startYear, endYear]);
+
+    const handleMonthChange = (selectedMonth: string) => {
+        setMonth(selectedMonth);
+        const match = savedRecords.find(r => r.month === selectedMonth);
+        if (match) {
+            setYear(match.year);
+        } else {
+            const isNextYear = ['January', 'February', 'March'].includes(selectedMonth);
+            setYear(isNextYear ? endYear : startYear);
+        }
+    };
 
     const currentResults = useMemo(() => {
         return savedRecords.filter(r => r.month === month && r.year === year);
@@ -991,8 +1047,8 @@ const Reports: React.FC<ReportsProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3 bg-[#0f172a] p-2 rounded-xl border border-slate-700">
-                    <select value={month} onChange={e => setMonth(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400" title="Select Month" aria-label="Select Month">
-                        {months.map(m => (<option key={m} value={m} className="bg-[#0f172a] text-white">{m}</option>))}
+                    <select value={month} onChange={e => handleMonthChange(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400" title="Select Month" aria-label="Select Month">
+                        {selectableMonths.map(m => (<option key={m} value={m} className="bg-[#0f172a] text-white">{m}</option>))}
                     </select>
                     <select value={year} onChange={e => setYear(+e.target.value)} className="bg-transparent px-4 py-1 text-sm text-white font-bold outline-none focus:text-indigo-400" title="Select Year" aria-label="Select Year">
                         {yearOptions.map(y => (<option key={y} value={y} className="bg-[#0f172a] text-white">{y}</option>))}

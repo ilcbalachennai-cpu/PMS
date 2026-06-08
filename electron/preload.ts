@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     apiFetch: (url: string, options: any) => ipcRenderer.invoke('api-fetch', url, options),
     startUpdateDownload: (url: string, expectedHash?: string) => ipcRenderer.invoke('start-update-download', url, expectedHash),
     prepareForInstall: () => ipcRenderer.invoke('prepare-for-install'),
-    backupAndInstall: (options?: { silent?: boolean, username?: string, userEmail?: string }) => ipcRenderer.invoke('backup-and-install', options),
+    backupAndInstall: (options?: { silent?: boolean, username?: string, userEmail?: string, newPatchTimestamp?: string }) => ipcRenderer.invoke('backup-and-install', options),
     findBPPApp: () => ipcRenderer.invoke('find-bpp-app'),
     openItemLocation: (filePath: string) =>
         ipcRenderer.invoke('open-item-location', filePath),
@@ -52,6 +52,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onUpdateDownloadProgress: (callback: (progress: number) => void) => {
         ipcRenderer.on('update-download-progress', (_, progress: number) => callback(progress));
     },
+    onUpdateCloseWarning: (callback: () => void) => {
+        ipcRenderer.removeAllListeners('update-close-warning');
+        ipcRenderer.on('update-close-warning', () => callback());
+    },
     relaunchApp: () => ipcRenderer.invoke('relaunch-app'),
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
     getIsElectron: () => true,
@@ -62,7 +66,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     wipeAllData: () => ipcRenderer.invoke('wipe-all-data'),
     listSilos: () => ipcRenderer.invoke('list-silos'),
     deleteSilo: (companyId: string) => ipcRenderer.invoke('delete-silo', companyId),
-    wipeCompanyData: (companyId: string) => ipcRenderer.invoke('wipe-company-data', companyId)
+    wipeCompanyData: (companyId: string) => ipcRenderer.invoke('wipe-company-data', companyId),
+    generateDiagnostics: (uiState: any) => ipcRenderer.invoke('generate-diagnostics', uiState)
 });
 
 console.log("EB: Electron Bridge (electronAPI) Initialized");

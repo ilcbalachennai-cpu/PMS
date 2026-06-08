@@ -6,7 +6,7 @@ import {
     ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator,
     ScrollText, HandCoins, Wallet, Scale, RotateCw, TrendingUp,
     ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
-    FolderOpen
+    FolderOpen, FileText
 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData, SettingsTab } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
@@ -16,8 +16,10 @@ import {
     getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
     requestResetOTP, getAppDeveloper, APP_VERSION, APP_PATCH_TIMESTAMP
 } from '../services/licenseService';
-import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, generateBackupFilename } from '../utils/formatters';
+import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, generateBackupFilename, getCompanyBackupFolder } from '../utils/formatters';
+import { getMonthAbbr } from '../services/reportService';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
+import { executeDiagnosticExport } from '../utils/diagnostics';
 
 declare global {
     interface Window {
@@ -55,6 +57,21 @@ interface SettingsProps {
     globalYear?: number;
     activeFinancialYear?: string;
 }
+
+const UsageTimeClock = () => {
+    const [now, setNow] = useState(Date.now());
+    useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+    const sessionLoginTime = sessionStorage.getItem('session_login_time');
+    const start = sessionLoginTime ? parseInt(sessionLoginTime, 10) : Date.now();
+    const diff = Math.floor((now - start) / 1000);
+    const h = Math.floor(diff / 3600).toString().padStart(2, '0');
+    const m = Math.floor((diff % 3600) / 60).toString().padStart(2, '0');
+    const s = (diff % 60).toString().padStart(2, '0');
+    return <>{h}:{m}:{s}</>;
+};
 
 const Settings: React.FC<SettingsProps> = ({
     config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo,
@@ -1571,7 +1588,8 @@ const Settings: React.FC<SettingsProps> = ({
             a.download = fileName;
             if (window.electronAPI && window.electronAPI.runBackup) {
                 setProcessStatus('Saving to BharatPP location...');
-                const res = await window.electronAPI.runBackup(encrypted, fileName, companyProfile.establishmentName);
+                const subfolderPath = `${getCompanyBackupFolder(companyProfile.establishmentName, companyProfile.id)}/BK_${getMonthAbbr(globalMonth)}${String(globalYear).slice(-2)}`;
+                const res = await window.electronAPI.runBackup(encrypted, fileName, subfolderPath);
 
                 if (res.success) {
                     setProcessProgress(100);
@@ -2911,48 +2929,7 @@ const Settings: React.FC<SettingsProps> = ({
             )}
 
             
-                      {/* --- V05.02.10: Dev Diagnostic Timestamps --- */}
-                      <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl relative mt-8">
-                          <div className="p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 border-b border-slate-700/50 flex justify-between items-center">
-                              <div className="flex items-center gap-3">
-                                  <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg">
-                                      <Info size={20} />
-                                  </div>
-                                  <div>
-                                      <h3 className="text-white font-black tracking-tight text-sm">App Patch Diagnostics</h3>
-                                      <p className="text-[10px] text-slate-400">Live Timestamp Validation Variables</p>
-                                  </div>
-                              </div>
-                          </div>
-                          <div className="p-6">
-                              <div className="grid grid-cols-2 gap-4 text-xs">
-                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Compiled Executable Version</p>
-                                      <p className="text-amber-400 font-mono font-bold">{APP_VERSION}</p>
-                                  </div>
-                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Cloud App_Config Version</p>
-                                      <p className="text-amber-400 font-mono font-bold">{localStorage.getItem('app_latest_version') || 'Unknown'}</p>
-                                  </div>
-                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Compiled Baseline Timestamp</p>
-                                      <p className="text-blue-400 font-mono font-bold">{APP_PATCH_TIMESTAMP}</p>
-                                  </div>
-                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Local Active Timestamp (activeTs)</p>
-                                      <p className="text-blue-400 font-mono font-bold">{localStorage.getItem('app_active_patch_ts') || 'Unknown'}</p>
-                                  </div>
-                                  <div className="p-3 bg-slate-800 rounded-xl border border-slate-700 col-span-2">
-                                      <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Cloud Live Timestamp (latestTs)</p>
-                                      <p className="text-emerald-400 font-mono font-bold">{localStorage.getItem('app_latest_patch_timestamp') || 'Unknown'}</p>
-                                  </div>
-                              </div>
-                              <p className="mt-4 text-[10px] text-slate-500 leading-relaxed text-center">
-                                  For a patch to trigger, <strong className="text-slate-300">Cloud Live Timestamp</strong> must be strictly newer than <strong className="text-slate-300">Local Active Timestamp</strong>.<br/>
-                                  Additionally, <strong className="text-slate-300">Compiled Executable Version</strong> must not be higher than <strong className="text-slate-300">Cloud App_Config Version</strong>.
-                              </p>
-                          </div>
-                      </div>
+
 
               {activeTab === 'DEVELOPER' && userRole === 'Developer' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -3363,6 +3340,28 @@ const Settings: React.FC<SettingsProps> = ({
                                     Initiate Factory Reset
                                 </button>
                             </div>
+
+                            {/* Diagnostics Card */}
+                            <div className="p-5 rounded-2xl border border-blue-900/30 bg-blue-900/5 hover:bg-blue-900/10 transition-colors flex flex-col justify-between group">
+                                <div>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="p-2 bg-blue-900/20 text-blue-400 rounded-lg group-hover:scale-110 transition-transform">
+                                            <FileText size={18} />
+                                        </div>
+                                        <div>
+                                            <h5 className="text-xs font-black text-blue-400 uppercase tracking-tighter">Diagnostic Report</h5>
+                                            <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded">Encrypted</span>
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Generate an AES-256 encrypted secure file containing application configuration, error traces, and active logs for Developer support.</p>
+                                </div>
+                                <button
+                                    onClick={executeDiagnosticExport}
+                                    className="mt-4 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                                >
+                                    <FileText size={14} /> Export Diagnostic Logs
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -3690,13 +3689,10 @@ const Settings: React.FC<SettingsProps> = ({
                                         <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">System Activation & Machine Lock Status</p>
                                     </div>
                                 </div>
-                                {profileData?.establishmentName && (
+                                {currentUser?.username && (
                                     <div className="flex flex-col items-end gap-1">
                                         <div className="text-xs font-bold text-amber-500 uppercase tracking-wider bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 whitespace-nowrap">
-                                            {profileData.establishmentName}
-                                        </div>
-                                        <div className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
-                                            ID: <span className="text-amber-500">{activeCompanyId}</span>
+                                            USER ID: <span className="text-white">{currentUser.username}</span>
                                         </div>
                                     </div>
                                 )}
@@ -3925,6 +3921,56 @@ const Settings: React.FC<SettingsProps> = ({
                                     </button>
                                 </div>
                             </div>
+
+                            {/* --- V05.02.10: Dev Diagnostic Timestamps --- */}
+                            <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl relative mt-8">
+                                <div className="p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 border-b border-slate-700/50 flex justify-between items-center">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg">
+                                            <Info size={20} />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-white font-black tracking-tight text-sm">App Patch Diagnostics</h3>
+                                            <p className="text-[10px] text-slate-400">Live Timestamp Validation Variables</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="p-6">
+                                    <div className="grid grid-cols-2 gap-3 mb-4">
+                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Compiled Executable Version</p>
+                                            <p className="text-amber-400 font-mono font-bold">{APP_VERSION}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Cloud App_Config Version</p>
+                                            <p className="text-amber-400 font-mono font-bold">{localStorage.getItem('app_latest_version') || 'Unknown'}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Compiled Baseline Timestamp</p>
+                                            <p className="text-blue-400 font-mono font-bold">{APP_PATCH_TIMESTAMP}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Local Active Timestamp (activeTs)</p>
+                                            <p className="text-blue-400 font-mono font-bold">{localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700 flex flex-col justify-center">
+                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Usage Time (Current Session)</p>
+                                            <p className="text-fuchsia-400 font-mono font-bold">
+                                                <UsageTimeClock />
+                                            </p>
+                                        </div>
+                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Cloud Live Timestamp (latestTs)</p>
+                                            <p className="text-emerald-400 font-mono font-bold">{localStorage.getItem('app_latest_patch_timestamp') || 'Unknown'}</p>
+                                        </div>
+                                    </div>
+
+                                    <p className="mt-4 text-[10px] text-slate-500 leading-relaxed text-center">
+                                        For a patch to trigger, <strong className="text-slate-300">Cloud Live Timestamp</strong> must be strictly newer than <strong className="text-slate-300">Local Active Timestamp</strong>.<br/>
+                                        Additionally, <strong className="text-slate-300">Compiled Executable Version</strong> must not be higher than <strong className="text-slate-300">Cloud App_Config Version</strong>.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     );
                 })()
@@ -3944,13 +3990,10 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Account Control & Access Permissions</p>
                                 </div>
                             </div>
-                            {profileData?.establishmentName && (
+                            {currentUser?.username && (
                                 <div className="flex flex-col items-end gap-1">
                                     <div className="text-xs font-bold text-amber-500 uppercase tracking-wider bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 whitespace-nowrap">
-                                        {profileData.establishmentName}
-                                    </div>
-                                    <div className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
-                                        ID: <span className="text-amber-500">{activeCompanyId}</span>
+                                        USER ID: <span className="text-white">{currentUser.username}</span>
                                     </div>
                                 </div>
                             )}

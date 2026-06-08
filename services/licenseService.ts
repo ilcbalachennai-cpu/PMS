@@ -4,7 +4,7 @@ import { LicenseData } from '../types';
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
 export const APP_VERSION = "06.01.01";
-export const APP_PATCH_TIMESTAMP = "28-05-2026 17:24:00"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_PATCH_TIMESTAMP = "08-06-2026 21:18:52"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {

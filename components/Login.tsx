@@ -390,6 +390,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
           console.warn("Could not fire cloud tracking:", e);
         }
 
+        sessionStorage.setItem('session_login_time', Date.now().toString());
         onLogin(user);
       } else {
         // --- EMERGENCY REDIRECT IF NO ADMINS ---
@@ -462,6 +463,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
                 console.warn("Could not fire cloud tracking on fallback:", e);
               }
 
+              sessionStorage.setItem('session_login_time', Date.now().toString());
               onLogin(syncedUser);
               return;
             }
@@ -622,6 +624,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
       const res = await verifyDeveloperOTP(username, devOTP);
       if (res.success && res.data) {
         setShowDevModal(false);
+        sessionStorage.setItem('session_login_time', Date.now().toString());
         onLogin(res.data);
       } else {
         setDevError(res.message);

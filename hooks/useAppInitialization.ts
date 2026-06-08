@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect } from 'react';
 
 export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
   const [isAppDirectoryConfigured, setIsAppDirectoryConfigured] = useState<boolean | null>(null);
+  const [isBootSyncComplete, setIsBootSyncComplete] = useState<boolean>(false);
 
   const initApp = useCallback(async () => {
     // @ts-ignore
@@ -80,11 +81,12 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
     }
 
     await verifyLicense();
+    setIsBootSyncComplete(true);
   }, [verifyLicense]);
 
   useEffect(() => {
     initApp();
-  }, []);
+  }, [initApp]);
 
-  return { isAppDirectoryConfigured };
+  return { isAppDirectoryConfigured, isBootSyncComplete };
 };

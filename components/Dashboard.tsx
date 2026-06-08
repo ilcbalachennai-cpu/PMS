@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 import { IndianRupee, Users, Building, TrendingUp, Calendar, Calculator, ArrowRight, ExternalLink, Sparkles, FileText, Upload } from 'lucide-react';
 import { Employee, StatutoryConfig, Attendance, LeaveLedger, AdvanceLedger, View, CompanyProfile, PayrollResult } from '../types';
@@ -33,13 +33,27 @@ const getLastProcessedPeriod = (history: PayrollResult[]) => {
 
 const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attendances, payrollHistory, month, year, onNavigate, activeFinancialYear }) => {
 
-  const currentYear = new Date().getFullYear();
-  const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+  const [startYear, endYear] = useMemo(() => {
+    if (!activeFinancialYear) return [new Date().getFullYear(), new Date().getFullYear()];
+    const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+    if (match) {
+      return [2000 + parseInt(match[1], 10), 2000 + parseInt(match[2], 10)];
+    }
+    return [new Date().getFullYear(), new Date().getFullYear()];
+  }, [activeFinancialYear]);
+
+  const yearOptions = useMemo(() => {
+    if (payrollHistory.length === 0) {
+      if (startYear === endYear) return [startYear];
+      return [startYear, endYear];
+    }
+    const uniqueYears = Array.from(new Set(payrollHistory.map(r => r.year)));
+    return uniqueYears.sort((a, b) => a - b);
+  }, [payrollHistory, startYear, endYear]);
 
   const CHRONO_ORDER = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
-
   const availableMonths = useMemo(() => {
-    if (payrollHistory.length === 0) return MONTHS_LIST;
+    if (payrollHistory.length === 0) return CHRONO_ORDER;
     const unique = Array.from(new Set(payrollHistory.map(r => r.month)));
     return unique.sort((a, b) => CHRONO_ORDER.indexOf(a) - CHRONO_ORDER.indexOf(b));
   }, [payrollHistory, CHRONO_ORDER]);
@@ -49,18 +63,33 @@ const Dashboard: React.FC<DashboardProps> = ({ employees, companyProfile, attend
   const [localMonth, setLocalMonth] = useState<string>(() => lastProcessed?.month || month);
   const [localYear, setLocalYear] = useState<number>(() => lastProcessed?.year || year);
 
+  useEffect(() => {
+    const isMonthValid = availableMonths.length === 0 || availableMonths.includes(localMonth);
+    const isYearValid = yearOptions.length === 0 || yearOptions.includes(localYear);
+
+    if (!isMonthValid || !isYearValid) {
+      if (payrollHistory.length > 0) {
+        const autoMonth = availableMonths[0];
+        const match = payrollHistory.find(r => r.month === autoMonth);
+        if (match) {
+          setLocalMonth(match.month);
+          setLocalYear(match.year);
+        }
+      } else {
+        const isNextYear = ['January', 'February', 'March'].includes(localMonth);
+        setLocalYear(isNextYear ? endYear : startYear);
+      }
+    }
+  }, [availableMonths, yearOptions, localMonth, localYear, payrollHistory, startYear, endYear]);
+
   const handleMonthChange = (selectedMonth: string) => {
     setLocalMonth(selectedMonth);
     const match = payrollHistory.find(r => r.month === selectedMonth);
     if (match) {
       setLocalYear(match.year);
     } else {
-      const fyMatch = activeFinancialYear?.match(/FY(\d{2})-(\d{2})/);
-      if (fyMatch) {
-        const startYear = 2000 + parseInt(fyMatch[1]);
-        const isNextYear = ['January', 'February', 'March'].includes(selectedMonth);
-        setLocalYear(isNextYear ? startYear + 1 : startYear);
-      }
+      const isNextYear = ['January', 'February', 'March'].includes(selectedMonth);
+      setLocalYear(isNextYear ? endYear : startYear);
     }
   };
 

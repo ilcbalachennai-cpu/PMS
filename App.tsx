@@ -44,6 +44,7 @@ import { useUIState } from './hooks/useUIState';
 import { useAuth } from './hooks/useAuth';
 import { useSync } from './hooks/useSync';
 import { useNavigation } from './hooks/useNavigation';
+import { executeDiagnosticExport } from './utils/diagnostics';
 
 const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -253,6 +254,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     return isJanToMar ? globalYear !== endY : globalYear !== startY;
   }, [globalMonth, globalYear, activeFinancialYear]);
 
+  const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
+  const [isRetryingSync, setIsRetryingSync] = useState(false);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const { isAppDirectoryConfigured, isBootSyncComplete } = useAppInitialization(verifyLicense);
+
   const { 
     latestAppVersion, setLatestAppVersion, 
     latestPatchTimestamp, setLatestPatchTimestamp,
@@ -267,7 +273,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     isPatchNotice, isPatchMandatory, isSessionDismissed, patchSkipCount, versionSkipCount,
     deploymentStep,
     handleUpdateNow, handleUpdateLater 
-  } = useAppUpdate(showAlert, currentUser?.role === 'Developer', currentUser?.username, currentUser?.email);
+  } = useAppUpdate(showAlert, currentUser?.role === 'Developer', currentUser?.username, currentUser?.email, isBootSyncComplete);
 
   const [isInstalling, setIsInstalling] = useState(false);
   const [isAddingNewCompany, setIsAddingNewCompany] = useState(false);
@@ -279,10 +285,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const [modalSwitchYear, setModalSwitchYear] = useState<number>(2025);
 
 
-  const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
-  const [isRetryingSync, setIsRetryingSync] = useState(false);
-  const [showPremiumModal, setShowPremiumModal] = useState(false);
-  const { isAppDirectoryConfigured } = useAppInitialization(verifyLicense);
   const { activeView, setActiveView } = useNavigation(mainContentRef, currentUser);
 
   const handleSystemRepair = () => {
@@ -1145,17 +1147,23 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   }, [isReloadingAfterReset]);
 
+  const [showIdleWarning, setShowIdleWarning] = useState(false);
+  const [idleCountdown, setIdleCountdown] = useState(10);
+
   // Auto Logout Timer (Throttling-Proof & Background-Safe)
   useEffect(() => {
     if (!currentUser) return; // Only track when logged in
 
-    localStorage.setItem('app_last_activity_time', String(Date.now()));
+    if (!localStorage.getItem('app_last_activity_time')) {
+      localStorage.setItem('app_last_activity_time', String(Date.now()));
+    }
 
     let lastX = -1;
     let lastY = -1;
     const MOVE_THRESHOLD = 5; // Ignored if moved less than 5 pixels (DPI jitter / layout scroll)
 
     const updateActivity = (e: Event) => {
+      if (showIdleWarning) return; // Block activity updates while warning is active
       if (e.type === 'mousemove') {
         const me = e as MouseEvent;
         // Skip synthetic mousemove events triggered by layout/marquee updates when cursor is parked
@@ -1171,9 +1179,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         }
         lastX = me.clientX;
         lastY = me.clientY;
-        console.log(`[ActivityTracker] Real Mouse Move: clientX=${me.clientX}, clientY=${me.clientY}`);
-      } else {
-        console.log(`[ActivityTracker] User Interaction: type=${e.type}`);
       }
       localStorage.setItem('app_last_activity_time', String(Date.now()));
     };
@@ -1181,34 +1186,49 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     const events = ['mousemove', 'keydown', 'mousedown', 'touchstart'];
     events.forEach(e => window.addEventListener(e, updateActivity));
 
-    // Check every 10 seconds if we have been inactive for more than 9 minutes (540000 ms)
+    // Check every 5 seconds if we have been inactive
     const checkInterval = setInterval(async () => {
       const lastActive = localStorage.getItem('app_last_activity_time') || Date.now();
       const elapsed = Date.now() - Number(lastActive);
       
-      // If idle time exceeds threshold AND no active update is downloading
-      if (elapsed > 540000 && !isUpdateDownloading) {
-        console.log("[ActivityTracker] Idle threshold reached! Triggering logout...");
-        clearInterval(checkInterval);
-        sessionStorage.setItem('logout_reason', 'timeout');
-        
-        // Report auto-logout to cloud to clear "LIVE" status
-        if (currentUser && currentUser.role !== 'Developer') {
-          try {
-            const mid = await getMachineId();
-            await trackHeartbeat(currentUser.email || "", mid, currentUser.username, sessionStartRef.current, "LOGGED OUT");
-          } catch (e) { console.warn("Auto-logout heartbeat failed", e); }
-        }
-        closeAlert();
-        logout();
+      // If idle time exceeds 9 minutes AND no active update is downloading
+      if (elapsed > 540000 && !isUpdateDownloading && !showIdleWarning) {
+        console.log("[ActivityTracker] Idle threshold reached! Showing warning...");
+        setShowIdleWarning(true);
+        setIdleCountdown(10);
       }
-    }, 10000); // Check every 10 seconds
+    }, 5000);
 
     return () => {
       clearInterval(checkInterval);
       events.forEach(e => window.removeEventListener(e, updateActivity));
     };
-  }, [currentUser, logout]);
+  }, [currentUser, isUpdateDownloading, showIdleWarning]);
+
+  // Idle Warning Countdown Effect
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (showIdleWarning) {
+      if (idleCountdown > 0) {
+        timer = setTimeout(() => setIdleCountdown(prev => prev - 1), 1000);
+      } else {
+        // Countdown finished, execute logout
+        console.log("[ActivityTracker] Idle countdown finished! Logging out...");
+        setShowIdleWarning(false);
+        sessionStorage.setItem('logout_reason', 'timeout');
+        
+        if (currentUser && currentUser.role !== 'Developer') {
+          getMachineId().then(mid => {
+            trackHeartbeat(currentUser.email || "", mid, currentUser.username, sessionStartRef.current, "LOGGED OUT").catch(e => console.warn("Auto-logout heartbeat failed", e));
+          }).catch(()=>{});
+        }
+        closeAlert();
+        logout();
+        window.location.reload();
+      }
+    }
+    return () => clearTimeout(timer);
+  }, [showIdleWarning, idleCountdown, currentUser, logout, closeAlert]);
 
   // Heartbeat Tracker (LIVE Status in Google Sheets)
   useEffect(() => {
@@ -1671,7 +1691,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                     </>
                   )}
                 </button>
-                <p className="text-[10px] text-slate-500 font-bold tracking-widest uppercase opacity-60">Security Engine v{licenseStatus.data?.latestVersion || '02.02.19'}</p>
+                  <button onClick={executeDiagnosticExport} className="w-full mt-2 py-2.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-400 hover:text-white rounded-xl font-bold transition-all text-xs flex items-center justify-center gap-1.5">
+                    <FileText size={14} /> Export Error Log
+                  </button>
+                  <p className="text-[10px] text-slate-500 font-bold tracking-widest uppercase opacity-60 mt-3">Security Engine v{licenseStatus.data?.latestVersion || '02.02.19'}</p>
               </div>
             </div>
           </div>
@@ -2048,6 +2071,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                        <LogOut size={14} /> Change User Account/Quit App
                      </button>
                      <div className="w-px h-4 bg-slate-800"></div>
+                     <button onClick={executeDiagnosticExport} className="text-slate-500 hover:text-blue-400 text-[11px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2">
+                       <FileText size={14} /> Export Diagnostics
+                     </button>
+                     <div className="w-px h-4 bg-slate-800"></div>
                      <button onClick={() => setIsCompanyGateOpen(false)} className="text-slate-500 hover:text-blue-400 text-[11px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2">
                        <LayoutDashboard size={14} /> Skip to Last Active
                      </button>
@@ -2181,6 +2208,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={!isSettingsAccessible} />
             </nav>
             <div className="p-4 border-t border-slate-800 bg-[#0b1120] space-y-1">
+              <button onClick={executeDiagnosticExport} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-blue-400 hover:bg-blue-900/20`} title="Export Diagnostics">
+                <FileText size={18} /> {isSidebarOpen && <span className="font-bold text-sm">Export Diagnostics</span>}
+              </button>
               <button onClick={handleLogoutAction} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-red-400 hover:bg-red-900/20`}><LogOut size={18} /> {isSidebarOpen && <span className="font-bold text-sm">Sign Out</span>}</button>
               <button
                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -2414,7 +2444,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
                       <div className="flex flex-col items-center gap-4 text-center">
                          <h2 className="text-2xl font-black text-white tracking-tight leading-tight">
-                           Please wait,&nbsp; Loading <br/>
+                           Please wait,&nbsp; Loading&nbsp; {activeFinancialYear ? activeFinancialYear.replace('FY', 'FY ') : ''} <br/>
                            <span className="text-blue-400">{companyProfile.establishmentName || 'Organization'}</span>
                          </h2>
                          <div className="px-4 py-1.5 bg-blue-500/10 rounded-full border border-blue-500/20">
@@ -2432,7 +2462,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         <div className="flex justify-center">
                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] animate-ellipsis-wait">Initializing Silo</span>
                         </div>
-                      </div>
+                        <button 
+                            onClick={executeDiagnosticExport}
+                            className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 transition-colors z-50 flex items-center gap-1.5"
+                        >
+                            <FileText size={12} />
+                            Export Diagnostics
+                        </button>
+                     </div>
                    </div>
                 </div>
               )}
@@ -2511,13 +2548,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                             })}
                           </div>
                         </div>
+                        <button 
+                            onClick={executeDiagnosticExport}
+                            className="mt-6 text-[10px] font-bold text-slate-600 hover:text-rose-400 uppercase tracking-widest transition-colors flex items-center gap-1.5"
+                        >
+                            <FileText size={12} />
+                            Export Diagnostics
+                        </button>
                      </div>
                   </div>
                 )}
                 {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={safeNavigate} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} onNavigate={safeNavigate} setSettingsTab={setSettingsTab} licenseInfo={licenseInfo || undefined} hasPreviousYearData={hasPreviousYearData} activeFinancialYear={activeFinancialYear} />}
-                {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} onNavigate={safeNavigate} />}
+                {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} onNavigate={safeNavigate} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} />}
                 {activeView === View.MIS && <MISDashboard payrollHistory={payrollHistory} employees={employees} companyProfile={companyProfile} showAlert={showAlert} />}
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} />}
@@ -2817,7 +2861,19 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 ml-1">Month</label>
                 <select
                   value={modalSwitchMonth}
-                  onChange={(e) => setModalSwitchMonth(e.target.value)}
+                  onChange={(e) => {
+                    const selectedMonth = e.target.value;
+                    setModalSwitchMonth(selectedMonth);
+                    if (pendingFySwitch) {
+                      const match = pendingFySwitch.match(/FY(\d{2})-(\d{2})/);
+                      if (match) {
+                        const startY = 2000 + parseInt(match[1]);
+                        const endY = 2000 + parseInt(match[2]);
+                        const isNextYear = ['January', 'February', 'March'].includes(selectedMonth);
+                        setModalSwitchYear(isNextYear ? endY : startY);
+                      }
+                    }
+                  }}
                   className="w-full bg-slate-950 border border-slate-700/80 px-3 py-2.5 rounded-xl text-xs font-bold text-white outline-none focus:border-indigo-500 cursor-pointer"
                   title="Select Month"
                   aria-label="Select Month"
@@ -2833,9 +2889,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 <select
                   value={modalSwitchYear}
                   onChange={(e) => setModalSwitchYear(parseInt(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-700/80 px-3 py-2.5 rounded-xl text-xs font-bold text-white outline-none focus:border-indigo-500 cursor-pointer"
-                  title="Select Year"
-                  aria-label="Select Year"
+                  disabled={true}
+                  className="w-full bg-slate-900 border border-slate-700/80 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-500 outline-none cursor-not-allowed"
+                  title="Auto-calculated Year"
+                  aria-label="Year"
                 >
                   {(() => {
                     const match = pendingFySwitch.match(/FY(\d{2})-(\d{2})/);
@@ -2948,6 +3005,33 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         </div>
       )}
         </>
+      )}
+
+      {/* Auto Logout Idle Warning Modal */}
+      {showIdleWarning && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-[#0f172a] border border-amber-500/30 rounded-2xl p-8 max-w-md w-full shadow-2xl flex flex-col items-center text-center">
+            <div className="w-16 h-16 bg-amber-500/20 text-amber-500 rounded-full flex items-center justify-center mb-6 animate-pulse">
+              <AlertTriangle size={32} />
+            </div>
+            <h2 className="text-2xl font-black text-white mb-2">Session Timeout</h2>
+            <p className="text-slate-400 mb-6 leading-relaxed">
+              You have been idle for a while. For your security, you will be automatically logged out in:
+            </p>
+            <div className="text-6xl font-black text-amber-500 mb-8 tabular-nums">
+              {idleCountdown}
+            </div>
+            <button
+              onClick={() => {
+                setShowIdleWarning(false);
+                localStorage.setItem('app_last_activity_time', String(Date.now()));
+              }}
+              className="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-[0_0_15px_rgba(217,119,6,0.3)]"
+            >
+              Continue Working
+            </button>
+          </div>
+        </div>
       )}
     </>
   )}

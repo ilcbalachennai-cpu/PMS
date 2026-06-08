@@ -9,7 +9,8 @@ import {
   INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE, 
   DEFAULT_LEAVE_POLICY 
 } from '../constants';
-import { getBackupFileName } from '../services/reportService';
+import { getBackupFileName, getMonthAbbr } from '../services/reportService';
+import { getCompanyBackupFolder } from '../utils/formatters';
 
 export const usePayrollData = (showAlert: any) => {
   const [isResetting, setIsResetting] = useState(false);
@@ -588,7 +589,14 @@ export const usePayrollData = (showAlert: any) => {
             // V04.00.01: Aggressive LocalStorage Cleanup
             // Clean up ALL dynamically generated app_ keys to free up quota before hydrating.
             // This prevents the 5MB browser quota crash when switching FYs or Companies.
-            const keysToKeep = ['app_active_company_id', 'app_companies', 'app_users', 'app_license_secure', 'app_machine_id', 'settings_initial_tab', 'app_active_financial_year', 'app_legal_agreed_date'];
+            const keysToKeep = [
+               'app_active_company_id', 'app_companies', 'app_users', 'app_license_secure', 
+               'app_machine_id', 'settings_initial_tab', 'app_active_financial_year', 'app_legal_agreed_date',
+               'app_active_patch_ts', 'app_latest_patch_timestamp', 'app_latest_version',
+               'app_download_url', 'app_download_url_win7', 'app_launcher_url',
+               'app_update_hash', 'app_update_hash_win10', 'app_update_hash_win7',
+               'app_patch_skip_count', 'app_version_skip_count', 'app_version_marker', 'app_update_ready'
+            ];
             for (let i = localStorage.length - 1; i >= 0; i--) {
                const k = localStorage.key(i);
                if (k && k.startsWith('app_') && !keysToKeep.includes(k) && !k.startsWith('app_msg_dismissed') && !k.includes('app_setup_complete')) {
@@ -916,9 +924,10 @@ export const usePayrollData = (showAlert: any) => {
 
       const backupFileName = getBackupFileName('AC', companyProfile, globalMonth, globalYear);
       const encryptionKey = companyProfile.securityPin || 'INITIAL_PMS_KEY';
+      const subfolderPath = `${getCompanyBackupFolder(companyProfile.establishmentName, companyProfile.id)}/BK_${getMonthAbbr(globalMonth)}${String(globalYear).slice(-2)}`;
       const backupRes = await window.electronAPI.createDataBackup({
         fileName: backupFileName,
-        subfolder: companyProfile.establishmentName,
+        subfolder: subfolderPath,
         encryptionKey: encryptionKey,
         financialYear: activeFinancialYear
       });

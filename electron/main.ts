@@ -150,6 +150,12 @@ function initializeDatabase(basePath: string, companyId?: string) {
         
         console.log('✅ Database initialized successfully.');
         
+        // V06.01.01: Legacy Auto-Migrator
+        // If this is the Root DB (no companyId specified), run the auto migrator!
+        if (!companyId || companyId === 'default' || companyId === 'null') {
+            performLegacyAutoMigration(db, paths).catch(e => console.error("AutoMigration Error:", e));
+        }
+        
         // V03.01.07: Create a startup backup
         try {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -354,12 +360,7 @@ function createWindow() {
         if (isUpdateDownloading) {
             e.preventDefault();
             closeRequested = true;
-            dialog.showMessageBox(mainWindow!, {
-                type: 'info',
-                title: 'Update in Progress',
-                message: 'A new version is currently downloading in the background.\n\nThe application will close automatically upon completion to apply the update. Please wait.',
-                buttons: ['OK']
-            });
+            mainWindow?.webContents.send('update-close-warning');
         }
     });
 
@@ -868,8 +869,78 @@ const GLOBAL_KEYS = [
     'app_config', 
     'app_data_size', 
     'app_company_limit', 
-    'app_logo'
+    'app_logo',
+    'app_active_patch_ts',
+    'app_patch_skip_count',
+    'app_version_skip_count',
+    'app_version_marker',
+    'app_last_seen_version',
+    'app_last_seen_patch_ts'
 ];
+
+async function performLegacyAutoMigration(rootDb: Database.Database, appPaths: any) {
+    try {
+        console.log("🚀 [AutoMigrate] Checking for legacy data in root DB...");
+        
+        // 1. Get all keys in root database
+        const rows = rootDb.prepare('SELECT * FROM store').all() as { key: string, value: string }[];
+        
+        // 2. Identify if there are any non-global (legacy) keys
+        const legacyRows = rows.filter(r => !GLOBAL_KEYS.includes(r.key));
+        if (legacyRows.length === 0) {
+            console.log("✅ [AutoMigrate] Root DB is clean. No legacy data found.");
+            return;
+        }
+
+        console.log(`⚠️ [AutoMigrate] Found ${legacyRows.length} legacy keys. Starting migration surgery...`);
+
+        // 3. Extract the active companies list to use for routing
+        const companiesRow = rows.find(r => r.key === 'app_companies');
+        let companies: any[] = [];
+        if (companiesRow) {
+            try { companies = JSON.parse(companiesRow.value); } catch(e) {}
+        }
+        const companyIds = companies.map(c => c.id);
+        const defaultCompanyId = companyIds.length > 0 ? companyIds[0] : 'company_1';
+
+        let migratedCount = 0;
+
+        for (const row of legacyRows) {
+            let targetCompanyId = defaultCompanyId;
+
+            // Try to perfectly match the company ID suffix
+            for (const cid of companyIds) {
+                if (row.key.endsWith(`_${cid}`)) {
+                    targetCompanyId = cid;
+                    break;
+                }
+            }
+
+            const siloDir = path.join(appPaths.data, targetCompanyId);
+            if (!fs.existsSync(siloDir)) {
+                fs.mkdirSync(siloDir, { recursive: true });
+                console.log(`[AutoMigrate] Created new Silo directory: ${siloDir}`);
+            }
+
+            const siloDbPath = path.join(siloDir, 'active_db.sqlite');
+            const siloDb = new Database(siloDbPath);
+            siloDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+            
+            // Insert into Silo
+            siloDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)').run(row.key, row.value);
+            siloDb.close();
+
+            // Delete from Root
+            rootDb.prepare('DELETE FROM store WHERE key = ?').run(row.key);
+            migratedCount++;
+        }
+
+        console.log(`🎉 [AutoMigrate] SUCCESS! ${migratedCount} legacy keys successfully sliced and moved into Silo folders.`);
+        
+    } catch (e) {
+        console.error("❌ [AutoMigrate] FAILED:", e);
+    }
+}
 
 ipcMain.handle('db-set', async (_, { key, value }) => {
     try {
@@ -1180,7 +1251,7 @@ ipcMain.handle('run-backup', async (_, arg1, arg2, arg3) => {
         
         let targetDir = paths.backups;
         if (subfolder) {
-            const folderName = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+            const folderName = subfolder.replace(/\.\./g, '').replace(/[<>:"|?*]/g, '');
             targetDir = path.join(paths.backups, folderName);
             if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         }
@@ -1218,7 +1289,7 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
         let targetDir = paths.backups;
         if (subfolder) {
             // Use only the first word and sanitize
-            const folderName = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+            const folderName = subfolder.replace(/\.\./g, '').replace(/[<>:"|?*]/g, '');
             targetDir = path.join(paths.backups, folderName);
         }
 
@@ -1701,6 +1772,106 @@ ipcMain.handle('find-bpp-app', async () => {
     }
 });
 
+// ── 8.5 DIAGNOSTICS & TELEMETRY ──
+ipcMain.handle('generate-diagnostics', async (_, uiState: any) => {
+    try {
+        if (!mainWindow) throw new Error("No main window");
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const defaultPath = path.join(app.getPath('desktop'), `BPP_Diagnostics_${timestamp}.bpplog`);
+
+        const result = await dialog.showSaveDialog(mainWindow, {
+            title: 'Save Secure Diagnostic Report',
+            defaultPath: defaultPath,
+            filters: [{ name: 'BPP Encrypted Log', extensions: ['bpplog'] }]
+        });
+
+        if (result.canceled || !result.filePath) {
+            return { success: false, error: 'User canceled save dialog' };
+        }
+
+        // Gather File System State
+        const fsState: any = {
+            appBasePath: appBasePath || 'NOT_CONFIGURED',
+            rootExists: false,
+            rootSize: 0,
+            legacyDataExists: false,
+            legacyDataSize: 0,
+            silos: []
+        };
+
+        if (appBasePath && fs.existsSync(appBasePath)) {
+            // Root DB could be active_db.sqlite or app_companies.sqlite
+            const rootDbPath1 = path.join(appBasePath, 'active_db.sqlite');
+            const rootDbPath2 = path.join(appBasePath, 'app_companies.sqlite');
+            if (fs.existsSync(rootDbPath1)) {
+                fsState.rootExists = true;
+                fsState.rootSize = fs.statSync(rootDbPath1).size;
+            } else if (fs.existsSync(rootDbPath2)) {
+                fsState.rootExists = true;
+                fsState.rootSize = fs.statSync(rootDbPath2).size;
+            }
+
+            const legacyDbPath = path.join(appBasePath, 'Data', 'active_db.sqlite');
+            if (fs.existsSync(legacyDbPath)) {
+                fsState.legacyDataExists = true;
+                fsState.legacyDataSize = fs.statSync(legacyDbPath).size;
+            }
+
+            // Scan for silos in app root, BPP_APP, OR inside the nested BharatPP/Data folder
+            const scanDirs = [appBasePath, path.join(appBasePath, 'BPP_APP'), path.join(appBasePath, 'BharatPP', 'Data')];
+            for (const scanDir of scanDirs) {
+                if (fs.existsSync(scanDir)) {
+                    const items = fs.readdirSync(scanDir, { withFileTypes: true });
+                    for (const item of items) {
+                        if (item.isDirectory()) {
+                            const siloDbPath = path.join(scanDir, item.name, 'active_db.sqlite');
+                            // Only count it as a silo if it has an active_db.sqlite, or its name matches a typical ID format (e.g. SAIPRA_123456)
+                            if (fs.existsSync(siloDbPath) || item.name.includes('_')) {
+                                // Ensure we don't duplicate if they somehow exist in both
+                                if (!fsState.silos.some((s: any) => s.folder === item.name)) {
+                                    fsState.silos.push({
+                                        folder: path.basename(scanDir) === 'BPP_APP' ? `BPP_APP/${item.name}` : item.name,
+                                        exists: fs.existsSync(siloDbPath),
+                                        size: fs.existsSync(siloDbPath) ? fs.statSync(siloDbPath).size : 0
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        const payload = {
+            timestamp: new Date().toISOString(),
+            os: process.platform,
+            uiState: uiState,
+            fsState: fsState
+        };
+
+        const jsonString = JSON.stringify(payload, null, 2);
+
+        // Encrypt Payload (AES-256-CBC)
+        const encryptionKey = 'bpp_dev_473748';
+        const cipher = crypto.createCipheriv('aes-256-cbc' as any, 
+            crypto.scryptSync(encryptionKey, 'salt', 32) as any, 
+            Buffer.alloc(16, 0) as any
+        );
+        
+        let encrypted = cipher.update(jsonString, 'utf8', 'base64');
+        encrypted += cipher.final('base64');
+
+        fs.writeFileSync(result.filePath, encrypted, 'utf8');
+
+        return { success: true, filePath: result.filePath };
+    } catch (e: any) {
+        console.error('[IPC] generate-diagnostics failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+
 // ── 9. SMART AUTO-UPDATE HANDLERS ──
 
 const INSTALLER_NAME = 'bpp_installer.exe';
@@ -1828,7 +1999,7 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
     });
 });
 
-ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean }) => {
+ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchTimestamp?: string }) => {
     const isSilent = options?.silent ?? false;
     const installerPath = getInstallerPath();
 
@@ -1843,6 +2014,18 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean }) => {
             console.log('--- DEFENSIVE RELAUNCHER START ---');
             
             // A. Flush and Close Database
+            if (options?.newPatchTimestamp && appBasePath) {
+                try {
+                    const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+                    const rootDb = new Database(rootDbPath);
+                    rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+                    rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)').run('app_active_patch_ts', JSON.stringify(options.newPatchTimestamp));
+                    rootDb.close();
+                    console.log('✅ Safely persisted active patch timestamp to ROOT DB:', options.newPatchTimestamp);
+                } catch(e) {
+                    console.error('❌ Failed to persist patch timestamp to ROOT DB', e);
+                }
+            }
             if (db) {
                 try { 
                     db.pragma('wal_checkpoint(TRUNCATE)'); 

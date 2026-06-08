@@ -36,5 +36,14 @@ if (!win10Script.includes(expectedArtifactFragment) || !win7Script.includes(expe
     process.exit(1);
 }
 
+// --- Dynamic Baseline Injection ---
+const now = new Date();
+const pad = (n) => n.toString().padStart(2, '0');
+const currentTimestamp = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+let newLicenseService = licenseService.replace(/export const APP_PATCH_TIMESTAMP = ".*";/, `export const APP_PATCH_TIMESTAMP = "${currentTimestamp}";`);
+fs.writeFileSync(licenseServicePath, newLicenseService, 'utf8');
+console.log(`✅ Dynamic Baseline injected: ${currentTimestamp}`);
+
 console.log('✅ Version consistency audit passed.');
 process.exit(0);

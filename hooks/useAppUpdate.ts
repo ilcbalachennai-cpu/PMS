@@ -108,10 +108,15 @@ import { APP_VERSION, APP_PATCH_TIMESTAMP } from '../services/licenseService';
     } catch (e) { return false; }
   };
 
-export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, username?: string, userEmail?: string) => {
+export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, username?: string, userEmail?: string, isBootSyncComplete: boolean = false) => {
   const [latestAppVersion, setLatestAppVersion] = useState<string | null>(localStorage.getItem('app_latest_version'));
   const [latestPatchTimestamp, setLatestPatchTimestamp] = useState<string | null>(localStorage.getItem('app_latest_patch_timestamp'));
   const [appStartupTime] = useState(Date.now());
+  
+  useEffect(() => {
+     (window as any).__appStartupTime = appStartupTime;
+  }, [appStartupTime]);
+
   const [downloadUrl, setDownloadUrl] = useState<string | null>(localStorage.getItem('app_download_url'));
   const [sha256, setSha256] = useState<string | null>(localStorage.getItem('app_update_hash'));
   const [showUpdateNotice, setShowUpdateNotice] = useState(false);
@@ -190,16 +195,14 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
             const osVersion = await window.electronAPI.getOSVersion();
             const isLegacyWin = osVersion.startsWith('6.'); 
             
-            const launcherUrl = localStorage.getItem('app_launcher_url');
-            if (launcherUrl) {
-               finalUrl = launcherUrl;
-            } else if (isLegacyWin) {
+            // Removed launcherUrl override to prevent infinite loops
+            if (isLegacyWin) {
                finalUrl = localStorage.getItem('app_download_url_win7') || "";
             } else {
                finalUrl = downloadUrl || localStorage.getItem('app_download_url') || "";
             }
           } catch (e) {
-            finalUrl = localStorage.getItem('app_launcher_url') || downloadUrl || localStorage.getItem('app_download_url') || "";
+            finalUrl = downloadUrl || localStorage.getItem('app_download_url') || "";
           }
 
           if (!finalUrl) {
@@ -252,7 +255,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
           }
         }
 
-        // 🚀 [V02.02.26.1] MANAGED DEPLOYMENT SEQUENCE
+        //  [V02.02.26.1] MANAGED DEPLOYMENT SEQUENCE
         // Explicitly driving stages to prevent "silent failures"
         setDeploymentStep(3); // EXTRACTing
         await onInstall();
@@ -269,12 +272,12 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
             console.warn("prepareForInstall warning:", e);
         }
 
-        // 🏆 SUCCESS STATE: Final feedback before restart
+        //  SUCCESS STATE: Final feedback before restart
         setDeploymentStep(6); 
-        console.log("🏆 Patch Successfully Applied. Holding for UI readability...");
+        console.log(" Patch Successfully Applied. Holding for UI readability...");
         await new Promise(resolve => setTimeout(resolve, 3100));
 
-        // 🎖️ [PatchSync] Synchronize patch timestamp during Version or Patch update
+        //  [PatchSync] Synchronize patch timestamp during Version or Patch update
         if (latestPatchTimestamp) {
            localStorage.setItem('app_active_patch_ts', latestPatchTimestamp);
            localStorage.setItem('app_patch_skip_count', '0');
@@ -294,7 +297,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
 
         localStorage.removeItem('app_update_ready');
         // @ts-ignore - Pass silent flag for patches
-        const result = await (window as any).electronAPI.backupAndInstall({ silent: isPatchNotice, username, userEmail });
+        const result = await (window as any).electronAPI.backupAndInstall({ silent: isPatchNotice, username, userEmail, newPatchTimestamp: latestPatchTimestamp });
         if (result && result.success === false) {
            showAlert('error', 'Restart Failed', `The update was downloaded but the installer could not be launched automatically: ${result.error || 'Unknown error'}. Please try restarting the app manually.`);
         }
@@ -355,14 +358,18 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
   // If we just upgraded to a new version or did a fresh install, adopt the compiled baseline
   // or the cloud patch baseline depending on whether our version matches the cloud version.
   useEffect(() => {
+    if (!isBootSyncComplete) return;
+
     const versionMarker = localStorage.getItem('app_version_marker');
+    const localActiveTs = localStorage.getItem('app_active_patch_ts') || '00-00-0000 00:00:00';
     
-    // We detect if this is a fresh boot of a new version or a fresh install
-    const isNewVersionOrFreshInstall = !versionMarker || versionMarker !== APP_VERSION;
+    // We detect if this is a fresh boot of a new version, a fresh install, or if the compiled baseline is simply newer than our local active timestamp
+    const isCompiledNewer = parseDateTime(APP_PATCH_TIMESTAMP) > parseDateTime(localActiveTs);
+    const isNewVersionOrFreshInstall = !versionMarker || versionMarker !== APP_VERSION || isCompiledNewer;
     
     if (isNewVersionOrFreshInstall) {
        if (latestPatchTimestamp && latestAppVersion) {
-          console.log(`🎊 [VersionSync] New version or fresh install detected (${versionMarker || 'None'} -> ${APP_VERSION}).`);
+          console.log(` [VersionSync] New version or fresh install detected (${versionMarker || 'None'} -> ${APP_VERSION}).`);
           localStorage.setItem('app_version_skip_count', '0');
           setVersionSkipCount(0);
           localStorage.setItem('app_version_marker', APP_VERSION);
@@ -371,9 +378,9 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
           // If the cloud version is older, adopt the cloud patch timestamp to prevent old heritage patches
           if (isVersionHigher(APP_VERSION, latestAppVersion)) {
              targetBaseline = latestPatchTimestamp;
-             console.log(`📡 [VersionSync] Cloud version (${latestAppVersion}) is older than compiled version (${APP_VERSION}). Adopting cloud patch baseline: ${latestPatchTimestamp}`);
+             console.log(` [VersionSync] Cloud version (${latestAppVersion}) is older than compiled version (${APP_VERSION}). Adopting cloud patch baseline: ${latestPatchTimestamp}`);
           } else {
-             console.log(`📡 [VersionSync] Compiled version (${APP_VERSION}) matches or is older than cloud version (${latestAppVersion}). Using compiled baseline: ${APP_PATCH_TIMESTAMP}`);
+             console.log(` [VersionSync] Compiled version (${APP_VERSION}) matches or is older than cloud version (${latestAppVersion}). Using compiled baseline: ${APP_PATCH_TIMESTAMP}`);
           }
           
           localStorage.setItem('app_active_patch_ts', targetBaseline);
@@ -386,10 +393,10 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
              dbSetFn('app_active_patch_ts', targetBaseline).catch(() => {});
           }
        } else {
-          console.log(`⏳ [VersionSync] New version or fresh install detected. Waiting for cloud version and patch timestamp...`);
+          console.log(` [VersionSync] New version or fresh install detected. Waiting for cloud version and patch timestamp...`);
        }
     }
-  }, [latestPatchTimestamp, latestAppVersion]);
+  }, [latestPatchTimestamp, latestAppVersion, isBootSyncComplete]);
 
   // --- V03.01.04: HARD CLEANUP OF REDUNDANT UPDATE FLAGS ---
   useEffect(() => {
@@ -404,7 +411,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
     const isPatchNewer = cloudPatchTs ? parseDateTime(cloudPatchTs) > parseDateTime(localPatchTs) : false;
 
     if (!isVerHigher && !isPatchNewer) {
-      console.log(`🧹 [HardCleanup] Current version (${APP_VERSION}) is up to date. Nuking redundant update flags.`);
+      console.log(` [HardCleanup] Current version (${APP_VERSION}) is up to date. Nuking redundant update flags.`);
       localStorage.removeItem('app_update_ready');
       setUpdateDownloaded(false);
       setShowUpdateNotice(false);
@@ -412,9 +419,9 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
   }, []);
 
   useEffect(() => {
-    // 🛡️ [V02.02.23] DEVELOPER BYPASS
+    //  [V02.02.23] DEVELOPER BYPASS
     if (import.meta.env.DEV || isDeveloper) {
-       console.log("🛡️ [UpdateSync] System updates and patches are suppressed in Developer Environment.");
+       console.log(" [UpdateSync] System updates and patches are suppressed in Developer Environment.");
        setShowUpdateNotice(false);
        setIsPatchNotice(false);
        setUpdateDownloaded(false);
@@ -425,7 +432,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
     if (latestAppVersion) {
         const lastSeenVer = localStorage.getItem('app_last_seen_version');
         if (lastSeenVer && isVersionHigher(latestAppVersion, lastSeenVer)) {
-            console.log(`🆕 [VersionSync] Newer cloud version detected (${latestAppVersion} > ${lastSeenVer}). Resetting version skip count.`);
+            console.log(` [VersionSync] Newer cloud version detected (${latestAppVersion} > ${lastSeenVer}). Resetting version skip count.`);
             localStorage.setItem('app_version_skip_count', '0');
             setVersionSkipCount(0);
              const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
@@ -437,7 +444,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
             sessionStorage.removeItem('patch_session_suppressed');
             setIsSessionDismissed(false);
         } else {
-            console.log(`📡 [VersionSync] Same version detected (${latestAppVersion}). Maintaining skip count: ${versionSkipCount}/3.`);
+            console.log(` [VersionSync] Same version detected (${latestAppVersion}). Maintaining skip count: ${versionSkipCount}/3.`);
         }
         localStorage.setItem('app_last_seen_version', latestAppVersion);
     }
@@ -449,7 +456,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
         const lastSeenTsNum = parseDateTime(lastSeenTs);
 
         if (latestTsNum > lastSeenTsNum) {
-            console.log(`🆕 [PatchSync] New patch detected (${latestPatchTimestamp}). Resetting skip count.`);
+            console.log(` [PatchSync] New patch detected (${latestPatchTimestamp}). Resetting skip count.`);
             localStorage.setItem('app_patch_skip_count', '0');
             localStorage.setItem('app_last_seen_patch_ts', latestPatchTimestamp);
             setPatchSkipCount(0);
@@ -458,12 +465,12 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
             sessionStorage.removeItem('patch_session_suppressed');
             setIsSessionDismissed(false);
         } else {
-            console.log(`📡 [PatchSync] Same patch detected (${latestPatchTimestamp}). Maintaining skip count: ${patchSkipCount}/3.`);
+            console.log(` [PatchSync] Same patch detected (${latestPatchTimestamp}). Maintaining skip count: ${patchSkipCount}/3.`);
             localStorage.setItem('app_last_seen_patch_ts', latestPatchTimestamp);
         }
     }
 
-    // ── PHASE 1: Version Update (Absolute Priority) ──
+    //  PHASE 1: Version Update (Absolute Priority) 
     if (latestAppVersion && isVersionHigher(latestAppVersion, APP_VERSION)) {
        setIsPatchNotice(false);
        setIsPatchMandatory(versionSkipCount >= 3);
@@ -475,13 +482,14 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
     // If the compiled version is strictly newer than the cloud version (e.g. local testing),
     // we suppress patch notices completely to prevent applying stale old-version patches.
     if (latestAppVersion && isVersionHigher(APP_VERSION, latestAppVersion)) {
-       console.log(`🛡️ [PatchSync] Compiled version (${APP_VERSION}) is strictly newer than cloud version (${latestAppVersion}). Suppressing patch updates.`);
+       console.log(` [PatchSync] Compiled version (${APP_VERSION}) is strictly newer than cloud version (${latestAppVersion}). Suppressing patch updates.`);
        setIsPatchNotice(false);
        setShowUpdateNotice(false);
        return;
     }
 
-    // ── PHASE 2: Patch Update (Only if no new version) ──
+    //  PHASE 2: Patch Update (Only if no new version) 
+    if (!latestAppVersion) { console.log("[PatchSync] Waiting for cloud version before evaluating patches..."); return; }
     const latestTs = parseDateTime(latestPatchTimestamp);
     const activeTs = parseDateTime(activePatchTs);
     const delayMs = 5 * 60 * 1000; 
@@ -490,16 +498,23 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
     
     const isDismissed = sessionStorage.getItem('patch_session_suppressed') === 'true';
 
+    (window as any).__updateVars = {
+       latestTs, activeTs, delayMs, appStartupTime, now, isDismissed, patchSkipCount, isDeveloper,
+       cond1: latestTs > activeTs,
+       cond2: (!isDismissed || patchSkipCount >= 3),
+       cond3: (now >= (appStartupTime + delayMs))
+    };
+
     // Check if patch is newer AND if the 5-minute grace period has passed
     if (latestTs > activeTs && (!isDismissed || patchSkipCount >= 3)) {
        if (now >= (appStartupTime + delayMs)) {
-         console.log("🚀 [PatchSync] Startup grace period expired. Triggering update notice.");
+         console.log(" [PatchSync] Startup grace period expired. Triggering update notice.");
          setIsPatchNotice(true);
          setIsPatchMandatory(patchSkipCount >= 3);
          setShowUpdateNotice(true);
        } else {
          const remainingSecs = Math.ceil(((appStartupTime + delayMs) - now) / 1000);
-         console.log(`⏳ [PatchSync] Patch detected but in 5-min cooldown. Waiting ${remainingSecs}s more for developer verification...`);
+         console.log(` [PatchSync] Patch detected but in 5-min cooldown. Waiting ${remainingSecs}s more for developer verification...`);
          setIsPatchNotice(false);
          setShowUpdateNotice(false);
        }

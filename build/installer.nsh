@@ -67,5 +67,9 @@ FunctionEnd
     GetFullPathName $3 "$INSTDIR\.."
     CopyFiles /SILENT "$INSTDIR\resources\manual_assets\*.*" "$3\"
     RMDir /r "$INSTDIR\resources\manual_assets"
+    
+    # If the installer is running silently (Patch Update), automatically launch the app after installing
+    IfSilent 0 +2
+    ExecShell "" "$INSTDIR\BPP_APP.exe"
 !macroend
 
