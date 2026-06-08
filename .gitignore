@@ -24,3 +24,12 @@ release
 *.njsproj
 *.sln
 *.sw?
+ 
+# Scratch and temporary logs
+*.bpplog
+history.txt
+scratch/
+*.sqlite
+check_db.cjs
+test_req.cjs
+
