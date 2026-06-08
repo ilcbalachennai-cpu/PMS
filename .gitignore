@@ -33,3 +33,5 @@ scratch/
 check_db.cjs
 test_req.cjs
 
+ 
+BPP_Diagnostics_*.json
