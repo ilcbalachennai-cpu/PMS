@@ -18,6 +18,12 @@ Function .onVerifyInstDir
 FunctionEnd
 
 !macro customInit
+    # Per user request: Clear application memory (configuration files) before installation
+    # This ensures a clean initialization loop without touching the actual data (BharatPP folders).
+    RMDir /r "$APPDATA\BPP_APP"
+    RMDir /r "$APPDATA\bharatpay-pro"
+    RMDir /r "$APPDATA\BharatPayPro"
+    
     # If this is an update (BPP_APP.exe already exists), skip redirecting the path
     IfFileExists "$INSTDIR\BPP_APP.exe" skip_custom_init
     
