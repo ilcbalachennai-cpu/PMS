@@ -1116,7 +1116,13 @@ ipcMain.handle('list-silos', async () => {
         if (!fs.existsSync(dataDir)) return { success: true, silos: [] };
 
         const silos = fs.readdirSync(dataDir)
-            .filter(name => fs.statSync(path.join(dataDir, name)).isDirectory())
+            .filter(name => {
+                const siloPath = path.join(dataDir, name);
+                const isDir = fs.statSync(siloPath).isDirectory();
+                if (!isDir) return false;
+                // Only include silos that actually have an active database
+                return fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
+            })
             .filter(name => name !== '.icon-ico'); // Exclude known non-silo folders if any
         
         return { success: true, silos };
@@ -1739,28 +1745,34 @@ ipcMain.handle('find-bpp-app', async () => {
 
             drives.forEach(drive => {
                 potentialRoots.push(path.join(drive, 'BPP_APP'));
+                potentialRoots.push(path.join(drive, 'BharatPayRoll'));
                 potentialRoots.push(path.join(drive, 'BharatPayRoll', 'BPP_APP'));
                 potentialRoots.push(path.join(drive, 'BPP', 'BPP_APP')); // Check subfolder too
+                potentialRoots.push(path.join(drive, 'BharatPP'));
             });
         } catch (e) {
             // Fallback if WMIC fails
             ['C:', 'D:', 'E:', 'F:', 'G:', 'H:'].forEach(d => {
                 potentialRoots.push(path.join(d, '/', 'BPP_APP'));
+                potentialRoots.push(path.join(d, '/', 'BharatPayRoll'));
                 potentialRoots.push(path.join(d, '/', 'BharatPayRoll', 'BPP_APP'));
+                potentialRoots.push(path.join(d, '/', 'BharatPP'));
             });
         }
 
         // 2. Add User Home
         potentialRoots.push(path.join(app.getPath('home'), 'BPP_APP'));
+        potentialRoots.push(path.join(app.getPath('home'), 'BharatPayRoll'));
         potentialRoots.push(path.join(app.getPath('home'), 'BharatPayRoll', 'BPP_APP'));
 
         // 3. Scan for first existing one
         for (const p of potentialRoots) {
             if (fs.existsSync(p)) {
                 // Verify it's actually our app directory (contains BharatPP or active_db.sqlite)
-                const dataPath = path.join(p, 'BharatPP', 'Data', 'active_db.sqlite');
-                if (fs.existsSync(dataPath)) {
-                    console.log('🔍 Dynamic Detection: Found BPP_APP at', p);
+                const dataPath = path.join(p, 'BharatPP');
+                const dbPath = path.join(p, 'active_db.sqlite');
+                if (fs.existsSync(dataPath) || fs.existsSync(dbPath)) {
+                    console.log('🔄 Dynamic Detection: Found App Data at', p);
                     return { success: true, path: p };
                 }
             }

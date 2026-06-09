@@ -128,11 +128,15 @@ const AppSetup: React.FC<AppSetupProps> = ({ onComplete }) => {
                         </div>
 
                         {error && (
-                            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-3 animate-in slide-in-from-top-2 duration-300">
-                                <AlertCircle className="text-red-500 shrink-0" size={18} />
-                                <span className="text-xs text-red-400 font-medium">{error}</span>
-                            </div>
-                        )}
+                              <div className="p-4 rounded-xl bg-red-500/20 border-2 border-red-500/50 flex flex-col items-center justify-center gap-3 animate-in slide-in-from-top-2 duration-300 shadow-[0_0_15px_rgba(239,68,68,0.3)]">
+                                  <div className="flex items-center gap-2">
+                                      <AlertCircle className="text-red-500 shrink-0" size={24} />
+                                      <span className="text-sm text-red-400 font-bold uppercase tracking-wider">Initialization Error</span>
+                                  </div>
+                                  <span className="text-sm text-white font-medium text-center bg-red-950/50 p-2 rounded-lg w-full break-words">{error}</span>
+                                  <span className="text-[10px] text-red-300 font-mono text-center">Please close the app entirely, ensure the folder has write permissions and no other process is using the files, and try again.</span>
+                              </div>
+                          )}
 
                         {/* Action Bar */}
                         <div className="space-y-4 pt-2">
