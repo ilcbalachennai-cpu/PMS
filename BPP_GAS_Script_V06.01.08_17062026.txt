@@ -164,6 +164,45 @@ function IsDeveloperRequest(ss, params) {
     return false;
 }
 
+function lookupRegisteredEmail(ss, userID, machineID) {
+    if (!ss) return "";
+    var uId = String(userID || "").trim().toUpperCase();
+    var mId = String(machineID || "").trim().toLowerCase();
+
+    // 1. Search in BPP_APP_License
+    var sheet = ss.getSheetByName('BPP_APP_License');
+    if (sheet) {
+        var data = sheet.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++) {
+            var rowEmail = String(data[i][5] || "").trim();
+            if (rowEmail && rowEmail.toLowerCase() !== "n/a" && rowEmail.toLowerCase() !== "unknown") {
+                var rowUID = String(data[i][2] || "").trim().toUpperCase();
+                var rowMach = String(data[i][8] || "").trim().toLowerCase();
+                if ((uId && rowUID === uId) || (mId && rowMach === mId)) {
+                    return rowEmail;
+                }
+            }
+        }
+    }
+
+    // 2. Search in Approved_Trial_Data
+    var trialSheet = ss.getSheetByName('Approved_Trial_Data');
+    if (trialSheet) {
+        var data = trialSheet.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++) {
+            var rowEmail = String(data[i][3] || "").trim();
+            if (rowEmail && rowEmail.toLowerCase() !== "n/a" && rowEmail.toLowerCase() !== "unknown") {
+                var rowUID = String(data[i][1] || "").trim().toUpperCase();
+                var rowMach = String(data[i][5] || "").trim().toLowerCase();
+                if ((uId && rowUID === uId) || (mId && rowMach === mId)) {
+                    return rowEmail;
+                }
+            }
+        }
+    }
+    return "";
+}
+
 function handleTrackHeartbeat(ss, params) {
     // --- STRICT BYPASS: Developer never writes tracker data ---
     if (IsDeveloperRequest(ss, params)) return jsonResponse({ success: true, note: "Dev Isolation Mode" });
@@ -188,7 +227,14 @@ function handleTrackHeartbeat(ss, params) {
     const status = String(params.status || "LIVE").toUpperCase();
     const userID = String(params.userID || "UNKNOWN").toUpperCase();
     const machineID = String(params.machineId || "UNKNOWN");
-    const email = String(params.email || "N/A");
+    
+    let email = String(params.email || "N/A");
+    if (email === "N/A" || email.toLowerCase() === "n/a" || email.trim() === "") {
+        var foundEmail = lookupRegisteredEmail(ss, userID, machineID);
+        if (foundEmail) {
+            email = foundEmail;
+        }
+    }
     const location = String(params.location || "Auto-Detected");
     const sessionStart = params.sessionStart ? new Date(params.sessionStart) : now;
     
