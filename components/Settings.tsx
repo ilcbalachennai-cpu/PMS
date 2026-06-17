@@ -56,6 +56,7 @@ interface SettingsProps {
     globalMonth?: string;
     globalYear?: number;
     activeFinancialYear?: string;
+    isLicenseExpired?: boolean;
 }
 
 const UsageTimeClock = () => {
@@ -79,7 +80,7 @@ const Settings: React.FC<SettingsProps> = ({
     setSettingsTab,
     userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange,
     showAlert, verifyLicense, activeCompanyId = 'default', onRescueOrganizations,
-    globalMonth = 'April', globalYear = 2025, activeFinancialYear
+    globalMonth = 'April', globalYear = 2025, activeFinancialYear, isLicenseExpired
 }) => {
     const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${key}_${activeCompanyId}`;
     const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
@@ -781,7 +782,7 @@ const Settings: React.FC<SettingsProps> = ({
                 const rawProfile = data.company_profile || data.companyProfile || data.app_company_profile || {};
                 const backupCompanyId = rawProfile.id;
 
-                let targetId = activeCompanyId !== 'default' ? activeCompanyId : 'company_1';
+                let targetId = activeCompanyId !== 'default' ? activeCompanyId : generateCompanyId(rawProfile.establishmentName || 'COMPANY');
                 let conflictMessage = "";
 
                 if (backupCompanyId && backupCompanyId !== activeCompanyId) {
@@ -2324,11 +2325,11 @@ const Settings: React.FC<SettingsProps> = ({
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="space-y-1">
                                                 <label htmlFor="epf-ceiling" className="text-[10px] font-bold text-slate-500 uppercase">Statutory Ceiling (₹)</label>
-                                                <input id="epf-ceiling" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfCeiling} onChange={e => setFormData({ ...formData, epfCeiling: +e.target.value })} title="Statutory Ceiling Amount" />
+                                                <input id="epf-ceiling" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfCeiling} onChange={e => setFormData({ ...formData, epfCeiling: +e.target.value })} title="Statutory Ceiling Amount" />
                                             </div>
                                             <div className="space-y-1">
                                                 <label htmlFor="epf-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase">Employee Rate (%)</label>
-                                                <input id="epf-employee-rate" type="number" step="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfEmployeeRate * 100} onChange={e => setFormData({ ...formData, epfEmployeeRate: +e.target.value / 100 })} title="Employee PF Contribution Rate" />
+                                                <input id="epf-employee-rate" type="number" onFocus={(e) => e.target.select()} step="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfEmployeeRate * 100} onChange={e => setFormData({ ...formData, epfEmployeeRate: +e.target.value / 100 })} title="Employee PF Contribution Rate" />
                                             </div>
                                         </div>
                                     </div>
@@ -2373,8 +2374,8 @@ const Settings: React.FC<SettingsProps> = ({
                             <div className="flex items-center gap-3 border-b border-slate-800 pb-3"><ShieldCheck className="text-pink-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-pink-400">ESI Corporation</h3></div>
                             <div className="space-y-4">
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1"><label htmlFor="esi-ceiling" className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label><input id="esi-ceiling" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiCeiling} onChange={e => setFormData({ ...formData, esiCeiling: +e.target.value })} title="ESI Eligibility Ceiling" aria-label="ESI Eligibility Ceiling" /></div>
-                                    <div className="space-y-1"><label htmlFor="esi-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase">EE Rate (%)</label><input id="esi-employee-rate" type="number" step="0.001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiEmployeeRate * 100} onChange={e => setFormData({ ...formData, esiEmployeeRate: +e.target.value / 100 })} title="Employee ESI Rate" aria-label="Employee ESI Rate" /></div>
+                                    <div className="space-y-1"><label htmlFor="esi-ceiling" className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label><input id="esi-ceiling" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiCeiling} onChange={e => setFormData({ ...formData, esiCeiling: +e.target.value })} title="ESI Eligibility Ceiling" aria-label="ESI Eligibility Ceiling" /></div>
+                                    <div className="space-y-1"><label htmlFor="esi-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase">EE Rate (%)</label><input id="esi-employee-rate" type="number" onFocus={(e) => e.target.select()} step="0.001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiEmployeeRate * 100} onChange={e => setFormData({ ...formData, esiEmployeeRate: +e.target.value / 100 })} title="Employee ESI Rate" aria-label="Employee ESI Rate" /></div>
                                 </div>
                             </div>
                         </div>
@@ -2391,8 +2392,8 @@ const Settings: React.FC<SettingsProps> = ({
                                 <div className="space-y-2">
                                     <div className="space-y-1"><label htmlFor="el-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="el-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.el.label} onChange={e => handleLeavePolicyChange('el', 'label', e.target.value)} title="Earned Leave Label" aria-label="Earned Leave Label" /></div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1"><label htmlFor="el-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="el-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxPerYear} onChange={e => handleLeavePolicyChange('el', 'maxPerYear', +e.target.value)} title="Maximum EL per Year" aria-label="Maximum EL per Year" /></div>
-                                        <div className="space-y-1"><label htmlFor="el-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="el-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxCarryForward} onChange={e => handleLeavePolicyChange('el', 'maxCarryForward', +e.target.value)} title="Maximum EL Carry Forward" aria-label="Maximum EL Carry Forward" /></div>
+                                        <div className="space-y-1"><label htmlFor="el-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="el-max" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxPerYear} onChange={e => handleLeavePolicyChange('el', 'maxPerYear', +e.target.value)} title="Maximum EL per Year" aria-label="Maximum EL per Year" /></div>
+                                        <div className="space-y-1"><label htmlFor="el-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="el-carry" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.el.maxCarryForward} onChange={e => handleLeavePolicyChange('el', 'maxCarryForward', +e.target.value)} title="Maximum EL Carry Forward" aria-label="Maximum EL Carry Forward" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -2402,8 +2403,8 @@ const Settings: React.FC<SettingsProps> = ({
                                 <div className="space-y-2">
                                     <div className="space-y-1"><label htmlFor="sl-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="sl-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.sl.label} onChange={e => handleLeavePolicyChange('sl', 'label', e.target.value)} title="Sick Leave Label" aria-label="Sick Leave Label" /></div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1"><label htmlFor="sl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="sl-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxPerYear} onChange={e => handleLeavePolicyChange('sl', 'maxPerYear', +e.target.value)} title="Maximum SL per Year" aria-label="Maximum SL per Year" /></div>
-                                        <div className="space-y-1"><label htmlFor="sl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="sl-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxCarryForward} onChange={e => handleLeavePolicyChange('sl', 'maxCarryForward', +e.target.value)} title="Maximum SL Carry Forward" aria-label="Maximum SL Carry Forward" /></div>
+                                        <div className="space-y-1"><label htmlFor="sl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="sl-max" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxPerYear} onChange={e => handleLeavePolicyChange('sl', 'maxPerYear', +e.target.value)} title="Maximum SL per Year" aria-label="Maximum SL per Year" /></div>
+                                        <div className="space-y-1"><label htmlFor="sl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="sl-carry" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.sl.maxCarryForward} onChange={e => handleLeavePolicyChange('sl', 'maxCarryForward', +e.target.value)} title="Maximum SL Carry Forward" aria-label="Maximum SL Carry Forward" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -2413,8 +2414,8 @@ const Settings: React.FC<SettingsProps> = ({
                                 <div className="space-y-2">
                                     <div className="space-y-1"><label htmlFor="cl-label" className="text-[10px] font-bold text-slate-500 uppercase">Label</label><input id="cl-label" type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white" value={localLeavePolicy.cl.label} onChange={e => handleLeavePolicyChange('cl', 'label', e.target.value)} title="Casual Leave Label" aria-label="Casual Leave Label" /></div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1"><label htmlFor="cl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="cl-max" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxPerYear} onChange={e => handleLeavePolicyChange('cl', 'maxPerYear', +e.target.value)} title="Maximum CL per Year" aria-label="Maximum CL per Year" /></div>
-                                        <div className="space-y-1"><label htmlFor="cl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="cl-carry" type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxCarryForward} onChange={e => handleLeavePolicyChange('cl', 'maxCarryForward', +e.target.value)} title="Maximum CL Carry Forward" aria-label="Maximum CL Carry Forward" /></div>
+                                        <div className="space-y-1"><label htmlFor="cl-max" className="text-[10px] font-bold text-slate-500 uppercase">Max/Year</label><input id="cl-max" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxPerYear} onChange={e => handleLeavePolicyChange('cl', 'maxPerYear', +e.target.value)} title="Maximum CL per Year" aria-label="Maximum CL per Year" /></div>
+                                        <div className="space-y-1"><label htmlFor="cl-carry" className="text-[10px] font-bold text-slate-500 uppercase">Carry Fwd</label><input id="cl-carry" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono" value={localLeavePolicy.cl.maxCarryForward} onChange={e => handleLeavePolicyChange('cl', 'maxCarryForward', +e.target.value)} title="Maximum CL Carry Forward" aria-label="Maximum CL Carry Forward" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -2556,7 +2557,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         <div className="flex items-center gap-2">
                                             <span className="text-[9px] text-slate-500 font-bold uppercase">Rate (%)</span>
                                             <input
-                                                type="number"
+                                                type="number" onFocus={(e) => e.target.select()}
                                                 className="w-16 bg-slate-800 border border-slate-700 rounded p-1 text-xs text-amber-400 font-mono text-center"
                                                 value={formData.bonusRate * 100}
                                                 onChange={e => setFormData({ ...formData, bonusRate: (+e.target.value / 100) })}
@@ -2695,9 +2696,9 @@ const Settings: React.FC<SettingsProps> = ({
                                         <tbody className="divide-y divide-slate-800">
                                             {formData.ptSlabs.map((slab, i) => (
                                                 <tr key={i} className="group">
-                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.min} onChange={e => handleSlabChange(i, 'min', +e.target.value)} title="Minimum Earnings for Slab" aria-label="Minimum Earnings for Slab" /></td>
-                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.max} onChange={e => handleSlabChange(i, 'max', +e.target.value)} title="Maximum Earnings for Slab" aria-label="Maximum Earnings for Slab" /></td>
-                                                    <td className="py-3"><input type="number" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} title="PT Amount for Slab" aria-label="PT Amount for Slab" /></td>
+                                                    <td className="py-3"><input type="number" onFocus={(e) => e.target.select()} className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.min} onChange={e => handleSlabChange(i, 'min', +e.target.value)} title="Minimum Earnings for Slab" aria-label="Minimum Earnings for Slab" /></td>
+                                                    <td className="py-3"><input type="number" onFocus={(e) => e.target.select()} className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.max} onChange={e => handleSlabChange(i, 'max', +e.target.value)} title="Maximum Earnings for Slab" aria-label="Maximum Earnings for Slab" /></td>
+                                                    <td className="py-3"><input type="number" onFocus={(e) => e.target.select()} className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} title="PT Amount for Slab" aria-label="PT Amount for Slab" /></td>
                                                     <td className="py-3 text-right"><button onClick={() => handleDeleteSlab(i)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete PT Slab" aria-label="Delete PT Slab"><Trash2 size={14} /></button></td>
                                                 </tr>
                                             ))}
@@ -2721,8 +2722,8 @@ const Settings: React.FC<SettingsProps> = ({
                         {formData.enableLWF && (
                             <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
                                 <div className="space-y-1"><label htmlFor="lwf-cycle" className="text-[10px] font-bold text-slate-500 uppercase">Cycle</label><select id="lwf-cycle" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white" value={formData.lwfDeductionCycle} onChange={e => setFormData({ ...formData, lwfDeductionCycle: e.target.value as any })} title="LWF Deduction Cycle" aria-label="LWF Deduction Cycle"><option value="Monthly">Monthly</option><option value="HalfYearly">Half-Yearly</option><option value="Yearly">Yearly</option></select></div>
-                                <div className="space-y-1"><label htmlFor="lwf-ee-contrib" className="text-[10px] font-bold text-slate-500 uppercase">EE Contribution (₹)</label><input id="lwf-ee-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployeeContribution} onChange={e => setFormData({ ...formData, lwfEmployeeContribution: +e.target.value })} title="Employee LWF Contribution" aria-label="Employee LWF Contribution" /></div>
-                                <div className="space-y-1"><label htmlFor="lwf-er-contrib" className="text-[10px] font-bold text-slate-500 uppercase">ER Contribution (₹)</label><input id="lwf-er-contrib" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployerContribution} onChange={e => setFormData({ ...formData, lwfEmployerContribution: +e.target.value })} title="Employer LWF Contribution" aria-label="Employer LWF Contribution" /></div>
+                                <div className="space-y-1"><label htmlFor="lwf-ee-contrib" className="text-[10px] font-bold text-slate-500 uppercase">EE Contribution (₹)</label><input id="lwf-ee-contrib" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployeeContribution} onChange={e => setFormData({ ...formData, lwfEmployeeContribution: +e.target.value })} title="Employee LWF Contribution" aria-label="Employee LWF Contribution" /></div>
+                                <div className="space-y-1"><label htmlFor="lwf-er-contrib" className="text-[10px] font-bold text-slate-500 uppercase">ER Contribution (₹)</label><input id="lwf-er-contrib" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.lwfEmployerContribution} onChange={e => setFormData({ ...formData, lwfEmployerContribution: +e.target.value })} title="Employer LWF Contribution" aria-label="Employer LWF Contribution" /></div>
                                 <div className="space-y-1"><label className="text-[10px] font-bold text-slate-500 uppercase">Total (₹)</label><div className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-emerald-400 font-mono font-bold">{formatIndianNumber(formData.lwfEmployeeContribution + formData.lwfEmployerContribution)}</div></div>
                             </div>
                         )}
@@ -2791,7 +2792,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-1">
                                         <div className="flex items-center justify-between">
-                                            <label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name*</label>
+                                            <label htmlFor="profile-est-name" className="text-[10px] font-bold text-slate-400 uppercase">Establishment Name<span className="text-red-500 text-sm ml-0.5">*</span></label>
                                             <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
                                                 <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">ID:</span>
                                                 <span className="text-[9px] font-mono font-bold text-amber-500">{activeCompanyId}</span>
@@ -2822,16 +2823,29 @@ const Settings: React.FC<SettingsProps> = ({
                                     </div>
                                     <div className="space-y-1"><label htmlFor="profile-trade-name" className="text-[10px] font-bold text-slate-400 uppercase">Trade Name (If Any)</label><input id="profile-trade-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Trade Name" value={profileData.tradeName} onChange={e => setProfileData({ ...profileData, tradeName: e.target.value })} title="Trade Name" aria-label="Trade Name" /></div>
 
-                                    <div className="space-y-1"><label htmlFor="profile-cin" className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)*</label><input id="profile-cin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.cin} onChange={e => setProfileData({ ...profileData, cin: e.target.value })} placeholder="U00000XX0000XXX000000" title="Corporate Identification Number" aria-label="Corporate Identification Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-pan-no" className="text-[10px] font-bold text-sky-400 uppercase">PAN Number of Establishment*</label><input id="profile-pan-no" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" placeholder="PAN Number" value={profileData.pan} onChange={e => setProfileData({ ...profileData, pan: e.target.value })} title="PAN Number" aria-label="PAN Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-cin" className="text-[10px] font-bold text-sky-400 uppercase">CIN No (Corporate ID)<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-cin" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" value={profileData.cin} onChange={e => setProfileData({ ...profileData, cin: e.target.value })} placeholder="U00000XX0000XXX000000" title="Corporate Identification Number" aria-label="Corporate Identification Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pan-no" className="text-[10px] font-bold text-sky-400 uppercase">PAN Number of Establishment<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-pan-no" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" placeholder="PAN Number" value={profileData.pan} onChange={e => {
+                                        let formatted = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+                                        let result = "";
+                                        for (let i = 0; i < formatted.length; i++) {
+                                            if (i < 5) {
+                                                if (/[A-Z]/.test(formatted[i])) result += formatted[i];
+                                            } else if (i < 9) {
+                                                if (/[0-9]/.test(formatted[i])) result += formatted[i];
+                                            } else if (i === 9) {
+                                                if (/[A-Z]/.test(formatted[i])) result += formatted[i];
+                                            }
+                                        }
+                                        setProfileData({ ...profileData, pan: result });
+                                    }} title="PAN Number" aria-label="PAN Number" /></div>
                                 </div>
                             </div>
                             {/* ... Registration Codes ... */}
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Registration Codes</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label htmlFor="profile-pf-code" className="text-[10px] font-bold text-slate-400 uppercase">PF Code</label><input id="profile-pf-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PF Code" value={profileData.pfCode} onChange={e => setProfileData({ ...profileData, pfCode: e.target.value })} title="PF Code Number" aria-label="PF Code Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-esi-code" className="text-[10px] font-bold text-slate-400 uppercase">ESI Code</label><input id="profile-esi-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="ESI Code" value={profileData.esiCode} onChange={e => setProfileData({ ...profileData, esiCode: e.target.value })} title="ESI Code Number" aria-label="ESI Code Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pf-code" className="text-[10px] font-bold text-slate-400 uppercase">PF Code<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-pf-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PF Code" value={profileData.pfCode} onChange={e => setProfileData({ ...profileData, pfCode: e.target.value })} title="PF Code Number" aria-label="PF Code Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-esi-code" className="text-[10px] font-bold text-slate-400 uppercase">ESI Code<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-esi-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="ESI Code" value={profileData.esiCode} onChange={e => setProfileData({ ...profileData, esiCode: e.target.value })} title="ESI Code Number" aria-label="ESI Code Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-gst-no" className="text-[10px] font-bold text-slate-400 uppercase">GST No</label><input id="profile-gst-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="GST Number" value={profileData.gstNo} onChange={e => setProfileData({ ...profileData, gstNo: e.target.value })} title="GST Number" aria-label="GST Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-lin" className="text-[10px] font-bold text-slate-400 uppercase">LIN No (Labour ID)</label><input id="profile-lin" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" value={profileData.lin} onChange={e => setProfileData({ ...profileData, lin: e.target.value })} placeholder="L0000000000" title="Labour Identification Number" aria-label="Labour Identification Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-pt-no" className="text-[10px] font-bold text-slate-400 uppercase">PT Registration No</label><input id="profile-pt-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PT Registration" value={profileData.ptNo || ''} onChange={e => setProfileData({ ...profileData, ptNo: e.target.value })} title="PT Registration Number" aria-label="PT Registration Number" /></div>
@@ -2843,14 +2857,14 @@ const Settings: React.FC<SettingsProps> = ({
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Address Details (Registered Office)</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label htmlFor="profile-door-no" className="text-[10px] font-bold text-slate-400 uppercase">Door No / Flat No</label><input id="profile-door-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Door No" value={profileData.doorNo} onChange={e => setProfileData({ ...profileData, doorNo: e.target.value })} title="Door/Flat Number" aria-label="Door/Flat Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-door-no" className="text-[10px] font-bold text-slate-400 uppercase">Door No / Flat No<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-door-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Door No" value={profileData.doorNo} onChange={e => setProfileData({ ...profileData, doorNo: e.target.value })} title="Door/Flat Number" aria-label="Door/Flat Number" /></div>
                                     <div className="space-y-1 md:col-span-2"><label htmlFor="profile-building" className="text-[10px] font-bold text-slate-400 uppercase">Building Name / Landmark</label><input id="profile-building" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Building Name" value={profileData.buildingName} onChange={e => setProfileData({ ...profileData, buildingName: e.target.value })} title="Building Name or Landmark" aria-label="Building Name or Landmark" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-street" className="text-[10px] font-bold text-slate-400 uppercase">Street</label><input id="profile-street" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Street" value={profileData.street} onChange={e => setProfileData({ ...profileData, street: e.target.value })} title="Street Name" aria-label="Street Name" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-street" className="text-[10px] font-bold text-slate-400 uppercase">Street<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-street" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Street" value={profileData.street} onChange={e => setProfileData({ ...profileData, street: e.target.value })} title="Street Name" aria-label="Street Name" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-locality" className="text-[10px] font-bold text-slate-400 uppercase">Locality</label><input id="profile-locality" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Locality" value={profileData.locality} onChange={e => setProfileData({ ...profileData, locality: e.target.value })} title="Locality" aria-label="Locality" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-area" className="text-[10px] font-bold text-slate-400 uppercase">Area</label><input id="profile-area" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="Area" value={profileData.area} onChange={e => setProfileData({ ...profileData, area: e.target.value })} title="Area Name" aria-label="Area Name" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-city" className="text-[10px] font-bold text-slate-400 uppercase">City / Town</label><input id="profile-city" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="City" value={profileData.city} onChange={e => setProfileData({ ...profileData, city: e.target.value })} title="City or Town" aria-label="City or Town" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-state" className="text-[10px] font-bold text-slate-400 uppercase">State / Union Territory</label><select id="profile-state" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.state} onChange={e => setProfileData({ ...profileData, state: e.target.value })} title="Select State" aria-label="Select State">{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-                                    <div className="space-y-1"><label htmlFor="profile-pincode" className="text-[10px] font-bold text-slate-400 uppercase">Pin Code</label><input id="profile-pincode" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="600001" value={profileData.pincode} onChange={e => setProfileData({ ...profileData, pincode: e.target.value })} title="Pincode" aria-label="Pincode" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-city" className="text-[10px] font-bold text-slate-400 uppercase">City / Town<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-city" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="City" value={profileData.city} onChange={e => setProfileData({ ...profileData, city: e.target.value })} title="City or Town" aria-label="City or Town" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-state" className="text-[10px] font-bold text-slate-400 uppercase">State / Union Territory<span className="text-red-500 text-sm ml-0.5">*</span></label><select id="profile-state" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.state} onChange={e => setProfileData({ ...profileData, state: e.target.value })} title="Select State" aria-label="Select State">{INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pincode" className="text-[10px] font-bold text-slate-400 uppercase">Pin Code<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-pincode" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-mono outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="600001" value={profileData.pincode} onChange={e => setProfileData({ ...profileData, pincode: e.target.value })} title="Pincode" aria-label="Pincode" /></div>
                                 </div>
                             </div>
                             {/* ... Contact ... */}
@@ -2873,7 +2887,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6">
                                     <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-host" className="text-[10px] font-bold text-slate-400 uppercase">SMTP HOST</label><input id="smtp-host" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="smtp.gmail.com" value={profileData.smtpHost || ''} onChange={e => setProfileData({ ...profileData, smtpHost: e.target.value })} /></div>
-                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-port" className="text-[10px] font-bold text-slate-400 uppercase">PORT</label><input id="smtp-port" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="465" value={profileData.smtpPort || ''} onChange={e => { const port = parseInt(e.target.value); let sec = profileData.smtpSecurity || 'None'; if (port === 465) sec = 'SSL'; else if (port === 587) sec = 'TLS'; setProfileData({ ...profileData, smtpPort: port || undefined, smtpSecurity: sec as any }); }} /></div>
+                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-port" className="text-[10px] font-bold text-slate-400 uppercase">PORT</label><input id="smtp-port" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="465" value={profileData.smtpPort || ''} onChange={e => { const port = parseInt(e.target.value); let sec = profileData.smtpSecurity || 'None'; if (port === 465) sec = 'SSL'; else if (port === 587) sec = 'TLS'; setProfileData({ ...profileData, smtpPort: port || undefined, smtpSecurity: sec as any }); }} /></div>
                                     <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-security" className="text-[10px] font-bold text-slate-400 uppercase">SECURITY</label><select id="smtp-security" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono" value={profileData.smtpSecurity || 'None'} onChange={e => setProfileData({ ...profileData, smtpSecurity: e.target.value as any })}><option value="None">None</option><option value="SSL">SSL</option><option value="TLS">TLS</option></select></div>
                                     <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-user" className="text-[10px] font-bold text-slate-400 uppercase">SMTP USER (EMAIL)</label><input id="smtp-user" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="your.email@gmail.com" value={profileData.smtpUser || ''} onChange={e => setProfileData({ ...profileData, smtpUser: e.target.value })} /></div>
                                     <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-password" className="text-[10px] font-bold text-slate-400 uppercase">SMTP PASSWORD</label><input id="smtp-password" type="password" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="••••••••••••••••" value={profileData.smtpPassword || ''} onChange={e => setProfileData({ ...profileData, smtpPassword: e.target.value })} /></div>
@@ -3143,7 +3157,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <h4 className="text-white font-black mb-1 uppercase tracking-tighter">Enter Fresh Data</h4>
                                 <p className="text-[10px] text-slate-500 text-center mb-6">Start with an empty system for new installation.</p>
-                                <button onClick={onSkipSetupRedirect} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all">Skip to Dashboard</button>
+                                <button onClick={onSkipSetupRedirect} disabled={isLicenseExpired} title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""} className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all">Skip to Dashboard</button>
                             </div>
                             <div className="bg-[#0f172a] p-8 rounded-2xl border border-emerald-500/20 flex flex-col items-center group hover:border-emerald-500/40 transition-all">
                                 <div className="p-4 bg-emerald-900/20 text-emerald-400 rounded-full mb-4 shadow-lg group-hover:scale-110 transition-transform">
@@ -3159,7 +3173,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <h4 className="text-white font-black mb-1 uppercase tracking-tighter">Legacy Migration</h4>
                                 <p className="text-[10px] text-slate-500 text-center mb-6">Migrate from Single-Company older version.</p>
-                                <button onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }} className="w-full py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"><RefreshCw size={14} /> Run Migration</button>
+                                <button onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }} disabled={isLicenseExpired} title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""} className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"><RefreshCw size={14} /> Run Migration</button>
                             </div>
                         </div>
                     ) : (
@@ -3226,7 +3240,9 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Specifically for older backups. Extracts data, generates fresh IDs, and extrapolates fields for the new multi-company architecture."</p>
                                     <button
                                         onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }}
-                                        className="w-full py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"
+                                        disabled={isLicenseExpired}
+                                        title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
+                                        className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"
                                     >
                                         <RefreshCw size={14} /> Run Migration Wizard
                                     </button>
@@ -3256,7 +3272,9 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <button
                                     onClick={() => requireAuth(() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); })}
-                                    className="mt-4 py-2.5 px-4 bg-amber-900/20 hover:bg-amber-600 text-amber-500 hover:text-white border border-amber-900/50 hover:border-amber-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                    disabled={isLicenseExpired}
+                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
+                                    className="mt-4 py-2.5 px-4 bg-amber-900/20 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-amber-900/20 disabled:text-amber-500/50 text-amber-500 hover:text-white border border-amber-900/50 hover:border-amber-400 disabled:hover:border-amber-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                 >
                                     Initiate Partial Reset
                                 </button>
@@ -3284,7 +3302,9 @@ const Settings: React.FC<SettingsProps> = ({
                                             });
                                         }
                                     }}
-                                    className="mt-4 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                                    disabled={isLicenseExpired}
+                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
+                                    className="mt-4 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
                                 >
                                     <RefreshCw size={14} /> Scan & Rescue Orphans
                                 </button>
@@ -3314,7 +3334,9 @@ const Settings: React.FC<SettingsProps> = ({
                                             setTargetPurgeCompanyId('');
                                         }
                                     })}
-                                    className="mt-4 py-2.5 px-4 bg-pink-900/20 hover:bg-pink-600 text-pink-500 hover:text-white border border-pink-900/50 hover:border-pink-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                    disabled={isLicenseExpired}
+                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
+                                    className="mt-4 py-2.5 px-4 bg-pink-900/20 hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-pink-900/20 disabled:text-pink-500/50 text-pink-500 hover:text-white border border-pink-900/50 hover:border-pink-400 disabled:hover:border-pink-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                 >
                                     Initiate Purge
                                 </button>
@@ -3335,7 +3357,9 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <button
                                     onClick={() => requireAuth(() => { setShowResetModal(true); setResetMode('FACTORY'); setResetPassword(''); setResetError(''); })}
-                                    className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                    disabled={isLicenseExpired}
+                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
+                                    className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-900/20 disabled:text-red-500/50 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 disabled:hover:border-red-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                 >
                                     Initiate Factory Reset
                                 </button>
@@ -3929,8 +3953,13 @@ const Settings: React.FC<SettingsProps> = ({
                                         <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg">
                                             <Info size={20} />
                                         </div>
-                                        <div>
-                                            <h3 className="text-white font-black tracking-tight text-sm">App Patch Diagnostics</h3>
+                                        <div className="flex-1">
+                                            <div className="flex items-center justify-between">
+                                                <h3 className="text-white font-black tracking-tight text-sm">App Patch Diagnostics</h3>
+                                                {isLicenseExpired && (
+                                                    <span className="text-[9px] text-rose-400 font-bold tracking-widest uppercase bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20">Version / Patch Update will be inactive under Expired Trial / License</span>
+                                                )}
+                                            </div>
                                             <p className="text-[10px] text-slate-400">Live Timestamp Validation Variables</p>
                                         </div>
                                     </div>

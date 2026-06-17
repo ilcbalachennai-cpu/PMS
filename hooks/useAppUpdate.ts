@@ -375,12 +375,11 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
           localStorage.setItem('app_version_marker', APP_VERSION);
           
           let targetBaseline = APP_PATCH_TIMESTAMP;
-          // If the cloud version is older, adopt the cloud patch timestamp to prevent old heritage patches
-          if (isVersionHigher(APP_VERSION, latestAppVersion)) {
+          if (latestPatchTimestamp && parseDateTime(latestPatchTimestamp) > parseDateTime(APP_PATCH_TIMESTAMP)) {
              targetBaseline = latestPatchTimestamp;
-             console.log(` [VersionSync] Cloud version (${latestAppVersion}) is older than compiled version (${APP_VERSION}). Adopting cloud patch baseline: ${latestPatchTimestamp}`);
+             console.log(` [VersionSync] Cloud patch (${latestPatchTimestamp}) is newer than compiled (${APP_PATCH_TIMESTAMP}). Adopting cloud patch baseline to prevent immediate patching.`);
           } else {
-             console.log(` [VersionSync] Compiled version (${APP_VERSION}) matches or is older than cloud version (${latestAppVersion}). Using compiled baseline: ${APP_PATCH_TIMESTAMP}`);
+             console.log(` [VersionSync] Using compiled baseline: ${APP_PATCH_TIMESTAMP}`);
           }
           
           localStorage.setItem('app_active_patch_ts', targetBaseline);
@@ -494,26 +493,36 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
     const activeTs = parseDateTime(activePatchTs);
     const delayMs = 5 * 60 * 1000; 
 
-    console.log(`[PatchSync] Cloud: ${latestPatchTimestamp} (${latestTs}) | Local X: ${activePatchTs} (${activeTs}) | Startup: ${appStartupTime} | Now: ${now} | Grace Ends: ${appStartupTime + delayMs}`);
-    
+    // --- V06.01.03: Only count time after login ---
+    const loginTimeStr = sessionStorage.getItem('session_login_time');
+    const actualStartTime = loginTimeStr ? parseInt(loginTimeStr, 10) : null;
+    const isPostLogin = actualStartTime !== null;
+    const graceStartTime = isPostLogin ? actualStartTime : appStartupTime;
+
+    console.log(`[PatchSync] Cloud: ${latestPatchTimestamp} (${latestTs}) | Local X: ${activePatchTs} (${activeTs}) | Startup: ${appStartupTime} | Now: ${now} | Grace Ends: ${graceStartTime + delayMs}`);
+
     const isDismissed = sessionStorage.getItem('patch_session_suppressed') === 'true';
 
     (window as any).__updateVars = {
-       latestTs, activeTs, delayMs, appStartupTime, now, isDismissed, patchSkipCount, isDeveloper,
+       latestTs, activeTs, delayMs, appStartupTime, actualStartTime, now, isDismissed, patchSkipCount, isDeveloper,
        cond1: latestTs > activeTs,
        cond2: (!isDismissed || patchSkipCount >= 3),
-       cond3: (now >= (appStartupTime + delayMs))
+       cond3: isPostLogin && (now >= (actualStartTime + delayMs))
     };
 
-    // Check if patch is newer AND if the 5-minute grace period has passed
+    // Check if patch is newer AND if the 5-minute grace period has passed post-login
     if (latestTs > activeTs && (!isDismissed || patchSkipCount >= 3)) {
-       if (now >= (appStartupTime + delayMs)) {
-         console.log(" [PatchSync] Startup grace period expired. Triggering update notice.");
+       if (!isPostLogin) {
+         // Pause patch updates on the pre-login screen
+         setIsPatchNotice(false);
+         setShowUpdateNotice(false);
+       } else if (now >= (actualStartTime + delayMs)) {
+         console.log(" [PatchSync] Post-login grace period expired. Triggering update notice.");
          setIsPatchNotice(true);
          setIsPatchMandatory(patchSkipCount >= 3);
          setShowUpdateNotice(true);
        } else {
-         const remainingSecs = Math.ceil(((appStartupTime + delayMs) - now) / 1000);
+         const remainingSecs = Math.ceil(((actualStartTime + delayMs) - now) / 1000);
          console.log(` [PatchSync] Patch detected but in 5-min cooldown. Waiting ${remainingSecs}s more for developer verification...`);
          setIsPatchNotice(false);
          setShowUpdateNotice(false);

@@ -14,6 +14,7 @@ interface PFCalculatorProps {
     setMonth: (m: string) => void;
     year: number;
     setYear: (y: number) => void;
+    activeFinancialYear?: string;
 }
 
 const PFCalculator: React.FC<PFCalculatorProps> = ({
@@ -24,11 +25,36 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
     month,
     setMonth,
     year,
-    setYear
+    setYear,
+    activeFinancialYear
 }) => {
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const currentYear = new Date().getFullYear();
-    const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+    const CHRONO_ORDER = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
+
+    const finalizedRecords = useMemo(() => payrollHistory.filter(r => r.status === 'Finalized'), [payrollHistory]);
+
+    const months = useMemo(() => {
+        if (finalizedRecords.length === 0) return ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
+        const unique = Array.from(new Set(finalizedRecords.map(r => r.month)));
+        return unique.sort((a, b) => CHRONO_ORDER.indexOf(a) - CHRONO_ORDER.indexOf(b));
+    }, [finalizedRecords, CHRONO_ORDER]);
+
+    const [startYear, endYear] = useMemo(() => {
+        if (!activeFinancialYear) return [new Date().getFullYear(), new Date().getFullYear()];
+        const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+        if (match) {
+            return [2000 + parseInt(match[1], 10), 2000 + parseInt(match[2], 10)];
+        }
+        return [new Date().getFullYear(), new Date().getFullYear()];
+    }, [activeFinancialYear]);
+
+    const yearOptions = useMemo(() => {
+        if (finalizedRecords.length === 0) {
+            if (startYear === endYear) return [startYear];
+            return [startYear, endYear];
+        }
+        const uniqueYears = Array.from(new Set(finalizedRecords.map(r => r.year)));
+        return uniqueYears.sort((a, b) => a - b);
+    }, [finalizedRecords, startYear, endYear]);
 
     const currentRecords = useMemo(() => {
         return payrollHistory.filter(r => r.month === month && r.year === year);

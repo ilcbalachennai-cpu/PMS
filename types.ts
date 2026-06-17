@@ -437,7 +437,7 @@ export enum SettingsTab {
 
 export interface LicenseData {
   key: string;
-  status: 'Active' | 'Inactive' | 'Expired' | 'Trial' | 'REGISTERED' | 'ACTIVE' | 'PENDING_RESTORE' | 'PENDING_SYNC' | 'LICENSE ACTIVE';
+  status: 'Active' | 'Inactive' | 'Expired' | 'Trial' | 'REGISTERED' | 'ACTIVE' | 'PENDING_RESTORE' | 'PENDING_SYNC' | 'LICENSE ACTIVE' | 'TRIAL_EXPIRED' | 'LICENSE_EXPIRED' | 'TRIAL EXPIRED' | 'LICENSE EXPIRED';
   userName: string;
   userID: string;
   registeredTo: string; // Mail ID

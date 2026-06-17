@@ -247,7 +247,7 @@ const OTManager: React.FC<OTManagerProps> = ({
                                     </td>
                                     <td className="px-3 py-3 text-center">
                                         <input
-                                            type="number"
+                                            type="number" onFocus={(e) => e.target.select()}
                                             disabled={disabled}
                                             className="w-16 bg-[#0f172a] border border-slate-700 rounded px-2 py-1 text-center text-[11px] text-white font-mono outline-none focus:border-blue-500 disabled:opacity-50"
                                             value={record.otDays}
@@ -258,7 +258,7 @@ const OTManager: React.FC<OTManagerProps> = ({
                                     </td>
                                     <td className="px-3 py-3 text-center">
                                         <input
-                                            type="number"
+                                            type="number" onFocus={(e) => e.target.select()}
                                             disabled={disabled}
                                             className="w-16 bg-[#0f172a] border border-slate-700 rounded px-2 py-1 text-center text-[11px] text-white font-mono outline-none focus:border-blue-500 disabled:opacity-50"
                                             value={record.otHours}

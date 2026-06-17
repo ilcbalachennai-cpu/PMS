@@ -7,7 +7,7 @@ import {
   ArrowRight, RefreshCw, Database,
   ChevronLeft, ChevronRight, X, Eye, EyeOff,
   ShieldAlert, CalendarX, WifiOff, Wifi, Scale, Building2, Plus, Trash2,
-  Mail, AlertTriangle
+  Mail, AlertTriangle, BookOpen
 } from 'lucide-react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
@@ -51,7 +51,7 @@ const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July
 // Global OS Detection for UI refinement
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
 
-const NavigationItem = ({ view, icon: Icon, label, activeView, onNavigate, isSidebarOpen, depth = 0, disabled = false, isLocked = false, onClickLocked }: { view: View, icon: any, label: string, activeView: View, onNavigate: (v: View) => void, isSidebarOpen: boolean, depth?: number, disabled?: boolean, isLocked?: boolean, onClickLocked?: () => void }) => (
+const NavigationItem = ({ view, icon: Icon, label, activeView, onNavigate, isSidebarOpen, depth = 0, disabled = false, isLocked = false, onClickLocked, disabledTooltip }: { view: View, icon: any, label: string, activeView: View, onNavigate: (v: View) => void, isSidebarOpen: boolean, depth?: number, disabled?: boolean, isLocked?: boolean, onClickLocked?: () => void, disabledTooltip?: string }) => (
   <button
     onClick={() => {
       if (isLocked) {
@@ -60,8 +60,8 @@ const NavigationItem = ({ view, icon: Icon, label, activeView, onNavigate, isSid
         onNavigate(view);
       }
     }}
-    title={isLocked ? "You need the premium access code to activate this feature" : `Navigate to ${label}`}
-    aria-label={isLocked ? "Feature Locked" : `Navigate to ${label}`}
+    title={isLocked ? "You need the premium access code to activate this feature" : (disabled && disabledTooltip ? disabledTooltip : `Navigate to ${label}`)}
+    aria-label={isLocked ? "Feature Locked" : (disabled && disabledTooltip ? disabledTooltip : `Navigate to ${label}`)}
     className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all relative group ${disabled || isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${activeView === view
       ? (isWin7
         ? 'bg-blue-600/60 text-white shadow-[0_0_15px_rgba(37,99,235,0.25)] ring-1 ring-blue-400'
@@ -1216,15 +1216,18 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         console.log("[ActivityTracker] Idle countdown finished! Logging out...");
         setShowIdleWarning(false);
         sessionStorage.setItem('logout_reason', 'timeout');
-        
-        if (currentUser && currentUser.role !== 'Developer') {
-          getMachineId().then(mid => {
-            trackHeartbeat(currentUser.email || "", mid, currentUser.username, sessionStartRef.current, "LOGGED OUT").catch(e => console.warn("Auto-logout heartbeat failed", e));
-          }).catch(()=>{});
-        }
-        closeAlert();
-        logout();
-        window.location.reload();
+        const executeLogout = async () => {
+          if (currentUser && currentUser.role !== 'Developer') {
+            try {
+              const mid = await getMachineId();
+              await trackHeartbeat(currentUser.email || "", mid, currentUser.username, sessionStartRef.current, "LOGGED OUT");
+            } catch(e) { console.warn("Auto-logout heartbeat failed", e); }
+          }
+          closeAlert();
+          logout();
+          window.location.reload();
+        };
+        executeLogout();
       }
     }
     return () => clearTimeout(timer);
@@ -1461,6 +1464,39 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       profileToSave.id = firstId;
       localStorage.setItem('app_active_company_id', firstId);
       localStorage.setItem('app_companies', JSON.stringify([profileToSave]));
+      
+      // Extract admin user
+      const savedUsersRaw = localStorage.getItem('app_users');
+      let savedUsers: User[] = (() => { try { return savedUsersRaw ? JSON.parse(savedUsersRaw) : []; } catch { return []; } })();
+      const adminIdx = savedUsers.findIndex(u => u.username === data.adminUser.username);
+      if (adminIdx >= 0) savedUsers[adminIdx] = data.adminUser; else savedUsers.push(data.adminUser);
+      localStorage.setItem('app_users', JSON.stringify(savedUsers));
+
+      if ((window as any).electronAPI) {
+        // 1. Save global items first (Root DB)
+        if ((window as any).electronAPI.dbSetGlobal) {
+          await (window as any).electronAPI.dbSetGlobal('app_companies', [profileToSave]);
+          await (window as any).electronAPI.dbSetGlobal('app_active_company_id', firstId);
+          await (window as any).electronAPI.dbSetGlobal('app_users', savedUsers);
+        } else {
+          await (window as any).electronAPI.dbSet('app_companies', [profileToSave]);
+          await (window as any).electronAPI.dbSet('app_active_company_id', firstId);
+          await (window as any).electronAPI.dbSet('app_users', savedUsers);
+        }
+        
+        // 2. Switch Electron process to the new Company Silo!
+        if ((window as any).electronAPI.switchCompanyData) {
+           await (window as any).electronAPI.switchCompanyData(firstId);
+        }
+
+        // 3. Save Silo-specific items (Silo DB)
+        await (window as any).electronAPI.dbSet('app_companies', [profileToSave]); // Backup copy inside Silo
+        await (window as any).electronAPI.dbSet('app_active_company_id', firstId); // Backup copy inside Silo
+        await (window as any).electronAPI.dbSet('app_config', data.statutoryConfig);
+        await (window as any).electronAPI.dbSet('app_company_profile', profileToSave);
+        await (window as any).electronAPI.dbSet(`${firstId}_app_setup_complete`, 'true');
+      }
+
       requiresReload = true;
     }
 
@@ -1476,7 +1512,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     // Check for Post-Reset Enrollment Mode
     const isResetMode = localStorage.getItem('app_is_reset_mode') === 'true';
 
-    if ((window as any).electronAPI) {
+    // If it's not a fresh install (default), it just falls through and sets users 
+    // because addCompany would have already switched the DB.
+    if ((window as any).electronAPI && !requiresReload) {
       (window as any).electronAPI.dbSet('app_users', savedUsers);
       (window as any).electronAPI.dbSet(`${profileToSave.id}_app_setup_complete`, 'true');
     }
@@ -1610,7 +1648,32 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const effectiveUser = (currentUser || { id: 'setup', name: 'Initial Setup', role: 'Administrator', username: 'setup', password: '', email: '' }) as User;
   const isSettingsAccessible = effectiveUser.role === 'Developer' || effectiveUser.role === 'Administrator';
-  const isNavLocked = employees.length === 0 && companies.length <= 1;
+  
+  // --- V06.01.07: Mandatory Company Config Enforcement ---
+  const isCompanyProfileComplete = !!(
+    companyProfile.pfCode && 
+    companyProfile.esiCode && 
+    companyProfile.doorNo && 
+    companyProfile.street && 
+    companyProfile.city && 
+    companyProfile.mobile && 
+    companyProfile.securityPin
+  );
+  const isNavLocked = (employees.length === 0 && companies.length <= 1) || !isCompanyProfileComplete;
+
+  // Enforce redirection to Configuration -> Company Profile if incomplete
+  useEffect(() => {
+    if (!isCompanyProfileComplete && activeView !== View.Settings && activeView !== View.Dashboard) {
+      safeNavigate(View.Settings);
+      setSettingsTab(SettingsTab.Company);
+      showAlert(
+        'warning', 
+        'Company Profile Setup Required', 
+        'Please update the important fields marked with a red asterisk (*) under the "Company Profile" tab. Then, move to the "Statutory Rules" tab, scan through, and confirm to activate Employee adding and Attendance processing.'
+      );
+    }
+  }, [isCompanyProfileComplete, activeView]);
+  // ---------------------------------------------------------
 
   // --- V03.01.02: Normalizing Render Path to Prevent Hook Violations ---
   const isExpired = licenseStatus.message === 'LICENSE EXPIRED' || (licenseStatus.data?.isExpired);
@@ -1784,7 +1847,21 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         </div>
       )}
 
-      {(showRegistrationManual || isRestorationForced || (companies.length === 0)) ? (
+      {isAppDirectoryConfigured === false ? (
+        <div className="flex flex-col md:flex-row w-full h-full min-h-screen bg-[#020617] overflow-y-auto custom-scrollbar">
+          <div className="md:w-1/3 flex items-center justify-center p-4 border-r border-slate-800/30 bg-[#020617]">
+             <AppSetup onComplete={() => window.location.reload()} />
+          </div>
+          <div className="flex-1 flex items-center justify-center p-4 md:bg-slate-900/10">
+            <Login 
+              onLogin={handleAuthLogin} 
+              currentLogo={logoUrl} 
+              setLogo={handleUpdateLogo} 
+              isLocked={true}
+            />
+          </div>
+        </div>
+      ) : (showRegistrationManual || isRestorationForced || (companies.length === 0)) ? (
         <Registration
           onComplete={handleRegistrationComplete}
           onRestore={() => window.location.reload()}
@@ -1796,17 +1873,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         />
       ) : !currentUser ? (
         <div className="flex flex-col md:flex-row w-full h-full min-h-screen bg-[#020617] overflow-y-auto custom-scrollbar">
-          {isAppDirectoryConfigured === false && (
-            <div className="md:w-1/3 flex items-center justify-center p-4 border-r border-slate-800/30 bg-[#020617]">
-               <AppSetup onComplete={() => window.location.reload()} />
-            </div>
-          )}
-          <div className={`flex-1 flex items-center justify-center p-4 ${isAppDirectoryConfigured === false ? 'md:bg-slate-900/10' : ''}`}>
+          <div className="flex-1 flex items-center justify-center p-4">
             <Login 
               onLogin={handleAuthLogin} 
               currentLogo={logoUrl} 
               setLogo={handleUpdateLogo} 
-              isLocked={isAppDirectoryConfigured === false}
+              isLocked={false}
             />
           </div>
         </div>
@@ -2196,8 +2268,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             </div>
             <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
               <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isCompanyGateOpen && activeView !== View.Dashboard} />
-              <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
-              <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
+              <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} disabledTooltip={!isCompanyProfileComplete ? "Company Profile Mandatory fields to be updated and saved to activate this function" : undefined} />
+              <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} disabledTooltip={!isCompanyProfileComplete ? "Company Profile Mandatory fields to be updated and saved to activate this function" : undefined} />
               <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
               <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
               <NavigationItem view={View.MIS} icon={IndianRupee} label="Management Info (MIS)" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} isLocked={!licenseInfo?.splMIS} onClickLocked={() => setShowPremiumModal(true)} />
@@ -2208,6 +2280,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={!isSettingsAccessible} />
             </nav>
             <div className="p-4 border-t border-slate-800 bg-[#0b1120] space-y-1">
+              <button onClick={() => window.electronAPI?.openUserManual?.()} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-emerald-400 hover:bg-emerald-900/20`} title="User Manual">
+                <BookOpen size={18} /> {isSidebarOpen && <span className="font-bold text-sm">User Manual</span>}
+              </button>
               <button onClick={executeDiagnosticExport} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-blue-400 hover:bg-blue-900/20`} title="Export Diagnostics">
                 <FileText size={18} /> {isSidebarOpen && <span className="font-bold text-sm">Export Diagnostics</span>}
               </button>
@@ -2562,11 +2637,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} onNavigate={safeNavigate} setSettingsTab={setSettingsTab} licenseInfo={licenseInfo || undefined} hasPreviousYearData={hasPreviousYearData} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} onNavigate={safeNavigate} activeFinancialYear={activeFinancialYear} />}
-                {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} />}
-                {activeView === View.MIS && <MISDashboard payrollHistory={payrollHistory} employees={employees} companyProfile={companyProfile} showAlert={showAlert} />}
-                {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} />}
+                {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
+                {activeView === View.MIS && <MISDashboard payrollHistory={payrollHistory} employees={employees} companyProfile={companyProfile} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
+                {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
-                {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} />}
+                {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
@@ -2774,6 +2849,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         patchSkipCount={patchSkipCount}
         versionSkipCount={versionSkipCount}
         deploymentStep={deploymentStep}
+        isVersionUpdate={!isPatchNotice}
         onUpdateNow={() => handleUpdateNow(async () => {
           setIsInstalling(true);
           // Pre-install persistence

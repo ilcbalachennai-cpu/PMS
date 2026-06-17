@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Mail, FileBarChart, PieChart, Info, Plus, FileText, Settings2, Trash2, Calendar, Layers, CheckCircle2, Lock, ChevronUp, ChevronDown, Play, Loader2 } from 'lucide-react';
 import { PayrollResult, Employee, CompanyProfile } from '../../types';
 import { generateDynamicReportPDF, openSavedReport } from '../../services/reportService';
@@ -110,9 +110,16 @@ interface MISDashboardProps {
   companyProfile: CompanyProfile;
   showAlert: any;
   config?: any;
+  activeFinancialYear?: string;
 }
 
-const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHistory, employees, showAlert }) => {
+const MISDashboard: React.FC<MISDashboardProps> = ({ 
+  payrollHistory, 
+  employees, 
+  companyProfile, 
+  showAlert,
+  activeFinancialYear 
+}) => {
   const [activeTab, setActiveTab] = useState<'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT'>('DYNAMIC_REPORT');
   
   const [reportYear, setReportYear] = useState<number>(new Date().getFullYear());
@@ -151,8 +158,25 @@ const MISDashboard: React.FC<MISDashboardProps> = ({ companyProfile, payrollHist
   }, [newlyAddedColumnId]);
 
   // Common years and months
-  const yearOptions = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 5 + i);
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const months = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
+
+  const [startYear, endYear] = useMemo(() => {
+      if (!activeFinancialYear) return [new Date().getFullYear(), new Date().getFullYear()];
+      const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+      if (match) {
+          return [2000 + parseInt(match[1], 10), 2000 + parseInt(match[2], 10)];
+      }
+      return [new Date().getFullYear(), new Date().getFullYear()];
+  }, [activeFinancialYear]);
+
+  const yearOptions = useMemo(() => {
+      if (payrollHistory.length === 0) {
+          if (startYear === endYear) return [startYear];
+          return [startYear, endYear];
+      }
+      const uniqueYears = Array.from(new Set(payrollHistory.map(r => r.year)));
+      return uniqueYears.sort((a, b) => a - b);
+  }, [payrollHistory, startYear, endYear]);
   
   // Calculate verified historical periods for Dynamic Reports based on finalized payroll records
   const availablePeriods = React.useMemo(() => {

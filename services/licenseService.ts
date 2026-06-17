@@ -2,9 +2,9 @@ import CryptoJS from 'crypto-js';
 import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
-export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycEpjAIjHnGDzIhlv9iu-_WPTEclB8HKMgIwbZlQ9JqrbCgQsQsM61draKRPBqyOHb/exec";
-export const APP_VERSION = "06.01.01";
-export const APP_PATCH_TIMESTAMP = "08-06-2026 21:18:52"; // Format: dd-MM-yyyy HH:mm:ss
+export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzE10qkCCczPH-_eCQ_cJBRGpu28viV8zhNRCw2iD0Rha3y_1HIuWNPGAjHBrqsHeEB/exec";
+export const APP_VERSION = "06.01.08";
+export const APP_PATCH_TIMESTAMP = "17-06-2026 14:10:26"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -37,6 +37,10 @@ export const getMachineId = async (): Promise<string> => {
   }
 
   let mid = localStorage.getItem('app_machine_id');
+  if (mid && (mid.toUpperCase().includes('EXPIRED') || mid.toUpperCase().includes('ACTIVE') || mid.toUpperCase() === 'PENDING')) {
+    mid = null;
+    localStorage.removeItem('app_machine_id');
+  }
   if (!mid) {
     mid = 'WEB-' + Math.random().toString(36).substring(2, 15).toUpperCase();
     localStorage.setItem('app_machine_id', mid);
@@ -425,6 +429,9 @@ export const registerTrial = async (
       dataSize: 50,
       status: "REGISTERED",
       isTrial: true,
+      splDynamic: true,
+      splMIS: true,
+      companyLimit: 2,
       checksum: ''
     };
 
@@ -486,9 +493,9 @@ export const registerTrial = async (
         startDate: respData.startDate || new Date().toLocaleDateString('en-GB').replace(/\//g, '-'),
         expiryDate: respData.expiryDate || "",
         isTrial: true,
-        splDynamic: respData.splDynamic === 'Yes' || respData.splDynamic === true,
-        splMIS: respData.splMIS === 'Yes' || respData.splMIS === true,
-        companyLimit: Number(respData.companyLimit || 1),
+        splDynamic: respData.splDynamic !== undefined ? (respData.splDynamic === 'Yes' || respData.splDynamic === true) : true,
+        splMIS: respData.splMIS !== undefined ? (respData.splMIS === 'Yes' || respData.splMIS === true) : true,
+        companyLimit: Number(respData.companyLimit || 2),
         checksum: ''
       };
 
@@ -499,13 +506,16 @@ export const registerTrial = async (
 
       localStorage.setItem(storageKey, scrambled);
       localStorage.setItem(dataSizeKey, String(licenseData.dataSize));
-      localStorage.setItem('app_machine_id', licenseData.machineId);
+      const invalidMachine = licenseData.machineId && (licenseData.machineId.toUpperCase().includes('EXPIRED') || licenseData.machineId.toUpperCase().includes('ACTIVE') || licenseData.machineId.toUpperCase() === 'PENDING');
+      if (!invalidMachine) {
+        localStorage.setItem('app_machine_id', licenseData.machineId);
 
-      // Sync to electron DB
-      if ((window as any).electronAPI) {
-        await (window as any).electronAPI.dbSet(storageKey, scrambled);
-        await (window as any).electronAPI.dbSet(dataSizeKey, String(licenseData.dataSize));
-        await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
+        // Sync to electron DB
+        if ((window as any).electronAPI) {
+          await (window as any).electronAPI.dbSet(storageKey, scrambled);
+          await (window as any).electronAPI.dbSet(dataSizeKey, String(licenseData.dataSize));
+          await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
+        }
       }
       localStorage.setItem('app_license_last_check', new Date().toISOString().split('T')[0]);
 
@@ -589,17 +599,20 @@ export const activateFullLicense = async (
 
       localStorage.setItem(storageKey, scrambled);
       localStorage.setItem(dataSizeKey, String(licenseData.dataSize));
-      localStorage.setItem('app_machine_id', licenseData.machineId);
+      const invalidMachine2 = licenseData.machineId && (licenseData.machineId.toUpperCase().includes('EXPIRED') || licenseData.machineId.toUpperCase().includes('ACTIVE') || licenseData.machineId.toUpperCase() === 'PENDING');
+      if (!invalidMachine2) {
+        localStorage.setItem('app_machine_id', licenseData.machineId);
 
-      // Sync to electron DB (Global/Root DB for recovery across folders)
-      if ((window as any).electronAPI && (window as any).electronAPI.dbSetGlobal) {
-        await (window as any).electronAPI.dbSetGlobal(storageKey, scrambled);
-        await (window as any).electronAPI.dbSetGlobal(dataSizeKey, String(licenseData.dataSize));
-        await (window as any).electronAPI.dbSetGlobal('app_machine_id', licenseData.machineId);
-      } else if ((window as any).electronAPI) {
-        await (window as any).electronAPI.dbSet(storageKey, scrambled);
-        await (window as any).electronAPI.dbSet(dataSizeKey, String(licenseData.dataSize));
-        await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
+        // Sync to electron DB (Global/Root DB for recovery across folders)
+        if ((window as any).electronAPI && (window as any).electronAPI.dbSetGlobal) {
+          await (window as any).electronAPI.dbSetGlobal(storageKey, scrambled);
+          await (window as any).electronAPI.dbSetGlobal(dataSizeKey, String(licenseData.dataSize));
+          await (window as any).electronAPI.dbSetGlobal('app_machine_id', licenseData.machineId);
+        } else if ((window as any).electronAPI) {
+          await (window as any).electronAPI.dbSet(storageKey, scrambled);
+          await (window as any).electronAPI.dbSet(dataSizeKey, String(licenseData.dataSize));
+          await (window as any).electronAPI.dbSet('app_machine_id', licenseData.machineId);
+        }
       }
       localStorage.setItem('app_license_last_check', new Date().toISOString().split('T')[0]);
 
@@ -701,9 +714,7 @@ export const validateLicenseStartup = async (
 
   // 1. OFFLINE ENFORCEMENT (Strict)
   if (stored) {
-    if (isExpiredOffline(stored.expiryDate)) {
-      return { valid: false, message: 'LICENSE EXPIRED', data: { isExpired: true } };
-    }
+
 
     if (timeCheck.tampered) {
       // --- REPORT TAMPERING TO CLOUD ---
@@ -781,9 +792,19 @@ export const validateLicenseStartup = async (
 
     if (expiry < new Date()) {
       if (!isOnline) {
+        // V06.01: Save the expired status offline so UI reflects it properly instead of remaining active
+        stored.status = stored.isTrial ? 'TRIAL EXPIRED' : 'LICENSE EXPIRED';
+        const storageKey = 'app_license_secure';
+        const scrambled = scramble(JSON.stringify(stored));
+        localStorage.setItem(storageKey, scrambled);
+        if ((window as any).electronAPI) {
+          (window as any).electronAPI.dbSet(storageKey, scrambled);
+        }
+        
         return {
-          valid: false,
-          message: 'License Expired to renew Contact ilcbala.Bharatpayroll@gmail.com'
+          valid: true, // Allow read-only reports generation
+          message: 'LICENSE EXPIRED',
+          data: { ...stored, isExpired: true, status: stored.status }
         };
       } else {
         console.warn("⚠️ License expired locally, but online. Proceeding to verify with cloud...");
@@ -851,6 +872,18 @@ export const validateLicenseStartup = async (
         console.log("📥 Sync Response:", result);
 
         const cloudData = result.data || {};
+        
+        // --- Infer missing fields from status since GAS omits them for expired licenses ---
+        if (cloudData.status) {
+          if (cloudData.isTrial === undefined) {
+            if (cloudData.status.includes('TRIAL')) cloudData.isTrial = true;
+            else if (cloudData.status.includes('LICENSE')) cloudData.isTrial = false;
+          }
+          if (cloudData.status.includes('EXPIRED')) {
+            cloudData.splMIS = false;
+            cloudData.splDynamic = false;
+          }
+        }
 
         // --- ALWAYS Sync Developer Credentials (even if license invalid) ---
         if (cloudData.devUser && cloudData.devPass) {
@@ -859,6 +892,7 @@ export const validateLicenseStartup = async (
             password: String(cloudData.devPass).trim(),
             name: `${String(cloudData.devUser).trim()} (Developer)`,
             role: 'Developer',
+
             email: 'developer@bharatpay.com'
           };
           // Encrypt with Machine Specific Key
@@ -907,7 +941,7 @@ export const validateLicenseStartup = async (
                   expiryDate: result.data.expiryDate || "",
                   machineId: currentMachineId,
                   status: result.data.status || "ACTIVATED",
-                  dataSize: Number(result.data.dataSize) || 5000,
+                  dataSize: Number(result.data.dataSize) || stored?.dataSize || 5000,
                   isTrial: false,
                   splDynamic: result.data.splDynamic === 'Yes' || result.data.splDynamic === true,
                   splMIS: result.data.splMIS === 'Yes' || result.data.splMIS === true,
@@ -935,7 +969,7 @@ export const validateLicenseStartup = async (
                 userID: result.data.userID || 'RESCUE',
                 machineId: currentMachineId,
                 status: 'PENDING_RESTORE',
-                dataSize: Number(result.data.dataSize) || (cloudIsTrial ? 50 : 5000),
+                dataSize: Number(result.data.dataSize) || (cloudIsTrial ? 50 : (stored?.dataSize || 5000)),
                 isTrial: cloudIsTrial,
                 expiryDate: result.data.expiryDate || '',
                 startDate: result.data.startDate || '',
@@ -953,7 +987,7 @@ export const validateLicenseStartup = async (
                 currentLicense.key = 'TRIAL'; // Suppress key field in UI
                 currentLicense.dataSize = 50; // STRICT: Trial users are locked to 50
               } else {
-                currentLicense.dataSize = Number(result.data.dataSize) || 5000;
+                currentLicense.dataSize = Number(result.data.dataSize) || stored?.dataSize || 5000;
               }
 
               localStorage.setItem(dataSizeKey, String(currentLicense.dataSize));
@@ -1019,7 +1053,7 @@ export const validateLicenseStartup = async (
               expiryDate: cloudData.expiryDate || "",
               machineId: currentMachineId,
               status: cloudData.status || (cloudIsTrial ? "REGISTERED" : "ACTIVATED"),
-              dataSize: cloudIsTrial ? 50 : (Number(cloudData.dataSize) || 5000),
+              dataSize: cloudIsTrial ? 50 : (Number(cloudData.dataSize) || activeLicense?.dataSize || 5000),
               isTrial: cloudIsTrial,
               splDynamic: cloudData.splDynamic === 'Yes' || cloudData.splDynamic === true,
               splMIS: cloudData.splMIS === 'Yes' || cloudData.splMIS === true,
@@ -1103,7 +1137,7 @@ export const validateLicenseStartup = async (
               storageUpdated = true;
             }
             // ✅ FIX: Sync dataSize (Employee Data Limit) from cloud
-            const incomingDataSize = activeLicense.isTrial ? 50 : (cloudData.dataSize ? Number(cloudData.dataSize) : 5000);
+            const incomingDataSize = activeLicense.isTrial ? 50 : (cloudData.dataSize ? Number(cloudData.dataSize) : (activeLicense.dataSize || 5000));
             if (incomingDataSize !== activeLicense.dataSize) {
               console.log(`📊 Data Limit Sync: ${activeLicense.dataSize} -> ${incomingDataSize}`);
               activeLicense.dataSize = incomingDataSize;
@@ -1674,7 +1708,7 @@ export const trackHeartbeat = async (email: string, machineId: string, userID: s
     });
 
     // For logouts, use keepalive to ensure the request finishes even if the app closes
-    fetchFromApi(GOOGLE_SCRIPT_URL, {
+    await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       body: payload,
       // @ts-ignore

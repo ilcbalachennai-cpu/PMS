@@ -22,6 +22,7 @@ interface SocialSecurityCodeProps {
     globalYear: number;
     setGlobalYear: (y: number) => void;
     showAlert: any;
+    activeFinancialYear?: string;
 }
 
 const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
@@ -33,11 +34,28 @@ const SocialSecurityCode: React.FC<SocialSecurityCodeProps> = ({
     setGlobalMonth,
     globalYear,
     setGlobalYear,
-    showAlert: _showAlert
+    showAlert: _showAlert,
+    activeFinancialYear
 }) => {
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const currentYear = new Date().getFullYear();
-    const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+    const months = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
+
+    const [startYear, endYear] = useMemo(() => {
+        if (!activeFinancialYear) return [new Date().getFullYear(), new Date().getFullYear()];
+        const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+        if (match) {
+            return [2000 + parseInt(match[1], 10), 2000 + parseInt(match[2], 10)];
+        }
+        return [new Date().getFullYear(), new Date().getFullYear()];
+    }, [activeFinancialYear]);
+
+    const yearOptions = useMemo(() => {
+        if (payrollHistory.length === 0) {
+            if (startYear === endYear) return [startYear];
+            return [startYear, endYear];
+        }
+        const uniqueYears = Array.from(new Set(payrollHistory.map(r => r.year)));
+        return uniqueYears.sort((a, b) => a - b);
+    }, [payrollHistory, startYear, endYear]);
 
     const [showLegalModal, setShowLegalModal] = useState(false);
     const [showSimulator, setShowSimulator] = useState(false);

@@ -20,6 +20,7 @@ interface UpdatePortalProps {
   patchSkipCount?: number;
   versionSkipCount?: number;
   deploymentStep?: number;
+  isVersionUpdate?: boolean;
 }
 
 const UpdatePortal: React.FC<UpdatePortalProps> = ({
@@ -35,7 +36,8 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   downloadProgress = 0,
   patchSkipCount = 0,
   versionSkipCount = 0,
-  deploymentStep: externalStep
+  deploymentStep: externalStep,
+  isVersionUpdate = false
 }) => {
   const [secondsLeft, setSecondsLeft] = React.useState(20);
   const [installStep, setInstallStep] = React.useState(3);
@@ -390,6 +392,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
 
   // ── RENDER: INSTALLING ──
   if (state === 'INSTALLING') {
+     if (isVersionUpdate) return null;
      return (
       <div className="fixed inset-0 bg-[#020617] z-[1000] flex items-center justify-center p-6 text-center animate-in fade-in duration-1000">
         <div className="max-w-sm w-full space-y-8">

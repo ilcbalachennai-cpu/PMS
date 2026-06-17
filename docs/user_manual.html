@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BharatPay Pro - User Manual V05</title>
+    <title>BharatPay Pro - User Manual V06</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -170,6 +170,11 @@
             body { background: white; padding: 0; }
             .container { box-shadow: none; width: 100%; max-width: none; padding: 0; }
         }
+
+        .warning-text {
+            color: #991b1b;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -181,20 +186,20 @@
             <div class="logo-text">
                 <span class="orange">Bharat</span>Pay <span class="green">Pro</span>
             </div>
-            <p class="version">Comprehensive User Manual • V05</p>
+            <p class="version">Comprehensive User Manual • V06</p>
         </header>
 
-        <p>Welcome to <strong>BharatPay Pro</strong>, a premium Payroll Management System designed for precision, security, and ease of use. This manual will guide you through every aspect of the software, including the advanced <strong>Multi-Company & Multi-Financial Year Architecture</strong> introduced in the V05 series.</p>
+        <p>Welcome to <strong>BharatPay Pro</strong>, a premium Payroll Management System designed for precision, security, and ease of use. This manual will guide you through every aspect of the software, including the advanced <strong>Multi-Company & Multi-Financial Year Architecture</strong> introduced in the V06 series.</p>
 
         <h2>1. Getting Started</h2>
         
-        <h3>1.1 First-Time Installation & Directory Setup</h3>
-        <p>When deploying BharatPay Pro for the first time, the application and database locations are tied strictly to where you run the application folder. The application manages database pathing automatically. To ensure high performance, security, and absolute resilience against data loss, follow these directory setup guidelines:</p>
+        <h3>1.1 First-Time Installation & Data Folder Selection</h3>
+        <p>When deploying BharatPay Pro for the first time, the system will initialize your environment.</p>
         <ol>
-            <li><strong>Application Directory Location (CRITICAL)</strong>: 
+            <li><strong>Data Folder Selection (CRITICAL)</strong>: Upon the very first launch, the application will prompt you to select a master directory to store your database and generated reports. 
                 <ul>
-                    <li><strong>Avoid the C:\ Drive</strong>: Do NOT extract or run the application folder inside your primary <code>C:\</code> drive or system directories (such as <code>Program Files</code>, <code>Documents</code>, or <code>Desktop</code>). If your operating system crashes, gets formatted, or undergoes a Windows system recovery, you risk losing your database permanently!</li>
-                    <li><strong>Recommended Paths</strong>: Always extract and run the entire application directory from a separate physical partition or drive, such as <code>D:\BharatPayRoll</code> or <code>E:\BharatPayRoll</code>. Running the app from this dedicated folder ensures that the main program and all isolated database silos are strictly stored together, ensuring total isolation and enabling incredibly easy directory backups.</li>
+                    <li><strong>Avoid the C:\ Drive</strong>: Do NOT select a folder inside your primary <code>C:\</code> drive or system directories (such as <code>Program Files</code>, <code>Documents</code>, or <code>Desktop</code>). If your operating system crashes, gets formatted, or undergoes a Windows system recovery, you risk losing your database permanently.</li>
+                    <li><strong>Recommended Paths</strong>: We highly recommend creating a dedicated folder on a secure, regularly backed-up drive, such as <code>D:\BharatPayData</code> or <code>E:\PayrollDB</code>.</li>
                 </ul>
             </li>
             <li><strong>Grant Permissions</strong>: If Windows Firewall or Anti-Virus prompts you, click "Allow" to ensure the local database and update services can run smoothly.</li>
@@ -223,7 +228,7 @@
         </ul>
 
         <h2>2. Multi-Organization Management</h2>
-        <p>BharatPay Pro V05 supports managed multiple establishments or independent companies within a single installation. Each unit operates in its own **Data Silo** for total isolation.</p>
+        <p>BharatPay Pro V06 supports managed multiple establishments or independent companies within a single installation. Each unit operates in its own **Data Silo** for total isolation.</p>
 
         <h3>2.1 The Organization Selector & Creating a New Company</h3>
         <p>If you have multiple organizations registered, the system will present the <strong>Organization Selector</strong> immediately after login. Select the unit you wish to work on for the current session.</p>
@@ -284,7 +289,7 @@
         </ul>
 
         <h2>3. Statutory Compliance & Settings Portal</h2>
-        <p>BharatPay Pro V05 consolidates all administrative setups under the <strong>Settings Portal</strong>. Configuring these options accurately is critical, as they form the operational foundation for all wage calculations, security boundaries, and licensing rules.</p>
+        <p>BharatPay Pro V06 consolidates all administrative setups under the <strong>Settings Portal</strong>. Configuring these options accurately is critical, as they form the operational foundation for all wage calculations, security boundaries, and licensing rules.</p>
 
         <h3>3.1 The Four Essential Configuration Tabs</h3>
         <ul>
@@ -332,6 +337,34 @@
 
         <h3>3.2 Default Wage Basis (Code Wages Compliance)</h3>
         <p>By default, the statutory engine utilizes the new **Code Wages** guidelines as the basis for all social security deductions. The system monitors the <strong>Clause 88 Threshold</strong>, automatically checking if exclusions (allowances) exceed 50% of the employee's total gross remuneration. If exclusions exceed 50%, the excess is dynamically clawed back into the contribution wage basis in real time, shielding the company from compliance audit penalties.</p>
+
+        <h2>4. Setting Up Your Company</h2>
+        <p>After selecting your Data Folder and successfully logging in, your very first task is to configure your <strong>Company Profile</strong> and <strong>Statutory Rules</strong>. <br>
+        <span class="warning-text">Note: Core features like "Employee Master" and "Process PayRoll" will remain securely locked and inactive until these mandatory settings are saved.</span></p>
+        
+        <ol>
+            <li><strong>Company Profile</strong>: Navigate to Settings and fill in your establishment details. Fields marked with a red asterisk (<code>*</code>) are strictly mandatory.</li>
+            <li><strong>Statutory Configuration</strong>: Click on the Statutory Rules tab. The system provides intelligent default values for EPF limits, ESI cutoffs, and tax slabs based on standard compliances. <strong>Please scan through these defaults carefully.</strong> You can modify or override these defaults to match the specific operational needs of your establishment. Ensure you click <strong>Save</strong> to apply the configuration. Once saved, your core modules will unlock.</li>
+        </ol>
+
+        <h3>4.1 Policy Modules: Overtime & Arrear Salary</h3>
+        <p>Under the Statutory Configuration tab, you can activate advanced payroll components:</p>
+        <ul>
+            <li><strong>Overtime (OT) Module</strong>: 
+                <ul>
+                    <li><em>Activation</em>: Toggle "Enable Overtime Calculation" to ON.</li>
+                    <li><em>Importance</em>: Activating this is crucial if your establishment pays extra for extended shifts. Once enabled, the system unlocks dedicated Overtime input columns during the Pay Process.</li>
+                    <li><em>Usage</em>: Before compiling salaries, you must input the respective OT hours for employees. The engine will then dynamically calculate OT earnings based on the employee's basic wage rate and instantly reflect it in their final Dynamic Pay Sheet.</li>
+                </ul>
+            </li>
+            <li><strong>Arrear Salary Module</strong>:
+                <ul>
+                    <li><em>Activation</em>: Toggle "Enable Arrear Salary" to ON.</li>
+                    <li><em>Importance</em>: Used for retroactive pay adjustments or delayed compensations.</li>
+                    <li><em>Usage</em>: Once activated, an 'Arrears' column becomes available in the Payroll processor. You can manually input arrear amounts for specific employees, which will be seamlessly added to their gross earnings for that specific month without disrupting standard wage structures.</li>
+                </ul>
+            </li>
+        </ul>
 
         <h2>5. Employee Management</h2>
         <p>Navigate to the <strong>Employees</strong> section to manage your workforce master data.</p>
@@ -700,7 +733,7 @@
                 <span>📧 ilcbala.BharatPayRoll@gmail.com</span>
                 <span>📞 Refer to License Agreement</span>
             </div>
-            <p>© 2026 BharatPay Pro. All Rights Reserved. (V05)</p>
+            <p>© 2026 BharatPay Pro. All Rights Reserved.</p>
         </div>
     </div>
 

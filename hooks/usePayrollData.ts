@@ -10,7 +10,7 @@ import {
   DEFAULT_LEAVE_POLICY 
 } from '../constants';
 import { getBackupFileName, getMonthAbbr } from '../services/reportService';
-import { getCompanyBackupFolder } from '../utils/formatters';
+import { getCompanyBackupFolder, generateCompanyId } from '../utils/formatters';
 
 export const usePayrollData = (showAlert: any) => {
   const [isResetting, setIsResetting] = useState(false);
@@ -31,7 +31,8 @@ export const usePayrollData = (showAlert: any) => {
         try {
           const parsed = JSON.parse(oldProfile);
           if (parsed && typeof parsed === 'object') {
-            const defaultCompany = { ...INITIAL_COMPANY_PROFILE, ...parsed, id: 'company_1' };
+            const newId = generateCompanyId(parsed.establishmentName || 'COMPANY');
+            const defaultCompany = { ...INITIAL_COMPANY_PROFILE, ...parsed, id: newId };
             localStorage.setItem('app_companies', JSON.stringify([defaultCompany]));
             return [defaultCompany];
           }
@@ -106,11 +107,6 @@ export const usePayrollData = (showAlert: any) => {
       const raw = localStorage.getItem(scopedKey);
       if (raw) return JSON.parse(raw);
       
-      // JIT Migration for company_1
-      if (activeCompanyId === 'company_1') {
-        const globalRaw = localStorage.getItem(key);
-        if (globalRaw) return JSON.parse(globalRaw);
-      }
       return fallback;
     } catch (e) { return fallback; }
   };
@@ -157,19 +153,36 @@ export const usePayrollData = (showAlert: any) => {
         if (res.success && res.silos) {
           const foundSilos = res.silos as string[];
           
-          setCompanies(prevCompanies => {
-            const filtered = prevCompanies.filter(c => foundSilos.includes(c.id));
-            
-            // Only update if something was actually removed
-            if (filtered.length !== prevCompanies.length) {
-              console.log(`[Cleanup] Removed ${prevCompanies.length - filtered.length} missing companies from registry.`);
-              localStorage.setItem('app_companies', JSON.stringify(filtered));
-              if (window.electronAPI?.dbSetGlobal) {
-                window.electronAPI.dbSetGlobal('app_companies', filtered);
+            setCompanies(prevCompanies => {
+              let updated = false;
+              let newCompanies = [...prevCompanies];
+
+              // 1. Remove missing silos
+              const filtered = newCompanies.filter(c => foundSilos.includes(c.id));
+              if (filtered.length !== newCompanies.length) {
+                console.log(`[Cleanup] Removed ${newCompanies.length - filtered.length} missing companies from registry.`);
+                newCompanies = filtered;
+                updated = true;
               }
-              return filtered;
-            }
-            return prevCompanies;
+
+              // 2. Auto-Rescue found silos that are NOT in the registry
+              // V06.01.02: Disabled automatic frontend rescue to respect intentional "Remove From List Only" actions.
+              // Users can use the manual "Rescue Organizations" button from the Settings menu instead.
+              const existingIds = newCompanies.map(c => c.id);
+              const missingSilos = foundSilos.filter(s => !existingIds.includes(s));
+              if (missingSilos.length > 0) {
+                console.log(`[Auto-Rescue] Found ${missingSilos.length} unregistered physical folders. Ignored automatically to respect manual delinking.`);
+              }
+
+              // Only update if something was actually changed
+              if (updated) {
+                localStorage.setItem('app_companies', JSON.stringify(newCompanies));
+                if (window.electronAPI?.dbSetGlobal) {
+                  window.electronAPI.dbSetGlobal('app_companies', newCompanies);
+                }
+                return newCompanies;
+              }
+              return prevCompanies;
           });
         }
       } catch (e) {

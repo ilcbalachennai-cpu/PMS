@@ -616,13 +616,13 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     <div className="text-[9px] text-slate-500 uppercase tracking-normal font-mono">{emp.id}</div>
                   </td>
                   <td className="px-3 py-2.5 text-center">
-                    <input title={`Present Days for ${emp.name}`} aria-label={`Present Days for ${emp.name}`} disabled={inputDisabled} type="number" className="w-12 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-[11px] text-white font-mono disabled:opacity-50 focus:border-blue-500 outline-none" value={att.presentDays} onChange={e => handleUpdate(emp.id, 'presentDays', +e.target.value || 0)} />
+                    <input title={`Present Days for ${emp.name}`} aria-label={`Present Days for ${emp.name}`} disabled={inputDisabled} type="number" onFocus={(e) => e.target.select()} className="w-12 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-[11px] text-white font-mono disabled:opacity-50 focus:border-blue-500 outline-none" value={att.presentDays} onChange={e => handleUpdate(emp.id, 'presentDays', +e.target.value || 0)} />
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     <div className="relative">
                       <input
                         disabled={inputDisabled}
-                        type="number"
+                        type="number" onFocus={(e) => e.target.select()}
                         title={`EL Availed for ${emp.name}`}
                         aria-label={`EL Availed for ${emp.name}`}
                         className={`w-12 bg-[#0f172a] border rounded px-1 py-1 text-center text-[11px] font-mono disabled:opacity-50 outline-none ${isELExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700/50 text-white'}`}
@@ -636,7 +636,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                       {/* UPDATED: Input styling to Orange */}
                       <input
                         disabled={inputDisabled}
-                        type="number"
+                        type="number" onFocus={(e) => e.target.select()}
                         title={`EL Encashed for ${emp.name}`}
                         aria-label={`EL Encashed for ${emp.name}`}
                         className={`w-12 bg-orange-950/20 border rounded px-1 py-1 text-center text-[11px] font-mono font-black disabled:opacity-50 outline-none ${isELExceeded ? 'border-red-500 text-red-500 bg-red-900/10' : 'border-orange-900/30 text-orange-400'}`}
@@ -650,7 +650,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     <div className="relative">
                       <input
                         disabled={inputDisabled}
-                        type="number"
+                        type="number" onFocus={(e) => e.target.select()}
                         title={`Sick Leave for ${emp.name}`}
                         aria-label={`Sick Leave for ${emp.name}`}
                         className={`w-12 bg-[#0f172a] border rounded px-1 py-1 text-center text-[11px] font-mono disabled:opacity-50 outline-none ${isSLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700/50 text-white'}`}
@@ -664,7 +664,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     <div className="relative">
                       <input
                         disabled={inputDisabled}
-                        type="number"
+                        type="number" onFocus={(e) => e.target.select()}
                         title={`Casual Leave for ${emp.name}`}
                         aria-label={`Casual Leave for ${emp.name}`}
                         className={`w-12 bg-[#0f172a] border rounded px-1 py-1 text-center text-[11px] font-mono disabled:opacity-50 outline-none ${isCLExceeded ? 'border-red-500 text-red-400 bg-red-900/10' : 'border-slate-700/50 text-white'}`}
@@ -675,7 +675,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-center">
-                    <input title={`LOP Days for ${emp.name}`} aria-label={`LOP Days for ${emp.name}`} disabled={inputDisabled} type="number" className="w-12 bg-red-950/20 border border-red-900/30 rounded px-1 py-1 text-center text-[11px] text-red-300 font-black font-mono disabled:opacity-50 outline-none" value={att.lopDays} onChange={e => handleUpdate(emp.id, 'lopDays', +e.target.value || 0)} />
+                    <input title={`LOP Days for ${emp.name}`} aria-label={`LOP Days for ${emp.name}`} disabled={inputDisabled} type="number" onFocus={(e) => e.target.select()} className="w-12 bg-red-950/20 border border-red-900/30 rounded px-1 py-1 text-center text-[11px] text-red-300 font-black font-mono disabled:opacity-50 outline-none" value={att.lopDays} onChange={e => handleUpdate(emp.id, 'lopDays', +e.target.value || 0)} />
                   </td>
                   <td className="px-5 py-2.5">
                     <div className="flex flex-col gap-1">

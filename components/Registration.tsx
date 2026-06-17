@@ -641,7 +641,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
             return;
         }
         if (!panRegex.test(companyPan.trim().toUpperCase())) {
-            setError('Invalid PAN Format. Must be in the standard format (e.g., ABCDE1234F).');
+            setError('Invalid PAN Format. Must be in the standard format (e.g., ABCDE1234R).');
             containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
             return;
         }
@@ -792,18 +792,36 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                 </div>
                             </div>
                             
-                            {(error.includes('Unauthorised') || error.includes('Security') || error.includes('Integrity')) && (
+                            {(error.includes('Unauthorised') || error.includes('Security') || error.includes('Integrity') || error.includes('Failed') || error.includes('folder')) && (
                                 <div className="pt-2 border-t border-red-500/20 flex flex-col gap-3">
                                     <p className="text-[10px] text-red-300/70 font-bold uppercase tracking-wider text-center">
-                                        Possible system corruption or version mismatch detected.
+                                        System recovery options available.
                                     </p>
-                                    <button 
-                                        onClick={() => onSystemRepair?.()}
-                                        className="w-full py-3 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl transition-all shadow-lg shadow-red-900/30 flex items-center justify-center gap-2 group"
-                                    >
-                                        <RotateCw size={14} className="group-hover:rotate-180 transition-transform duration-700" />
-                                        Self-Repair & Install Latest Version
-                                    </button>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <button 
+                                            onClick={() => onSystemRepair?.()}
+                                            className="w-full py-3 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl transition-all shadow-lg shadow-red-900/30 flex items-center justify-center gap-2 group"
+                                        >
+                                            <RotateCw size={14} className="group-hover:rotate-180 transition-transform duration-700" />
+                                            Self-Repair & Install Latest Version
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                if(confirm("WARNING: This will completely wipe the application data and force a fresh install state. Are you sure?")) {
+                                                    localStorage.clear();
+                                                    sessionStorage.clear();
+                                                    if((window as any).electronAPI) {
+                                                        (window as any).electronAPI.dbDelete('app_users');
+                                                        (window as any).electronAPI.dbDelete('app_license_secure');
+                                                    }
+                                                    window.location.reload();
+                                                }
+                                            }}
+                                            className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl transition-all shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2"
+                                        >
+                                            Force App Reset
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -881,6 +899,13 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                             ) : null}
                                         </div>
                                     </div>
+
+                                    {/* ALWAYS SHOW ERROR MESSAGE IF IT EXISTS, EVEN IN IDLE STATE */}
+                                    {emailVerifyMsg && emailVerifyState === 'idle' && (
+                                        <div className="p-3 mt-4 bg-red-950/30 border border-red-500/30 rounded-xl">
+                                            <p className="text-[10px] text-red-400 font-bold uppercase text-center tracking-wide">{emailVerifyMsg}</p>
+                                        </div>
+                                    )}
 
                                     {(emailVerifyState === 'otp_pending' || emailVerifyState === 'verifying') && (
                                         <div className="p-5 bg-blue-950/20 border border-blue-500/30 rounded-2xl space-y-4 animate-in fade-in zoom-in duration-300">
@@ -1131,18 +1156,39 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                         // --- V05.02.10: Link Data Folder Password Fix ---
                                                         // Ensure the newly registered admin credentials are saved locally
                                                         // so that the background license check during boot has a password to send.
-                                                        const adminUser = {
-                                                            username: userID || 'admin',
-                                                            password: adminPassword,
-                                                            name: userName || 'System Administrator',
-                                                            role: 'Administrator',
-                                                            email: regEmail || 'admin@bharatpay.com'
-                                                        };
-                                                        localStorage.setItem('app_users', JSON.stringify([adminUser]));
-                                                        localStorage.setItem('app_setup_complete', 'true');
-                                                        if (api.dbSet) {
-                                                            await api.dbSet('app_users', [adminUser]);
-                                                            await api.dbSet('app_setup_complete', 'true');
+                                                        // V06.01.08 Fix: Do NOT overwrite existing admin credentials if the linked DB already has them.
+                                                        let hasExistingUsers = false;
+                                                        if (api.dbGet) {
+                                                            try {
+                                                                const existingDbUsersRaw = await api.dbGet('app_users');
+                                                                if (existingDbUsersRaw && existingDbUsersRaw !== '[]' && existingDbUsersRaw !== 'null') {
+                                                                    const existingDbUsers = JSON.parse(existingDbUsersRaw);
+                                                                    if (existingDbUsers && existingDbUsers.length > 0) {
+                                                                        hasExistingUsers = true;
+                                                                        localStorage.setItem('app_users', JSON.stringify(existingDbUsers));
+                                                                        localStorage.setItem('app_setup_complete', 'true');
+                                                                        if (api.dbSet) await api.dbSet('app_setup_complete', 'true');
+                                                                    }
+                                                                }
+                                                            } catch (e) {
+                                                                console.warn("Could not parse existing app_users", e);
+                                                            }
+                                                        }
+                                                        
+                                                        if (!hasExistingUsers) {
+                                                            const adminUser = {
+                                                                username: userID || 'admin',
+                                                                password: adminPassword,
+                                                                name: userName || 'System Administrator',
+                                                                role: 'Administrator',
+                                                                email: regEmail || 'admin@bharatpay.com'
+                                                            };
+                                                            localStorage.setItem('app_users', JSON.stringify([adminUser]));
+                                                            localStorage.setItem('app_setup_complete', 'true');
+                                                            if (api.dbSet) {
+                                                                await api.dbSet('app_users', [adminUser]);
+                                                                await api.dbSet('app_setup_complete', 'true');
+                                                            }
                                                         }
                                                         
                                                         // Successfully linked, reload app to pick up db
@@ -1216,10 +1262,23 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                             <input
                                                 type="text"
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all font-black uppercase tracking-wider placeholder:text-slate-600"
-                                                placeholder="E.G. ABCPBL2345E"
+                                                placeholder="E.G. ABCDE1234R"
                                                 maxLength={10}
                                                 value={companyPan}
-                                                onChange={e => setCompanyPan(e.target.value.toUpperCase().slice(0, 10))}
+                                                onChange={e => {
+                                                    let formatted = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+                                                    let result = "";
+                                                    for (let i = 0; i < formatted.length; i++) {
+                                                        if (i < 5) {
+                                                            if (/[A-Z]/.test(formatted[i])) result += formatted[i];
+                                                        } else if (i < 9) {
+                                                            if (/[0-9]/.test(formatted[i])) result += formatted[i];
+                                                        } else if (i === 9) {
+                                                            if (/[A-Z]/.test(formatted[i])) result += formatted[i];
+                                                        }
+                                                    }
+                                                    setCompanyPan(result);
+                                                }}
                                             />
                                         </div>
                                         <div className="space-y-3 col-span-2">

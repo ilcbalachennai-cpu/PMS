@@ -18,16 +18,10 @@ Function .onVerifyInstDir
 FunctionEnd
 
 !macro customInit
-    # Per user request: Clear application memory (configuration files) before installation
-    # This ensures a clean initialization loop without touching the actual data (BharatPP folders).
-    RMDir /r "$APPDATA\BPP_APP"
-    RMDir /r "$APPDATA\bharatpay-pro"
-    RMDir /r "$APPDATA\BharatPayPro"
-    
-    # If this is an update (BPP_APP.exe already exists), skip redirecting the path
+    # When installer starts, redirect default C: drive installs to D:\BharatPayRoll\BPP_APP
+    # Only do this if it's a fresh install (BPP_APP.exe doesn't exist)
     IfFileExists "$INSTDIR\BPP_APP.exe" skip_custom_init
     
-    # When installer starts, redirect default C: drive installs to D:\BharatPayRoll\BPP_APP
     StrCpy $R0 $INSTDIR 3
     ${If} $R0 == "C:\" 
     ${OrIf} $R0 == "c:\"

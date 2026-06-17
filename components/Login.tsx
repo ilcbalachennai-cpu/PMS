@@ -319,7 +319,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
         try {
           // V03.01.07: Developer bypass for specific machine
           const mid = await getMachineId();
-          const isDevMachine = mid === '05D02810-8051-7C4A-B33D-19383C3F3A2F';
+          const isDevMachine = mid === '05D02810-8051-7C4A-B33D-19383C3F3A2F' || !import.meta.env.PROD;
           
           if (isDevMachine) {
             console.log("✅ Dev Machine detected. Bypassing Developer OTP.");
@@ -1027,7 +1027,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
                         onClick={() => autofill('VRANGA')}
                         type="button"
                         disabled={isLocked}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30 ${(!import.meta.env.DEV && !isLocked) ? 'hidden' : ''} disabled:opacity-50`}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30 ${!import.meta.env.DEV ? 'hidden' : ''} disabled:opacity-50`}
                         title="Developer Quick Access"
                       >
                         <Lock className="text-amber-500 mb-1 group-hover:rotate-12 transition-transform" size={16} />

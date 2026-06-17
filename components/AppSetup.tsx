@@ -8,7 +8,8 @@ import {
     Loader2,
     ShieldCheck,
     IndianRupee,
-    AlertCircle
+    AlertCircle,
+    RefreshCw
 } from 'lucide-react';
 
 interface AppSetupProps {
@@ -135,6 +136,22 @@ const AppSetup: React.FC<AppSetupProps> = ({ onComplete }) => {
                                   </div>
                                   <span className="text-sm text-white font-medium text-center bg-red-950/50 p-2 rounded-lg w-full break-words">{error}</span>
                                   <span className="text-[10px] text-red-300 font-mono text-center">Please close the app entirely, ensure the folder has write permissions and no other process is using the files, and try again.</span>
+                                    
+                                    {/* Hard Reset Option directly in the error block */}
+                                    <button
+                                        onClick={async () => {
+                                            if (window.confirm("Are you sure you want to completely reset the application configuration? This will not delete your data, but will force the app to restart as a fresh installation.")) {
+                                                setIsProcessing(true);
+                                                const api = (window as any).electronAPI;
+                                                if (api?.hardResetApp) {
+                                                    await api.hardResetApp();
+                                                }
+                                            }
+                                        }}
+                                        className="mt-2 px-6 py-2 bg-red-600/80 hover:bg-red-500 text-white text-xs font-black uppercase tracking-widest rounded-lg border border-red-400 shadow-xl shadow-red-900/50 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        <RefreshCw size={14} /> Force App Reset
+                                    </button>
                               </div>
                           )}
 

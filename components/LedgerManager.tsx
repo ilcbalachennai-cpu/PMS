@@ -511,7 +511,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                             <div className="text-[9px] text-slate-500 uppercase tracking-normal font-mono">{emp.id}</div>
                                         </td>
                                         <td className="px-3 py-2.5 text-center text-slate-300 font-mono text-[11px]">{l.el.opening}</td>
-                                        <td className="px-3 py-2.5 text-center"><input disabled={baseDisabled} title={`EL Eligible for ${emp.name}`} aria-label={`EL Eligible for ${emp.name}`} type="number" className="w-12 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-white text-[11px] font-mono disabled:opacity-50 focus:border-blue-500 outline-none" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
+                                        <td className="px-3 py-2.5 text-center"><input disabled={baseDisabled} title={`EL Eligible for ${emp.name}`} aria-label={`EL Eligible for ${emp.name}`} type="number" onFocus={(e) => e.target.select()} className="w-12 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-white text-[11px] font-mono disabled:opacity-50 focus:border-blue-500 outline-none" value={l.el.eligible} onChange={e => handleLeaveUpdate(emp.id, 'el', 'eligible', +e.target.value)} /></td>
                                         <td className="px-3 py-2.5 text-center font-black text-blue-400 text-xs">{l.el.balance}</td>
                                         <td className="px-3 py-2.5 text-center text-emerald-400 font-bold text-xs">{l.sl.balance}</td>
                                         <td className="px-3 py-2.5 text-center text-amber-400 font-bold text-xs">{l.cl.balance}</td>
@@ -546,13 +546,13 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                         </td>
                                         <td className="px-3 py-2.5 text-center text-slate-400 font-mono text-[11px]">{formatIndianNumber(a.opening || 0)}</td>
                                         <td className="px-3 py-2.5 text-center">
-                                            <input disabled={inputDisabled} title={`New Advance for ${emp.name}`} aria-label={`New Advance for ${emp.name}`} type="number" min={0}
+                                            <input disabled={inputDisabled} title={`New Advance for ${emp.name}`} aria-label={`New Advance for ${emp.name}`} type="number" onFocus={(e) => e.target.select()} min={0}
                                                 className="w-14 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-emerald-400 font-black text-[11px] font-mono disabled:opacity-50 outline-none focus:border-emerald-500"
                                                 value={a.totalAdvance || 0}
                                                 onChange={e => handleAdvanceUpdate(emp.id, 'totalAdvance', +e.target.value)} />
                                         </td>
                                         <td className="px-3 py-2.5 text-center">
-                                            <input disabled={inputDisabled} title={`Manual Payment for ${emp.name}`} aria-label={`Manual Payment for ${emp.name}`} type="number" min={0}
+                                            <input disabled={inputDisabled} title={`Manual Payment for ${emp.name}`} aria-label={`Manual Payment for ${emp.name}`} type="number" onFocus={(e) => e.target.select()} min={0}
                                                 placeholder="0"
                                                 className="w-14 bg-amber-950/20 border border-amber-900/30 rounded px-1 py-1 text-center text-amber-400 text-[11px] font-mono font-black disabled:opacity-50 outline-none focus:border-amber-500"
                                                 value={(a.manualPayment || 0) > 0 ? a.manualPayment : ''}
@@ -563,7 +563,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                                                 disabled={inputDisabled || (a.manualPayment || 0) > 0}
                                                 title={(a.manualPayment || 0) > 0 ? 'Disabled — Manual payment is set' : `EMI Count for ${emp.name}`}
                                                 aria-label={(a.manualPayment || 0) > 0 ? 'Disabled — Manual payment is set' : `EMI Count for ${emp.name}`}
-                                                type="number" min={0} step={1}
+                                                type="number" onFocus={(e) => e.target.select()} min={0} step={1}
                                                 className="w-12 bg-[#0f172a] border border-slate-700/50 rounded px-1 py-1 text-center text-slate-300 text-[11px] font-mono disabled:opacity-30 outline-none"
                                                 value={a.emiCount || 0}
                                                 onChange={e => handleAdvanceUpdate(emp.id, 'emiCount', +e.target.value)} />

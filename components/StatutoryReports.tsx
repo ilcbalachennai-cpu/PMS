@@ -58,6 +58,7 @@ interface StatutoryReportsProps {
     arrearHistory?: ArrearBatch[];
     latestFrozenPeriod: { month: string; year: number } | null;
     showAlert: any;
+    activeFinancialYear?: string;
 }
 
 const STATE_FORM_MAPPINGS: Record<string, { wage: string; slip: string; advance: string }> = {
@@ -83,11 +84,28 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     advanceLedgers = [],
     arrearHistory = [],
     showAlert: _showAlert,
-    latestFrozenPeriod
+    latestFrozenPeriod,
+    activeFinancialYear
 }) => {
-    const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const currentYear = new Date().getFullYear();
-    const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+    const monthsArr = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
+
+    const [startYear, endYear] = useMemo(() => {
+        if (!activeFinancialYear) return [new Date().getFullYear(), new Date().getFullYear()];
+        const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
+        if (match) {
+            return [2000 + parseInt(match[1], 10), 2000 + parseInt(match[2], 10)];
+        }
+        return [new Date().getFullYear(), new Date().getFullYear()];
+    }, [activeFinancialYear]);
+
+    const yearOptions = useMemo(() => {
+        if (payrollHistory.length === 0) {
+            if (startYear === endYear) return [startYear];
+            return [startYear, endYear];
+        }
+        const uniqueYears = Array.from(new Set(payrollHistory.map(r => r.year)));
+        return uniqueYears.sort((a, b) => a - b);
+    }, [payrollHistory, startYear, endYear]);
 
     const [selectedState, setSelectedState] = useState<string>(companyProfile.state || 'Tamil Nadu');
     const [rangeModal, setRangeModal] = useState({ isOpen: false, reportType: '', fromMonth: globalMonth, fromYear: globalYear, toMonth: globalMonth, toYear: globalYear });

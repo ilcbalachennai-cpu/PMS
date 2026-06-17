@@ -2,9 +2,10 @@ import React, { useEffect, useRef } from 'react';
 import {
     X, User2, Plus, Edit2, Camera, Upload, Download,
     FileText, Save, Home, MapPinned, Landmark,
-    Briefcase, ShieldCheck, ShieldAlert, UserMinus, Lock, BookOpen
+    Briefcase, ShieldCheck, ShieldAlert, UserMinus, Lock, BookOpen,
+    AlertCircle
 } from 'lucide-react';
-import { Employee } from '../../types';
+import { Employee, CompanyProfile } from '../../types';
 import { INDIAN_STATES } from '../../constants';
 import { formatIndianNumber } from '../../utils/formatters';
 
@@ -14,6 +15,7 @@ interface EmployeeFormProps {
     setNewEmpForm: React.Dispatch<React.SetStateAction<Partial<Employee>>>;
     onClose: () => void;
     onSubmit: (e: React.FormEvent) => void;
+    companyProfile?: CompanyProfile;
     designations: string[];
     divisions: string[];
     branches: string[];
@@ -49,6 +51,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
     setNewEmpForm,
     onClose,
     onSubmit,
+    companyProfile: _companyProfile,
     designations,
     divisions,
     branches,
@@ -67,6 +70,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
     globalMonth,
     globalYear
 }) => {
+    const formRef = useRef<HTMLFormElement>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
     const dojInputRef = useRef<HTMLInputElement>(null);
     const dolInputRef = useRef<HTMLInputElement>(null);
@@ -75,6 +79,42 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
     const [isRejoining] = React.useState(!!editingId && !!newEmpForm.dol);
     const [isDOJUpdated, setIsDOJUpdated] = React.useState(false);
     const [isDOLRemoved, setIsDOLRemoved] = React.useState(false);
+
+    const [showCancelConfirm, setShowCancelConfirm] = React.useState(false);
+    const [isDirty, setIsDirty] = React.useState(false);
+    const initialFormSnapshot = useRef<string>(JSON.stringify(newEmpForm));
+
+    const handleClose = () => {
+        const formChanged = isDirty || JSON.stringify(newEmpForm) !== initialFormSnapshot.current;
+        if (formChanged) {
+            setShowCancelConfirm(true);
+        } else {
+            onClose();
+        }
+    };
+
+    const handleSaveFromModal = (e: React.MouseEvent) => {
+        if (newEmpForm.doj && (!editingId || isRejoining)) {
+            const dojDate = new Date(newEmpForm.doj);
+            const monthIndex = monthsArr.indexOf(globalMonth);
+            
+            const startOfMonth = new Date(globalYear, monthIndex, 1);
+            const endOfMonth = new Date(globalYear, monthIndex + 1, 0);
+
+            if (dojDate < startOfMonth || dojDate > endOfMonth) {
+                e.preventDefault();
+                alert(`Invalid DOJ: Date of Joining must be within the current processing month (${globalMonth} ${globalYear}).`);
+                dojInputRef.current?.focus();
+                return;
+            }
+        }
+        
+        setShowCancelConfirm(false);
+        
+        if (formRef.current) {
+            formRef.current.requestSubmit();
+        }
+    };
 
     // List of months for indexing
     const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -125,10 +165,10 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                             <p className="text-xs text-slate-500">Master Record Configuration</p>
                         </div>
                     </div>
-                    <button onClick={onClose} title="Close Form" aria-label="Close Form" className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition-all"><X size={24} /></button>
+                    <button onClick={handleClose} title="Close Form" aria-label="Close Form" className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition-all"><X size={24} /></button>
                 </div>
 
-                <form onSubmit={onSubmit} className="p-8 space-y-12">
+                <form ref={formRef} onSubmit={onSubmit} onChange={() => setIsDirty(true)} className="p-8 space-y-12">
                     <div>
                         <FormSectionHeader icon={User2} title="1. Personal & Employment Identity" />
                         <div className="flex flex-col md:flex-row gap-8">
@@ -286,7 +326,29 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 </div>
                                 <div className="space-y-1.5">
                                     <label htmlFor="genderInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Gender</label>
-                                    <select id="genderInput" tabIndex={isRejoining ? -1 : undefined} title="Gender" aria-label="Gender" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.gender} onChange={e => setNewEmpForm({ ...newEmpForm, gender: e.target.value as any })}><option>Male</option><option>Female</option><option>Transgender</option><option>Others</option></select>
+                                    <select 
+                                        id="genderInput" 
+                                        tabIndex={isRejoining ? -1 : undefined} 
+                                        title="Gender" 
+                                        aria-label="Gender" 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500" 
+                                        value={newEmpForm.gender || 'Male'} 
+                                        onChange={e => {
+                                            const val = e.target.value as any;
+                                            const updates: Partial<Employee> = { gender: val };
+                                            const cleanVal = String(val || '').trim().toLowerCase();
+                                            if (newEmpForm.maritalStatus === 'Yes' || newEmpForm.relationship === 'Spouse') {
+                                                if (cleanVal === 'male' || cleanVal === 'm') updates.spouseGender = 'Female';
+                                                else if (cleanVal === 'female' || cleanVal === 'f') updates.spouseGender = 'Male';
+                                            }
+                                            setNewEmpForm({ ...newEmpForm, ...updates });
+                                        }}
+                                    >
+                                        <option>Male</option>
+                                        <option>Female</option>
+                                        <option>Transgender</option>
+                                        <option>Others</option>
+                                    </select>
                                 </div>
                                 <div className="space-y-1.5">
                                     <label htmlFor="dobInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Date of Birth</label>
@@ -356,67 +418,133 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                         <div>
                             <FormSectionHeader icon={Home} title="2. Family Relations" />
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-900/30 p-4 rounded-xl border border-slate-800">
-                                 <div className="col-span-2 space-y-1.5"><label htmlFor="fatherSpouseNameInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Father / Spouse Name</label><input id="fatherSpouseNameInput" tabIndex={isRejoining ? -1 : undefined} title="Father or Spouse Name" aria-label="Father or Spouse Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.fatherSpouseName} onChange={e => setNewEmpForm({ ...newEmpForm, fatherSpouseName: e.target.value })} /></div>
-                                <div className="col-span-2 space-y-1.5"><label htmlFor="relationshipInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Relationship</label><select id="relationshipInput" tabIndex={isRejoining ? -1 : undefined} title="Relationship" aria-label="Relationship" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.relationship} onChange={e => setNewEmpForm({ ...newEmpForm, relationship: e.target.value })}><option>Father</option><option>Spouse</option><option>Mother</option><option>Guardian</option></select></div>
+                                 <div className="col-span-2 space-y-1.5">
+                                     <label htmlFor="fatherSpouseNameInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Father / Spouse Name</label>
+                                     <input 
+                                         id="fatherSpouseNameInput" 
+                                         tabIndex={isRejoining ? -1 : undefined} 
+                                         title="Father or Spouse Name" 
+                                         aria-label="Father or Spouse Name" 
+                                         className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500" 
+                                         value={newEmpForm.fatherSpouseName} 
+                                         onChange={e => {
+                                             const val = e.target.value.toUpperCase();
+                                             const updates: Partial<Employee> = { fatherSpouseName: val };
+                                             if (newEmpForm.relationship === 'Spouse') {
+                                                 updates.spouseName = val;
+                                             }
+                                             setNewEmpForm({ ...newEmpForm, ...updates });
+                                         }} 
+                                     />
+                                 </div>
+                                <div className="col-span-2 space-y-1.5">
+                                    <label htmlFor="relationshipInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Relationship</label>
+                                    <select 
+                                        id="relationshipInput" 
+                                        tabIndex={isRejoining ? -1 : undefined} 
+                                        title="Relationship" 
+                                        aria-label="Relationship" 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500" 
+                                        value={newEmpForm.relationship} 
+                                        onChange={e => {
+                                            const val = e.target.value;
+                                            const updates: Partial<Employee> = { relationship: val };
+                                            if (val === 'Spouse') {
+                                                updates.maritalStatus = 'Yes';
+                                                const cleanGender = String(newEmpForm.gender || 'Male').trim().toLowerCase();
+                                                if (cleanGender === 'male' || cleanGender === 'm') updates.spouseGender = 'Female';
+                                                else if (cleanGender === 'female' || cleanGender === 'f') updates.spouseGender = 'Male';
+                                                updates.spouseName = newEmpForm.fatherSpouseName || '';
+                                            }
+                                            setNewEmpForm({ ...newEmpForm, ...updates });
+                                        }}
+                                    >
+                                        <option>Father</option>
+                                        <option>Spouse</option>
+                                        <option>Mother</option>
+                                        <option>Guardian</option>
+                                    </select>
+                                </div>
 
                                 <div className="space-y-1.5">
                                     <label htmlFor="maritalStatusInput" className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Married</label>
                                      <select
-                                        id="maritalStatusInput"
-                                        tabIndex={isRejoining ? -1 : undefined}
-                                        title="Marital Status"
-                                        aria-label="Marital Status"
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none"
-                                        value={newEmpForm.maritalStatus || 'No'}
-                                        onChange={e => setNewEmpForm({ ...newEmpForm, maritalStatus: e.target.value as 'Yes' | 'No' })}
-                                    >
-                                        <option value="No">No</option>
-                                        <option value="Yes">Yes</option>
-                                    </select>
+                                         id="maritalStatusInput"
+                                         tabIndex={isRejoining ? -1 : undefined}
+                                         title="Marital Status"
+                                         aria-label="Marital Status"
+                                         className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${newEmpForm.relationship === 'Spouse' ? 'border-slate-800 text-slate-600' : 'border-slate-700'}`}
+                                         disabled={newEmpForm.relationship === 'Spouse'}
+                                         value={newEmpForm.relationship === 'Spouse' ? 'Yes' : (newEmpForm.maritalStatus || 'No')}
+                                         onChange={e => {
+                                             const val = e.target.value as 'Yes' | 'No';
+                                             const updates: Partial<Employee> = { maritalStatus: val };
+                                             if (val === 'Yes') {
+                                                 const cleanGender = String(newEmpForm.gender || 'Male').trim().toLowerCase();
+                                                 if (cleanGender === 'male' || cleanGender === 'm') updates.spouseGender = 'Female';
+                                                 else if (cleanGender === 'female' || cleanGender === 'f') updates.spouseGender = 'Male';
+                                             }
+                                             setNewEmpForm({ ...newEmpForm, ...updates });
+                                         }}
+                                     >
+                                         <option value="No">No</option>
+                                         <option value="Yes">Yes</option>
+                                     </select>
                                 </div>
                                 <div className="space-y-1.5">
-                                    <label htmlFor="spouseNameInput" className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Name</label>
+                                    <label htmlFor="spouseNameInput" className={`text-[10px] font-bold uppercase tracking-widest ${(newEmpForm.maritalStatus === 'Yes' || newEmpForm.relationship === 'Spouse') ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Name</label>
                                      <input
-                                        id="spouseNameInput"
-                                        tabIndex={isRejoining ? -1 : undefined}
-                                        title="Spouse Legal Name"
-                                        aria-label="Spouse Legal Name"
-                                        className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none transition-colors ${newEmpForm.maritalStatus === 'Yes' ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
-                                        disabled={newEmpForm.maritalStatus !== 'Yes'}
-                                        value={newEmpForm.spouseName || ''}
-                                        onChange={e => setNewEmpForm({ ...newEmpForm, spouseName: e.target.value })}
-                                    />
+                                         id="spouseNameInput"
+                                         tabIndex={isRejoining ? -1 : undefined}
+                                         title="Spouse Legal Name"
+                                         aria-label="Spouse Legal Name"
+                                         className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${(newEmpForm.maritalStatus === 'Yes' || newEmpForm.relationship === 'Spouse') ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
+                                         disabled={newEmpForm.maritalStatus !== 'Yes' && newEmpForm.relationship !== 'Spouse'}
+                                         value={newEmpForm.spouseName || ''}
+                                         onChange={e => {
+                                             const val = e.target.value.toUpperCase();
+                                             const updates: Partial<Employee> = { spouseName: val };
+                                             if (newEmpForm.relationship === 'Spouse') {
+                                                 updates.fatherSpouseName = val;
+                                             }
+                                             setNewEmpForm({ ...newEmpForm, ...updates });
+                                         }}
+                                     />
                                 </div>
                                 <div className="space-y-1.5">
-                                    <label htmlFor="spouseGenderInput" className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Gender</label>
+                                    <label htmlFor="spouseGenderInput" className={`text-[10px] font-bold uppercase tracking-widest ${(newEmpForm.maritalStatus === 'Yes' || newEmpForm.relationship === 'Spouse') ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Gender</label>
                                      <select
-                                        id="spouseGenderInput"
-                                        tabIndex={isRejoining ? -1 : undefined}
-                                        title="Spouse Gender"
-                                        aria-label="Spouse Gender"
-                                        className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none transition-colors ${newEmpForm.maritalStatus === 'Yes' ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
-                                        disabled={newEmpForm.maritalStatus !== 'Yes'}
-                                        value={newEmpForm.spouseGender || ''}
-                                        onChange={e => setNewEmpForm({ ...newEmpForm, spouseGender: e.target.value })}
-                                    >
-                                        <option value="">Select...</option>
-                                        <option value="Male">Male</option>
-                                        <option value="Female">Female</option>
-                                        <option value="Others">Others</option>
-                                    </select>
+                                         id="spouseGenderInput"
+                                         tabIndex={isRejoining ? -1 : undefined}
+                                         title="Spouse Gender"
+                                         aria-label="Spouse Gender"
+                                         className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${(newEmpForm.maritalStatus === 'Yes' || newEmpForm.relationship === 'Spouse') ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
+                                         disabled={newEmpForm.maritalStatus !== 'Yes' && newEmpForm.relationship !== 'Spouse'}
+                                         value={newEmpForm.spouseGender || ''}
+                                         onChange={e => setNewEmpForm({ ...newEmpForm, spouseGender: e.target.value })}
+                                     >
+                                         <option value="">Select...</option>
+                                         <option value="Male">Male</option>
+                                         <option value="Female">Female</option>
+                                         <option value="Others">Others</option>
+                                     </select>
                                 </div>
                                 <div className="space-y-1.5">
-                                    <label htmlFor="spouseAadhaarInput" className={`text-[10px] font-bold uppercase tracking-widest ${newEmpForm.maritalStatus === 'Yes' ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Aadhaar No</label>
+                                    <label htmlFor="spouseAadhaarInput" className={`text-[10px] font-bold uppercase tracking-widest ${(newEmpForm.maritalStatus === 'Yes' || newEmpForm.relationship === 'Spouse') ? 'text-slate-500' : 'text-slate-700'}`}>Spouse Aadhaar No</label>
                                      <input
-                                        id="spouseAadhaarInput"
-                                        tabIndex={isRejoining ? -1 : undefined}
-                                        title="Spouse Aadhaar Number"
-                                        aria-label="Spouse Aadhaar Number"
-                                        className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none font-mono transition-colors ${newEmpForm.maritalStatus === 'Yes' ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
-                                        disabled={newEmpForm.maritalStatus !== 'Yes'}
-                                        value={newEmpForm.spouseAadhaar || ''}
-                                        onChange={e => setNewEmpForm({ ...newEmpForm, spouseAadhaar: e.target.value })}
-                                    />
+                                         id="spouseAadhaarInput"
+                                         tabIndex={isRejoining ? -1 : undefined}
+                                         title="Spouse Aadhaar Number"
+                                         aria-label="Spouse Aadhaar Number"
+                                         className={`w-full bg-slate-900 border rounded-xl p-3 text-sm text-white outline-none font-mono transition-colors focus:ring-2 focus:ring-blue-500 ${(newEmpForm.maritalStatus === 'Yes' || newEmpForm.relationship === 'Spouse') ? 'border-slate-700' : 'border-slate-800 text-slate-600'}`}
+                                         disabled={newEmpForm.maritalStatus !== 'Yes' && newEmpForm.relationship !== 'Spouse'}
+                                         value={newEmpForm.spouseAadhaar || ''}
+                                         onChange={e => {
+                                             const val = e.target.value.replace(/\D/g, '').slice(0, 12);
+                                             const formattedVal = val.replace(/(\d{4})(?=\d)/g, '$1 ');
+                                             setNewEmpForm({ ...newEmpForm, spouseAadhaar: formattedVal });
+                                         }}
+                                     />
                                 </div>
                             </div>
                         </div>
@@ -468,11 +596,11 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                     <div>
                         <FormSectionHeader icon={ShieldCheck} title="6. Statutory Identity Numbers" color="text-amber-400" />
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-                            <div className="space-y-1.5"><label htmlFor="panInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PAN No</label><input id="panInput" tabIndex={isRejoining ? -1 : undefined} title="PAN Number" aria-label="PAN Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500 uppercase" value={newEmpForm.pan} onChange={e => setNewEmpForm({ ...newEmpForm, pan: e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="aadhaarInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Aadhaar No*</label><input id="aadhaarInput" tabIndex={isRejoining ? -1 : undefined} required title="Aadhaar Number" aria-label="Aadhaar Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.aadhaarNumber} onChange={e => setNewEmpForm({ ...newEmpForm, aadhaarNumber: e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="uanInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">UAN No</label><input id="uanInput" tabIndex={isRejoining ? -1 : undefined} title="UAN Number" aria-label="UAN Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.uanc} onChange={e => setNewEmpForm({ ...newEmpForm, uanc: e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="pfNumberInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PF Number</label><input id="pfNumberInput" tabIndex={isRejoining ? -1 : undefined} title="PF Number" aria-label="PF Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.pfNumber} onChange={e => setNewEmpForm({ ...newEmpForm, pfNumber: e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="esiNumberInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ESI Number</label><input id="esiNumberInput" tabIndex={isRejoining ? -1 : undefined} title="ESI Number" aria-label="ESI Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.esiNumber} onChange={e => setNewEmpForm({ ...newEmpForm, esiNumber: e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="panInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PAN No</label><input id="panInput" tabIndex={isRejoining ? -1 : undefined} title="PAN Number" aria-label="PAN Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500 uppercase" value={newEmpForm.pan || ''} onChange={e => { let formatted = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10); setNewEmpForm({ ...newEmpForm, pan: formatted }); }} /></div>
+                            <div className="space-y-1.5"><label htmlFor="aadhaarInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Aadhaar No*</label><input id="aadhaarInput" tabIndex={isRejoining ? -1 : undefined} required title="Aadhaar Number" aria-label="Aadhaar Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.aadhaarNumber || ''} onChange={e => { const val = e.target.value.replace(/\D/g, '').slice(0, 12); const formattedVal = val.replace(/(\d{4})(?=\d)/g, '$1 '); setNewEmpForm({ ...newEmpForm, aadhaarNumber: formattedVal }); }} /></div>
+                            <div className="space-y-1.5"><label htmlFor="uanInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">UAN No</label><input id="uanInput" tabIndex={isRejoining ? -1 : undefined} title="UAN Number" aria-label="UAN Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.uanc || ''} onChange={e => setNewEmpForm({ ...newEmpForm, uanc: e.target.value.replace(/\D/g, '').slice(0, 12) })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="pfNumberInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PF Number</label><input id="pfNumberInput" tabIndex={isRejoining ? -1 : undefined} title="PF Number" aria-label="PF Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.pfNumber || ''} onChange={e => setNewEmpForm({ ...newEmpForm, pfNumber: e.target.value })} /></div>
+                            <div className="space-y-1.5"><label htmlFor="esiNumberInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ESI Number</label><input id="esiNumberInput" tabIndex={isRejoining ? -1 : undefined} title="ESI Number" aria-label="ESI Number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-amber-500" value={newEmpForm.esiNumber || ''} onChange={e => setNewEmpForm({ ...newEmpForm, esiNumber: e.target.value.replace(/\D/g, '').slice(0, 17) })} /></div>
                         </div>
                     </div>
 
@@ -687,7 +815,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                     )}
 
                     <div className="flex justify-end gap-4 pt-6 border-t border-slate-800">
-                        <button type="button" onClick={onClose} title="Cancel and Close Form" aria-label="Cancel and Close Form" className="px-6 py-3 rounded-xl font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-all text-sm">Cancel</button>
+                        <button type="button" onClick={handleClose} title="Cancel and Close Form" aria-label="Cancel and Close Form" className="px-6 py-3 rounded-xl font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-all text-sm">Cancel</button>
                         <button 
                             type="submit" 
                             title={isRejoining && (!isDOJUpdated || !isDOLRemoved) ? "Required for Rejoin: 1. Update DOJ 2. Clear DOL" : "Save Employee Record"}
@@ -719,6 +847,34 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                     </div>
                 </form>
             </div>
+
+            {/* Unsaved Changes Confirmation Modal */}
+            {showCancelConfirm && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-900/30 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="p-4 bg-amber-900/20 border-b border-amber-900/30 flex justify-between items-center text-amber-400">
+                            <h3 className="text-base font-bold flex items-center gap-2">
+                                <AlertCircle size={18} /> Unsaved Changes
+                            </h3>
+                            <button type="button" onClick={() => setShowCancelConfirm(false)} className="text-amber-400/60 hover:text-amber-400" aria-label="Close warning"><X size={18} /></button>
+                        </div>
+                        <div className="p-5 space-y-5">
+                            <div className="p-3 bg-amber-900/10 border border-amber-900/20 rounded-xl flex gap-3">
+                                <AlertCircle className="text-amber-400 shrink-0" size={20} />
+                                <div className="text-xs text-amber-300/80 leading-relaxed font-medium">
+                                    You have made changes to the employee profile. Are you sure you want to discard these changes and close the form?
+                                </div>
+                            </div>
+                            <div className="flex gap-3">
+                                <button type="button" onClick={handleSaveFromModal} className="flex-1 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl shadow-lg shadow-blue-900/20 transition-all">Save Changes</button>
+                                <button type="button" onClick={onClose} className="flex-1 py-2 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold rounded-xl transition-all">
+                                    Discard Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

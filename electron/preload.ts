@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createDataBackup: (arg: any) => ipcRenderer.invoke('create-data-backup', arg),
     restoreSqliteBackup: (arg: any) => ipcRenderer.invoke('restore-sqlite-backup', arg),
     closeApp: () => ipcRenderer.invoke('close-app'),
+    hardResetApp: () => ipcRenderer.invoke('hard-reset-app'),
     logAuditEvent: (args: { type: string, message: string, metadata?: any }) => ipcRenderer.invoke('log-audit-event', args),
     getMachineId: () => ipcRenderer.invoke('get-machine-id'),
     selectAppDirectory: () => ipcRenderer.invoke('select-app-directory'),

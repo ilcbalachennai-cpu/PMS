@@ -18,6 +18,7 @@ interface EmployeeToolbarProps {
     showFYFilter?: boolean;
     onToggleFYFilter?: (val: boolean) => void;
     activeFinancialYear?: string;
+    isLicenseExpired?: boolean;
 }
 
 const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
@@ -36,72 +37,88 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
     onAddNew,
     showFYFilter,
     onToggleFYFilter,
-    activeFinancialYear
+    activeFinancialYear,
+    isLicenseExpired
 }) => {
     return (
         <div className="space-y-2">
             {/* ACTION CARD */}
-            <div className="bg-[#1e293b] p-3 rounded-2xl border border-slate-800/80 shadow-2xl flex flex-nowrap items-center justify-between gap-4 transition-all overflow-x-auto custom-scrollbar">
-                <div className="flex items-center flex-nowrap gap-2">
-                    <div className="flex items-center gap-2 bg-[#0f172a] p-1 rounded-xl border border-slate-800">
-                        <button
-                            onClick={onDownloadTemplate}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
-                            title="Download blank template for new employees"
-                        >
-                            <FileSpreadsheet size={16} /> Template
-                        </button>
-                        <button
-                            onClick={onDownloadUpdateTemplate}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
-                            title="Download template with existing employees to update details"
-                        >
-                            <FileSpreadsheet size={16} className="text-amber-500" /> Update Template
-                        </button>
-                        <button
-                            onClick={onImportClick}
-                            disabled={isImporting}
-                            className="flex items-center gap-2 px-3 py-2 bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600/20 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider border border-emerald-500/10"
-                            title="Import new employees"
-                        >
-                            {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} className="text-emerald-500" />} Import
-                        </button>
-                        <button
-                            onClick={onImportUpdateClick}
-                            disabled={isImporting}
-                            className="flex items-center gap-2 px-3 py-2 bg-amber-600/10 text-amber-400 hover:bg-amber-600/20 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider border border-emerald-500/10"
-                            title="Import updated employee details"
-                        >
-                            {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} className="text-amber-500" />} Update Import
-                        </button>
-                    </div>
+            <div className="bg-[#1e293b] p-2 rounded-2xl border border-slate-800/80 shadow-2xl flex flex-nowrap items-center justify-between gap-2 transition-all overflow-x-auto custom-scrollbar">
+                <div className="flex items-center flex-nowrap gap-1">
+                    {!isLicenseExpired && (
+                        <div className="flex items-center gap-2 bg-[#0f172a] p-1 rounded-xl border border-slate-800">
+                            <button
+                                onClick={onDownloadTemplate}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
+                                title="Download blank template for new employees"
+                            >
+                                <FileSpreadsheet size={16} /> Template
+                            </button>
+                            <button
+                                onClick={onDownloadUpdateTemplate}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
+                                title="Download template with existing employees to update details"
+                            >
+                                <FileSpreadsheet size={16} className="text-amber-500" /> Update Template
+                            </button>
+                            <button
+                                onClick={onImportClick}
+                                disabled={isImporting}
+                                title="Import new employee records from an Excel template"
+                                className={`flex items-center gap-1.5 px-3 py-1.5 ${isImporting ? 'bg-blue-600/50 text-blue-300 cursor-wait' : 'bg-blue-600 text-white hover:bg-blue-500 hover:shadow-[0_0_15px_rgba(59,130,246,0.5)]'} rounded-lg transition-all font-black text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} 
+                                Import New
+                            </button>
+                            <button
+                                onClick={onImportUpdateClick}
+                                disabled={isImporting}
+                                title="Update existing employee records using the downloaded Update Template"
+                                className={`flex items-center gap-1.5 px-3 py-1.5 ${isImporting ? 'bg-amber-600/50 text-amber-300 cursor-wait' : 'bg-amber-600 text-white hover:bg-amber-500 hover:shadow-[0_0_15px_rgba(245,158,11,0.5)]'} rounded-lg transition-all font-black text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} 
+                                Import Updates
+                            </button>
+                        </div>
+                    )}
 
                     <div className="flex items-center gap-2 bg-[#0f172a] p-1 rounded-xl border border-slate-800">
                         <button
                             onClick={onExportClick}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
-                            title="Export active employee list to Excel"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 text-emerald-400 border border-emerald-500/50 hover:bg-emerald-600 hover:text-white hover:shadow-[0_0_15px_rgba(16,185,129,0.5)] rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
                         >
                             <Download size={16} /> Export
-                        </button>
-                        <button
-                            onClick={onShowRejoin}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
-                            title="Process rejoining for left employees"
-                        >
-                            <RotateCcw size={16} /> Rejoin
                         </button>
                     </div>
                 </div>
 
-                <button
-                    onClick={onAddNew}
-                    className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-500 transition-all shadow-[0_0_20px_rgba(37,99,235,0.2)] font-black uppercase tracking-widest text-[11px] group"
-                    title="Add a new employee manually"
-                >
-                    <Plus size={18} strokeWidth={3} className="group-hover:rotate-90 transition-transform duration-300" /> 
-                    Add New
-                </button>
+                <div className="flex items-center flex-nowrap gap-2">
+                    {!isLicenseExpired && (
+                        <button
+                            onClick={onShowRejoin}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 rounded-xl transition-all font-black text-[11px] uppercase tracking-wider border border-slate-700"
+                        >
+                            <RotateCcw size={16} className="text-amber-400" />
+                            Rejoin
+                        </button>
+                    )}
+                    
+
+
+                    {!isLicenseExpired && (
+                        <button
+                            onClick={onAddNew}
+                            disabled={totalActive >= limit}
+                            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl font-black text-[11px] uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed
+                                ${totalActive >= limit 
+                                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/50 cursor-not-allowed' 
+                                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] shadow-lg'}`}
+                        >
+                            <Plus size={18} />
+                            Add New
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* STATUS & SEARCH BOX */}

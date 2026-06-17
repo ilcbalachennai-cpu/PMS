@@ -11,7 +11,31 @@ import * as os from 'os';
 let mainWindow: BrowserWindow | null = null;
 const isDev = process.env.NODE_ENV === 'development';
 
+// Force App Name to ensure consistency in OS-level paths before anything else
+app.name = 'BharatPayPro';
+
+// Force Electron to use EXACTLY "BharatPayPro" folder in %APPDATA% 
+// This prevents it from creating multiple random folders like "BPP_APP" or "bharatpay-pro"
+const appDataPath = app.getPath('appData');
+const newUserData = path.join(appDataPath, 'BharatPayPro');
+app.setPath('userData', newUserData);
+
 // ── CONFIGURATION & PERSISTENCE ──
+// Auto-migrate old configs to prevent data loss for existing users!
+const oldDirs = ['BPP_APP', 'bharatpay-pro', 'BharatPayRoll'];
+for (const oldDir of oldDirs) {
+    const oldConfigPath = path.join(appDataPath, oldDir, isDev ? 'app-config-dev.json' : 'app-config.json');
+    const newConfigPath = path.join(newUserData, isDev ? 'app-config-dev.json' : 'app-config.json');
+    
+    if (fs.existsSync(oldConfigPath) && !fs.existsSync(newConfigPath)) {
+        try {
+            if (!fs.existsSync(newUserData)) fs.mkdirSync(newUserData, { recursive: true });
+            fs.copyFileSync(oldConfigPath, newConfigPath);
+            console.log(`[Migration] Migrated old config from ${oldDir} to BharatPayPro`);
+        } catch(e) {}
+    }
+}
+
 // V03.01.06: Isolate Developer and Production database configurations
 const CONFIG_PATH = isDev 
     ? path.join(app.getPath('userData'), 'app-config-dev.json') 
@@ -51,34 +75,18 @@ let appBasePath = appConfig.appBasePath || (isDev ? 'E:\\BharatPP_Dev' : '');
 
 // Helper to get structured paths
 const getAppPaths = (base: string) => {
-    // 🔍 SMART PATH RESOLUTION
-    // If the base folder already has 'Data' or 'BharatPP/Data', use it correctly.
-    let root = base;
-    const directDataPath = path.join(base, 'Data');
-    const nestedDataPath = path.join(base, 'BharatPP', 'Data');
-
-    if (fs.existsSync(nestedDataPath)) {
-        // Case: User selected the PARENT of BharatPP
-        root = path.join(base, 'BharatPP');
-    } else if (fs.existsSync(directDataPath)) {
-        // Case: User selected the 'BharatPP' folder itself
-        root = base;
-    } else {
-        // Case: New installation or empty folder
-        // V04.00.02: Prevent nested BharatPP folder creation if already pointing to Dev/Prod root
-        if (base.endsWith('BharatPP') || base.endsWith('BharatPP_Dev')) {
-            root = base;
-        } else {
-            root = path.join(base, 'BharatPP');
-        }
-    }
+    // Standardize architecture: The physical root is ALWAYS inside a "BharatPP" folder.
+    // If the user selected a directory already named exactly "BharatPP", we use it as-is.
+    // Otherwise, we automatically nest everything inside a "BharatPP" subfolder.
+    const isExactlyBharatPP = path.basename(base).toLowerCase() === 'bharatpp';
+    const actualRoot = isExactlyBharatPP ? base : path.join(base, 'BharatPP');
 
     return {
-        root,
-        data: path.join(root, 'Data'),
-        reports: path.join(root, 'Report files'),
-        backups: path.join(root, 'Data backup'),
-        templates: path.join(root, 'Templates')
+        root: actualRoot, // The Global Registry DB stays EXACTLY in the BharatPP folder
+        data: path.join(actualRoot, 'Data'),
+        reports: path.join(actualRoot, 'Report files'),
+        backups: path.join(actualRoot, 'Data backup'),
+        templates: path.join(actualRoot, 'Templates')
     };
 };
 
@@ -92,12 +100,32 @@ function initializeDatabase(basePath: string, companyId?: string) {
         return;
     }
 
+    // V07: Prevent database creation inside installation directory
+    if (basePath.includes('BPP_APP') || basePath.includes(app.getAppPath())) {
+        console.error('❌ FATAL: Cannot initialize database inside BPP_APP installation folder for security reasons.');
+        return;
+    }
+
     // V03.01.07: Forced base path to User App folder for debugging
     // console.log(`🔍 Original basePath: ${basePath}. Forcing to E:\\BharatPP_Dev`);
     // basePath = 'E:\\BharatPP_Dev';
 
     appBasePath = basePath;
     const paths = getAppPaths(basePath);
+    
+    // --- V06.01.03: Auto-Repair from temporary DB ---
+    try {
+        const repairDbPath = path.join(paths.root, 'temp_active_db.sqlite');
+        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
+        if (fs.existsSync(repairDbPath)) {
+            console.log(`[Auto-Repair] Found temp_active_db.sqlite in root folder! Overwriting active_db.sqlite...`);
+            fs.copyFileSync(repairDbPath, rootDbPath);
+            fs.unlinkSync(repairDbPath);
+            console.log(`[Auto-Repair] Master database recovered successfully.`);
+        }
+    } catch (err) {
+        console.error(`[Auto-Repair] Failed to apply repair DB:`, err);
+    }
     
     // V03.01.03: Direct Silo Provisioning
     activeCompanyId = companyId || activeCompanyId || null;
@@ -154,6 +182,7 @@ function initializeDatabase(basePath: string, companyId?: string) {
         // If this is the Root DB (no companyId specified), run the auto migrator!
         if (!companyId || companyId === 'default' || companyId === 'null') {
             performLegacyAutoMigration(db, paths).catch(e => console.error("AutoMigration Error:", e));
+            performAutoRescue(db, paths).catch(e => console.error("AutoRescue Error:", e));
         }
         
         // V03.01.07: Create a startup backup
@@ -318,11 +347,25 @@ function ensureDatabase() {
  */
 function copyRecursiveSync(src: string, dest: string) {
     if (!fs.existsSync(src)) return;
+    
+    // V06.01.03: INFINITE RECURSION PREVENTION
+    // Resolve absolute paths to prevent copying a folder into its own subdirectory
+    const absoluteSrc = path.resolve(src);
+    const absoluteDest = path.resolve(dest);
+    if (absoluteDest.startsWith(absoluteSrc + path.sep) || absoluteDest === absoluteSrc) {
+        console.warn(`[IPC] Blocked recursive copy loop. Cannot copy ${absoluteSrc} into ${absoluteDest}`);
+        return;
+    }
+
     if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
     const entries = fs.readdirSync(src, { withFileTypes: true });
     for (const entry of entries) {
         const srcPath = path.join(src, entry.name);
         const destPath = path.join(dest, entry.name);
+        
+        // Final sanity check for nested folders
+        if (path.resolve(destPath).startsWith(path.resolve(srcPath))) continue;
+
         if (entry.isDirectory()) {
             copyRecursiveSync(srcPath, destPath);
         } else {
@@ -350,6 +393,7 @@ function createWindow() {
             contextIsolation: true,
         },
         autoHideMenuBar: true,
+        closable: false,
         show: false, // Don't show until ready-to-show
     });
     mainWindow.once('ready-to-show', () => {
@@ -365,6 +409,37 @@ function createWindow() {
     });
 
     // We will export a method for the downloader to call when finished
+    ipcMain.handle('hard-reset-app', async () => {
+        try {
+            console.log('[IPC] hard-reset-app requested');
+            const appDataPath = app.getPath('appData');
+            const targetDirs = [
+                path.join(appDataPath, 'BPP_APP'),
+                path.join(appDataPath, 'bharatpay-pro'),
+                path.join(appDataPath, 'BharatPayPro')
+            ];
+            
+            for (const dir of targetDirs) {
+                if (fs.existsSync(dir)) {
+                    fs.rmSync(dir, { recursive: true, force: true });
+                    console.log(`[IPC] Wiped configuration directory: ${dir}`);
+                }
+            }
+            
+            // Relaunch and exit
+            app.relaunch();
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.setClosable(true);
+                mainWindow.destroy();
+            }
+            app.quit();
+            return { success: true };
+        } catch (error: any) {
+            console.error('[IPC] hard-reset-app failed:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
     ipcMain.handle('check-close-requested', () => {
         if (closeRequested) {
             app.quit();
@@ -397,23 +472,108 @@ function createWindow() {
 // Prevent multiple instances of BPP_APP from running simultaneously in production.
 const gotTheLock = app.requestSingleInstanceLock();
 
-if (!gotTheLock && !isDev) {
-  // A second instance tried to launch — show the custom already running UI.
-  app.whenReady().then(() => {
-    const errorWin = new BrowserWindow({
-      width: 420,
-      height: 380,
+if (!gotTheLock) {
+  // A second instance tried to launch — show a warning and quit.
+  app.on('ready', () => {
+    const errorWindow = new BrowserWindow({
+      width: 480,
+      height: 280,
       frame: false,
       transparent: true,
       resizable: false,
       alwaysOnTop: true,
-      webPreferences: { 
-        nodeIntegration: false, 
-        contextIsolation: true 
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
       }
     });
-    errorWin.loadFile(path.join(__dirname, 'already-running.html'));
-    errorWin.on('closed', () => app.quit());
+
+    const errorHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: transparent;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            -webkit-app-region: drag;
+          }
+          .modal {
+            background-color: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            width: 430px;
+            padding: 24px;
+            text-align: center;
+            color: #c9d1d9;
+          }
+          .title {
+            color: #ff7b72;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+          }
+          .message {
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 24px;
+            color: #8b949e;
+          }
+          .button {
+            -webkit-app-region: no-drag;
+            background-color: #238636;
+            color: #ffffff;
+            border: 1px solid rgba(240,246,252,0.1);
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+          }
+          .button:hover {
+            background-color: #2ea043;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="modal">
+          <div class="title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            BharatPay Pro - Already Running
+          </div>
+          <div class="message">
+            BharatPay Pro is already open on this machine.<br/><br/>
+            Only one session is allowed at a time to prevent data conflicts.<br/>
+            Please switch to the existing window.
+          </div>
+          <button class="button" onclick="window.close()">Close</button>
+        </div>
+      </body>
+      </html>
+    `;
+
+    errorWindow.loadURL('data:text/html;charset=utf-8;base64,' + Buffer.from(errorHtml).toString('base64'));
+
+    errorWindow.on('closed', () => {
+      app.quit();
+    });
   });
 } else {
   // If a second instance attempts while we are the primary, focus our window (only in prod).
@@ -437,7 +597,17 @@ if (isWin7 || isLegacyElectron || process.argv.includes('--disable-gpu')) {
 }
 
 app.whenReady().then(() => {
-    // ── ULTRA-FAST STARTUP (V02.02.26) ──
+    if (!gotTheLock) return; // Prevent main app initialization when running as second instance
+    
+    // Dismiss any lingering patch update UI popups seamlessly
+    try {
+        execSync('taskkill /F /IM mshta.exe /T', { stdio: 'ignore', windowsHide: true });
+    } catch (e) {}
+    try {
+        execSync('taskkill /F /IM wscript.exe /T', { stdio: 'ignore', windowsHide: true });
+    } catch (e) {}
+
+    // 🔥 ULTRA-FAST STARTUP (V02.02.26) 🔥
     // 1. Create window immediately for perception of speed
     createWindow();
 
@@ -505,9 +675,14 @@ ipcMain.handle('initialize-app-directory', async (_, selectedPath: string) => {
             const oldPaths = getAppPaths(appBasePath);
             const newPaths = getAppPaths(selectedPath);
             
+            // V06.01.03: Prevent Migrating into own sub-directory
+            if (path.resolve(selectedPath).startsWith(path.resolve(appBasePath) + path.sep)) {
+                return { success: false, error: 'Cannot migrate into a sub-folder of the existing directory. Please select a different location.' };
+            }
+            
             // 1. Migrate registry active_db.sqlite
-            const oldRegistry = path.join(appBasePath, 'active_db.sqlite');
-            const newRegistry = path.join(selectedPath, 'active_db.sqlite');
+            const oldRegistry = path.join(oldPaths.root, 'active_db.sqlite');
+            const newRegistry = path.join(newPaths.root, 'active_db.sqlite');
             if (fs.existsSync(oldRegistry) && !fs.existsSync(newRegistry)) {
                 try {
                     fs.copyFileSync(oldRegistry, newRegistry);
@@ -563,6 +738,12 @@ ipcMain.handle('initialize-app-directory', async (_, selectedPath: string) => {
 });
 
 ipcMain.handle('get-app-directory', async () => {
+    if (appBasePath && (appBasePath.includes('BPP_APP') || appBasePath.includes(app.getAppPath()))) {
+        console.error('❌ Security block: Configured directory is inside installation folder. Forcing setup.');
+        appBasePath = '';
+        saveAppConfig({ ...getAppConfig(), appBasePath: '' });
+        return null;
+    }
     return appBasePath || null;
 });
 
@@ -878,6 +1059,80 @@ const GLOBAL_KEYS = [
     'app_last_seen_patch_ts'
 ];
 
+async function performAutoRescue(rootDb: Database.Database, appPaths: any) {
+    try {
+        const dataDir = appPaths.data;
+        if (!fs.existsSync(dataDir)) return;
+
+        // Check if app_companies is already populated. If so, normal users just log in.
+        const companiesRow = rootDb.prepare('SELECT value FROM store WHERE key = ?').get('app_companies') as { value: string } | undefined;
+        let existingIds: string[] = [];
+        let existingComps: any[] = [];
+        
+        if (companiesRow && companiesRow.value) {
+            try {
+                existingComps = JSON.parse(companiesRow.value);
+                existingIds = existingComps.map((c: any) => c.id);
+            } catch (e) {}
+        }
+
+        // If the user already has companies registered, we don't strictly *need* to rescue automatically
+        // because it might be intentional. But for a fresh config wipe, `existingComps` will be empty.
+        // We will rescue any silos that aren't registered ONLY if the registry is empty.
+        if (existingComps.length > 0) return;
+
+        const silos = fs.readdirSync(dataDir)
+            .filter(name => {
+                const siloPath = path.join(dataDir, name);
+                return fs.statSync(siloPath).isDirectory() && fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
+            })
+            .filter(name => name !== '.icon-ico');
+        
+        const missingSilos = silos.filter(s => !existingIds.includes(s));
+        if (missingSilos.length === 0) return;
+
+        console.log(`[AutoRescue] Found ${missingSilos.length} orphaned silos. Syncing to root DB...`);
+
+        for (const siloId of missingSilos) {
+            try {
+                const siloDbPath = path.join(dataDir, siloId, 'active_db.sqlite');
+                const siloDb = new Database(siloDbPath);
+                
+                let profileRow = siloDb.prepare(`SELECT value FROM store WHERE key = ?`).get(`app_company_profile_${siloId}`) as { value: string } | undefined;
+                if (!profileRow) {
+                    profileRow = siloDb.prepare(`SELECT value FROM store WHERE key = 'app_company_profile' OR key = 'company_profile'`).get() as { value: string } | undefined;
+                }
+                
+                let compName = `Rescued Org (${siloId})`;
+                let createdDate = new Date().toISOString();
+                if (profileRow && profileRow.value) {
+                    const parsed = JSON.parse(profileRow.value);
+                    compName = parsed.establishmentName || parsed.tradeName || compName;
+                    createdDate = parsed.createdDate || createdDate;
+                }
+
+                existingComps.push({
+                    id: siloId,
+                    establishmentName: compName,
+                    createdDate: createdDate
+                });
+                
+                siloDb.close();
+                console.log(`[AutoRescue] Recovered silo ${siloId} (${compName})`);
+            } catch (e) {
+                console.warn(`[AutoRescue] Failed to recover silo ${siloId}:`, e);
+            }
+        }
+
+        if (existingComps.length > 0 && missingSilos.length > 0) {
+            rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)').run('app_companies', JSON.stringify(existingComps));
+            console.log(`[AutoRescue] Successfully registered orphaned silos.`);
+        }
+    } catch (err) {
+        console.error('[AutoRescue] Critical error:', err);
+    }
+}
+
 async function performLegacyAutoMigration(rootDb: Database.Database, appPaths: any) {
     try {
         console.log("🚀 [AutoMigrate] Checking for legacy data in root DB...");
@@ -901,7 +1156,7 @@ async function performLegacyAutoMigration(rootDb: Database.Database, appPaths: a
             try { companies = JSON.parse(companiesRow.value); } catch(e) {}
         }
         const companyIds = companies.map(c => c.id);
-        const defaultCompanyId = companyIds.length > 0 ? companyIds[0] : 'company_1';
+        const defaultCompanyId = companyIds.length > 0 ? companyIds[0] : 'default';
 
         let migratedCount = 0;
 
@@ -937,6 +1192,17 @@ async function performLegacyAutoMigration(rootDb: Database.Database, appPaths: a
 
         console.log(`🎉 [AutoMigrate] SUCCESS! ${migratedCount} legacy keys successfully sliced and moved into Silo folders.`);
         
+        // V06.01.01: Update the Root Database (Global Registry) to point to the migrated silos!
+        if (appBasePath) {
+            const registryPaths = getAppPaths(appBasePath);
+            const globalDbPath = path.join(registryPaths.root, 'active_db.sqlite');
+            const globalDb = new Database(globalDbPath);
+            globalDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+            globalDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)').run('app_companies', JSON.stringify(companies));
+            globalDb.close();
+            console.log(`[AutoMigrate] Synced ${companies.length} companies to the Global Registry.`);
+        }
+        
     } catch (e) {
         console.error("❌ [AutoMigrate] FAILED:", e);
     }
@@ -946,7 +1212,8 @@ ipcMain.handle('db-set', async (_, { key, value }) => {
     try {
         if (GLOBAL_KEYS.includes(key as string)) {
             if (!appBasePath) throw new Error("Storage path not set");
-            const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+            const paths = getAppPaths(appBasePath);
+        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
             const rootDb = new Database(rootDbPath);
             rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
             const stmt = rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
@@ -972,7 +1239,8 @@ ipcMain.handle('db-get', async (_, key) => {
         let row: { value: string } | undefined;
         if (GLOBAL_KEYS.includes(key as string)) {
             if (appBasePath) {
-                const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+                const paths = getAppPaths(appBasePath);
+                const rootDbPath = path.join(paths.root, 'active_db.sqlite');
                 if (fs.existsSync(rootDbPath)) {
                     try {
                         const rootDb = new Database(rootDbPath, { readonly: true });
@@ -982,6 +1250,11 @@ ipcMain.handle('db-get', async (_, key) => {
                         console.warn('[IPC] Failed to fetch key from root registry database:', err);
                     }
                 }
+            }
+            
+            // --- CRITICAL FALLBACK FOR LEGACY DATA MIGRATION ---
+            if (!row && ensureDatabase() && db) {
+                row = db.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
             }
         } else {
             if (ensureDatabase() && db) {
@@ -1000,7 +1273,8 @@ ipcMain.handle('db-delete', async (_, key) => {
     try {
         if (GLOBAL_KEYS.includes(key as string)) {
             if (appBasePath) {
-                const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+                const paths = getAppPaths(appBasePath);
+        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
                 if (fs.existsSync(rootDbPath)) {
                     const rootDb = new Database(rootDbPath);
                     rootDb.prepare('DELETE FROM store WHERE key = ?').run(key);
@@ -1030,19 +1304,30 @@ ipcMain.handle('db-get-all', async () => {
         
         // 2. ── Strict Registry Merging ──
         if (appBasePath) {
-            const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+            const paths = getAppPaths(appBasePath);
+        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
             if (fs.existsSync(rootDbPath)) {
                 try {
                     const rootDb = new Database(rootDbPath, { readonly: true });
                     for (const key of GLOBAL_KEYS) {
                         const row = rootDb.prepare('SELECT value FROM store WHERE key = ?').get(key) as { value: string } | undefined;
-                        if (row) {
+                        
+                        let finalValue: any = null;
+                        
+                        if (row && row.value && row.value !== '[]') {
+                            finalValue = JSON.parse(row.value);
+                        } else if (key === 'app_companies') {
+                            // --- V06.01.07: Call Auto Heal ---
+                            finalValue = autoHealAppCompanies(rootDbPath, paths.data);
+                        }
+                        
+                        if (finalValue) {
                             // Replace if somehow it exists in silo (legacy data cleanup), otherwise push
                             const existingIndex = mergedData.findIndex(item => item.key === key);
                             if (existingIndex >= 0) {
-                                mergedData[existingIndex].value = JSON.parse(row.value);
+                                mergedData[existingIndex].value = finalValue;
                             } else {
-                                mergedData.push({ key, value: JSON.parse(row.value) });
+                                mergedData.push({ key, value: finalValue });
                             }
                         }
                     }
@@ -1059,12 +1344,74 @@ ipcMain.handle('db-get-all', async () => {
     }
 });
 
+// --- V06.01.07: AUTO-HEALING FRAMEWORK FOR APP_COMPANIES ---
+function autoHealAppCompanies(rootDbPath: string, dataDir: string): any[] | null {
+    console.log(`[db-get-global] Auto-Recovery Triggered! Root app_companies is missing/empty.`);
+    const recoveredCompanies: any[] = [];
+    if (fs.existsSync(dataDir)) {
+        const silos = fs.readdirSync(dataDir).filter(name => {
+            const siloPath = path.join(dataDir, name);
+            return fs.statSync(siloPath).isDirectory() && fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
+        });
+        for (const siloId of silos) {
+            try {
+                const siloDb = new Database(path.join(dataDir, siloId, 'active_db.sqlite'), { readonly: true });
+                let profile = null;
+                
+                try {
+                    const profileRow = siloDb.prepare("SELECT value FROM store WHERE key = 'app_company_profile'").get() as any;
+                    if (profileRow && profileRow.value) profile = JSON.parse(profileRow.value);
+                } catch(e) {}
+                
+                if (!profile) {
+                    try {
+                        const companyRow = siloDb.prepare("SELECT value FROM store WHERE key = 'app_companies'").get() as any;
+                        if (companyRow && companyRow.value) {
+                            const comps = JSON.parse(companyRow.value);
+                            profile = comps.find((c: any) => c.id === siloId) || comps[0];
+                        }
+                    } catch(e) {}
+                }
+                
+                siloDb.close();
+                
+                if (profile) {
+                    recoveredCompanies.push(profile);
+                    console.log(`[db-get-global] Rescued profile for silo: ${siloId}`);
+                } else {
+                    recoveredCompanies.push({ id: siloId, establishmentName: siloId, cin: '' });
+                    console.log(`[db-get-global] Rescued minimal ID for silo: ${siloId}`);
+                }
+            } catch(e) {
+                console.warn(`[db-get-global] Failed to read silo ${siloId} for recovery`, e);
+            }
+        }
+    }
+    if (recoveredCompanies.length > 0) {
+        // Save it back to root
+        try {
+            const writeDb = new Database(rootDbPath);
+            writeDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+            const stmtWrite = writeDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+            stmtWrite.run('app_companies', JSON.stringify(recoveredCompanies));
+            writeDb.close();
+            console.log(`[db-get-global] Auto-Recovery Complete! Injected ${recoveredCompanies.length} companies into root.`);
+        } catch(e) {
+            console.error(`[db-get-global] Auto-Recovery write failed`, e);
+        }
+        return recoveredCompanies;
+    }
+    return null;
+}
+// --- END AUTO-HEALING ---
+
 ipcMain.handle('db-get-global', async (_, key) => {
     try {
         console.log(`[db-get-global] Requested key: ${key}. appBasePath: ${appBasePath}`);
         if (!appBasePath) return null;
         
-        const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+        const paths = getAppPaths(appBasePath);
+        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
         console.log(`[db-get-global] DB Path: ${rootDbPath}. Exists? ${fs.existsSync(rootDbPath)}`);
         if (!fs.existsSync(rootDbPath)) return null;
         
@@ -1078,6 +1425,12 @@ ipcMain.handle('db-get-global', async (_, key) => {
         
         console.log(`[db-get-global] Row found? ${!!row}`);
         
+        // --- V06.01.07: Call Auto Heal ---
+        if (key === 'app_companies' && (!row || !row.value || row.value === '[]')) {
+            const healed = autoHealAppCompanies(rootDbPath, paths.data);
+            if (healed) return healed;
+        }
+
         if (row && row.value) {
            try {
               return JSON.parse(row.value);
@@ -1095,7 +1448,8 @@ ipcMain.handle('db-get-global', async (_, key) => {
 ipcMain.handle('db-set-global', async (_, { key, value }) => {
     try {
         // 1. Always write to the ROOT database (Registry) ONLY
-        const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+        const paths = getAppPaths(appBasePath);
+        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
         const rootDb = new Database(rootDbPath);
         rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
         const stmt = rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
@@ -1608,6 +1962,10 @@ async function getInternalMachineId() {
 ipcMain.handle('close-app', async () => {
     console.error("IPC 'close-app' WAS CALLED. STACK TRACE:");
     console.trace();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setClosable(true);
+        mainWindow.destroy();
+    }
     app.quit();
 });
 
@@ -2028,7 +2386,8 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
             // A. Flush and Close Database
             if (options?.newPatchTimestamp && appBasePath) {
                 try {
-                    const rootDbPath = path.join(appBasePath, 'active_db.sqlite');
+                    const paths = getAppPaths(appBasePath);
+        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
                     const rootDb = new Database(rootDbPath);
                     rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
                     rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)').run('app_active_patch_ts', JSON.stringify(options.newPatchTimestamp));
@@ -2068,8 +2427,25 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
                 // Determine binary name for taskkill
                 const exeName = app.isPackaged ? 'BPP_APP.exe' : 'electron.exe';
                 
-                // Chain: Delay -> Taskkill -> Delay -> Start Installer
-                const command = `timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}" ${isSilent ? '/S' : ''}`;
+                // Show a native borderless HTA Progress Popup without buttons
+                const htaPath = path.join(app.getPath('temp'), 'bpp_update_msg.hta');
+                const htaContent = `
+<HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal"/>
+<title>BharatPay Pro Update</title>
+<body style="background-color:#0f172a; color:#f8fafc; font-family:'Segoe UI', sans-serif; font-size:14px; margin:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; height:100%; border:1px solid #1e293b;">
+  <p style="margin-bottom:12px; font-weight:bold; font-size:18px; color:#38bdf8;">${isSilent ? 'Applying Background Patch Update...' : 'Preparing Application Update...'}</p>
+  <p style="margin:0; font-size:14px; opacity:0.85;">${isSilent ? 'Please wait, the app will restart automatically in 10-30 seconds.' : 'Please follow the setup wizard to complete the update.'}</p>
+  <script>
+    window.resizeTo(550, 200);
+    window.moveTo((screen.width - 550) / 2, (screen.height - 200) / 2);
+    setTimeout(function() { window.close(); }, 180000);
+  </script>
+</body>
+                `;
+                fs.writeFileSync(htaPath, htaContent.trim(), 'utf8');
+                
+                // Chain: Launch HTA Popup -> Delay -> Taskkill -> Delay -> Start Installer
+                const command = `start mshta "${htaPath}" & timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}" ${isSilent ? '/S' : ''}`;
                 
                 spawn('cmd', ['/c', command], {
                     detached: true,

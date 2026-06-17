@@ -21,7 +21,7 @@ import {
     generateTemplateWorkbook,
     getMonthAbbr
 } from '../services/reportService';
-import { formatIndianNumber } from '../utils/formatters';
+import { formatIndianNumber, getCompanyBackupFolder } from '../utils/formatters';
 
 
 interface ReportsProps {
@@ -119,9 +119,8 @@ const Reports: React.FC<ReportsProps> = ({
     const [pinShow, setPinShow] = useState(false);
     const pinVerifyBtnRef = useRef<HTMLButtonElement>(null);
 
+
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-
     const CHRONO_ORDER = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
 
     const [startYear, endYear] = useMemo(() => {
@@ -379,9 +378,10 @@ const Reports: React.FC<ReportsProps> = ({
             await new Promise(resolve => setTimeout(resolve, 1500));
             const backupFileName = getBackupFileName('BC', companyProfile, month, year);
             const encryptionKey = companyProfile.securityPin || 'INITIAL_PMS_KEY';
+            const subfolderPath = `${getCompanyBackupFolder(companyProfile.establishmentName, companyProfile.id)}/BK_${getMonthAbbr(month)}${String(year).slice(-2)}`;
             const backupRes = await window.electronAPI.createDataBackup({
                 fileName: backupFileName,
-                subfolder: companyProfile.establishmentName,
+                subfolder: subfolderPath,
                 encryptionKey: encryptionKey,
                 financialYear: activeFinancialYear
             });

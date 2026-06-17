@@ -253,7 +253,7 @@ const FineManager: React.FC<FineManagerProps> = ({
                                     </td>
                                     <td className="px-3 py-2 text-right">
                                         <input
-                                            type="number"
+                                            type="number" onFocus={(e) => e.target.select()}
                                             title={`Income Tax for ${emp.name}`}
                                             aria-label={`Income Tax for ${emp.name}`}
                                             disabled={inputDisabled}
@@ -265,7 +265,7 @@ const FineManager: React.FC<FineManagerProps> = ({
                                     </td>
                                     <td className="px-3 py-2 text-right">
                                         <input
-                                            type="number"
+                                            type="number" onFocus={(e) => e.target.select()}
                                             title={`Fine Amount for ${emp.name}`}
                                             aria-label={`Fine Amount for ${emp.name}`}
                                             disabled={inputDisabled}

@@ -11,8 +11,8 @@ interface EmployeeTableProps {
     employees: Employee[];
     selectedEmp: Employee | null;
     onSelectEmp: (emp: Employee) => void;
-    onEdit: (emp: Employee) => void;
-    onDelete: (emp: Employee, e: React.MouseEvent) => void;
+    onEdit?: (emp: Employee) => void;
+    onDelete?: (emp: Employee, e: React.MouseEvent) => void;
     calculateGrossWage: (emp: Employee) => number;
     currentUser?: User;
     frozenEmployeeIds?: Set<string>;
@@ -82,7 +82,7 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                             <td className="px-4 py-2.5 text-right space-x-1">
                                 <div className="flex justify-end gap-1">
                                     <button
-                                        onClick={(e) => { e.stopPropagation(); onEdit(emp); }}
+                                        onClick={(e) => { e.stopPropagation(); onEdit?.(emp); }}
                                         className="text-slate-400 hover:text-blue-400 p-1.5 hover:bg-blue-900/30 rounded-lg transition-all"
                                         title={`Edit ${emp.name}'s Profile`}
                                         aria-label={`Edit ${emp.name}'s Profile`}
@@ -91,7 +91,7 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                                     </button>
                                     {(currentUser?.role === 'Developer' || currentUser?.role === 'Administrator') && !frozenEmployeeIds.has(emp.id) && (
                                         <button
-                                            onClick={(e) => { e.stopPropagation(); onDelete(emp, e); }}
+                                            onClick={(e) => { e.stopPropagation(); onDelete?.(emp, e); }}
                                             className="text-slate-400 hover:text-red-400 p-1.5 hover:bg-red-900/20 rounded-lg transition-all"
                                             title={`Delete ${emp.name}'s Record`}
                                             aria-label={`Delete ${emp.name}'s Record`}

@@ -441,7 +441,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                         <div className="space-y-2 animate-in fade-in slide-in-from-left-2">
                             <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Increment %</label>
                             <div className="flex items-center gap-1.5">
-                                <input type="number" className="w-16 bg-[#0f172a] border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] font-black text-white outline-none focus:border-blue-500 text-center" placeholder="0.00" value={flatPercentage} title="Flat Increment Percentage for All Employees" aria-label="Flat Increment Percentage for All Employees" onChange={e => setFlatPercentage(+e.target.value)} disabled={isLocked} />
+                                <input type="number" onFocus={(e) => e.target.select()} className="w-16 bg-[#0f172a] border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] font-black text-white outline-none focus:border-blue-500 text-center" placeholder="0.00" value={flatPercentage} title="Flat Increment Percentage for All Employees" aria-label="Flat Increment Percentage for All Employees" onChange={e => setFlatPercentage(+e.target.value)} disabled={isLocked} />
                                 <span className="text-[10px] font-black text-blue-500">%</span>
                             </div>
                         </div>
@@ -535,7 +535,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                 const renderAdhocInput = (field: keyof typeof adhoc) => (
                                     <td className="px-2 py-2 text-center bg-purple-900/10">
                                         <input
-                                            type="number"
+                                            type="number" onFocus={(e) => e.target.select()}
                                             title={`Increment ${field} for ${emp.name}`}
                                             aria-label={`Increment ${field} for ${emp.name}`}
                                             disabled={isLocked}
@@ -571,7 +571,7 @@ const ArrearManager: React.FC<ArrearManagerProps> = ({
                                             percentageMode === 'Specific' && (
                                                 <td className="px-2 py-2 text-center bg-blue-900/10">
                                                     <input
-                                                        type="number"
+                                                        type="number" onFocus={(e) => e.target.select()}
                                                         title={`Specific Increment percentage for ${emp.name}`}
                                                         aria-label={`Specific Increment percentage for ${emp.name}`}
                                                         disabled={isLocked}

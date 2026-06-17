@@ -69,12 +69,13 @@ interface EmployeeListProps {
     globalMonth: string;
     globalYear: number;
     activeFinancialYear?: string;
+    isLicenseExpired?: boolean;
 }
 
 const EmployeeList: React.FC<EmployeeListProps> = ({
     employees, setEmployees, onAddEmployee, onBulkAddEmployees,
     designations, divisions, branches, sites, currentUser, companyProfile, dataSizeLimit, showAlert,
-    globalMonth, globalYear, activeFinancialYear
+    globalMonth, globalYear, activeFinancialYear, isLicenseExpired
 }) => {
     // --- State Management ---
     const [filterByFY, setFilterByFY] = useState(true);
@@ -320,6 +321,17 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
 
     const handleAddSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Length validations for Statutory Numbers
+        if (newEmpForm.uanc && newEmpForm.uanc.length < 10) {
+            showAlert('danger', 'Validation Error', 'UAN Number must be at least 10 digits long.');
+            return;
+        }
+        if (newEmpForm.esiNumber && newEmpForm.esiNumber.length < 10) {
+            showAlert('danger', 'Validation Error', 'ESI Number must be at least 10 digits long.');
+            return;
+        }
+
         const data = newEmpForm as Employee;
         if (editingId) {
             setEmployees(prev => prev.map(emp => emp.id === editingId ? data : emp));
@@ -441,7 +453,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     return (
         <div className="flex flex-col h-full animate-in fade-in duration-500">
             {/* STICKY HEADER & TOOLBAR */}
-            <div className="sticky top-0 z-20 bg-slate-950 px-8 pt-2 pb-2 border-b border-slate-800 space-y-3">
+            <div className="sticky top-0 z-20 bg-slate-950 px-4 pt-2 pb-2 border-b border-slate-800 space-y-3">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
                         <div className={`p-2.5 rounded-xl border transition-all ${isWin7 
@@ -453,6 +465,34 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                         <div className="flex flex-col md:flex-row md:items-baseline gap-2 md:gap-4">
                             <h1 className="text-lg font-black tracking-tighter text-white uppercase flex items-center gap-2">
                                 Personnel <span className="text-blue-500">Master</span>
+                                <button onClick={() => {
+                                    if (!companyProfile?.pfCode) {
+                                        showAlert('warning', 'Missing PF Code', 'Please set the PF Code in Company Profile first.');
+                                        return;
+                                    }
+                                    const prefix = companyProfile.pfCode.endsWith('/') ? companyProfile.pfCode : companyProfile.pfCode + '/';
+                                    const updated = employees.map(emp => {
+                                        const digits = emp.id.replace(/\D/g, '');
+                                        // Update if empty, or if it doesn't start with the prefix
+                                        if (digits && (!emp.pfNumber || !emp.pfNumber.startsWith(prefix))) {
+                                            return { ...emp, pfNumber: prefix + digits };
+                                        }
+                                        return emp;
+                                    });
+                                    setEmployees(updated);
+                                    showAlert('success', 'PF Numbers Fixed', 'Legacy PF numbers have been updated to the new format.');
+                                }} title="Prefix PF No with Employer code" className="text-[9px] bg-amber-600/20 text-amber-500 border border-amber-500/50 px-2 py-1 rounded ml-4 font-bold hover:bg-amber-500 hover:text-black transition-colors">FIX LEGACY PFs</button>
+                                <button onClick={() => {
+                                    const updated = employees.map(emp => {
+                                        let updatedEmp = { ...emp };
+                                        if (updatedEmp.name) updatedEmp.name = updatedEmp.name.toUpperCase();
+                                        if (updatedEmp.fatherSpouseName) updatedEmp.fatherSpouseName = updatedEmp.fatherSpouseName.toUpperCase();
+                                        if (updatedEmp.spouseName) updatedEmp.spouseName = updatedEmp.spouseName.toUpperCase();
+                                        return updatedEmp;
+                                    });
+                                    setEmployees(updated);
+                                    showAlert('success', 'Names Standardized', 'All employee and relative names have been converted to uppercase.');
+                                }} title="Standardising the NAMES in Caps" className="text-[9px] bg-sky-600/20 text-sky-500 border border-sky-500/50 px-2 py-1 rounded ml-2 font-bold hover:bg-sky-500 hover:text-white transition-colors">STANDARDIZE NAMES</button>
                             </h1>
                             <div className="hidden md:block w-[1px] h-4 bg-slate-800 self-center"></div>
                             <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] opacity-80 decoration-blue-500/30">Enterprise Employee Lifecycle & Master Record Management</p>
@@ -503,10 +543,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     onImportUpdateClick={handleImportUpdate}
                     onExportClick={() => setExportModal({ ...exportModal, isOpen: true })}
                     onShowRejoin={() => setShowRejoinPanel(true)}
-                    onAddNew={handleAddNew}
+                    onAddNew={() => !isLicenseExpired && handleAddNew()}
                     showFYFilter={filterByFY}
                     onToggleFYFilter={setFilterByFY}
                     activeFinancialYear={activeFinancialYear}
+                    isLicenseExpired={isLicenseExpired}
                 />
             </div>
 
@@ -518,8 +559,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                             employees={filteredEmployees}
                             selectedEmp={selectedEmp}
                             onSelectEmp={setSelectedEmp}
-                            onEdit={handleEdit}
-                            onDelete={handleDeleteClick}
+                            onEdit={isLicenseExpired ? undefined : handleEdit}
+                            onDelete={isLicenseExpired ? undefined : handleDeleteClick}
                             calculateGrossWage={calculateGrossWage}
                             currentUser={currentUser}
                             frozenEmployeeIds={frozenEmployeeIds}
@@ -555,6 +596,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                         setNewEmpForm={setNewEmpForm}
                         onClose={() => setIsAdding(false)}
                         onSubmit={handleAddSubmit}
+                        companyProfile={companyProfile}
                         designations={designations}
                         divisions={divisions}
                         branches={branches}

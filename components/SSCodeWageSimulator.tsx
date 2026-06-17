@@ -73,7 +73,7 @@ const SSCodeWageSimulator: React.FC<SSCodeWageSimulatorProps> = ({ isOpen, onClo
       </td>
       <td className={`p-2 border-r border-slate-700/50 ${isInclude ? 'bg-emerald-900/10' : 'bg-rose-900/10'}`}>
         <input
-          type="number"
+          type="number" onFocus={(e) => e.target.select()}
           value={value === 0 ? '' : value}
           onChange={(e) => setter(Number(e.target.value))}
           placeholder="0"

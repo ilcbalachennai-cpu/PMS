@@ -4,6 +4,7 @@ import {
   ShieldAlert, Clock, Mail, X,
   AlertTriangle, ExternalLink, Crown, Zap, CheckCircle2
 } from 'lucide-react';
+import { GOOGLE_SCRIPT_URL } from '../../services/licenseService';
 
 // Raw row from Google Sheets getDataRange().getValues()
 // [SI, Category, EmpRange, NoOfEmp, PerEmp, AnnualFee, HalfYearlyFee, SpecialDiscount, MemberDiscount]
@@ -12,6 +13,7 @@ type SheetRow = (string | number)[];
 interface TrialNoticeModalProps {
   daysRemaining: number;
   expiryDate: string;
+  isFullLicense?: boolean;
   onClose: () => void;
 }
 
@@ -30,7 +32,7 @@ const fmt = (v: string | number) => {
   return v;
 };
 
-const TrialNoticeModal: React.FC<TrialNoticeModalProps> = ({ daysRemaining, expiryDate, onClose }) => {
+const TrialNoticeModal: React.FC<TrialNoticeModalProps> = ({ daysRemaining, expiryDate, isFullLicense, onClose }) => {
   const [rows, setRows] = useState<SheetRow[]>(FALLBACK_ROWS);
   const [loading, setLoading] = useState(true);
 
@@ -40,7 +42,7 @@ const TrialNoticeModal: React.FC<TrialNoticeModalProps> = ({ daysRemaining, expi
   useEffect(() => {
     const fetchPricing = async () => {
       try {
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYnFPLmvE1vCxLXVG53Ja1qx2VIeMZAz1b2v1-Kgh1k5b1bgo5lZnGM5Y3--r-uKbd/exec";
+        const SCRIPT_URL = GOOGLE_SCRIPT_URL;
         let result: any;
         if ((window as any).electronAPI?.apiFetch) {
           result = await (window as any).electronAPI.apiFetch(SCRIPT_URL, {
@@ -82,11 +84,15 @@ const TrialNoticeModal: React.FC<TrialNoticeModalProps> = ({ daysRemaining, expi
   const daysColor = isCritical ? 'text-red-400' : isUrgent ? 'text-amber-400' : 'text-white';
 
   const handleMailTo = () => {
-    const subject = encodeURIComponent('BharatPay Pro — License Purchase Enquiry');
-    const body = encodeURIComponent(
-      `Hello ILCBala Team,\n\nI am currently on the Trial Version of BharatPay Pro and would like to upgrade to a Licensed Version.\n\nPlease share the payment and activation details.\n\nThank you.`
+    const subject = encodeURIComponent(
+      isFullLicense ? 'BharatPay Pro — License Renewal Enquiry' : 'BharatPay Pro — License Purchase Enquiry'
     );
-    window.open(`mailto:ilcbala.BharatPayPro@gmail.com?subject=${subject}&body=${body}`, '_blank');
+    const body = encodeURIComponent(
+      isFullLicense
+        ? `Hello ILCBala Team,\n\nMy BharatPay Pro License has expired or is expiring soon. I would like to renew my Licensed Version.\n\nPlease share the payment and renewal details.\n\nThank you.`
+        : `Hello ILCBala Team,\n\nI am currently on the Trial Version of BharatPay Pro and would like to upgrade to a Licensed Version.\n\nPlease share the payment and activation details.\n\nThank you.`
+    );
+    window.open(`mailto:ilcbala.bharatpayroll@gmail.com?subject=${subject}&body=${body}`, '_blank');
   };
 
   return (
@@ -114,19 +120,19 @@ const TrialNoticeModal: React.FC<TrialNoticeModalProps> = ({ daysRemaining, expi
             {/* Title */}
             <div className="flex-1 min-w-0">
               <span className={`inline-block text-[10px] font-black uppercase tracking-[0.3em] px-3 py-1 rounded-full border mb-2 ${badgeClass}`}>
-                Trial Version Active
+                {isFullLicense ? (daysRemaining <= 0 ? "License Expired" : "License Expiring Soon") : (daysRemaining <= 0 ? "Trial Expired" : "Trial Version Active")}
               </span>
               <h2 className="text-xl font-black text-white tracking-tight">
-                {isCritical ? '🚨 Trial Expiring in ' : isUrgent ? '⚠️ Trial Expiring in ' : 'Your Trial: '}
+                {isCritical ? `🚨 ${isFullLicense ? 'License' : 'Trial'} Expiring in ` : isUrgent ? `⚠️ ${isFullLicense ? 'License' : 'Trial'} Expiring in ` : `${isFullLicense ? 'Your License:' : 'Your Trial:'} `}
                 <span className={`tabular-nums ${daysColor}`}>{daysRemaining}</span>
                 {' Days Remaining'}
               </h2>
               <p className="text-slate-400 text-sm mt-0.5">
-                This is a trial version of{' '}
+                {isFullLicense ? 'Your license for' : 'This is a trial version of'}{' '}
                 <span className="text-[#FF9933] font-bold">Bharat</span>
                 <span className="text-white font-bold">Pay</span>
                 <span className="text-[#34d399] font-bold">Pro</span>.
-                {' '}To continue uninterrupted, purchase a Licensed Version.
+                {' '}To continue uninterrupted, please renew or purchase a Licensed Version.
               </p>
             </div>
 
@@ -234,10 +240,12 @@ const TrialNoticeModal: React.FC<TrialNoticeModalProps> = ({ daysRemaining, expi
         {/* ── Footer / CTA ── */}
         <div className="p-5 border-t border-slate-800 bg-[#0b1120] flex flex-col sm:flex-row items-center gap-4">
           <div className="text-center sm:text-left">
-            <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] mb-0.5">To purchase a license, email us at</p>
+            <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] mb-0.5">
+              {isFullLicense ? 'To renew your license, contact' : 'To purchase a license, email us at'}
+            </p>
             <div className="flex items-center gap-2">
               <CheckCircle2 size={13} className="text-emerald-500" />
-              <p className="text-sm font-black text-indigo-400">ilcbala.BharatPayPro@gmail.com</p>
+              <p className="text-sm font-black text-indigo-400">ilcbala.bharatpayroll@gmail.com</p>
             </div>
           </div>
           <div className="sm:ml-auto flex items-center gap-3 flex-wrap justify-center">
@@ -252,7 +260,7 @@ const TrialNoticeModal: React.FC<TrialNoticeModalProps> = ({ daysRemaining, expi
               className="px-7 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-900/40 flex items-center gap-2 border border-indigo-400/30"
             >
               <Mail size={15} />
-              Get Licensed Version
+              {isFullLicense ? "Renew License" : "Get Licensed Version"}
               <ExternalLink size={12} className="opacity-70" />
             </button>
           </div>

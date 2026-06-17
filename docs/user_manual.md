@@ -1,7 +1,7 @@
 # BharatPay Pro - Comprehensive User Manual
-*Version 03.01.04*
+*Version 06.01.08*
 
-Welcome to **BharatPay Pro**, a premium Payroll Management System designed for precision, security, and ease of use. This manual will guide you through every aspect of the software, including the advanced **Multi-Company Architecture** introduced in the 03.xx series.
+Welcome to **BharatPay Pro**, a premium Payroll Management System designed for precision, security, and ease of use. This manual will guide you through every aspect of the software, including the advanced **Multi-Company Architecture** introduced in the V06 series.
 
 ---
 
@@ -9,8 +9,9 @@ Welcome to **BharatPay Pro**, a premium Payroll Management System designed for p
 
 ### 1.1 First-Time Installation
 When you launch BharatPay Pro for the first time, the system will initialize your environment.
-1.  **Grant Permissions**: If Windows Firewall or Anti-Virus prompts you, click "Allow" to ensure the local database and update services can run.
-2.  **Registration**: New users must click **"Register Now"**. 
+1.  **Data Folder Selection**: Upon the very first launch, the application will prompt you to select a master directory to store your database and generated reports. We highly recommend creating a dedicated folder (e.g., `D:\BharatPayData` or `Documents\Payroll`) on a secure, regularly backed-up drive rather than keeping it on the Desktop.
+2.  **Grant Permissions**: If Windows Firewall or Anti-Virus prompts you, click "Allow" to ensure the local database and update services can run.
+3.  **Registration**: New users must click **"Register Now"**. 
     *   **Verify Identity**: Provide valid credentials for OTP verification.
     *   **Set Password**: Create a strong **Administrator Password**. (This password is tied to your hardware; do not lose it!)
 
@@ -23,7 +24,7 @@ BharatPay Pro uses **Hardware-Locked Identity**. Your license and data are secur
 
 ## 2. Multi-Organization Management
 
-BharatPay Pro 03.01.04 supports managing multiple establishments or companies within a single installation. Each company operates in its own **Data Silo**, ensuring total isolation of payroll, employees, and settings.
+BharatPay Pro V06 supports managing multiple establishments or companies within a single installation. Each company operates in its own **Data Silo**, ensuring total isolation of payroll, employees, and settings.
 
 ### 2.1 The Organization Gate
 When you log into an installation with multiple companies, the **Organization Selector** will appear:
@@ -48,7 +49,7 @@ While working in the Dashboard, you can quickly jump between organizations:
 
 ## 3. Statutory Compliance & Settings Portal
 
-BharatPay Pro V05 consolidates all administrative setups under the **Settings Portal**. Configuring these options accurately is critical, as they form the operational foundation for all wage calculations, security boundaries, and licensing rules.
+BharatPay Pro V06 consolidates all administrative setups under the **Settings Portal**. Configuring these options accurately is critical, as they form the operational foundation for all wage calculations, security boundaries, and licensing rules.
 
 ### 3.1 The Four Essential Configuration Tabs
 
@@ -92,7 +93,23 @@ By default, the statutory engine utilizes the new **Code Wages** guidelines as t
 
 ## 4. Setting Up Your Company
 
-Before adding employees, configure your establishment profile inside the Settings tabs as documented above.
+After selecting your Data Folder and successfully logging in, your very first task is to configure your **Company Profile** and **Statutory Rules**. **Note: Core features like "Employee Master" and "Process PayRoll" will remain securely locked and inactive until these mandatory settings are saved.**
+
+1.  **Company Profile**: Navigate to Settings and fill in your establishment details. Fields marked with a red asterisk (`*`) are strictly mandatory.
+2.  **Statutory Configuration**: Click on the Statutory Rules tab. The system provides intelligent default values for EPF limits, ESI cutoffs, and tax slabs based on standard compliances. **Please scan through these defaults carefully.** You can modify or override these defaults to match the specific operational needs of your establishment. Ensure you click **Save** to apply the configuration. Once saved, your core modules will unlock.
+
+### 4.1 Policy Modules: Overtime & Arrear Salary
+
+Under the Statutory Configuration tab, you can activate advanced payroll components:
+
+*   **Overtime (OT) Module**: 
+    *   *Activation*: Toggle "Enable Overtime Calculation" to ON.
+    *   *Importance*: Activating this is crucial if your establishment pays extra for extended shifts. Once enabled, the system unlocks dedicated Overtime input columns during the Pay Process.
+    *   *Usage*: Before compiling salaries, you must input the respective OT hours for employees. The engine will then dynamically calculate OT earnings based on the employee's basic wage rate and instantly reflect it in their final Dynamic Pay Sheet.
+*   **Arrear Salary Module**:
+    *   *Activation*: Toggle "Enable Arrear Salary" to ON.
+    *   *Importance*: Used for retroactive pay adjustments or delayed compensations.
+    *   *Usage*: Once activated, an 'Arrears' column becomes available in the Payroll processor. You can manually input arrear amounts for specific employees, which will be seamlessly added to their gross earnings for that specific month without disrupting standard wage structures.
 
 ---
 
@@ -371,4 +388,4 @@ Permanently deletes an entire establishment silo, erasing its sqlite database fi
 > **IN CASE THE APP FAILS TO LOAD OR IS CORRUPTED**, go to the main installation folder (e.g., `D:\BharatPayRoll`) and **DOUBLE CLICK THE Launch_BPP_Installer.exe** to download/install fresh and launch the app again without any errors.
 
 ---
-*© 2026 BharatPay Pro. All Rights Reserved. (Version 05.02.06)*
+*© 2026 BharatPay Pro. All Rights Reserved.*
