@@ -1,12 +1,13 @@
     /**
  * BHARATPAY PRO - GOOGLE APPS SCRIPT (v06.01.08 FINAL)
  * -----------------------------------------------------------
- * - Updated: 17-June-2026 : 02.45 PM
+ * - Updated: 17-June-2026 : 08.50 PM
  * - SECURITY: SHA-256 HMAC Signature Verification active.
  * - FIX: Interface with Launcher URL (D2) for System Recovery path.
  * - FIX: handleStartupValidation — STRICT 4-FIELD SYNC (ID, Pass, Machine, Email).
  * - FIX: Refined status labels: LICENSE_ACTIVE, TRIAL_ACTIVE, LICENSE_EXPIRED, TRIAL_EXPIRED.
  * - FIX: Retain last active location on LOGGED OUT / OFFLINE status in Active_Users tracking.
+ * - FIX: Robust parseManualDate for Google Sheets date objects and slash separators to fix cleanupStaleActiveUsers ghost sessions.
  * -----------------------------------------------------------
  * AUDIT & DESIGN BY: ANTIGRAVITY AI & BALA
  */
@@ -1712,8 +1713,8 @@ function cleanupStaleActiveUsers(ss) {
     for (let i = 1; i < data.length; i++) {
         const status = String(data[i][3]).toUpperCase();
         if (status === 'LIVE') {
-            const lastActiveStr = String(data[i][4]);
-            const lastActiveDate = parseManualDate(lastActiveStr);
+            const lastActiveVal = data[i][4];
+            const lastActiveDate = parseManualDate(lastActiveVal);
             if (lastActiveDate && (now - lastActiveDate.getTime()) > threshold) {
                 sheet.getRange(i + 1, 4).setValue('DISCONNECTED')
                     .setBackground("#fee2e2")
@@ -1724,13 +1725,24 @@ function cleanupStaleActiveUsers(ss) {
     }
 }
 
-function parseManualDate(str) {
+function parseManualDate(val) {
+    if (!val) return null;
+    if (val instanceof Date) return val;
     try {
-        const p = str.match(/(\d+)-(\d+)-(\d+) (\d+):(\d+):(\d+)/);
-        if (!p) return null;
-        const iso = p[3] + "-" + p[2] + "-" + p[1] + "T" + p[4] + ":" + p[5] + ":" + p[6] + "+05:30";
-        return new Date(iso);
-    } catch (e) { return null; }
+        const str = String(val).trim();
+        const parsed = new Date(str);
+        if (!isNaN(parsed.getTime())) return parsed;
+    } catch (e) {}
+    try {
+        const str = String(val).trim();
+        const p = str.match(/(\d+)[-\/](\d+)[-\/](\d+) (\d+):(\d+):(\d+)/);
+        if (p) {
+            const iso = p[3] + "-" + p[2] + "-" + p[1] + "T" + p[4] + ":" + p[5] + ":" + p[6] + "+05:30";
+            const d = new Date(iso);
+            if (!isNaN(d.getTime())) return d;
+        }
+    } catch (e) {}
+    return null;
 }
 
 /**
