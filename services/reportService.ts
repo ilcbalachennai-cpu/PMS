@@ -10,7 +10,39 @@ import { formatIndianNumber } from '../utils/formatters';
 
 export const formatDateInd = (dateInput: string | Date | undefined): string => {
     if (!dateInput) return '';
-    const date = new Date(dateInput);
+    
+    // Check if input is a Date object
+    if (dateInput instanceof Date) {
+        if (isNaN(dateInput.getTime())) return '';
+        const day = String(dateInput.getDate()).padStart(2, '0');
+        const month = String(dateInput.getMonth() + 1).padStart(2, '0');
+        const year = dateInput.getFullYear();
+        return `${day}-${month}-${year}`;
+    }
+
+    const str = String(dateInput).trim();
+    if (!str || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return '';
+
+    // Match DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+    const matchDMY = str.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})$/);
+    if (matchDMY) {
+        const d = matchDMY[1].padStart(2, '0');
+        const m = matchDMY[2].padStart(2, '0');
+        const y = matchDMY[3];
+        return `${d}-${m}-${y}`;
+    }
+
+    // Match YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+    const matchYMD = str.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})$/);
+    if (matchYMD) {
+        const y = matchYMD[1];
+        const m = matchYMD[2].padStart(2, '0');
+        const d = matchYMD[3].padStart(2, '0');
+        return `${d}-${m}-${y}`;
+    }
+
+    // Fallback: Try native date parsing (e.g. ISO string)
+    const date = new Date(str);
     if (isNaN(date.getTime())) return '';
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');

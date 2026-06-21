@@ -3,8 +3,8 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzE10qkCCczPH-_eCQ_cJBRGpu28viV8zhNRCw2iD0Rha3y_1HIuWNPGAjHBrqsHeEB/exec";
-export const APP_VERSION = "06.01.08";
-export const APP_PATCH_TIMESTAMP = "17-06-2026 14:10:26"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_VERSION = "06.01.09";
+export const APP_PATCH_TIMESTAMP = "21-06-2026 16:49:21"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -355,6 +355,10 @@ const fetchFromApi = async (url: string, options: any) => {
   try {
     // --- V02.02.23: SECURE SHA-256 COMMUNICATION HANDSHAKE ---
     if (options.method === 'POST' && options.body) {
+      if (!options.headers) {
+        options.headers = {};
+      }
+      options.headers['Content-Type'] = 'application/json';
       try {
         const bodyObj = JSON.parse(options.body);
         bodyObj.version = APP_VERSION; // Version identification
@@ -1677,35 +1681,75 @@ export const trackHeartbeat = async (email: string, machineId: string, userID: s
     let location = "Auto-Detecting...";
 
     if (!isLogout) {
-      // Attempt multi-provider location detection only for LIVE status to avoid logout delays
-      try {
-        const locRes = await Promise.any([
-          fetch('https://ipapi.co/json/').then(r => r.json()),
-          fetch('http://ip-api.com/json').then(r => r.json())
-        ]);
+      // Use cached location if available in sessionStorage to prevent redundant API spams and delays
+      const cachedLoc = sessionStorage.getItem('session_detected_location');
+      if (cachedLoc) {
+        location = cachedLoc;
+      } else {
+        // Attempt multi-provider location detection with a 2-second timeout
+        try {
+          const locRes = await Promise.any([
+            fetchWithTimeout('https://ipapi.co/json/', {}, 2000).then(r => r.json()),
+            fetchWithTimeout('http://ip-api.com/json', {}, 2000).then(r => r.json())
+          ]);
 
-        if (locRes.city && (locRes.country_name || locRes.country)) {
-          location = `${locRes.city}, ${locRes.country_name || locRes.country}`;
-        } else if (locRes.region) {
-          location = `${locRes.region}, ${locRes.country || 'India'}`;
+          if (locRes.city && (locRes.country_name || locRes.country)) {
+            location = `${locRes.city}, ${locRes.country_name || locRes.country}`;
+          } else if (locRes.region) {
+            location = `${locRes.region}, ${locRes.country || 'India'}`;
+          }
+          sessionStorage.setItem('session_detected_location', location);
+        } catch (e) {
+          console.warn("Location detection failed:", e);
+          location = "Auto-Detected";
         }
-      } catch (e) {
-        console.warn("Location detection failed:", e);
-        location = "Auto-Detected";
       }
     } else {
       location = "Session Ended";
     }
 
-    const payload = JSON.stringify({
+    // Sanitize location to printable ASCII only to prevent signature failures on unicode characters
+    const cleanLocation = location.replace(/[^\x20-\x7E]/g, "");
+
+    const payloadObj = {
       action: 'HEARTBEAT',
       email: email,
       machineId: machineId,
       userID: userID,
       sessionStart: sessionStart,
-      location: location,
+      location: cleanLocation,
       status: status
-    });
+    };
+
+    const payload = JSON.stringify(payloadObj);
+
+    // SQLite log helper
+    const logToDb = async (logObj: any) => {
+      // @ts-ignore
+      if (window.electronAPI && window.electronAPI.dbSet) {
+        try {
+          // @ts-ignore
+          const getRes = await window.electronAPI.dbGet('heartbeat_debug_logs');
+          let logs = [];
+          if (getRes && getRes.success && getRes.data) {
+            try {
+              logs = JSON.parse(getRes.data);
+            } catch (e) {}
+          }
+          logs.push({
+            timestamp: new Date().toISOString(),
+            ...logObj
+          });
+          if (logs.length > 50) logs.shift();
+          // @ts-ignore
+          await window.electronAPI.dbSet('heartbeat_debug_logs', JSON.stringify(logs));
+        } catch (err) {
+          console.warn("Failed to write SQLite debug log:", err);
+        }
+      }
+    };
+
+    await logToDb({ event: 'SENDING_HEARTBEAT', payload: payloadObj });
 
     // For logouts, use keepalive to ensure the request finishes even if the app closes
     await fetchFromApi(GOOGLE_SCRIPT_URL, {
@@ -1713,8 +1757,15 @@ export const trackHeartbeat = async (email: string, machineId: string, userID: s
       body: payload,
       // @ts-ignore
       keepalive: isLogout
-    }).catch(e => console.error("Heartbeat Tracking Warning:", e));
-  } catch (e) {
+    })
+    .then(async (res) => {
+      await logToDb({ event: 'HEARTBEAT_RESPONSE', response: res });
+    })
+    .catch(async (e) => {
+      console.error("Heartbeat Tracking Warning:", e);
+      await logToDb({ event: 'HEARTBEAT_ERROR', error: e.message || e.toString() });
+    });
+  } catch (e: any) {
     console.warn("Heartbeat Tracking Error:", e);
   }
 };

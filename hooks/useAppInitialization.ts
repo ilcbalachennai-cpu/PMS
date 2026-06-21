@@ -67,7 +67,14 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
     // @ts-ignore
     if (window.electronAPI && window.electronAPI.getAppDirectory) {
       try {
-        const systemKeys = ['app_active_patch_ts', 'app_patch_skip_count', 'app_version_skip_count', 'app_version_marker'];
+        const systemKeys = [
+          'app_active_patch_ts', 
+          'app_latest_patch_timestamp', 
+          'app_latest_version', 
+          'app_patch_skip_count', 
+          'app_version_skip_count', 
+          'app_version_marker'
+        ];
         for (const k of systemKeys) {
           // @ts-ignore
           const res = await window.electronAPI.dbGet(k);

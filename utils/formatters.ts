@@ -149,3 +149,68 @@ export const getCompanyBackupFolder = (establishmentName: string, id: string): s
 
     return `BK_${firstWord}_${numericPart}`;
 };
+
+/**
+ * Parses any date string format (DD-MM-YYYY, YYYY-MM-DD, ISO etc.) 
+ * and returns it as a standardized 'YYYY-MM-DD' string.
+ * This is crucial for HTML5 date inputs which strictly require YYYY-MM-DD.
+ */
+export const parseDateToYYYYMMDD = (val: any): string => {
+  if (val === undefined || val === null) return '';
+  if (val instanceof Date) {
+    if (!isNaN(val.getTime())) {
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, '0');
+      const d = String(val.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    return '';
+  }
+
+  const str = String(val).trim();
+  if (!str || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return '';
+
+  // 1. Format DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY
+  const matchDMY = str.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})$/);
+  if (matchDMY) {
+    const d = matchDMY[1].padStart(2, '0');
+    const m = matchDMY[2].padStart(2, '0');
+    const y = matchDMY[3];
+    return `${y}-${m}-${d}`;
+  }
+
+  // 2. Format YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+  const matchYMD = str.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})$/);
+  if (matchYMD) {
+     const y = matchYMD[1];
+     const m = matchYMD[2].padStart(2, '0');
+     const d = matchYMD[3].padStart(2, '0');
+     return `${y}-${m}-${d}`;
+  }
+
+  // 3. Fallback: Native Date parsing
+  const parsedTime = Date.parse(str);
+  if (!isNaN(parsedTime)) {
+    const dateObj = new Date(parsedTime);
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  return '';
+};
+
+/**
+ * Normalizes all date fields in an Employee object to YYYY-MM-DD
+ */
+export const normalizeEmployeeDates = (emp: any): any => {
+  if (!emp) return emp;
+  return {
+    ...emp,
+    dob: parseDateToYYYYMMDD(emp.dob),
+    doj: parseDateToYYYYMMDD(emp.doj),
+    dol: emp.dol ? parseDateToYYYYMMDD(emp.dol) : undefined,
+    epfMembershipDate: emp.epfMembershipDate ? parseDateToYYYYMMDD(emp.epfMembershipDate) : undefined,
+  };
+};

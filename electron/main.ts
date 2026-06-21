@@ -398,6 +398,9 @@ function createWindow() {
     });
     mainWindow.once('ready-to-show', () => {
         if (mainWindow) mainWindow.show();
+        try {
+            spawn('taskkill', ['/F', '/IM', 'mshta.exe'], { windowsHide: true });
+        } catch (e) {}
     });
 
     mainWindow.on('close', (e) => {
@@ -1056,7 +1059,8 @@ const GLOBAL_KEYS = [
     'app_version_skip_count',
     'app_version_marker',
     'app_last_seen_version',
-    'app_last_seen_patch_ts'
+    'app_last_seen_patch_ts',
+    'heartbeat_debug_logs'
 ];
 
 async function performAutoRescue(rootDb: Database.Database, appPaths: any) {
@@ -1665,15 +1669,9 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
         
         const rawRows = db!.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
         
-        // Filter rows based on financial year if specified
-        const rows = financialYear
-            ? rawRows.filter(row => {
-                if (row.key.includes('_FY')) {
-                    return row.key.includes(`_${financialYear}_`);
-                }
-                return true;
-            })
-            : rawRows;
+        // V06.01.09: Backups must always be complete (all financial years) to prevent data loss on restore.
+        // Ignore financialYear parameter filter.
+        const rows = rawRows;
         
         const excludedKeys = [
             'app_license_secure', 
@@ -2032,6 +2030,19 @@ ipcMain.handle('open-external', async (_, url: string) => {
 
 ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
     try {
+        const logFilePath = 'd:/ILCBala/PMS/scratch/api_fetch.log';
+        const fs = require('fs');
+        const path = require('path');
+        try {
+            const dir = path.dirname(logFilePath);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+            fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] REQ: ${options?.method || 'GET'} ${url}\nBODY: ${options?.body || 'none'}\n`);
+        } catch (err) {
+            console.error("Failed to write request log:", err);
+        }
+
         return new Promise((resolve, reject) => {
             const request = net.request({
                 url,
@@ -2041,6 +2052,9 @@ ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
 
             const timeout = setTimeout(() => {
                 request.abort();
+                try {
+                    fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] RES: TIMEOUT\n\n`);
+                } catch (e) {}
                 reject({ message: '🔌 API Request Timed Out (30s)' });
             }, 30000);
 
@@ -2064,6 +2078,10 @@ ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
                         responseBody = responseData;
                     }
 
+                    try {
+                        fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] RES STATUS: ${response.statusCode} | BODY: ${JSON.stringify(responseBody)}\n\n`);
+                    } catch (e) {}
+
                     if (response.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
                         console.error(`🔌 fetch failed [${response.statusCode}]:`, responseBody);
                         reject({ message: `HTTP error! status: ${response.statusCode}` });
@@ -2076,6 +2094,9 @@ ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
             request.on('error', (error) => {
                 clearTimeout(timeout);
                 console.error('🔌 Error in api-fetch:', error);
+                try {
+                    fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] RES ERROR: ${error.message}\n\n`);
+                } catch (e) {}
                 reject({ message: error.message });
             });
 
@@ -2426,15 +2447,17 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
             try {
                 // Determine binary name for taskkill
                 const exeName = app.isPackaged ? 'BPP_APP.exe' : 'electron.exe';
+                const tempDir = app.getPath('temp');
                 
-                // Show a native borderless HTA Progress Popup without buttons
-                const htaPath = path.join(app.getPath('temp'), 'bpp_update_msg.hta');
-                const htaContent = `
+                // Write HTA message files to the temp directory
+                // HTA 1: Silent Update (Patch Update) - shown during background installation
+                const silentHtaPath = path.join(tempDir, 'bpp_update_msg.hta');
+                const silentHtaContent = `
 <HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal"/>
 <title>BharatPay Pro Update</title>
 <body style="background-color:#0f172a; color:#f8fafc; font-family:'Segoe UI', sans-serif; font-size:14px; margin:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; height:100%; border:1px solid #1e293b;">
-  <p style="margin-bottom:12px; font-weight:bold; font-size:18px; color:#38bdf8;">${isSilent ? 'Applying Background Patch Update...' : 'Preparing Application Update...'}</p>
-  <p style="margin:0; font-size:14px; opacity:0.85;">${isSilent ? 'Please wait, the app will restart automatically in 10-30 seconds.' : 'Please follow the setup wizard to complete the update.'}</p>
+  <p style="margin-bottom:12px; font-weight:bold; font-size:18px; color:#38bdf8;">Applying Background Patch Update...</p>
+  <p style="margin:0; font-size:14px; opacity:0.85;">Please wait, the app will restart automatically in 10-30 seconds.</p>
   <script>
     window.resizeTo(550, 200);
     window.moveTo((screen.width - 550) / 2, (screen.height - 200) / 2);
@@ -2442,10 +2465,34 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
   </script>
 </body>
                 `;
-                fs.writeFileSync(htaPath, htaContent.trim(), 'utf8');
+                fs.writeFileSync(silentHtaPath, silentHtaContent.trim(), 'utf8');
+
+                // HTA 2: Post-Installation Launch Message (Interactive Update) - shown after NSIS copies files
+                const launchHtaPath = path.join(tempDir, 'bpp_launch_msg.hta');
+                const launchHtaContent = `
+<HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal"/>
+<title>BharatPay Pro Update</title>
+<body style="background-color:#0f172a; color:#f8fafc; font-family:'Segoe UI', sans-serif; font-size:14px; margin:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; height:100%; border:1px solid #1e293b;">
+  <p style="margin-bottom:12px; font-weight:bold; font-size:18px; color:#38bdf8;">Application Update Complete</p>
+  <p style="margin:0; font-size:14px; opacity:0.85;">Launching BharatPay Pro... Please wait.</p>
+  <script>
+    window.resizeTo(550, 200);
+    window.moveTo((screen.width - 550) / 2, (screen.height - 200) / 2);
+    setTimeout(function() { window.close(); }, 60000);
+  </script>
+</body>
+                `;
+                fs.writeFileSync(launchHtaPath, launchHtaContent.trim(), 'utf8');
                 
-                // Chain: Launch HTA Popup -> Delay -> Taskkill -> Delay -> Start Installer
-                const command = `start mshta "${htaPath}" & timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}" ${isSilent ? '/S' : ''}`;
+                // Chain: Launch HTA Popup (if silent) -> Delay -> Taskkill -> Delay -> Start Installer
+                let command = '';
+                if (isSilent) {
+                    command = `start mshta "${silentHtaPath}" & timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}" /S`;
+                } else {
+                    // Interactive: Do NOT start HTA here (prevents blocking/overlapping the installer options window).
+                    // The installer itself will start "bpp_launch_msg.hta" upon successful file copy/extraction.
+                    command = `timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}"`;
+                }
                 
                 spawn('cmd', ['/c', command], {
                     detached: true,

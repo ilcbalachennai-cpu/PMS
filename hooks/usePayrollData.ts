@@ -10,7 +10,7 @@ import {
   DEFAULT_LEAVE_POLICY 
 } from '../constants';
 import { getBackupFileName, getMonthAbbr } from '../services/reportService';
-import { getCompanyBackupFolder, generateCompanyId } from '../utils/formatters';
+import { getCompanyBackupFolder, generateCompanyId, normalizeEmployeeDates } from '../utils/formatters';
 
 export const usePayrollData = (showAlert: any) => {
   const [isResetting, setIsResetting] = useState(false);
@@ -111,7 +111,16 @@ export const usePayrollData = (showAlert: any) => {
     } catch (e) { return fallback; }
   };
 
-  const [employees, setEmployees] = useState<Employee[]>(() => getStoredInitial('app_employees', []));
+  const [employees, setEmployeesState] = useState<Employee[]>(() => {
+    const initial = getStoredInitial('app_employees', []);
+    return Array.isArray(initial) ? initial.map(normalizeEmployeeDates) : [];
+  });
+  const setEmployees = useCallback((val: Employee[] | ((prev: Employee[]) => Employee[])) => {
+    setEmployeesState(prev => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      return next.map(normalizeEmployeeDates);
+    });
+  }, []);
   const [config, setConfig] = useState<StatutoryConfig>(() => getStoredInitial('app_config', INITIAL_STATUTORY_CONFIG));
   const [companyProfile, setCompanyProfile] = useState<CompanyProfile>(() => {
     const saved = getStoredInitial('app_company_profile', null);
@@ -941,8 +950,7 @@ export const usePayrollData = (showAlert: any) => {
       const backupRes = await window.electronAPI.createDataBackup({
         fileName: backupFileName,
         subfolder: subfolderPath,
-        encryptionKey: encryptionKey,
-        financialYear: activeFinancialYear
+        encryptionKey: encryptionKey
       });
 
       const currentIdx = monthsArr.indexOf(globalMonth);

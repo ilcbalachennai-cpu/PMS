@@ -261,15 +261,6 @@ const Reports: React.FC<ReportsProps> = ({
         return `${year}-${String(mIdx + 1).padStart(2, '0')}-${lastDay}`;
     };
 
-    const getPrevMonthEnd = () => {
-        const mIdx = months.indexOf(month);
-        const prevDate = new Date(year, mIdx, 0);
-        const pY = prevDate.getFullYear();
-        const pM = prevDate.getMonth() + 1;
-        const pD = prevDate.getDate();
-        return `${pY}-${String(pM).padStart(2, '0')}-${String(pD).padStart(2, '0')}`;
-    };
-
 
     const handleReportTypeChange = (type: string) => {
         setReportType(type);
@@ -382,8 +373,7 @@ const Reports: React.FC<ReportsProps> = ({
             const backupRes = await window.electronAPI.createDataBackup({
                 fileName: backupFileName,
                 subfolder: subfolderPath,
-                encryptionKey: encryptionKey,
-                financialYear: activeFinancialYear
+                encryptionKey: encryptionKey
             });
 
 
@@ -415,7 +405,7 @@ const Reports: React.FC<ReportsProps> = ({
         const zw = currentResults.filter(r => r.payableDays === 0 || (r.earnings?.total || 0) === 0);
 
         if (zw.length > 0) {
-            const defaultDOL = getPrevMonthEnd();
+            const defaultDOL = getPayrollPeriodStart();
             const initialExitData: Record<string, { dol: string, reason: string }> = {};
             zw.forEach(r => {
                 const emp = employees.find(e => e.id === r.employeeId);
@@ -1538,7 +1528,6 @@ const Reports: React.FC<ReportsProps> = ({
                                         {zeroWageEmployees.map((r) => {
                                             const emp = employees.find(e => e.id === r.employeeId);
                                             const data = exitData[r.employeeId] || { dol: '', reason: '' };
-                                            const maxDate = getPayrollPeriodEnd();
 
                                             return (
                                                 <tr key={r.employeeId} className="bg-[#1e293b]/50 hover:bg-[#1e293b] transition-colors">
@@ -1553,20 +1542,57 @@ const Reports: React.FC<ReportsProps> = ({
                                                         </div>
                                                     </td>
                                                     <td className="px-4 py-3">
-                                                        <input
-                                                            type="date"
-                                                            className={`border rounded-lg px-3 py-2 text-xs w-full outline-none transition-all placeholder-slate-600 ${data.reason === 'ON LOP'
-                                                                ? 'bg-slate-800/40 border-slate-700 text-slate-500 cursor-not-allowed'
-                                                                : 'bg-[#0f172a] border-slate-600 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50'
-                                                                }`}
-                                                            value={data.reason === 'ON LOP' ? '' : data.dol}
-                                                            title={data.reason === 'ON LOP' ? "Date of Leaving not required for ON LOP" : `Enter Date of Leaving for ${emp?.name}`}
-                                                            aria-label={data.reason === 'ON LOP' ? "Date of Leaving not required for ON LOP" : `Enter Date of Leaving for ${emp?.name}`}
-                                                            max={maxDate}
-                                                            disabled={data.reason === 'ON LOP'}
-                                                            placeholder={data.reason === 'ON LOP' ? 'Not required' : ''}
-                                                            onChange={(e) => handleExitChange(r.employeeId, 'dol', e.target.value)}
-                                                        />
+                                                        {data.reason === 'ON LOP' ? (
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="text"
+                                                                    className="bg-slate-800/40 border border-slate-700 text-slate-500 rounded-lg px-3 py-2 text-xs w-20 cursor-not-allowed outline-none"
+                                                                    value="-"
+                                                                    disabled
+                                                                    placeholder="-"
+                                                                    title="Exit Date Disabled (ON LOP)"
+                                                                    aria-label="Exit Date Disabled (ON LOP)"
+                                                                />
+                                                                <span className="text-xs text-slate-500 font-mono font-bold select-none">-</span>
+                                                            </div>
+                                                        ) : (() => {
+                                                            const mIdx = months.indexOf(month);
+                                                            const totalDays = new Date(year, mIdx + 1, 0).getDate();
+                                                            const daysArray = Array.from({ length: totalDays }, (_, i) => i + 1);
+                                                            let selectedDay = 1;
+                                                            if (data.dol) {
+                                                                const parts = data.dol.split('-');
+                                                                if (parts.length === 3) {
+                                                                    selectedDay = parseInt(parts[2], 10);
+                                                                }
+                                                            }
+                                                            return (
+                                                                <div className="flex items-center gap-2">
+                                                                    <select
+                                                                        className="bg-[#0f172a] border border-slate-600 rounded-lg px-3 py-2 text-white text-xs w-20 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 outline-none transition-all custom-scrollbar"
+                                                                        value={selectedDay}
+                                                                        onChange={(e) => {
+                                                                            const dayVal = e.target.value;
+                                                                            if (dayVal) {
+                                                                                const newDol = `${year}-${String(mIdx + 1).padStart(2, '0')}-${String(dayVal).padStart(2, '0')}`;
+                                                                                handleExitChange(r.employeeId, 'dol', newDol);
+                                                                            }
+                                                                        }}
+                                                                        title={`Select Day of Leaving for ${emp?.name}`}
+                                                                        aria-label={`Select Day of Leaving for ${emp?.name}`}
+                                                                    >
+                                                                        {daysArray.map(d => (
+                                                                            <option key={d} value={d} className="bg-[#0f172a] text-white">
+                                                                                {String(d).padStart(2, '0')}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                    <span className="text-xs text-slate-400 font-mono font-bold select-none">
+                                                                        {` - ${String(mIdx + 1).padStart(2, '0')} - ${year}`}
+                                                                    </span>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                         {data.reason === 'ON LOP' && (
                                                             <p className="text-[9px] text-teal-400 mt-1">Employee stays active — no exit date needed</p>
                                                         )}

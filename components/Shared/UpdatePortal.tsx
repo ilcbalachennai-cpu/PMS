@@ -413,14 +413,14 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
                     
                     <div className="space-y-4">
                         <h2 className={`text-2xl font-black transition-colors duration-1000 ${effectiveStep === 6 ? 'text-emerald-400' : 'text-white'} uppercase tracking-tighter`}>
-                             {effectiveStep === 6 ? "Update Successful" : "Finalizing"}
+                             {effectiveStep === 6 ? "Download Successful" : "Finalizing"}
                         </h2>
                         <div className={`h-1 w-10 transition-colors duration-1000 ${effectiveStep === 6 ? 'bg-emerald-500' : 'bg-blue-600'} mx-auto rounded-full`}></div>
                         <p className={`text-[10px] font-bold uppercase tracking-[0.2em] leading-relaxed transition-colors duration-500 ${effectiveStep === 6 ? 'text-emerald-500' : 'text-slate-500'}`}>
                           {effectiveStep === 3 ? "Extracting Secure Pack..." :
                              effectiveStep === 4 ? "Validating Cryptographic Signatures..." :
                              effectiveStep === 5 ? "Applying Core Patch..." :
-                             "Software maintenance applied successfully!"}
+                             "Software maintenance downloaded successfully!"}
                         </p>
                         {effectiveStep === 6 && (
                             <div className="flex flex-col gap-1 mt-2">

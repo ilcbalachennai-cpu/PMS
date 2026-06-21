@@ -57,6 +57,7 @@ interface SettingsProps {
     globalYear?: number;
     activeFinancialYear?: string;
     isLicenseExpired?: boolean;
+    latestPatchTimestamp?: string | null;
 }
 
 const UsageTimeClock = () => {
@@ -80,7 +81,8 @@ const Settings: React.FC<SettingsProps> = ({
     setSettingsTab,
     userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange,
     showAlert, verifyLicense, activeCompanyId = 'default', onRescueOrganizations,
-    globalMonth = 'April', globalYear = 2025, activeFinancialYear, isLicenseExpired
+    globalMonth = 'April', globalYear = 2025, activeFinancialYear, isLicenseExpired,
+    latestPatchTimestamp
 }) => {
     const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${key}_${activeCompanyId}`;
     const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
@@ -2784,7 +2786,22 @@ const Settings: React.FC<SettingsProps> = ({
                     {/* ... Company Profile Form ... */}
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 shadow-xl overflow-hidden p-8">
                         {/* ... existing fields ... */}
-                        <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4"><div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20"><Building2 size={24} /></div><div><h3 className="font-bold text-sky-400 uppercase tracking-widest text-sm">Establishment Profile</h3><p className="text-xs text-slate-400">Official details for legal forms and reports.</p></div></div>
+                        <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20">
+                                    <Building2 size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-sky-400 uppercase tracking-widest text-sm">Establishment Profile</h3>
+                                    <p className="text-xs text-slate-400">Official details for legal forms and reports.</p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <span className="text-[10px] text-rose-400 font-bold bg-rose-500/10 border border-rose-500/30 px-3 py-1.5 rounded-lg uppercase tracking-wider">
+                                    * marked fields are to be filled mandatorily
+                                </span>
+                            </div>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 gap-y-8">
                             {/* ... Legal ID ... */}
                             <div className="md:col-span-3">
@@ -3990,7 +4007,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         </div>
                                         <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
                                             <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Cloud Live Timestamp (latestTs)</p>
-                                            <p className="text-emerald-400 font-mono font-bold">{localStorage.getItem('app_latest_patch_timestamp') || 'Unknown'}</p>
+                                            <p className="text-emerald-400 font-mono font-bold">{latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || 'Unknown'}</p>
                                         </div>
                                     </div>
 

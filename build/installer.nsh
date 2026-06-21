@@ -69,7 +69,16 @@ FunctionEnd
     RMDir /r "$INSTDIR\resources\manual_assets"
     
     # If the installer is running silently (Patch Update), automatically launch the app after installing
-    IfSilent 0 +2
+    # Otherwise, for interactive installs, launch the "launching app" overlay screen
+    IfSilent silent_run interactive_run
+    
+    silent_run:
     ExecShell "" "$INSTDIR\BPP_APP.exe"
+    Goto end_install
+    
+    interactive_run:
+    ExecShell "" "$TEMP\bpp_launch_msg.hta"
+    
+    end_install:
 !macroend
 

@@ -7,7 +7,7 @@ import {
   ArrowRight, RefreshCw, Database,
   ChevronLeft, ChevronRight, X, Eye, EyeOff,
   ShieldAlert, CalendarX, WifiOff, Wifi, Scale, Building2, Plus, Trash2,
-  Mail, AlertTriangle, BookOpen
+  Mail, AlertTriangle
 } from 'lucide-react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
@@ -132,6 +132,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const deleteProgressRef = useRef<HTMLDivElement>(null);
   const otpInputRef = useRef<HTMLInputElement>(null);
   const isReloadingAfterReset = sessionStorage.getItem('app_is_reloading_after_reset') === 'true';
+  const [exitingMessage, setExitingMessage] = useState<string | null>(null);
 
   // --- Initialize Hooks ---
   const { alertConfig, showAlert, closeAlert } = useAlerts();
@@ -1033,7 +1034,18 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   // --- Specialized Effects ---
 
-  const sessionStartRef = useRef(new Date().toISOString());
+  // Get exact session start time to avoid drift/stale values from login page loads
+  const getSessionStart = () => {
+    const loginTimeStr = sessionStorage.getItem('session_login_time');
+    if (loginTimeStr) {
+      try {
+        return new Date(parseInt(loginTimeStr, 10)).toISOString();
+      } catch (e) {
+        console.warn("Failed to parse session_login_time:", e);
+      }
+    }
+    return new Date().toISOString();
+  };
 
   // --- V02.02.08: MASTER DATABASE REPAIR & PROACTIVE RECOVERY ---
   // Ensure 'admin' is permanently linked to Registered ID (e.g., SAIPRA12)
@@ -1094,12 +1106,24 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           }));
 
           // --- Refresh Global Update State ---
-          if (updates.latestVersion) setLatestAppVersion(updates.latestVersion);
-          if (updates.downloadUrl) setDownloadUrl(updates.downloadUrl);
+          if (updates.latestVersion) {
+            setLatestAppVersion(updates.latestVersion);
+            localStorage.setItem('app_latest_version', updates.latestVersion);
+            // @ts-ignore
+            if (window.electronAPI) window.electronAPI.dbSet('app_latest_version', updates.latestVersion).catch(() => {});
+          }
+          if (updates.downloadUrl) {
+            setDownloadUrl(updates.downloadUrl);
+            localStorage.setItem('app_download_url', updates.downloadUrl);
+            // @ts-ignore
+            if (window.electronAPI) window.electronAPI.dbSet('app_download_url', updates.downloadUrl).catch(() => {});
+          }
           
           if (updates.patchTimestamp && updates.patchTimestamp !== latestPatchTimestamp) {
             setLatestPatchTimestamp(updates.patchTimestamp);
             localStorage.setItem('app_latest_patch_timestamp', updates.patchTimestamp);
+            // @ts-ignore
+            if (window.electronAPI) window.electronAPI.dbSet('app_latest_patch_timestamp', updates.patchTimestamp).catch(() => {});
           }
         }
       } catch (err) {
@@ -1113,16 +1137,28 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     // Periodic check every 10 minutes
     const interval = setInterval(syncMessages, 600000);
     return () => clearInterval(interval);
-  }, [checkNewMessages, setCompanyProfile]);
+  }, [checkNewMessages, setCompanyProfile, latestPatchTimestamp]);
 
   // --- NEW: Immediate Version Sync on Boot ---
   useEffect(() => {
     if (licenseStatus.valid && licenseStatus.data) {
-      if (licenseStatus.data.latestVersion) setLatestAppVersion(licenseStatus.data.latestVersion);
-      if (licenseStatus.data.downloadUrl) setDownloadUrl(licenseStatus.data.downloadUrl);
+      if (licenseStatus.data.latestVersion) {
+        setLatestAppVersion(licenseStatus.data.latestVersion);
+        localStorage.setItem('app_latest_version', licenseStatus.data.latestVersion);
+        // @ts-ignore
+        if (window.electronAPI) window.electronAPI.dbSet('app_latest_version', licenseStatus.data.latestVersion).catch(() => {});
+      }
+      if (licenseStatus.data.downloadUrl) {
+        setDownloadUrl(licenseStatus.data.downloadUrl);
+        localStorage.setItem('app_download_url', licenseStatus.data.downloadUrl);
+        // @ts-ignore
+        if (window.electronAPI) window.electronAPI.dbSet('app_download_url', licenseStatus.data.downloadUrl).catch(() => {});
+      }
       if (licenseStatus.data.patchTimestamp) {
         setLatestPatchTimestamp(licenseStatus.data.patchTimestamp);
         localStorage.setItem('app_latest_patch_timestamp', licenseStatus.data.patchTimestamp);
+        // @ts-ignore
+        if (window.electronAPI) window.electronAPI.dbSet('app_latest_patch_timestamp', licenseStatus.data.patchTimestamp).catch(() => {});
       }
     }
   }, [licenseStatus.valid, licenseStatus.data, setLatestAppVersion, setDownloadUrl, setLatestPatchTimestamp]);
@@ -1149,14 +1185,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const [showIdleWarning, setShowIdleWarning] = useState(false);
   const [idleCountdown, setIdleCountdown] = useState(10);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Auto Logout Timer (Throttling-Proof & Background-Safe)
   useEffect(() => {
-    if (!currentUser) return; // Only track when logged in
+    if (!currentUser || isLoggingOut) return; // Only track when logged in
 
-    if (!localStorage.getItem('app_last_activity_time')) {
-      localStorage.setItem('app_last_activity_time', String(Date.now()));
-    }
+    // Always initialize/reset activity time on mount or login to prevent stale timeouts from previous sessions
+    localStorage.setItem('app_last_activity_time', String(Date.now()));
 
     let lastX = -1;
     let lastY = -1;
@@ -1203,7 +1239,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       clearInterval(checkInterval);
       events.forEach(e => window.removeEventListener(e, updateActivity));
     };
-  }, [currentUser, isUpdateDownloading, showIdleWarning]);
+  }, [currentUser, isUpdateDownloading, showIdleWarning, isLoggingOut]);
 
   // Idle Warning Countdown Effect
   useEffect(() => {
@@ -1214,13 +1250,13 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       } else {
         // Countdown finished, execute logout
         console.log("[ActivityTracker] Idle countdown finished! Logging out...");
-        setShowIdleWarning(false);
+        setIsLoggingOut(true);
         sessionStorage.setItem('logout_reason', 'timeout');
         const executeLogout = async () => {
           if (currentUser && currentUser.role !== 'Developer') {
             try {
               const mid = await getMachineId();
-              await trackHeartbeat(currentUser.email || "", mid, currentUser.username, sessionStartRef.current, "LOGGED OUT");
+              await trackHeartbeat(currentUser.email || "", mid, currentUser.username, getSessionStart(), "LOGGED OUT");
             } catch(e) { console.warn("Auto-logout heartbeat failed", e); }
           }
           closeAlert();
@@ -1239,7 +1275,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
     const startHeartbeat = async () => {
       const mid = await getMachineId();
-      trackHeartbeat(currentUser.email || licenseInfo?.registeredTo || "", mid, currentUser.username, sessionStartRef.current, "LIVE");
+      trackHeartbeat(currentUser.email || licenseInfo?.registeredTo || "", mid, currentUser.username, getSessionStart(), "LIVE");
     };
 
     // Initial ping
@@ -1313,6 +1349,50 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     if (availableEmps.length < newEmps.length) { showAlert('info', 'Partial Import', `Only ${availableEmps.length} out of ${newEmps.length} employees imported due to license limits.`); }
     const currentIds = new Set(employees.map(e => e.id));
     const trulyNewEmps = availableEmps.filter(e => !currentIds.has(e.id));
+
+    // Auto-register any new designations, divisions, branches, or sites from imported employees
+    const newDesignations = Array.from(new Set(availableEmps.map(e => e.designation).filter(Boolean)));
+    const newDivisions = Array.from(new Set(availableEmps.map(e => e.division || e.department).filter(Boolean)));
+    const newBranches = Array.from(new Set(availableEmps.map(e => e.branch).filter(Boolean)));
+    const newSites = Array.from(new Set(availableEmps.map(e => e.site).filter(Boolean)));
+
+    if (newDesignations.length > 0) {
+      setDesignations(prev => {
+        const next = [...prev];
+        newDesignations.forEach(d => {
+          if (!next.includes(d)) next.push(d);
+        });
+        return next;
+      });
+    }
+    if (newDivisions.length > 0) {
+      setDivisions(prev => {
+        const next = [...prev];
+        newDivisions.forEach(d => {
+          if (!next.includes(d)) next.push(d);
+        });
+        return next;
+      });
+    }
+    if (newBranches.length > 0) {
+      setBranches(prev => {
+        const next = [...prev];
+        newBranches.forEach(b => {
+          if (!next.includes(b)) next.push(b);
+        });
+        return next;
+      });
+    }
+    if (newSites.length > 0) {
+      setSites(prev => {
+        const next = [...prev];
+        newSites.forEach(s => {
+          if (!next.includes(s)) next.push(s);
+        });
+        return next;
+      });
+    }
+
     setEmployees(curr => {
       const empMap = new Map<string, Employee>();
       curr.forEach(e => empMap.set(e.id, e));
@@ -1365,8 +1445,30 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       api.setFullScreen(false).catch(() => {});
     }
 
+    // Set precise session login time to avoid stale/drifted start times from mount
+    sessionStorage.setItem('session_login_time', Date.now().toString());
+
     handleLogin(user);
     setIsCompanyGateOpen(true);
+    // Overwrite activity time on successful login to prevent stale idle logouts
+    localStorage.setItem('app_last_activity_time', String(Date.now()));
+
+    // V02.02.40: Dispatch immediate login heartbeat status "LIVE" to Google Sheets
+    const triggerLoginHeartbeat = async () => {
+      try {
+        const mid = await getMachineId();
+        const license = getStoredLicense();
+        if (user.role !== 'Developer') {
+          await trackHeartbeat(user.email || license?.registeredTo || "", mid, user.username, new Date().toISOString(), "LIVE");
+        }
+      } catch (err) {
+        console.error("Login heartbeat triggering failed:", err);
+      }
+    };
+    triggerLoginHeartbeat();
+
+    // Refresh license verification and info to ensure states like licenseStatus are sync'd
+    verifyLicense(true).catch(() => {});
 
     // 1. Mandatory Security Check: Forced Reset Detection
     const isForcedReset = sessionStorage.getItem('app_forced_reset') === 'true';
@@ -1569,19 +1671,31 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       return;
     }
     showAlert('confirm', 'Sign Out', 'Select an action to proceed:', async () => {
-      const mid = await getMachineId();
-      if (currentUser?.role !== 'Developer') {
-        await trackHeartbeat(currentUser?.email || licenseInfo?.registeredTo || "", mid, currentUser?.username || "UNKNOWN", sessionStartRef.current, 'LOGGED OUT');
+      setExitingMessage('Securing Session & Signing Out...');
+      try {
+        const mid = await getMachineId();
+        if (currentUser?.role !== 'Developer') {
+          await trackHeartbeat(currentUser?.email || licenseInfo?.registeredTo || "", mid, currentUser?.username || "UNKNOWN", getSessionStart(), 'LOGGED OUT');
+        }
+      } catch (err) {
+        console.error("Logout heartbeat failed:", err);
+      } finally {
+        logout();
+        window.location.reload();
       }
-      logout();
-      window.location.reload();
     }, async () => {
-      const mid = await getMachineId();
-      if (currentUser?.role !== 'Developer') {
-        await trackHeartbeat(currentUser?.email || licenseInfo?.registeredTo || "", mid, currentUser?.username || "UNKNOWN", sessionStartRef.current, 'LOGGED OUT');
+      setExitingMessage('Securing Session & Exiting...');
+      try {
+        const mid = await getMachineId();
+        if (currentUser?.role !== 'Developer') {
+          await trackHeartbeat(currentUser?.email || licenseInfo?.registeredTo || "", mid, currentUser?.username || "UNKNOWN", getSessionStart(), 'LOGGED OUT');
+        }
+      } catch (err) {
+        console.error("Exit heartbeat failed:", err);
+      } finally {
+        if ((window as any).electronAPI) (window as any).electronAPI.closeApp();
+        else { logout(); window.close(); window.location.reload(); }
       }
-      if ((window as any).electronAPI) (window as any).electronAPI.closeApp();
-      else { logout(); window.close(); window.location.reload(); }
     }, 'Re-login', 'Quit Application', 'Cancel');
   };
 
@@ -1651,13 +1765,16 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   
   // --- V06.01.07: Mandatory Company Config Enforcement ---
   const isCompanyProfileComplete = !!(
-    companyProfile.pfCode && 
-    companyProfile.esiCode && 
-    companyProfile.doorNo && 
-    companyProfile.street && 
-    companyProfile.city && 
-    companyProfile.mobile && 
-    companyProfile.securityPin
+    companyProfile.establishmentName?.trim() &&
+    companyProfile.cin?.trim() &&
+    companyProfile.pan?.trim() &&
+    companyProfile.pfCode?.trim() &&
+    companyProfile.esiCode?.trim() &&
+    companyProfile.doorNo?.trim() &&
+    companyProfile.street?.trim() &&
+    companyProfile.city?.trim() &&
+    companyProfile.state?.trim() &&
+    companyProfile.pincode?.trim()
   );
   const isNavLocked = (employees.length === 0 && companies.length <= 1) || !isCompanyProfileComplete;
 
@@ -1697,6 +1814,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   return (
     <div className={`flex h-[100dvh] overflow-hidden bg-[#020617] text-white ${isWin7 ? 'is-win7' : ''}`}>
+      {exitingMessage && (
+        <div className="fixed inset-0 bg-[#020617]/90 backdrop-blur-md flex flex-col items-center justify-center z-[20000] space-y-8 animate-in fade-in duration-300">
+          <div className="relative">
+            <div className="absolute -inset-4 bg-blue-500/20 blur-2xl rounded-full animate-pulse"></div>
+            <div className="relative w-24 h-24 rounded-full border-[4px] border-white/10 overflow-hidden shadow-2xl bg-[#020617] flex items-center justify-center">
+              <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
+            </div>
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <h3 className="text-sm font-black text-white uppercase tracking-widest">{exitingMessage}</h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Please wait while the system completes background sync</p>
+          </div>
+        </div>
+      )}
       
       {showStartupOverlay ? (
         <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[1000] space-y-8 animate-in fade-in duration-700">
@@ -1786,7 +1917,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       <CustomModal {...alertConfig} onClose={closeAlert} autoCloseSecs={alertConfig.autoCloseSecs} />
 
       {licenseStatus.checked && !licenseStatus.valid && !showRegistrationManual && isAppDirectoryConfigured && (
-        <div className="fixed inset-0 z-[500] bg-[#020617] flex items-center justify-center p-2 md:p-4 overflow-hidden">
+        <div className="fixed inset-0 z-[15000] bg-[#020617] flex items-center justify-center p-2 md:p-4 overflow-hidden">
           {/* ... License Lock UI ... */}
           <div className="w-full max-w-6xl relative z-10 bg-[#1e293b] border border-slate-700 rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row md:h-[min(800px,90vh)]">
             <div className="md:w-5/12 bg-[#0f172a] p-8 md:p-10 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 text-center relative overflow-hidden group shrink-0">
@@ -2280,9 +2411,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={!isSettingsAccessible} />
             </nav>
             <div className="p-4 border-t border-slate-800 bg-[#0b1120] space-y-1">
-              <button onClick={() => window.electronAPI?.openUserManual?.()} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-emerald-400 hover:bg-emerald-900/20`} title="User Manual">
-                <BookOpen size={18} /> {isSidebarOpen && <span className="font-bold text-sm">User Manual</span>}
-              </button>
               <button onClick={executeDiagnosticExport} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-blue-400 hover:bg-blue-900/20`} title="Export Diagnostics">
                 <FileText size={18} /> {isSidebarOpen && <span className="font-bold text-sm">Export Diagnostics</span>}
               </button>
@@ -2506,6 +2634,29 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               className="flex-1 overflow-y-auto bg-slate-950 custom-scrollbar relative"
               onMouseEnter={() => isSidebarOpen && activeView !== View.Dashboard && setIsSidebarOpen(false)}
             >
+              {!isCompanyProfileComplete && (
+                <div className="bg-rose-950/30 border-b border-rose-500/20 px-8 py-3.5 flex items-center justify-between gap-4 backdrop-blur-md sticky top-0 z-20">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-rose-500/10 text-rose-400 rounded-xl border border-rose-500/20">
+                      <AlertTriangle size={18} className="animate-pulse" />
+                    </div>
+                    <p className="text-xs font-bold text-slate-300">
+                      Please Update the Mandatory Fields marked with <span className="text-rose-400 font-extrabold text-sm">*</span> in Company Profile to enable other functions under Dashboard.
+                    </p>
+                  </div>
+                  {activeView !== View.Settings && (
+                    <button
+                      onClick={() => {
+                        safeNavigate(View.Settings);
+                        setSettingsTab(SettingsTab.Company);
+                      }}
+                      className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all hover:shadow-[0_0_15px_rgba(225,29,72,0.3)] shrink-0"
+                    >
+                      Update Profile
+                    </button>
+                  )}
+                </div>
+              )}
               {isHydrating && (
                 <div className="absolute inset-0 z-[100] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-300">
                    <div className="bg-[#0f172a] border-2 border-blue-500/30 rounded-[2.5rem] p-12 flex flex-col items-center gap-8 shadow-[0_0_50px_rgba(0,0,0,0.5)] max-w-2xl w-full relative overflow-hidden group">
@@ -2642,7 +2793,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                 {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} activeFinancialYear={activeFinancialYear} />}
-                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} />}
+                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
               {/* --- Database Password Gate Modal --- */}
@@ -3009,7 +3160,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 }}
                 className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-[0_4px_20px_rgba(99,102,241,0.3)] hover:scale-[1.02] active:scale-98"
               >
-                Enter Year
+                Enter Month
               </button>
             </div>
           </div>

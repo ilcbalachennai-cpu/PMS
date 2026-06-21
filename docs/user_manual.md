@@ -1,5 +1,5 @@
 # BharatPay Pro - Comprehensive User Manual
-*Version 06.01.08*
+*Version 06.01.09*
 
 Welcome to **BharatPay Pro**, a premium Payroll Management System designed for precision, security, and ease of use. This manual will guide you through every aspect of the software, including the advanced **Multi-Company Architecture** introduced in the V06 series.
 

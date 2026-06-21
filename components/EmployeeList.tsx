@@ -398,8 +398,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                 const dataToExport = filteredEmployees.map(emp => {
                     const row: any = {};
                     exportModal.selectedColumns.forEach(col => {
-                        if (col === 'gross') row[col] = calculateGrossWage(emp);
-                        else row[col] = (emp as any)[col];
+                        if (col === 'gross') {
+                            row[col] = calculateGrossWage(emp);
+                        } else if (col === 'doj' && emp.doj) {
+                            const matchYMD = emp.doj.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                            row[col] = matchYMD ? `${matchYMD[3]}-${matchYMD[2]}-${matchYMD[1]}` : emp.doj;
+                        } else {
+                            row[col] = (emp as any)[col];
+                        }
                     });
                     return row;
                 });

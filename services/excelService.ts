@@ -78,6 +78,8 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
 const sanitizeData = (data: any): any => {
     if (Array.isArray(data)) {
         return data.map(sanitizeData);
+    } else if (data instanceof Date || Object.prototype.toString.call(data) === '[object Date]') {
+        return data;
     } else if (data !== null && typeof data === 'object') {
         const sanitized: any = {};
         for (const key in data) {
@@ -87,6 +89,93 @@ const sanitizeData = (data: any): any => {
         return sanitized;
     }
     return data;
+};
+
+/**
+ * Unified Date Parser for Excel Import
+ * Handles Date objects, string dates (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD, text dates), 
+ * and Excel serial numbers. Returns 'YYYY-MM-DD' formatted string.
+ */
+const parseExcelDate = (val: any): string => {
+    if (val === undefined || val === null) return '';
+    
+    // 1. Native Date objects (SheetJS cellDates path)
+    const isDateObject = val && (val instanceof Date || Object.prototype.toString.call(val) === '[object Date]');
+    if (isDateObject) {
+        if (!isNaN(val.getTime())) {
+            // Adjust for local timezone offset
+            const offset = val.getTimezoneOffset() * 60000;
+            const localTime = val.getTime() - offset;
+            // Add a 12 hour buffer to push any "almost midnight" times (like 23:59:50) safely into the middle of the correct day
+            const adjusted = new Date(localTime + 12 * 60 * 60 * 1000);
+            
+            const y = adjusted.getUTCFullYear();
+            const m = String(adjusted.getUTCMonth() + 1).padStart(2, '0');
+            const d = String(adjusted.getUTCDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+        return '';
+    }
+
+    const str = String(val).trim();
+    if (!str || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return '';
+
+    // 2. Excel numeric date serials check (e.g. "29029", 46113)
+    // Must run BEFORE general text parsing because pure numeric strings like "46113" 
+    // are parsed by Date.parse as valid year values (e.g. year 46113).
+    if (/^\d+(\.\d+)?$/.test(str)) {
+        const num = parseFloat(str);
+        if (num > 20000) {
+            const excelDate = new Date(Math.round((num - 25569) * 86400 * 1000));
+            if (!isNaN(excelDate.getTime())) {
+                const y = excelDate.getUTCFullYear();
+                const m = String(excelDate.getUTCMonth() + 1).padStart(2, '0');
+                const d = String(excelDate.getUTCDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            }
+        }
+    }
+
+    // 3. Format DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY
+    const matchDMY = str.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})$/);
+    if (matchDMY) {
+        const d = matchDMY[1].padStart(2, '0');
+        const m = matchDMY[2].padStart(2, '0');
+        const y = matchDMY[3];
+        return `${y}-${m}-${d}`;
+    }
+
+    // 4. Format DD-MM-YY, DD/MM/YY, DD.MM.YY (2-digit year)
+    const matchDMY2 = str.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{2})$/);
+    if (matchDMY2) {
+        const d = matchDMY2[1].padStart(2, '0');
+        const m = matchDMY2[2].padStart(2, '0');
+        const yy = parseInt(matchDMY2[3]);
+        const y = yy >= 80 ? `19${yy}` : `20${String(yy).padStart(2, '0')}`;
+        return `${y}-${m}-${d}`;
+    }
+
+    // 5. Format YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+    const matchYMD = str.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})$/);
+    if (matchYMD) {
+        const y = matchYMD[1];
+        const m = matchYMD[2].padStart(2, '0');
+        const d = matchYMD[3].padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    // 6. Text dates (e.g. "23-Jun-1979", "01 Apr 2026")
+    const cleanDateStr = str.replace(/[-\/\.]/g, ' ');
+    const parsedTime = Date.parse(cleanDateStr);
+    if (!isNaN(parsedTime)) {
+        const dateObj = new Date(parsedTime);
+        const y = dateObj.getFullYear();
+        const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const d = String(dateObj.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    return '';
 };
 
 /**
@@ -175,18 +264,18 @@ export const parseEmployeeXLSX = async (
                         return null;
                     };
 
-                    const excelId = String(getVal(['Employee ID', 'ID', 'Emp ID']) || '').trim();
-                    const name = String(getVal(['Full Name', 'Name', 'Employee Name']) || '').trim();
+                    const excelId = String(getVal(['Employee ID', 'ID', 'Emp ID', 'Employee ID (LOCKED)', 'Employee ID (LOCKED) ']) || '').trim();
+                    const name = String(getVal(['Full Name', 'Name', 'Employee Name', 'Full Name (LOCKED)']) || '').trim();
                     if (!name || name === 'Unknown') {
                         rejectedRecords.push({ row: rowNum, name: 'Unknown', id: excelId, reason: "Missing 'Full Name'. Skipped." });
                         return;
                     }
 
-                    const uan = String(getVal(['UAN Number', 'UAN', 'UAN No']) || '').trim();
-                    const aadhaar = String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No']) || '').trim();
-                    const pan = String(getVal(['PAN Number', 'PAN', 'PAN No']) || '').trim().toLowerCase();
-                    const esi = String(getVal(['ESI Number', 'ESI IP Number', 'ESI No']) || '').trim();
-                    const pf = String(getVal(['PF Member ID', 'PF ID', 'PF Number']) || '').trim();
+                    const uan = String(getVal(['UAN Number', 'UAN', 'UAN No', 'UAN Number (LOCKED)']) || '').trim();
+                    const aadhaar = String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No', 'Aadhaar Number (LOCKED)']) || '').trim();
+                    const pan = String(getVal(['PAN Number', 'PAN', 'PAN No', 'PAN Number (LOCKED)']) || '').trim().toLowerCase();
+                    const esi = String(getVal(['ESI Number', 'ESI IP Number', 'ESI No', 'ESI Number (LOCKED)']) || '').trim();
+                    const pf = String(getVal(['PF Member ID', 'PF ID', 'PF Number', 'PF Member ID (LOCKED)']) || '').trim();
 
                     if (!aadhaar) {
                         rejectedRecords.push({ row: rowNum, name, id: excelId, reason: "Missing 'Aadhaar Number'. Skipped." });
@@ -211,39 +300,24 @@ export const parseEmployeeXLSX = async (
                     batchESI.add(esi);
                     batchPF.add(pf);
 
-                    const parseIndDate = (val: any) => {
-                        if (!val) return '';
-                        if (val instanceof Date) {
-                            const offset = val.getTimezoneOffset() * 60000;
-                            const localDate = new Date(val.getTime() - offset);
-                            return localDate.toISOString().split('T')[0];
-                        }
-                        const str = String(val).trim();
-                        if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
-                            const [d, m, y] = str.split('-');
-                            return `${y}-${m}-${d}`;
-                        }
-                        if (/^\d+$/.test(str) && Number(str) > 20000) {
-                            const excelDate = new Date((Number(str) - 25569) * 86400 * 1000);
-                            return excelDate.toISOString().split('T')[0];
-                        }
-                        return str;
-                    };
+                    const parseIndDate = (val: any) => parseExcelDate(val);
 
                     const isTrue = (val: any) => String(val).trim().toUpperCase() === 'TRUE' || String(val).trim().toUpperCase() === 'YES';
+
+                    const parsedDoj = parseIndDate(getVal(['Date of Joining (DD-MM-YYYY)', 'Date of Joining (LOCKED)', 'Date of Joining', 'DOJ', 'Joining Date', 'Date of Join', 'Date of Joining (DD/MM/YYYY)', 'Date of Joining (DD.MM.YYYY)', 'DateofJoining', 'Date of Appointment'])) || '';
 
                     const importedEmp: Employee = {
                         ...getEmptyForm() as Employee,
                         id: '', // Will be assigned later
                         name,
-                        gender: (getVal(['Gender']) as any) || 'Male',
-                        dob: parseIndDate(getVal(['Date of Birth (DD-MM-YYYY)', 'Date of Birth', 'DOB'])),
-                        designation: String(getVal(['Designation']) || designations[0]),
-                        division: String(getVal(['Department/Division', 'Department', 'Division']) || divisions[0]),
-                        department: String(getVal(['Department/Division', 'Department', 'Division']) || divisions[0]),
-                        branch: String(getVal(['Branch']) || branches[0]),
-                        site: String(getVal(['Site']) || sites[0]),
-                        doj: parseIndDate(getVal(['Date of Joining (DD-MM-YYYY)', 'Date of Joining', 'DOJ', 'Joining Date'])) || new Date().toISOString().split('T')[0],
+                        gender: (getVal(['Gender', 'Gender (LOCKED)']) as any) || 'Male',
+                        dob: parseIndDate(getVal(['Date of Birth (DD-MM-YYYY)', 'Date of Birth (LOCKED)', 'Date of Birth', 'DOB', 'Birth Date', 'Date of Birth (DD/MM/YYYY)', 'Date of Birth (DD.MM.YYYY)', 'BirthDate'])),
+                        designation: String(getVal(['Designation', 'Designations', 'Desingation', 'Desg', 'Desig', 'Job Title', 'Role']) || designations[0] || ''),
+                        division: String(getVal(['Department/Division', 'Department', 'Division', 'Department/Division (LOCKED)']) || divisions[0] || ''),
+                        department: String(getVal(['Department/Division', 'Department', 'Division', 'Department/Division (LOCKED)']) || divisions[0] || ''),
+                        branch: String(getVal(['Branch', 'Branch (LOCKED)']) || branches[0] || ''),
+                        site: String(getVal(['Site', 'Site (LOCKED)']) || sites[0] || ''),
+                        doj: parsedDoj,
                         mobile: String(getVal(['Mobile Number', 'Mobile', 'Mobile No']) || ''),
                         email: String(getVal(['mail_id', 'Mail ID', 'mailDI', 'Email', 'Email ID']) || ''),
                         fatherSpouseName: String(getVal(['Father or Spouse Name', 'Father Name', 'Spouse Name']) || ''),
@@ -300,7 +374,7 @@ export const parseEmployeeXLSX = async (
                             sl: Number(getVal(['SL Opening Balance', 'SL Opening', 'SL Balance']) || 0),
                             cl: Number(getVal(['CL Opening Balance', 'CL Opening', 'CL Balance']) || 0)
                         },
-                        serviceRecords: [{ date: parseIndDate(getVal(['Date of Joining', 'DOJ'])) || new Date().toISOString().split('T')[0], type: 'Appointment', description: 'Imported from Excel' }]
+                        serviceRecords: [{ date: parsedDoj, type: 'Appointment', description: 'Imported from Excel' }]
                     };
 
                     tempEmps.push(importedEmp);
@@ -480,10 +554,17 @@ export const generateEmployeeUpdateTemplateXLSX = async (employees: Employee[], 
 
         const formatDate = (dateStr?: string) => {
             if (!dateStr) return '';
+            const matchYMD = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (matchYMD) {
+                return `${matchYMD[3]}-${matchYMD[2]}-${matchYMD[1]}`;
+            }
             const date = new Date(dateStr);
-            const d = String(date.getDate()).padStart(2, '0');
-            const m = String(date.getMonth() + 1).padStart(2, '0');
-            const y = date.getFullYear();
+            if (isNaN(date.getTime())) return '';
+            const offset = date.getTimezoneOffset() * 60000;
+            const localDate = new Date(date.getTime() - offset);
+            const d = String(localDate.getUTCDate()).padStart(2, '0');
+            const m = String(localDate.getUTCMonth() + 1).padStart(2, '0');
+            const y = localDate.getUTCFullYear();
             return `${d}-${m}-${y}`;
         };
 
@@ -591,20 +672,7 @@ export const parseEmployeeUpdateXLSX = async (
                 const rejectedRecords: { row: number; name: string; id: string; reason: string }[] = [];
                 let successCount = 0;
 
-                const parseIndDate = (val: any) => {
-                    if (!val) return '';
-                    if (val instanceof Date) {
-                        const offset = val.getTimezoneOffset() * 60000;
-                        const localDate = new Date(val.getTime() - offset);
-                        return localDate.toISOString().split('T')[0];
-                    }
-                    const str = String(val).trim();
-                    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
-                        const [d, m, y] = str.split('-');
-                        return `${y}-${m}-${d}`;
-                    }
-                    return str;
-                };
+                const parseIndDate = (val: any) => parseExcelDate(val);
 
                 const isTrue = (val: any) => String(val).trim().toUpperCase() === 'TRUE' || String(val).trim().toUpperCase() === 'YES';
 
@@ -618,7 +686,7 @@ export const parseEmployeeUpdateXLSX = async (
                         return null;
                     };
 
-                    const excelId = String(getVal(['Employee ID (LOCKED)', 'Employee ID', 'ID', 'Emp ID']) || '').trim();
+                    const excelId = String(getVal(['Employee ID (LOCKED)', 'Employee ID', 'ID', 'Emp ID', 'Employee ID (LOCKED) ']) || '').trim();
                     if (!excelId) {
                         rejectedRecords.push({ row: rowNum, name: 'Unknown', id: '', reason: "Missing 'Employee ID'. Skipped." });
                         return;
@@ -635,33 +703,38 @@ export const parseEmployeeUpdateXLSX = async (
                     // Update allowed fields
                     const updatedEmp: Employee = {
                         ...existingEmp,
-                        designation: String(getVal(['Designation']) || existingEmp.designation),
-                        division: String(getVal(['Department/Division', 'Department', 'Division']) || existingEmp.division),
-                        department: String(getVal(['Department/Division', 'Department', 'Division']) || existingEmp.department),
-                        branch: String(getVal(['Branch']) || existingEmp.branch),
-                        site: String(getVal(['Site']) || existingEmp.site),
+                        gender: (getVal(['Gender', 'Gender (LOCKED)']) as any) || existingEmp.gender,
+                        dob: parseIndDate(getVal(['Date of Birth (DD-MM-YYYY)', 'Date of Birth (LOCKED)', 'Date of Birth', 'DOB', 'Birth Date', 'Date of Birth (DD/MM/YYYY)', 'Date of Birth (DD.MM.YYYY)', 'BirthDate'])) || existingEmp.dob,
+                        doj: parseIndDate(getVal(['Date of Joining (DD-MM-YYYY)', 'Date of Joining (LOCKED)', 'Date of Joining', 'DOJ', 'Joining Date', 'Date of Join', 'Date of Joining (DD/MM/YYYY)', 'Date of Joining (DD.MM.YYYY)', 'DateofJoining', 'Date of Appointment'])) || existingEmp.doj,
+                        dol: parseIndDate(getVal(['Date of Leaving (DD-MM-YYYY)', 'Date of Leaving (LOCKED)', 'Date of Leaving', 'DOL'])) || existingEmp.dol,
+                        leavingReason: String(getVal(['Reason for Leaving', 'Reason']) || existingEmp.leavingReason),
+                        designation: String(getVal(['Designation', 'Designations', 'Desingation', 'Desg', 'Desig', 'Job Title', 'Role']) || existingEmp.designation),
+                        division: String(getVal(['Department/Division', 'Department', 'Division', 'Department/Division (LOCKED)']) || existingEmp.division),
+                        department: String(getVal(['Department/Division', 'Department', 'Division', 'Department/Division (LOCKED)']) || existingEmp.department),
+                        branch: String(getVal(['Branch', 'Branch (LOCKED)']) || existingEmp.branch),
+                        site: String(getVal(['Site', 'Site (LOCKED)']) || existingEmp.site),
                         mobile: String(getVal(['Mobile Number', 'Mobile', 'Mobile No']) || existingEmp.mobile),
-                        email: String(getVal(['mail_id', 'Mail ID', 'Email']) || existingEmp.email),
-                        fatherSpouseName: String(getVal(['Father or Spouse Name']) || existingEmp.fatherSpouseName),
+                        email: String(getVal(['mail_id', 'Mail ID', 'Email', 'Email ID']) || existingEmp.email),
+                        fatherSpouseName: String(getVal(['Father or Spouse Name', 'Father Name', 'Spouse Name']) || existingEmp.fatherSpouseName),
                         relationship: String(getVal(['Relationship']) || existingEmp.relationship),
-                        maritalStatus: String(getVal(['Married (Yes/No)']) || existingEmp.maritalStatus) === 'Yes' ? 'Yes' : 'No',
-                        spouseName: String(getVal(['Spouse Name']) || existingEmp.spouseName),
+                        maritalStatus: String(getVal(['Married (Yes/No)', 'Married', 'Marital Status']) || existingEmp.maritalStatus) === 'Yes' ? 'Yes' : 'No',
+                        spouseName: String(getVal(['Spouse Name', 'Wife Name', 'Husband Name']) || existingEmp.spouseName),
                         spouseGender: (getVal(['Spouse Gender']) as any) || existingEmp.spouseGender,
-                        spouseAadhaar: String(getVal(['Spouse Aadhaar Number']) || existingEmp.spouseAadhaar),
-                        doorNo: String(getVal(['Door No']) || existingEmp.doorNo),
-                        buildingName: String(getVal(['Building Name']) || existingEmp.buildingName),
+                        spouseAadhaar: String(getVal(['Spouse Aadhaar Number', 'Spouse Aadhaar', 'Spouse UID']) || existingEmp.spouseAadhaar),
+                        doorNo: String(getVal(['Door No', 'House No', 'Flat No']) || existingEmp.doorNo),
+                        buildingName: String(getVal(['Building Name', 'Building']) || existingEmp.buildingName),
                         street: String(getVal(['Street']) || existingEmp.street),
                         area: String(getVal(['Area']) || existingEmp.area),
                         city: String(getVal(['City']) || existingEmp.city),
                         state: String(getVal(['State']) || existingEmp.state),
-                        pincode: String(getVal(['Pincode']) || existingEmp.pincode),
-                        pan: String(getVal(['PAN Number']) || existingEmp.pan).toUpperCase(),
-                        aadhaarNumber: String(getVal(['Aadhaar Number']) || existingEmp.aadhaarNumber),
-                        bankAccount: String(getVal(['Bank Account Number']) || existingEmp.bankAccount),
-                        bankName: String(getVal(['Bank Name']) || existingEmp.bankName),
-                        bankBranch: String(getVal(['Bank Branch']) || existingEmp.bankBranch),
-                        ifsc: String(getVal(['IFSC Code']) || existingEmp.ifsc),
-                        basicPay: Number(getVal(['Basic Pay']) || existingEmp.basicPay),
+                        pincode: String(getVal(['Pincode', 'Pin Code']) || existingEmp.pincode),
+                        pan: String(getVal(['PAN Number', 'PAN', 'PAN No', 'PAN Number (LOCKED)']) || existingEmp.pan).toUpperCase(),
+                        aadhaarNumber: String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No', 'Aadhaar Number (LOCKED)']) || existingEmp.aadhaarNumber),
+                        bankAccount: String(getVal(['Bank Account Number', 'Bank Account', 'Account No', 'Account Number']) || existingEmp.bankAccount),
+                        bankName: String(getVal(['Bank Name', 'Bank']) || existingEmp.bankName),
+                        bankBranch: String(getVal(['Bank Branch', 'Branch Name']) || existingEmp.bankBranch),
+                        ifsc: String(getVal(['IFSC Code', 'IFSC']) || existingEmp.ifsc),
+                        basicPay: Number(getVal(['Basic Pay', 'Basic']) || existingEmp.basicPay),
                         da: Number(getVal(['DA']) || existingEmp.da),
                         retainingAllowance: Number(getVal(['Retaining Allowance']) || existingEmp.retainingAllowance),
                         hra: Number(getVal(['HRA']) || existingEmp.hra),
