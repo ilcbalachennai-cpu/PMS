@@ -288,8 +288,8 @@ const Settings: React.FC<SettingsProps> = ({
             reader.onloadend = () => {
                 const base64String = reader.result as string;
                 setLogo(base64String);
-                localStorage.setItem('app_logo', base64String);
-                if (window.electronAPI) window.electronAPI.dbSet('app_logo', base64String);
+                localStorage.setItem(getCKey('app_logo'), base64String);
+                if (window.electronAPI) window.electronAPI.dbSet(getCKey('app_logo'), base64String);
             };
             reader.readAsDataURL(file);
         }
@@ -1302,7 +1302,7 @@ const Settings: React.FC<SettingsProps> = ({
                 }
 
                 if (window.electronAPI?.dbSet) {
-                    await window.electronAPI.dbSet('app_company_profile', newProfile);
+                    await window.electronAPI.dbSet(getCKey('app_company_profile'), newProfile);
                     await window.electronAPI.dbSet('app_companies', companiesList);
                     await window.electronAPI.dbSet('app_active_company_id', targetCompanyId);
                 }
@@ -1595,9 +1595,19 @@ const Settings: React.FC<SettingsProps> = ({
                 const res = await window.electronAPI.runBackup(encrypted, fileName, subfolderPath);
 
                 if (res.success) {
+                    // Also trigger a standard browser download so they get a copy in their Downloads folder
+                    try {
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(url);
+                    } catch (dlErr) {
+                        console.error("Browser backup copy failed:", dlErr);
+                    }
+
                     setProcessProgress(100);
                     setProcessStatus('Backup Saved Successfully');
-                    showAlert?.('success', 'Safe Local Backup Created', `Your data has been encrypted and saved as: ${res.fileName || fileName}`, () => {
+                    showAlert?.('success', 'Backup Created', `Your data has been saved to the default location and a copy has been downloaded to your computer as: ${res.fileName || fileName}`, () => {
                         // Open the folder location ONLY after clicking OK
                         if (res.filePath && window.electronAPI.openItemLocation) {
                             window.electronAPI.openItemLocation(res.filePath);
@@ -1744,24 +1754,39 @@ const Settings: React.FC<SettingsProps> = ({
             ...profileData,
             establishmentName: (profileData.establishmentName || '').trim().toUpperCase()
         };
-        setConfig(formData);
+        const sanitizedConfig = { ...formData };
+        if (sanitizedConfig.enableDynamicPaySheet && sanitizedConfig.dynamicPaySheetColumns) {
+            const cols = [...sanitizedConfig.dynamicPaySheetColumns];
+            if (!cols.includes('totalEarnings')) {
+                cols.push('totalEarnings');
+            }
+            if (!cols.includes('totalDeductions')) {
+                cols.push('totalDeductions');
+            }
+            if (!cols.includes('netPay')) {
+                cols.push('netPay');
+            }
+            sanitizedConfig.dynamicPaySheetColumns = cols;
+        }
+        setFormData(sanitizedConfig);
+        setConfig(sanitizedConfig);
         setCompanyProfile(sanitizedProfile);
         setLeavePolicy(localLeavePolicy);
 
         // Persist to LocalStorage and DB
         localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(sanitizedProfile));
         if (window.electronAPI?.dbSet) {
-            await window.electronAPI.dbSet('app_company_profile', sanitizedProfile);
+            await window.electronAPI.dbSet(getCKey('app_company_profile'), sanitizedProfile);
         }
 
-        localStorage.setItem(getCKey('app_config'), JSON.stringify(formData));
+        localStorage.setItem(getCKey('app_config'), JSON.stringify(sanitizedConfig));
         if (window.electronAPI?.dbSet) {
-            await window.electronAPI.dbSet('app_config', formData);
+            await window.electronAPI.dbSet(getCKey('app_config'), sanitizedConfig);
         }
 
         localStorage.setItem(getCKey('app_leave_policy'), JSON.stringify(localLeavePolicy));
         if (window.electronAPI?.dbSet) {
-            await window.electronAPI.dbSet('app_leave_policy', localLeavePolicy);
+            await window.electronAPI.dbSet(getCKey('app_leave_policy'), localLeavePolicy);
         }
 
         // V03.01.07: Directly update app_companies registry to prevent stale status
@@ -2027,7 +2052,7 @@ const Settings: React.FC<SettingsProps> = ({
                             </div>
                             <div className="flex items-center gap-4 bg-slate-900/80 p-1.5 px-3 rounded-2xl border border-slate-800 shadow-inner">
                                 <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${formData.pfEsiCalculationBasis === 'LabourCode' ? 'text-slate-500' : 'text-amber-400'}`}>
-                                    {formData.pfEsiCalculationBasis === 'LabourCode' ? 'LABOUR CODE (CLAUSE 88)' : 'ORIGINAL WAGES BASIS'}
+                                    {formData.pfEsiCalculationBasis === 'LabourCode' ? 'LABOUR CODE (CLAUSE 88)' : 'LEGACY WAGES BASIS'}
                                 </span>
                                 <label className="relative inline-flex items-center cursor-pointer">
                                     <input
@@ -2065,20 +2090,20 @@ const Settings: React.FC<SettingsProps> = ({
                                 )}
                             </button>
 
-                            {/* Card 2: Original Wages */}
+                            {/* Card 2: Legacy Wages */}
                             <button
                                 onClick={() => setFormData({ ...formData, pfEsiCalculationBasis: 'OriginalWages' })}
                                 className={`group relative p-6 rounded-2xl border-2 transition-all text-left overflow-hidden ${formData.pfEsiCalculationBasis === 'OriginalWages' ? 'bg-amber-600/10 border-amber-500 shadow-lg shadow-amber-900/20' : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
-                                title="Select Original Wages Basis"
+                                title="Select Legacy Wages Basis"
                             >
                                 <div className="flex items-center gap-3 mb-3">
                                     <div className={`p-2 rounded-lg ${formData.pfEsiCalculationBasis === 'OriginalWages' ? 'bg-amber-500 text-white' : 'bg-slate-800 text-slate-500 grupo-hover:bg-slate-700'}`}>
                                         {formData.pfEsiCalculationBasis === 'OriginalWages' ? <CheckCircle2 size={16} /> : <div className="w-4 h-4 rounded-full border-2 border-slate-700" />}
                                     </div>
-                                    <h4 className="font-bold text-sm tracking-tight">Original Wages</h4>
+                                    <h4 className="font-bold text-sm tracking-tight">Legacy Wages</h4>
                                 </div>
                                 <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
-                                    PF/ESI Wages based on selected components below. Subject to Statutory Ceiling for PF unless (Higher Rule) is opted.
+                                    PF/ESI Wages based on selected components immediately below. Subject to Statutory Ceiling for PF unless (Higher Rule) is opted.
                                 </p>
                                 {formData.pfEsiCalculationBasis === 'OriginalWages' && (
                                     <div className="absolute top-0 right-0 p-2">
@@ -2088,6 +2113,120 @@ const Settings: React.FC<SettingsProps> = ({
                             </button>
                         </div>
                     </div>
+
+                    {/* PF LEGACY WAGES COMPONENTS - Only shows if OriginalWages selected */}
+                    {formData.pfEsiCalculationBasis === 'OriginalWages' && (
+                        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
+                            <div className="p-4 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Landmark size={16} className="text-blue-400" />
+                                    <h3 className="font-black uppercase tracking-tighter text-xs text-slate-300">PF Legacy Wages Components</h3>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <label htmlFor="enable-pf" className="flex items-center gap-2 cursor-pointer bg-slate-900/80 p-1.5 px-3 rounded-xl border border-slate-800 shadow-inner">
+                                        <input
+                                            id="enable-pf"
+                                            type="checkbox"
+                                            className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900"
+                                            checked={formData.enablePF !== false}
+                                            onChange={e => setFormData({ ...formData, enablePF: e.target.checked })}
+                                            title="Enable Provident Fund Deduction"
+                                            aria-label="Enable Provident Fund Deduction"
+                                        />
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase">PF Applicable</span>
+                                    </label>
+                                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Select components to include for PF Base</span>
+                                </div>
+                            </div>
+                            <div className="p-5">
+                                {formData.enablePF === false ? (
+                                    <p className="text-xs text-slate-500 italic text-center py-4">Provident Fund (PF) is disabled/not applicable.</p>
+                                ) : (
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                        {[
+                                            { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                            { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                            { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
+                                            { key: 'special3', label: 'Allow 3' },
+                                        ].map(comp => {
+                                            const isLocked = comp.key === 'basic' || comp.key === 'da';
+                                            const components = formData.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
+                                            const isActive = isLocked ? true : components[comp.key as keyof typeof components];
+                                            return (
+                                                <button
+                                                    key={comp.key}
+                                                    disabled={isLocked}
+                                                    onClick={() => handlePFOriginalWagesToggle(comp.key as any)}
+                                                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-blue-600 border-blue-400 text-white shadow-blue-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700'} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
+                                                    title={isLocked ? "Mandatory Component" : `Toggle ${comp.label} for PF Base`}
+                                                >
+                                                    {isActive ? <CheckSquare size={14} className={isLocked ? 'shrink-0 text-blue-200' : 'shrink-0'} /> : <Square size={14} className="shrink-0 opacity-40" />}
+                                                    <span className="truncate">{comp.label} {isLocked && <span className="opacity-40 ml-1">(Locked)</span>}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ESI LEGACY WAGES COMPONENTS - Only shows if OriginalWages selected */}
+                    {formData.pfEsiCalculationBasis === 'OriginalWages' && (
+                        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
+                            <div className="p-4 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Heart size={16} className="text-pink-400" />
+                                    <h3 className="font-black uppercase tracking-tighter text-xs text-slate-300">ESI Legacy Wages Components</h3>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <label htmlFor="enable-esi" className="flex items-center gap-2 cursor-pointer bg-slate-900/80 p-1.5 px-3 rounded-xl border border-slate-800 shadow-inner">
+                                        <input
+                                            id="enable-esi"
+                                            type="checkbox"
+                                            className="w-4 h-4 rounded border-slate-700 text-pink-500 bg-slate-900"
+                                            checked={formData.enableESI !== false}
+                                            onChange={e => setFormData({ ...formData, enableESI: e.target.checked })}
+                                            title="Enable ESI Deduction"
+                                            aria-label="Enable ESI Deduction"
+                                        />
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase">ESI Applicable</span>
+                                    </label>
+                                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Select components to include for ESI Base</span>
+                                </div>
+                            </div>
+                            <div className="p-5">
+                                {formData.enableESI === false ? (
+                                    <p className="text-xs text-slate-500 italic text-center py-4">ESI is disabled/not applicable.</p>
+                                ) : (
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                        {[
+                                            { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                            { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                            { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
+                                            { key: 'special3', label: 'Allow 3' },
+                                        ].map(comp => {
+                                            const isLocked = comp.key === 'basic' || comp.key === 'da';
+                                            const components = formData.esiOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents;
+                                            const isActive = isLocked ? true : components[comp.key as keyof typeof components];
+                                            return (
+                                                <button
+                                                    key={comp.key}
+                                                    disabled={isLocked}
+                                                    onClick={() => handleESIOriginalWagesToggle(comp.key as any)}
+                                                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-pink-600 border-pink-400 text-white shadow-pink-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-pink-900/20 hover:border-pink-500/30'} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
+                                                    title={isLocked ? "Mandatory Component" : `Toggle ${comp.label} for ESI Base`}
+                                                >
+                                                    {isActive ? <CheckSquare size={14} className={isLocked ? 'shrink-0 text-pink-200' : 'shrink-0'} /> : <Square size={14} className="shrink-0 opacity-40" />}
+                                                    <span className="truncate">{comp.label} {isLocked && <span className="opacity-40 ml-1">(Locked)</span>}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {/* DYNAMIC PAY SHEET COLUMNS CONFIGURATION */}
                     <div id="dynamic_paysheet_section" className="scroll-mt-20 bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
@@ -2123,7 +2262,7 @@ const Settings: React.FC<SettingsProps> = ({
 
                         {formData.enableDynamicPaySheet && (
                             <div className="p-6">
-                                <p className="text-xs text-slate-400 mb-4">* Select the columns to include. <b>EMPID</b>, <b>Employee Name</b>, <b>Total Earnings</b>, and <b>Net Pay</b> are mandatory and cannot be unselected.</p>
+                                <p className="text-xs text-slate-400 mb-4">* Select the columns to include. <b>EMPID</b>, <b>Employee Name</b>, <b>Total Earnings</b>, <b>Total Deductions</b>, and <b>Net Pay</b> are mandatory and cannot be unselected.</p>
                                 <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-800 space-y-5">
                                     {/* Mandatory Section */}
                                     <div>
@@ -2136,6 +2275,7 @@ const Settings: React.FC<SettingsProps> = ({
                                                 { key: 'empid', label: 'EMPID' },
                                                 { key: 'name', label: 'Employee Name' },
                                                 { key: 'totalEarnings', label: 'Total Earnings' },
+                                                { key: 'totalDeductions', label: 'Total Deductions' },
                                                 { key: 'netPay', label: 'Net Pay' }
                                             ].map(comp => (
                                                 <div 
@@ -2178,8 +2318,7 @@ const Settings: React.FC<SettingsProps> = ({
                                                 { key: 'it', label: 'IT' },
                                                 { key: 'lwf', label: 'LWF' },
                                                 { key: 'advanceRecovery', label: 'Adv Recovery' },
-                                                { key: 'fine', label: 'Fine' },
-                                                { key: 'totalDeductions', label: 'Total Deductions' }
+                                                { key: 'fine', label: 'Fine' }
                                             ].map(comp => {
                                                 const columns = formData.dynamicPaySheetColumns || [];
                                                 const isActive = columns.includes(comp.key);
@@ -2208,83 +2347,7 @@ const Settings: React.FC<SettingsProps> = ({
                         )}
                     </div>
 
-                    {/* PF ORIGINAL WAGES COMPONENTS - Only shows if OriginalWages selected */}
-                    {formData.pfEsiCalculationBasis === 'OriginalWages' && (
-                        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
-                            <div className="p-4 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <Landmark size={16} className="text-blue-400" />
-                                    <h3 className="font-black uppercase tracking-tighter text-xs text-slate-300">PF Original Wages Components</h3>
-                                </div>
-                                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Select components to include for PF Base</span>
-                            </div>
-                            <div className="p-5">
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                                    {[
-                                        { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
-                                        { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                        { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
-                                        { key: 'special3', label: 'Allow 3' },
-                                    ].map(comp => {
-                                        const isLocked = comp.key === 'basic' || comp.key === 'da';
-                                        const components = formData.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
-                                        const isActive = isLocked ? true : components[comp.key as keyof typeof components];
-                                        return (
-                                            <button
-                                                key={comp.key}
-                                                disabled={isLocked}
-                                                onClick={() => handlePFOriginalWagesToggle(comp.key as any)}
-                                                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-blue-600 border-blue-400 text-white shadow-blue-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700'} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
-                                                title={isLocked ? "Mandatory Component" : `Toggle ${comp.label} for PF Base`}
-                                            >
-                                                {isActive ? <CheckSquare size={14} className={isLocked ? 'shrink-0 text-blue-200' : 'shrink-0'} /> : <Square size={14} className="shrink-0 opacity-40" />}
-                                                <span className="truncate">{comp.label} {isLocked && <span className="opacity-40 ml-1">(Locked)</span>}</span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* ESI ORIGINAL WAGES COMPONENTS - Only shows if OriginalWages selected */}
-                    {formData.pfEsiCalculationBasis === 'OriginalWages' && (
-                        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
-                            <div className="p-4 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <Heart size={16} className="text-pink-400" />
-                                    <h3 className="font-black uppercase tracking-tighter text-xs text-slate-300">ESI Original Wages Components</h3>
-                                </div>
-                                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Select components to include for ESI Base</span>
-                            </div>
-                            <div className="p-5">
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                                    {[
-                                        { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
-                                        { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                        { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
-                                        { key: 'special3', label: 'Allow 3' },
-                                    ].map(comp => {
-                                        const isLocked = comp.key === 'basic' || comp.key === 'da';
-                                        const components = formData.esiOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents;
-                                        const isActive = isLocked ? true : components[comp.key as keyof typeof components];
-                                        return (
-                                            <button
-                                                key={comp.key}
-                                                disabled={isLocked}
-                                                onClick={() => handleESIOriginalWagesToggle(comp.key as any)}
-                                                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-pink-600 border-pink-400 text-white shadow-pink-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-pink-900/20 hover:border-pink-500/30'} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
-                                                title={isLocked ? "Mandatory Component" : `Toggle ${comp.label} for ESI Base`}
-                                            >
-                                                {isActive ? <CheckSquare size={14} className={isLocked ? 'shrink-0 text-pink-200' : 'shrink-0'} /> : <Square size={14} className="shrink-0 opacity-40" />}
-                                                <span className="truncate">{comp.label} {isLocked && <span className="opacity-40 ml-1">(Locked)</span>}</span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                    {/* Relocated PF/ESI Wages Components to the top of settings page */}
                     <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
                         {/* ... existing ... */}
                         <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 space-y-6">
@@ -2556,11 +2619,24 @@ const Settings: React.FC<SettingsProps> = ({
                                             <Calculator className="text-amber-400" size={16} />
                                             <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Annual Bonus Policy</span>
                                         </div>
+                                        <label htmlFor="enable-bonus" className="flex items-center gap-1.5 cursor-pointer bg-slate-950/50 p-1 px-2.5 rounded border border-slate-800/80 shadow-inner">
+                                            <input
+                                                id="enable-bonus"
+                                                type="checkbox"
+                                                className="w-3.5 h-3.5 rounded border-slate-700 text-amber-500 bg-slate-900 accent-amber-500"
+                                                checked={formData.enableBonus !== false}
+                                                onChange={e => setFormData({ ...formData, enableBonus: e.target.checked })}
+                                                title="Enable Annual Bonus Calculation"
+                                                aria-label="Enable Annual Bonus Calculation"
+                                            />
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase">Applicable</span>
+                                        </label>
                                         <div className="flex items-center gap-2">
                                             <span className="text-[9px] text-slate-500 font-bold uppercase">Rate (%)</span>
                                             <input
                                                 type="number" onFocus={(e) => e.target.select()}
-                                                className="w-16 bg-slate-800 border border-slate-700 rounded p-1 text-xs text-amber-400 font-mono text-center"
+                                                disabled={formData.enableBonus === false}
+                                                className="w-16 bg-slate-800 border border-slate-700 rounded p-1 text-xs text-amber-400 font-mono text-center disabled:opacity-50"
                                                 value={formData.bonusRate * 100}
                                                 onChange={e => setFormData({ ...formData, bonusRate: (+e.target.value / 100) })}
                                                 step="0.01"
@@ -2569,7 +2645,9 @@ const Settings: React.FC<SettingsProps> = ({
                                         </div>
                                     </div>
                                     <div className="space-y-4">
-                                        {formData.pfEsiCalculationBasis === 'OriginalWages' ? (
+                                        {formData.enableBonus === false ? (
+                                            <p className="text-xs text-slate-500 italic text-center py-4">Annual Bonus is disabled/not applicable.</p>
+                                        ) : formData.pfEsiCalculationBasis === 'OriginalWages' ? (
                                             <div className="space-y-3">
                                                 <div className="flex items-center justify-between">
                                                     <p className="text-[10px] text-slate-500 font-medium italic">"Select Bonus Wages Components. Basic & DA locked."</p>
@@ -2620,55 +2698,73 @@ const Settings: React.FC<SettingsProps> = ({
                                             <Landmark className="text-blue-400" size={16} />
                                             <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">LIC Gratuity Policy</span>
                                         </div>
+                                        <label htmlFor="enable-gratuity" className="flex items-center gap-1.5 cursor-pointer bg-slate-950/50 p-1 px-2.5 rounded border border-slate-800/80 shadow-inner">
+                                            <input
+                                                id="enable-gratuity"
+                                                type="checkbox"
+                                                className="w-3.5 h-3.5 rounded border-slate-700 text-blue-500 bg-slate-900 accent-blue-500"
+                                                checked={formData.enableGratuity !== false}
+                                                onChange={e => setFormData({ ...formData, enableGratuity: e.target.checked })}
+                                                title="Enable Gratuity Calculation"
+                                                aria-label="Enable Gratuity Calculation"
+                                            />
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase">Applicable</span>
+                                        </label>
                                         <span className="text-[9px] text-blue-400 font-black border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 rounded">ACT 1972</span>
                                     </div>
                                     <div className="space-y-4">
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase">Calculation Basis (Formula)</label>
-                                            <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-[11px] text-blue-300 font-mono shadow-inner border-l-4 border-l-blue-500">
-                                                (Selected Wages * (15/26) * Completed Years of Service)
-                                            </div>
-                                        </div>
-                                        {formData.pfEsiCalculationBasis === 'OriginalWages' ? (
-                                            <div className="space-y-3">
-                                                <div className="flex items-center justify-between">
-                                                    <p className="text-[10px] text-slate-500 font-medium italic">"Select Gratuity Wages Components. Basic & DA locked."</p>
-                                                    <span className="text-[8px] text-indigo-400 uppercase font-black">Override Mode</span>
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    {[
-                                                        { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
-                                                        { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                                        { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
-                                                        { key: 'special3', label: 'Allow 3' }
-                                                    ].map(comp => {
-                                                        const isLocked = comp.key === 'basic' || comp.key === 'da';
-                                                        const components = formData.gratuityWagesComponents || INITIAL_STATUTORY_CONFIG.gratuityWagesComponents;
-                                                        const isActive = isLocked ? true : components[comp.key as keyof typeof components];
-                                                        return (
-                                                            <button
-                                                                key={comp.key}
-                                                                disabled={isLocked}
-                                                                onClick={() => setFormData(p => ({ ...p, gratuityWagesComponents: { ...p.gratuityWagesComponents, [comp.key]: !isActive } }))}
-                                                                className={`flex items-center gap-2 p-1.5 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-indigo-600/20 border-indigo-500 text-indigo-100' : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'} ${isLocked ? 'cursor-not-allowed grayscale-[0.8]' : 'hover:border-indigo-400'}`}
-                                                            >
-                                                                {isActive ? <CheckSquare size={10} className={isLocked ? 'text-slate-500' : 'text-indigo-400'} /> : <Square size={10} />}
-                                                                <span className="truncate">{comp.label}</span>
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
+                                        {formData.enableGratuity === false ? (
+                                            <p className="text-xs text-slate-500 italic text-center py-4">Gratuity is disabled/not applicable.</p>
                                         ) : (
-                                            <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-800/50">
-                                                <p className="text-[10px] text-slate-400 italic leading-relaxed">
-                                                    {formData.pfEsiCalculationBasis === 'LabourCode' ? (
-                                                        <>Gratuity uses <span className="text-blue-300 font-bold underline decoration-blue-500/50">Code Wages (Clause 88)</span> as basis.</>
-                                                    ) : (
-                                                        <>Gratuity uses the <span className="text-blue-300 font-bold underline decoration-blue-500/50">Standard Definition (Basic + DA)</span> as per Payment of Gratuity Act.</>
-                                                    )}
-                                                </p>
-                                            </div>
+                                            <>
+                                                <div className="space-y-1">
+                                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Calculation Basis (Formula)</label>
+                                                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-[11px] text-blue-300 font-mono shadow-inner border-l-4 border-l-blue-500">
+                                                        (Selected Wages * (15/26) * Completed Years of Service)
+                                                    </div>
+                                                </div>
+                                                {formData.pfEsiCalculationBasis === 'OriginalWages' ? (
+                                                    <div className="space-y-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <p className="text-[10px] text-slate-500 font-medium italic">"Select Gratuity Wages Components. Basic & DA locked."</p>
+                                                            <span className="text-[8px] text-indigo-400 uppercase font-black">Override Mode</span>
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            {[
+                                                                { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
+                                                                { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
+                                                                { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
+                                                                { key: 'special3', label: 'Allow 3' }
+                                                            ].map(comp => {
+                                                                const isLocked = comp.key === 'basic' || comp.key === 'da';
+                                                                const components = formData.gratuityWagesComponents || INITIAL_STATUTORY_CONFIG.gratuityWagesComponents;
+                                                                const isActive = isLocked ? true : components[comp.key as keyof typeof components];
+                                                                return (
+                                                                    <button
+                                                                        key={comp.key}
+                                                                        disabled={isLocked}
+                                                                        onClick={() => setFormData(p => ({ ...p, gratuityWagesComponents: { ...p.gratuityWagesComponents, [comp.key]: !isActive } }))}
+                                                                        className={`flex items-center gap-2 p-1.5 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-indigo-600/20 border-indigo-500 text-indigo-100' : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'} ${isLocked ? 'cursor-not-allowed grayscale-[0.8]' : 'hover:border-indigo-400'}`}
+                                                                    >
+                                                                        {isActive ? <CheckSquare size={10} className={isLocked ? 'text-slate-500' : 'text-indigo-400'} /> : <Square size={10} />}
+                                                                        <span className="truncate">{comp.label}</span>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-800/50">
+                                                        <p className="text-[10px] text-slate-400 italic leading-relaxed">
+                                                            {formData.pfEsiCalculationBasis === 'LabourCode' ? (
+                                                                <>Gratuity uses <span className="text-blue-300 font-bold underline decoration-blue-500/50">Code Wages (Clause 88)</span> as basis.</>
+                                                            ) : (
+                                                                <>Gratuity uses the <span className="text-blue-300 font-bold underline decoration-blue-500/50">Standard Definition (Basic + DA)</span> as per Payment of Gratuity Act.</>
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </>
                                         )}
                                     </div>
                                 </div>
@@ -2694,13 +2790,33 @@ const Settings: React.FC<SettingsProps> = ({
                                 <div className="flex items-center gap-4"><span className="text-[10px] font-bold text-slate-500 uppercase">Deduction Cycle:</span><div className="flex gap-2">{['Monthly', 'HalfYearly'].map(c => (<button key={c} onClick={() => setFormData({ ...formData, ptDeductionCycle: c as any })} title={`Set PT Cycle to ${c}`} aria-label={`Set PT Cycle to ${c}`} className={`px-4 py-1.5 rounded-full text-[10px] font-bold border transition-all ${formData.ptDeductionCycle === c ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>{c}</button>))}</div></div>
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left">
-                                        <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800"><tr><th className="pb-3">Min Earnings (₹)</th><th className="pb-3">Max Earnings (₹)</th><th className="pb-3">Deduction (₹)</th><th className="pb-3 text-right">Action</th></tr></thead>
+                                        <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800">
+                                            <tr>
+                                                <th className="pb-3">Min Earnings (₹)</th>
+                                                <th className="pb-3">Max Earnings (₹)</th>
+                                                <th className="pb-3">Deduction (₹)</th>
+                                                {formData.ptDeductionCycle === 'HalfYearly' && <th className="pb-3">Monthly EMI (₹)</th>}
+                                                <th className="pb-3 text-right">Action</th>
+                                            </tr>
+                                        </thead>
                                         <tbody className="divide-y divide-slate-800">
                                             {formData.ptSlabs.map((slab, i) => (
                                                 <tr key={i} className="group">
                                                     <td className="py-3"><input type="number" onFocus={(e) => e.target.select()} className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.min} onChange={e => handleSlabChange(i, 'min', +e.target.value)} title="Minimum Earnings for Slab" aria-label="Minimum Earnings for Slab" /></td>
                                                     <td className="py-3"><input type="number" onFocus={(e) => e.target.select()} className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono" value={slab.max} onChange={e => handleSlabChange(i, 'max', +e.target.value)} title="Maximum Earnings for Slab" aria-label="Maximum Earnings for Slab" /></td>
                                                     <td className="py-3"><input type="number" onFocus={(e) => e.target.select()} className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} title="PT Amount for Slab" aria-label="PT Amount for Slab" /></td>
+                                                    {formData.ptDeductionCycle === 'HalfYearly' && (
+                                                        <td className="py-3">
+                                                            <input 
+                                                                type="number" 
+                                                                readOnly 
+                                                                className="bg-slate-800/50 border border-slate-800 rounded px-2 py-1 text-xs text-slate-400 w-24 font-mono font-bold" 
+                                                                value={Math.round(slab.amount / 6)} 
+                                                                title="Monthly EMI (Calculated as Deduction / 6)" 
+                                                                aria-label="Monthly EMI" 
+                                                            />
+                                                        </td>
+                                                    )}
                                                     <td className="py-3 text-right"><button onClick={() => handleDeleteSlab(i)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete PT Slab" aria-label="Delete PT Slab"><Trash2 size={14} /></button></td>
                                                 </tr>
                                             ))}

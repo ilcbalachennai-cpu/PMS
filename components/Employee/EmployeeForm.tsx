@@ -33,6 +33,17 @@ interface EmployeeFormProps {
     onUnlockSeparation: () => void;
     globalMonth: string;
     globalYear: number;
+    showAlert?: (
+        type: 'info' | 'success' | 'warning' | 'danger' | 'confirm',
+        title: string,
+        message: string | React.ReactNode,
+        onConfirm?: () => void,
+        onSecondaryConfirm?: () => void,
+        confirmLabel?: string,
+        secondaryConfirmLabel?: string,
+        cancelLabel?: string,
+        autoCloseSecs?: number
+    ) => void;
 }
 
 const FormSectionHeader = ({ icon: Icon, title, color = "text-sky-400", extra }: { icon: any, title: string, color?: string, extra?: React.ReactNode }) => (
@@ -68,7 +79,8 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
     isSeparationUnlocked,
     onUnlockSeparation,
     globalMonth,
-    globalYear
+    globalYear,
+    showAlert
 }) => {
     const formRef = useRef<HTMLFormElement>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
@@ -103,7 +115,11 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
 
             if (dojDate < startOfMonth || dojDate > endOfMonth) {
                 e.preventDefault();
-                alert(`Invalid DOJ: Date of Joining must be within the current processing month (${globalMonth} ${globalYear}).`);
+                if (showAlert) {
+                    showAlert('danger', 'Invalid Date of Joining', `Date of Joining must be within the current processing month (${globalMonth} ${globalYear}).`);
+                } else {
+                    alert(`Invalid DOJ: Date of Joining must be within the current processing month (${globalMonth} ${globalYear}).`);
+                }
                 dojInputRef.current?.focus();
                 return;
             }
@@ -116,8 +132,51 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
         }
     };
 
+    const handleFormSubmit = (e: React.FormEvent) => {
+        const empAge = getEmployeeAge();
+        if (empAge >= 60) {
+            const has7A = newEmpForm.isPFExempt === true;
+            const has7C = !newEmpForm.isPFExempt && !!newEmpForm.epsMaturityConfigured && newEmpForm.epsMaturityConfiguredAge !== 58;
+            if (!has7A && !has7C) {
+                e.preventDefault();
+                if (showAlert) {
+                    showAlert(
+                        'warning',
+                        'Statutory Action Required (Age 60+)',
+                        'Employee age crosses 60, you have to select Statutory option 7.A or 7.C',
+                        undefined, undefined, 'Understood'
+                    );
+                } else {
+                    alert("Employee age crosses 60, you have to select Statutory option 7.A or 7.C");
+                }
+                return;
+            }
+        }
+        onSubmit(e);
+    };
+
     // List of months for indexing
     const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    // Age calculation helper
+    const getEmployeeAge = (): number => {
+        if (!newEmpForm.dob) return 0;
+        const dob = new Date(newEmpForm.dob);
+        const monthIndex = monthsArr.indexOf(globalMonth);
+        const periodEnd = new Date(globalYear, monthIndex + 1, 0); // Last day of processing month
+        
+        let age = periodEnd.getFullYear() - dob.getFullYear();
+        const m = periodEnd.getMonth() - dob.getMonth();
+        if (m < 0 || (m === 0 && periodEnd.getDate() < dob.getDate())) {
+            age--;
+        }
+        return age;
+    };
+
+    const age = getEmployeeAge();
+    const isAge58To60 = age >= 58 && age < 60;
+    const isAge60OrAbove = age >= 60;
+    const is7CActive = isAge60OrAbove && !newEmpForm.isPFExempt && !!newEmpForm.epsMaturityConfigured && (!newEmpForm.epsMaturityConfiguredAge || newEmpForm.epsMaturityConfiguredAge === 60);
 
     useEffect(() => {
         // Automatically focus the name input when the form opens
@@ -168,7 +227,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                     <button onClick={handleClose} title="Close Form" aria-label="Close Form" className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition-all"><X size={24} /></button>
                 </div>
 
-                <form ref={formRef} onSubmit={onSubmit} onChange={() => setIsDirty(true)} className="p-8 space-y-12">
+                <form ref={formRef} onSubmit={handleFormSubmit} onChange={() => setIsDirty(true)} className="p-8 space-y-12">
                     <div>
                         <FormSectionHeader icon={User2} title="1. Personal & Employment Identity" />
                         <div className="flex flex-col md:flex-row gap-8">
@@ -224,11 +283,21 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                                     // @ts-ignore
                                                                     if (window.electronAPI && window.electronAPI.handleStatutoryForm) {
                                                                         // @ts-ignore
-                                                                        const res = await window.electronAPI.handleStatutoryForm(docType.label, 'preview');
-                                                                        if (!res.success) alert(`Failed to open preview: ${res.error}`);
-                                                                    } else {
-                                                                        alert("Electron Bridge not ready. Please close the app window and restart your 'npm run dev:electron' terminal to register the new code!");
-                                                                    }
+                                                                         const res = await window.electronAPI.handleStatutoryForm(docType.label, 'preview');
+                                                                         if (!res.success) {
+                                                                             if (showAlert) {
+                                                                                 showAlert('danger', 'Preview Failed', `Failed to open preview: ${res.error}`);
+                                                                             } else {
+                                                                                 alert(`Failed to open preview: ${res.error}`);
+                                                                             }
+                                                                         }
+                                                                     } else {
+                                                                         if (showAlert) {
+                                                                             showAlert('warning', 'Electron Bridge Not Ready', "Electron Bridge not ready. Please close the app window and restart your 'npm run dev:electron' terminal to register the new code!");
+                                                                         } else {
+                                                                             alert("Electron Bridge not ready. Please close the app window and restart your 'npm run dev:electron' terminal to register the new code!");
+                                                                         }
+                                                                     }
                                                                 }} 
                                                                 className="p-1 text-slate-400 hover:text-amber-400 rounded transition-colors cursor-pointer"
                                                             >
@@ -244,10 +313,18 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                                         // @ts-ignore
                                                                         const res = await window.electronAPI.handleStatutoryForm(docType.label, 'download');
                                                                         if (!res.success && res.error !== 'Download canceled') {
-                                                                            alert(`Download failed: ${res.error}`);
+                                                                            if (showAlert) {
+                                                                                showAlert('danger', 'Download Failed', `Download failed: ${res.error}`);
+                                                                            } else {
+                                                                                alert(`Download failed: ${res.error}`);
+                                                                            }
                                                                         }
                                                                     } else {
-                                                                        alert("Electron Bridge not ready. Please close the app window and restart your 'npm run dev:electron' terminal to register the new code!");
+                                                                        if (showAlert) {
+                                                                            showAlert('warning', 'Electron Bridge Not Ready', "Electron Bridge not ready. Please close the app window and restart your 'npm run dev:electron' terminal to register the new code!");
+                                                                        } else {
+                                                                            alert("Electron Bridge not ready. Please close the app window and restart your 'npm run dev:electron' terminal to register the new code!");
+                                                                        }
                                                                     }
                                                                 }} 
                                                                 className="p-1 text-slate-400 hover:text-sky-400 rounded transition-colors cursor-pointer"
@@ -352,7 +429,40 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 </div>
                                 <div className="space-y-1.5">
                                     <label htmlFor="dobInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Date of Birth</label>
-                                    <input id="dobInput" tabIndex={isRejoining ? -1 : undefined} type="date" title="Date of Birth" aria-label="Date of Birth" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.dob} onChange={e => setNewEmpForm({ ...newEmpForm, dob: e.target.value })} />
+                                    <input 
+                                        id="dobInput" 
+                                        tabIndex={isRejoining ? -1 : undefined} 
+                                        type="date" 
+                                        title="Date of Birth" 
+                                        aria-label="Date of Birth" 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" 
+                                        value={newEmpForm.dob} 
+                                        onChange={e => setNewEmpForm({ ...newEmpForm, dob: e.target.value })} 
+                                        onBlur={() => {
+                                            if (newEmpForm.dob) {
+                                                const dob = new Date(newEmpForm.dob);
+                                                const monthIndex = monthsArr.indexOf(globalMonth);
+                                                const periodEnd = new Date(globalYear, monthIndex + 1, 0);
+                                                let empAge = periodEnd.getFullYear() - dob.getFullYear();
+                                                const m = periodEnd.getMonth() - dob.getMonth();
+                                                if (m < 0 || (m === 0 && periodEnd.getDate() < dob.getDate())) {
+                                                    empAge--;
+                                                }
+                                                if (empAge >= 60) {
+                                                    if (showAlert) {
+                                                        showAlert(
+                                                            'warning',
+                                                            'Statutory Action Required (Age 60+)',
+                                                            'Employee age crosses 60, you have to select Statutory option 7.A or 7.C',
+                                                            undefined, undefined, 'Understood'
+                                                        );
+                                                    } else {
+                                                        alert("Employee age crosses 60, you have to select Statutory option 7.A or 7.C");
+                                                    }
+                                                }
+                                            }
+                                        }}
+                                    />
                                 </div>
 
                                 <div className="space-y-1.5">
@@ -380,7 +490,11 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                 if (isRejoining && e.key === 'Tab' && !e.shiftKey) {
                                                     e.preventDefault();
                                                     if (!isDOJValidInRange(newEmpForm.doj || '')) {
-                                                        alert(`DOJ is not within the Process Pay Date - ${globalMonth} ${globalYear}`);
+                                                        if (showAlert) {
+                                                            showAlert('danger', 'Invalid Date of Joining', `DOJ is not within the Process Pay Date - ${globalMonth} ${globalYear}`);
+                                                        } else {
+                                                            alert(`DOJ is not within the Process Pay Date - ${globalMonth} ${globalYear}`);
+                                                        }
                                                     }
                                                     // After alert (or if valid), always move to DOL
                                                     dolInputRef.current?.focus();
@@ -607,27 +721,144 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                     <div>
                         <FormSectionHeader icon={ShieldAlert} title="7. Statutory Options & Exemptions" color="text-amber-400" />
                         <div className="bg-slate-900/30 p-6 rounded-xl border border-slate-800 space-y-6">
-                            <div className="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700">
+                            {/* A. PF Exempted (Para 69) */}
+                            <div className={`flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 ${is7CActive || !!newEmpForm.isDeferredPension ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
                                 <div>
                                     <h4 className="text-sm font-bold text-white">A. PF Exempted (Para 69)</h4>
-                                    <p className="text-[10px] text-slate-400">Employee excluded from EPF coverage. (Also disables Higher Pension)</p>
-                                </div>                                 <label htmlFor="pfExemptInput" className="relative inline-flex items-center cursor-pointer">
-                                    <input id="pfExemptInput" tabIndex={isRejoining ? -1 : undefined} title="PF Exempted" aria-label="PF Exempted" type="checkbox" className="sr-only peer" checked={newEmpForm.isPFExempt} onChange={e => {
-                                        const isExempt = e.target.checked;
-                                        setNewEmpForm(prev => ({
-                                            ...prev,
-                                            isPFExempt: isExempt,
-                                            pfHigherPension: isExempt ? { ...prev.pfHigherPension!, enabled: false } : prev.pfHigherPension
-                                        }));
-                                    }} />
-
-                                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                                    <p className="text-[10px] text-slate-400">Employee excluded from EPF coverage. (Also disables Higher Pension & age options)</p>
+                                </div>
+                                <label htmlFor="pfExemptInput" className="relative inline-flex items-center cursor-pointer">
+                                    <input 
+                                        id="pfExemptInput" 
+                                        tabIndex={isRejoining ? -1 : undefined} 
+                                        title="PF Exempted" 
+                                        aria-label="PF Exempted" 
+                                        type="checkbox" 
+                                        className="sr-only peer" 
+                                        checked={newEmpForm.isPFExempt} 
+                                        disabled={!!newEmpForm.isDeferredPension || is7CActive} 
+                                        onChange={e => {
+                                            const isExempt = e.target.checked;
+                                            setNewEmpForm(prev => ({
+                                                ...prev,
+                                                isPFExempt: isExempt,
+                                                pfHigherPension: isExempt ? { ...prev.pfHigherPension!, enabled: false } : prev.pfHigherPension,
+                                                isDeferredPension: isExempt ? false : prev.isDeferredPension,
+                                                deferredPensionOption: isExempt ? undefined : prev.deferredPensionOption,
+                                                epsMaturityConfigured: isExempt ? true : false,
+                                                epsMaturityConfiguredAge: isExempt ? (isAge60OrAbove ? 60 : (isAge58To60 ? 58 : undefined)) : undefined
+                                            }));
+                                        }} 
+                                    />
+                                    <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 ${newEmpForm.isDeferredPension || is7CActive ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
                                 </label>
                             </div>
 
+                            {/* B. Deferred Pension Option (Age 58 to 60) */}
+                            {isAge58To60 && (
+                                <div className={`p-4 bg-slate-900 rounded-lg border border-slate-700 space-y-4 ${newEmpForm.isPFExempt ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <h4 className="text-sm font-bold text-white">B. Deferred Pension Option (Age 58 to 60)</h4>
+                                            <p className="text-[10px] text-slate-400">Employee age is {age} (eligible for deferred pension up to 60 years).</p>
+                                        </div>
+                                        <label htmlFor="deferredPensionInput" className="relative inline-flex items-center cursor-pointer">
+                                            <input 
+                                                id="deferredPensionInput" 
+                                                tabIndex={isRejoining ? -1 : undefined} 
+                                                title="Deferred Pension Option" 
+                                                aria-label="Deferred Pension Option" 
+                                                type="checkbox" 
+                                                className="sr-only peer" 
+                                                checked={!!newEmpForm.isDeferredPension} 
+                                                disabled={newEmpForm.isPFExempt} 
+                                                onChange={e => {
+                                                    const opted = e.target.checked;
+                                                    setNewEmpForm(prev => ({
+                                                        ...prev,
+                                                        isDeferredPension: opted,
+                                                        deferredPensionOption: opted ? 'WithEPS' : undefined,
+                                                        epsMaturityConfigured: true
+                                                    }));
+                                                }} 
+                                            />
+                                            <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600 ${newEmpForm.isPFExempt ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                                        </label>
+                                    </div>
+
+                                    {newEmpForm.isDeferredPension && (
+                                        <div className="grid grid-cols-2 gap-4 bg-slate-800/40 p-4 rounded-xl border border-slate-700 animate-in slide-in-from-top-2">
+                                            <label className="flex items-center gap-3 cursor-pointer">
+                                                <input 
+                                                    type="radio" 
+                                                    name="deferredPensionType" 
+                                                    value="WithEPS" 
+                                                    checked={newEmpForm.deferredPensionOption === 'WithEPS'} 
+                                                    onChange={() => setNewEmpForm(prev => ({ ...prev, deferredPensionOption: 'WithEPS' }))}
+                                                    className="w-4 h-4 text-amber-500 bg-slate-900 border-slate-700 focus:ring-amber-500 focus:ring-offset-slate-900 focus:ring-2" 
+                                                />
+                                                <div className="text-xs">
+                                                    <span className="font-bold text-white block">a. With Pension Contribution</span>
+                                                    <span className="text-[10px] text-slate-400">Calculate standard PF and EPS splits.</span>
+                                                </div>
+                                            </label>
+                                            <label className="flex items-center gap-3 cursor-pointer">
+                                                <input 
+                                                    type="radio" 
+                                                    name="deferredPensionType" 
+                                                    value="WithoutEPS" 
+                                                    checked={newEmpForm.deferredPensionOption === 'WithoutEPS'} 
+                                                    onChange={() => setNewEmpForm(prev => ({ ...prev, deferredPensionOption: 'WithoutEPS' }))}
+                                                    className="w-4 h-4 text-amber-500 bg-slate-900 border-slate-700 focus:ring-amber-500 focus:ring-offset-slate-900 focus:ring-2" 
+                                                />
+                                                <div className="text-xs">
+                                                    <span className="font-bold text-white block">b. Without Pension Contribution</span>
+                                                    <span className="text-[10px] text-slate-400">Employer share (entire 12%) goes to Provident Fund.</span>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* C. Employee Age Above 60 (Only PF Contribution Allowed) */}
+                            {isAge60OrAbove && (
+                                <div className={`flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 ${newEmpForm.isPFExempt ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
+                                    <div>
+                                        <h4 className="text-sm font-bold text-white">C. Employee Age Above 60 (Only PF Contribution Allowed)</h4>
+                                        <p className="text-[10px] text-slate-400">Employee age is {age} (&gt;= 60). No EPS contribution allowed, 100% EPF allocation active.</p>
+                                    </div>
+                                    <label htmlFor="pfAge60Input" className="relative inline-flex items-center cursor-pointer">
+                                        <input 
+                                            id="pfAge60Input" 
+                                            tabIndex={isRejoining ? -1 : undefined} 
+                                            title="Only PF Contribution Allowed" 
+                                            aria-label="Only PF Contribution Allowed" 
+                                            type="checkbox" 
+                                            className="sr-only peer" 
+                                            checked={!newEmpForm.isPFExempt && !!newEmpForm.epsMaturityConfigured && (!newEmpForm.epsMaturityConfiguredAge || newEmpForm.epsMaturityConfiguredAge === 60)} 
+                                            disabled={newEmpForm.isPFExempt} 
+                                            onChange={e => {
+                                                const checked = e.target.checked;
+                                                setNewEmpForm(prev => ({
+                                                    ...prev,
+                                                    epsMaturityConfigured: checked,
+                                                    epsMaturityConfiguredAge: checked ? 60 : undefined,
+                                                    isPFExempt: false,
+                                                    isDeferredPension: false,
+                                                    deferredPensionOption: undefined
+                                                }));
+                                            }} 
+                                        />
+                                        <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 ${newEmpForm.isPFExempt ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                                    </label>
+                                </div>
+                            )}
+
+                            {/* E. ESI Exempted */}
                             <div className="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700">
                                 <div>
-                                    <h4 className="text-sm font-bold text-white">B. ESI Exempted</h4>
+                                    <h4 className="text-sm font-bold text-white">E. ESI Exempted</h4>
                                     <p className="text-[10px] text-slate-400">Above Wage Ceiling or not covered.</p>
                                 </div>
                                  <label htmlFor="esiExemptInput" className="relative inline-flex items-center cursor-pointer">
@@ -635,6 +866,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
                                 </label>
                             </div>
+
 
                             <div className={`border-t border-slate-800 pt-6 space-y-4 ${newEmpForm.isPFExempt ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
                                 <div className="flex items-center justify-between">
@@ -834,7 +1066,11 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                     // Simple check if DOJ is within the globalMonth/Year
                                     if (dojDate < startOfMonth || dojDate > endOfMonth) {
                                         e.preventDefault();
-                                        alert(`Invalid DOJ: Date of Joining must be within the current processing month (${globalMonth} ${globalYear}).`);
+                                        if (showAlert) {
+                                            showAlert('danger', 'Invalid Date of Joining', `Date of Joining must be within the current processing month (${globalMonth} ${globalYear}).`);
+                                        } else {
+                                            alert(`Invalid DOJ: Date of Joining must be within the current processing month (${globalMonth} ${globalYear}).`);
+                                        }
                                         dojInputRef.current?.focus();
                                         return;
                                     }

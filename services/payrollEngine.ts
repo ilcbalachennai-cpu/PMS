@@ -153,7 +153,7 @@ export const calculatePayroll = (
     const special2 = Math.round((employee.specialAllowance2 || 0) * factor);
     const special3 = Math.round((employee.specialAllowance3 || 0) * factor);
 
-    const bonusRate = (config.bonusRate || 0); // Bug fix: Do not divide by 100 as it is already stored as a fraction (e.g., 0.0833)
+    const bonusRate = config.enableBonus !== false ? (config.bonusRate || 0) : 0; // Bug fix: Do not divide by 100 as it is already stored as a fraction (e.g., 0.0833)
     let bonus = 0;
     const encashedDays = attendance.encashedDays || 0;
 
@@ -169,8 +169,8 @@ export const calculatePayroll = (
 
     // --- PF Calculation Logic ---
 
-    // 1. Calculate Prorated Ceiling (As per Example 3: 15000/30 * days)
-    const proratedCeiling = Math.round((config.epfCeiling / daysInMonth) * effectivePayableDays);
+    // 1. PF Ceiling (We no longer use proportional ceiling calculation)
+    const proratedCeiling = config.epfCeiling;
 
     // 2. Calculate Code Wages (As per Code on Wages 2020 - Clause 88)
     const wageA = basic + da + retaining; // Basic Wage
@@ -214,7 +214,10 @@ export const calculatePayroll = (
 
     const isHigherContribApplicable = config.enableHigherContribution;
 
-    if (isHigherContribApplicable) {
+    if (config.enablePF === false) {
+        basePFWage = 0;
+        isCode88 = false;
+    } else if (isHigherContribApplicable) {
         // Logic for "Higher Contribution = Yes" (Examples 2, 4, 6, 8)
         // If Higher Contribution is enabled, we use the sum of configured components (Actual Wage),
         // effectively treating it as "Higher Wages" opted.
@@ -253,10 +256,8 @@ export const calculatePayroll = (
 
         basePFWage = Math.min(pfStandardBasisWage, proratedCeiling);
         
-        // Check if capping actually occurred due to proportional limits on NCP days
-        if (effectivePayableDays < daysInMonth && pfStandardBasisWage > proratedCeiling && config.epfCeiling > 0) {
-            isProportionatePFCapped = true;
-        }
+        // Capping is no longer proportional due to NCP days
+        isProportionatePFCapped = false;
     }
 
     let epfEmployee = 0;
@@ -264,9 +265,34 @@ export const calculatePayroll = (
     let epfEmployer = 0;
     let epsEmployer = 0;
 
-    const isOptOut = employee.isDeferredPension && employee.deferredPensionOption === 'OptOut';
+    // Calculate employee age at processing month
+    let age = 0;
+    if (employee.dob) {
+        const dob = new Date(employee.dob);
+        const monthIdx = months.indexOf(month);
+        const periodEnd = new Date(year, monthIdx + 1, 0); // Last day of processing month
+        age = periodEnd.getFullYear() - dob.getFullYear();
+        const m = periodEnd.getMonth() - dob.getMonth();
+        if (m < 0 || (m === 0 && periodEnd.getDate() < dob.getDate())) {
+            age--;
+        }
+    }
 
-    if (!employee.isPFExempt && !isOptOut) {
+    const isAge58To60 = age >= 58 && age < 60;
+    const isAge60OrAbove = age >= 60;
+
+    let isPFActive = false;
+    if (config.enablePF !== false && !employee.isPFExempt) {
+        if (isAge58To60) {
+            isPFActive = !!employee.isDeferredPension && employee.deferredPensionOption !== 'OptOut';
+        } else if (isAge60OrAbove) {
+            isPFActive = true;
+        } else {
+            isPFActive = true;
+        }
+    }
+
+    if (isPFActive) {
         const hp = employee.pfHigherPension;
 
         const A5 = hp?.contributedBefore2014 === 'Yes';
@@ -344,13 +370,14 @@ export const calculatePayroll = (
             epfEmployer = totalLiability - epsEmployer;
         }
 
-        if (employee.isDeferredPension && employee.deferredPensionOption === 'WithoutEPS') {
+        // If employee is 60+ OR (58-60 and WithoutEPS opted), then EPS = 0 and entire Employer share goes to EPF
+        const isWithoutEPS = isAge60OrAbove || (isAge58To60 && employee.deferredPensionOption === 'WithoutEPS');
+        if (isWithoutEPS) {
             const totalER = epfEmployer + epsEmployer;
             epfEmployer = totalER;
             epsEmployer = 0;
         }
-
-    } else if (isOptOut) {
+    } else {
         basePFWage = 0;
         isCode88 = false;
         epfEmployee = 0;
@@ -365,7 +392,7 @@ export const calculatePayroll = (
     let isESICodeWagesUsed = false;
     let esiRemark = exitRemark || '';
 
-    if (!employee.isESIExempt) {
+    if (config.enableESI !== false && !employee.isESIExempt) {
         // ESI Wage Base according to selected Basis
         const esiWageBase = esiStandardBasisWage;
 
@@ -474,14 +501,17 @@ export const calculatePayroll = (
 
     // --- FINE / DAMAGES & TAX ---
     const fineRecord = fines.find(f => f.employeeId === employee.id && f.month === month && f.year === year);
-    const fineAmount = fineRecord ? (fineRecord.amount || 0) : 0;
+    const rawAmount = fineRecord && fineRecord.amount !== undefined && fineRecord.amount !== null ? Number(fineRecord.amount) : 0;
+    const fineAmount = isNaN(rawAmount) ? 0 : rawAmount;
     const fineReason = fineRecord ? (fineRecord.reason || '') : '';
-    const manualTax = fineRecord ? fineRecord.tax : undefined;
+    const rawTax = fineRecord && fineRecord.tax !== undefined && fineRecord.tax !== null ? Number(fineRecord.tax) : undefined;
+    const manualTax = rawTax !== undefined && !isNaN(rawTax) ? rawTax : undefined;
 
     // --- Income Tax (TDS) Logic ---
     let incomeTax = 0;
 
-    if (config.incomeTaxCalculationType === 'Manual') {
+    const itMode = config.incomeTaxCalculationType || 'Manual';
+    if (itMode === 'Manual') {
         incomeTax = manualTax || 0;
     } else {
         if (manualTax !== undefined && manualTax > 0) {
@@ -553,7 +583,7 @@ export const calculatePayroll = (
                 advanceRecovery, fine: fineAmount, total: totalDeductions
             },
             employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer, lwf: lwfEmployer },
-            gratuityAccrual: Math.round(((gratuityBasisWage) * 15 / 26) / 12),
+            gratuityAccrual: config.enableGratuity !== false ? Math.round(((gratuityBasisWage) * 15 / 26) / 12) : 0,
         netPay: (grossEarnings + (otRecord?.otAmount || 0) + arrearAmount) - totalDeductions,
         isProportionatePFCapped,
         isCode88,

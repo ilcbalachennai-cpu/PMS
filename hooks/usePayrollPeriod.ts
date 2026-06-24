@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 
 const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFinancialYear?: string) => {
+export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFinancialYear?: string, payrollHistory?: any[]) => {
   const getCKey = (key: string) => {
     if (activeCompanyId === 'default') return key;
     const transactionalKeys = [
@@ -33,21 +33,27 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
         let history: any[] = [];
         let attendance: any[] = [];
 
-        if (window.electronAPI) {
+        if (payrollHistory && payrollHistory.length > 0) {
+          history = payrollHistory;
+        } else if (window.electronAPI) {
           const historyRes = await window.electronAPI.dbGet(getCKey('app_payroll_history'));
-          const attendanceRes = await window.electronAPI.dbGet(getCKey('app_attendance'));
-          
           if (historyRes.success && historyRes.data) {
             history = typeof historyRes.data === 'string' ? JSON.parse(historyRes.data) : historyRes.data;
           }
+        } else {
+          // Fallback to localStorage
+          const historyData = localStorage.getItem(getCKey('app_payroll_history'));
+          history = historyData ? JSON.parse(historyData) : [];
+        }
+
+        if (window.electronAPI) {
+          const attendanceRes = await window.electronAPI.dbGet(getCKey('app_attendance'));
           if (attendanceRes.success && attendanceRes.data) {
             attendance = typeof attendanceRes.data === 'string' ? JSON.parse(attendanceRes.data) : attendanceRes.data;
           }
         } else {
           // Fallback to localStorage
-          const historyData = localStorage.getItem(getCKey('app_payroll_history'));
           const attendanceData = localStorage.getItem(getCKey('app_attendance'));
-          history = historyData ? JSON.parse(historyData) : [];
           attendance = attendanceData ? JSON.parse(attendanceData) : [];
         }
 
@@ -99,7 +105,11 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
                   }
               });
               setLatestFrozenPeriod({ month: latest.month, year: latest.year });
+          } else {
+              setLatestFrozenPeriod(null);
           }
+        } else {
+          setLatestFrozenPeriod(null);
         }
 
         if (latestDraftPeriod) {
@@ -127,7 +137,7 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
     };
 
     fetchPeriod();
-  }, [activeCompanyId, activeFinancialYear]);
+  }, [activeCompanyId, activeFinancialYear, payrollHistory]);
 
   return { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod };
 };

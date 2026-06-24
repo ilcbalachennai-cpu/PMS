@@ -76,6 +76,10 @@ export interface WageBasisComponents {
 }
 
 export interface StatutoryConfig {
+  enablePF?: boolean;
+  enableESI?: boolean;
+  enableBonus?: boolean;
+  enableGratuity?: boolean;
   epfCeiling: number;
   epfEmployeeRate: number;
   epfEmployerRate: number;
@@ -265,6 +269,7 @@ export interface Employee {
   deferredPensionOption?: 'WithEPS' | 'WithoutEPS' | 'OptOut';
   // Added 'epsMaturityConfigured' to resolve type error in EmployeeList.tsx line 46
   epsMaturityConfigured?: boolean;
+  epsMaturityConfiguredAge?: number;
 
   photoUrl?: string;
   form1Url?: string;

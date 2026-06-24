@@ -794,8 +794,14 @@ ipcMain.handle('save-report', async (_, { fileName, data, type, subfolder }) => 
         let targetDir = paths.reports;
 
         if (subfolder) {
-            const folderName = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-            targetDir = path.join(paths.reports, folderName);
+            // Support nested subfolders (e.g. "SAIPRA_Rpt/Apr26")
+            const segments = subfolder.split(/[/\\]/).map((seg: string) => {
+                return seg.trim().split(' ')[0].replace(/[^a-zA-Z0-9_]/g, '');
+            }).filter(Boolean);
+
+            if (segments.length > 0) {
+                targetDir = path.join(paths.reports, ...segments);
+            }
         }
 
         // Ensure the reports directory exists

@@ -595,7 +595,8 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
       if (savedPath) {
         showAlert('success', 'Report Generated', `Pay Data Analysis report saved successfully.`, () => openSavedReport(savedPath), undefined, 'Open Report & Folder', undefined, undefined, 2);
       } else {
-        showAlert('error', 'Generation Failed', 'An error occurred while saving the report.');
+        const filename = (window as any).lastGeneratedFileName || 'the file';
+        showAlert('error', 'Generation Failed', `Similar file is already open, close "${filename}" to generate the new report`);
       }
     } catch (err: any) {
       showAlert('error', 'Error', err.message || 'An unexpected error occurred.');
@@ -800,7 +801,8 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
               2
           );
       } else {
-          showAlert('error', 'Generation Failed', 'An unexpected error occurred while saving the report. Please try again.');
+          const filename = (window as any).lastGeneratedFileName || 'the file';
+          showAlert('error', 'Generation Failed', `Similar file is already open, close "${filename}" to generate the new report`);
       }
     } catch (err: any) {
         console.error("Failed to generate dynamic PDF", err);

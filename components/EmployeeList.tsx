@@ -332,7 +332,28 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
             return;
         }
 
-        const data = newEmpForm as Employee;
+        const data = { ...newEmpForm } as Employee;
+        if (data.dob) {
+            const dob = new Date(data.dob);
+            const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const monthIndex = monthsArr.indexOf(globalMonth);
+            const periodEnd = new Date(globalYear, monthIndex + 1, 0);
+            
+            let empAge = periodEnd.getFullYear() - dob.getFullYear();
+            const m = periodEnd.getMonth() - dob.getMonth();
+            if (m < 0 || (m === 0 && periodEnd.getDate() < dob.getDate())) {
+                empAge--;
+            }
+            if (empAge >= 58 && empAge < 60) {
+                data.epsMaturityConfigured = true;
+                data.epsMaturityConfiguredAge = 58;
+            } else if (empAge >= 60) {
+                if (data.isPFExempt || data.epsMaturityConfigured) {
+                    data.epsMaturityConfiguredAge = 60;
+                }
+            }
+        }
+
         if (editingId) {
             setEmployees(prev => prev.map(emp => emp.id === editingId ? data : emp));
         } else {
@@ -620,6 +641,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                         onUnlockSeparation={() => setAuthModal({ isOpen: true, password: '', error: '', targetEmp: null, mode: 'UNLOCK_SEPARATION' })}
                         globalMonth={globalMonth}
                         globalYear={globalYear}
+                        showAlert={showAlert}
                     />
                 )}
 

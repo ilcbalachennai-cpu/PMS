@@ -174,7 +174,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   // ── RENDER: TOAST ──
   if (state === 'TOAST') {
     return (
-      <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/75 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="fixed inset-0 z-[20000] flex items-center justify-center bg-black/75 backdrop-blur-sm animate-in fade-in duration-300">
         <div className="bg-slate-900/95 border border-blue-500/30 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.8)] max-w-sm w-full relative overflow-hidden flex flex-col items-center text-center gap-5">
           <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/80"></div>
           
@@ -210,7 +210,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   if (state === 'PREPARING') {
     const currentStep = downloadProgress > 0 ? 2 : (isPreparing ? 1 : 0);
     return (
-      <div className="fixed inset-0 bg-[#020617]/95 backdrop-blur-2xl z-[600] flex items-center justify-center p-6 text-center">
+      <div className="fixed inset-0 bg-[#020617]/95 backdrop-blur-2xl z-[20000] flex items-center justify-center p-6 text-center">
         <div className="w-full max-w-md">
             <div className="glass-panel rounded-[2rem] p-8 relative overflow-hidden">
                 <div className="absolute -top-24 -left-24 w-64 h-64 bg-blue-600/10 blur-[100px] rounded-full"></div>
@@ -258,7 +258,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   // ── RENDER: READY TO INSTALL ──
   if (state === 'READY') {
     return (
-      <div className="fixed inset-0 bg-[#020617]/95 backdrop-blur-2xl z-[300] flex items-center justify-center p-6 text-center">
+      <div className="fixed inset-0 bg-[#020617]/95 backdrop-blur-2xl z-[20000] flex items-center justify-center p-6 text-center">
         <div className="w-full max-w-sm">
             <div className="glass-panel rounded-[2rem] overflow-hidden border border-white/5 shadow-2xl">
                 <div className="p-8 space-y-6">
@@ -297,7 +297,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   if (state === 'PATCH') {
     const currentStep = downloadProgress > 0 ? 2 : (isPreparing ? 1 : 0);
     return (
-      <div className="fixed inset-0 bg-[#020617]/90 backdrop-blur-xl z-[5000] flex items-center justify-center p-6 text-center">
+      <div className="fixed inset-0 bg-[#020617]/90 backdrop-blur-xl z-[20000] flex items-center justify-center p-6 text-center">
         <div className="w-full max-w-sm">
             <div className="glass-panel-amber-glow rounded-[1.5rem] relative overflow-hidden border-amber-500/30 shadow-[0_0_60px_rgba(245,158,11,0.2)]">
                 
@@ -394,7 +394,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   if (state === 'INSTALLING') {
      if (isVersionUpdate) return null;
      return (
-      <div className="fixed inset-0 bg-[#020617] z-[1000] flex items-center justify-center p-6 text-center animate-in fade-in duration-1000">
+      <div className="fixed inset-0 bg-[#020617] z-[20000] flex items-center justify-center p-6 text-center animate-in fade-in duration-1000">
         <div className="max-w-sm w-full space-y-8">
             <div className="glass-panel rounded-[2rem] overflow-hidden border border-white/5 pb-8 shadow-2xl">
                 <ProgressSteps currentStep={effectiveStep} theme="blue" />
@@ -444,7 +444,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   // ── RENDER: VIOLATION ──
   if (state === 'VIOLATION') {
     return (
-      <div className="fixed inset-0 bg-red-950/95 backdrop-blur-3xl z-[2000] flex items-center justify-center p-6 text-center">
+      <div className="fixed inset-0 bg-red-950/95 backdrop-blur-3xl z-[20000] flex items-center justify-center p-6 text-center">
         <div className="w-full max-w-sm">
             <div className="glass-panel-red rounded-[2rem] p-8 relative overflow-hidden">
                 <div className="space-y-8 relative z-10">

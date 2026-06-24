@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, CheckCircle2, X, ArrowRight, GitMerge, Lock, TrendingUp, UploadCloud, AlertCircle, RotateCw } from 'lucide-react';
+import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, CheckCircle2, ArrowRight, GitMerge, Lock, TrendingUp, UploadCloud, AlertCircle, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord, View, LicenseData, SettingsTab } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
@@ -286,14 +286,17 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         }
                     }
 
-                    if (fineAmt > 0 || taxVal > 0) {
+                    const cleanFineAmt = isNaN(fineAmt) ? 0 : fineAmt;
+                    const cleanTaxVal = isNaN(taxVal) ? undefined : taxVal;
+
+                    if (cleanFineAmt > 0 || (cleanTaxVal !== undefined && cleanTaxVal > 0)) {
                         newFines.push({
                             employeeId: empId,
                             month: props.month,
                             year: props.year,
-                            amount: fineAmt,
+                            amount: cleanFineAmt,
                             reason: fineReason,
-                            tax: taxVal
+                            tax: cleanTaxVal
                         });
                     }
                 });
@@ -518,6 +521,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         savedRecords={props.savedRecords}
                         hideContextSelector={true}
                         companyProfile={props.companyProfile}
+                        config={props.config}
                     />
                 </div>
 
@@ -613,7 +617,6 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             {showSuccessModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-emerald-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button title="Close Modal" aria-label="Close Modal" onClick={() => setShowSuccessModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-3 text-center">
                             <div className="p-4 bg-emerald-900/30 text-emerald-400 rounded-full border border-emerald-500/50 mb-2 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
                                 <CheckCircle2 size={40} />

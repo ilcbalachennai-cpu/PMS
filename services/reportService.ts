@@ -3,6 +3,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
 import { formatIndianNumber } from '../utils/formatters';
+import { getActivePaySheetColumns } from '../constants';
 
 // ==========================================
 // UTILITIES
@@ -103,6 +104,39 @@ export const numberToWords = (num: number): string => {
     return (isNegative ? 'Negative ' : '') + str.trim();
 };
 
+
+const savePdfDoc = (doc: any, fileName: string, res: { success: boolean; error?: string }) => {
+    if (!res.success) {
+        if (res.error === 'Electron API not found') {
+            savePdfDoc(doc, fileName, res);
+        }
+    }
+};
+
+const saveExcelWorkbook = (wb: any, fileName: string, res: { success: boolean; error?: string }) => {
+    if (!res.success) {
+        if (res.error === 'Electron API not found') {
+            saveExcelWorkbook(wb, fileName, res);
+        }
+    }
+};
+
+const saveTextContent = (text: string, fileName: string, res: { success: boolean; error?: string }) => {
+    if (!res.success) {
+        if (res.error === 'Electron API not found') {
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${fileName}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    }
+};
+
 export const openSavedReport = async (path: string | undefined | null) => {
     if (path && (window as any).electronAPI) {
         try {
@@ -119,11 +153,33 @@ export const openSavedReport = async (path: string | undefined | null) => {
 };
 
 const electronSaveReport = async (fileName: string, data: Uint8Array, type: string, subfolder?: string): Promise<{ success: boolean; path?: string; error?: string }> => {
+    if (typeof window !== 'undefined') {
+        (window as any).lastGeneratedFileName = `${fileName}.${type}`;
+    }
+    
+    let finalSubfolder = subfolder;
+    if (subfolder) {
+        const firstWord = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9_]/g, '').toUpperCase();
+        const companyFolder = `${firstWord}_Rpt`;
+        
+        // Extract month (3 letters) and year (2-4 digits) from the end of the filename
+        const match = fileName.trim().match(/_([A-Za-z]{3})_(\d{2,4})$/);
+        if (match) {
+            const monthAbbr = match[1];
+            const yearStr = match[2];
+            const year2Digit = yearStr.slice(-2);
+            const monthFolder = `${monthAbbr}${year2Digit}`;
+            finalSubfolder = `${companyFolder}/${monthFolder}`;
+        } else {
+            finalSubfolder = companyFolder;
+        }
+    }
+
     // @ts-ignore
     if (window.electronAPI && window.electronAPI.saveReport) {
         try {
             // @ts-ignore
-            const res = await window.electronAPI.saveReport(fileName, data, type, subfolder);
+            const res = await window.electronAPI.saveReport(fileName, data, type, finalSubfolder);
             if (res.success) {
                 console.log(`Report saved to ${res.path}`);
                 return { success: true, path: res.path };
@@ -203,7 +259,7 @@ export const generateExcelReport = async (data: any[], sheetName: string, fileNa
 
 
     if (!res.success) {
-        XLSX.writeFile(wb, `${fileName}.xlsx`);
+        saveExcelWorkbook(wb, fileName, res);
         return null;
     }
 
@@ -223,7 +279,7 @@ export const generateExcelWorkbook = async (wb: XLSX.WorkBook, fileName: string,
     const res = await electronSaveReport(fileName, u8, 'xlsx', subfolder);
 
     if (!res.success) {
-        XLSX.writeFile(wb, `${fileName}.xlsx`);
+        saveExcelWorkbook(wb, fileName, res);
         return null;
     }
 
@@ -235,6 +291,9 @@ export const generateExcelWorkbook = async (wb: XLSX.WorkBook, fileName: string,
 // Opens the Templates folder for the user after save.
 
 const electronSaveTemplate = async (fileName: string, data: Uint8Array, type: string, subfolder?: string): Promise<{ success: boolean; path?: string; error?: string }> => {
+    if (typeof window !== 'undefined') {
+        (window as any).lastGeneratedFileName = `${fileName}.${type}`;
+    }
     // @ts-ignore
     if (window.electronAPI && window.electronAPI.saveTemplate) {
         try {
@@ -275,7 +334,7 @@ export const generateTemplateWorkbook = async (wb: XLSX.WorkBook, fileName: stri
 
     if (!res.success) {
         // Fallback: browser download
-        XLSX.writeFile(wb, `${fileName}.xlsx`);
+        saveExcelWorkbook(wb, fileName, res);
         return null;
     }
 
@@ -349,7 +408,7 @@ export const generatePDFTableReport = async (title: string, headers: string[], d
 
 
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
 
@@ -471,7 +530,7 @@ export const generateDynamicReportPDF = async (
         return res.path || null;
     }
 
-    doc.save(`${cleanFileName}.pdf`);
+    savePdfDoc(doc, cleanFileName, res);
     return null;
 };
 
@@ -633,7 +692,7 @@ export const generateArrearReport = async (
         const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
 
         if (!res.success) {
-            doc.save(`${fileName}.pdf`);
+            savePdfDoc(doc, fileName, res);
             return null;
         }
         return res.path || null;
@@ -650,7 +709,15 @@ export const generateStateWageRegister = async (results: PayrollResult[], employ
 
     const title = `${stateName} Shops & Establishment Act\n${formName} - Register of Wages (${month} ${year})`;
     const fileName = getStandardFileName(`${stateName.replace(/\s+/g, '')}_${formName.split(' ')[0]}_WageReg`, companyProfile, month, year);
-    return await generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile);
+    return await generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile, {
+        5: { halign: 'right' },
+        6: { halign: 'right' },
+        7: { halign: 'right' },
+        8: { halign: 'right' },
+        9: { halign: 'right' },
+        10: { halign: 'right' },
+        11: { halign: 'right', fontStyle: 'bold' }
+    });
 };
 
 export const generateStatePaySlip = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, stateName: string, formName: string): Promise<string | null> => {
@@ -705,98 +772,78 @@ export const generateStateAdvanceRegister = async (results: PayrollResult[], emp
 };
 
 export const generateSimplePaySheetPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, subtitle?: string, customFilename?: string, config?: StatutoryConfig): Promise<string | null> => {
-    const columns = config?.dynamicPaySheetColumns || [];
-    const enableDynamic = config?.enableDynamicPaySheet;
+    const activeCols = getActivePaySheetColumns(results, config || {});
 
-    let headers: string[] = [];
-    let data: any[][] = [];
-    let grandTotal: any[] = [];
-    let colStyles: any = {};
+    const allColumns = [
+        { key: 'days', label: 'Days', getValue: (r: any) => r.payableDays },
+        { key: 'basic', label: 'Basic', getValue: (r: any) => Math.round(r.earnings?.basic || 0) },
+        { key: 'da', label: 'DA', getValue: (r: any) => Math.round(r.earnings?.da || 0) },
+        { key: 'retaining', label: 'Retn', getValue: (r: any) => Math.round(r.earnings?.retainingAllowance || 0) },
+        { key: 'hra', label: 'HRA', getValue: (r: any) => Math.round(r.earnings?.hra || 0) },
+        { key: 'conveyance', label: 'Conv', getValue: (r: any) => Math.round(r.earnings?.conveyance || 0) },
+        { 
+            key: 'others', 
+            label: 'Others', 
+            getValue: (r: any) => {
+                const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears'];
+                const displayedEarningsKeys = earningsKeys.filter(k => activeCols.includes(k));
+                const sumOfDisplayed = displayedEarningsKeys.reduce((acc, k) => acc + (r.earnings?.[k] || 0), 0);
+                return Math.round((r.earnings?.total || 0) - sumOfDisplayed);
+            }
+        },
+        { key: 'totalEarnings', label: 'GROSS', getValue: (r: any) => Math.round(r.earnings?.total || 0) },
+        { key: 'epf', label: 'PF', getValue: (r: any) => Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) },
+        { key: 'esi', label: 'ESI', getValue: (r: any) => Math.round(r.deductions?.esi || 0) },
+        { key: 'advanceRecovery', label: 'Adv', getValue: (r: any) => Math.round(r.deductions?.advanceRecovery || 0) },
+        { key: 'pt', label: 'PT', getValue: (r: any) => Math.round(r.deductions?.pt || 0) },
+        { 
+            key: 'otherDeductions', 
+            label: 'Others', 
+            getValue: (r: any) => {
+                const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
+                const displayedDeductionKeys = deductionKeys.filter(k => activeCols.includes(k));
+                let sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => acc + (r.deductions?.[k] || 0), 0);
+                return Math.round((r.deductions?.total || 0) - sumOfDisplayed);
+            }
+        },
+        { key: 'totalDeductions', label: 'TOTAL DED', getValue: (r: any) => Math.round(r.deductions?.total || 0) },
+        { key: 'netPay', label: 'NET PAY', getValue: (r: any) => Math.round(r.netPay || 0) }
+    ];
 
-    if (!enableDynamic) {
-        headers = ['ID', 'Name', 'Basic', 'DA', 'HRA', 'Conv', 'OT', 'Leave', 'Spl/Oth', 'GROSS', 'PF', 'ESI', 'PT', 'TDS', 'Adv', 'Fine', 'NET PAY'];
-        data = results.map(r => {
-            const emp = employees.find(e => e.id === r.employeeId);
-            const mainComponents = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.hra || 0) + (r.earnings.conveyance || 0) + (r.earnings.otAmount || 0) + (r.earnings.leaveEncashment || 0);
-            const otherAllowances = Math.max(0, (r.earnings.total || 0) - mainComponents);
-            return [
-                r.employeeId, emp?.name || '', Math.round(r.earnings.basic), Math.round(r.earnings.da), Math.round(r.earnings.hra),
-                Math.round(r.earnings.conveyance), Math.round(r.earnings.otAmount || 0), Math.round(r.earnings.leaveEncashment || 0), Math.round(otherAllowances), Math.round(r.earnings.total),
-                Math.round(r.deductions.epf + r.deductions.vpf), Math.round(r.deductions.esi), Math.round(r.deductions.pt),
-                Math.round(r.deductions.it), Math.round(r.deductions.advanceRecovery), Math.round(r.deductions.fine), Math.round(r.netPay)
-            ];
-        });
+    const headers: string[] = ['ID', 'Name'];
+    allColumns.forEach(col => {
+        if (activeCols.includes(col.key)) {
+            headers.push(col.label);
+        }
+    });
 
-        grandTotal = [
-            '', 'GRAND TOTAL',
-            ...Array.from({ length: 15 }, (_, i) =>
-                data.reduce((sum, row) => sum + (Number(row[i + 2]) || 0), 0)
-            )
-        ];
-
-        colStyles = { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right' }, 9: { halign: 'right', fontStyle: 'bold' }, 10: { halign: 'right' }, 11: { halign: 'right' }, 12: { halign: 'right' }, 13: { halign: 'right' }, 14: { halign: 'right' }, 15: { halign: 'right' }, 16: { halign: 'right', fontStyle: 'bold' } };
-    } else {
-        const allColumns = [
-            { key: 'basic', label: 'Basic', getValue: (r: any) => Math.round(r.earnings?.basic || 0) },
-            { key: 'da', label: 'DA', getValue: (r: any) => Math.round(r.earnings?.da || 0) },
-            { key: 'retaining', label: 'Retn', getValue: (r: any) => Math.round(r.earnings?.retainingAllowance || 0) },
-            { key: 'hra', label: 'HRA', getValue: (r: any) => Math.round(r.earnings?.hra || 0) },
-            { key: 'conveyance', label: 'Conv', getValue: (r: any) => Math.round(r.earnings?.conveyance || 0) },
-            { key: 'washing', label: 'Wash', getValue: (r: any) => Math.round(r.earnings?.washing || 0) },
-            { key: 'attire', label: 'Attire', getValue: (r: any) => Math.round(r.earnings?.attire || 0) },
-            { key: 'special1', label: 'Spl 1', getValue: (r: any) => Math.round(r.earnings?.special1 || 0) },
-            { key: 'special2', label: 'Spl 2', getValue: (r: any) => Math.round(r.earnings?.special2 || 0) },
-            { key: 'special3', label: 'Spl 3', getValue: (r: any) => Math.round(r.earnings?.special3 || 0) },
-            { key: 'bonus', label: 'Bonus', getValue: (r: any) => Math.round(r.earnings?.bonus || 0) },
-            { key: 'leaveEncashment', label: 'Leave', getValue: (r: any) => Math.round(r.earnings?.leaveEncashment || 0) },
-            { key: 'otAmount', label: 'OT', getValue: (r: any) => Math.round(r.earnings?.otAmount || 0) },
-            { key: 'arrears', label: 'Arrears', getValue: (r: any) => Math.round(r.earnings?.arrears || 0) },
-            { key: 'totalEarnings', label: 'GROSS', getValue: (r: any) => Math.round(r.earnings?.total || 0) },
-            { key: 'epf', label: 'PF', getValue: (r: any) => Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) },
-            { key: 'esi', label: 'ESI', getValue: (r: any) => Math.round(r.deductions?.esi || 0) },
-            { key: 'pt', label: 'PT', getValue: (r: any) => Math.round(r.deductions?.pt || 0) },
-            { key: 'it', label: 'TDS', getValue: (r: any) => Math.round(r.deductions?.it || 0) },
-            { key: 'lwf', label: 'LWF', getValue: (r: any) => Math.round(r.deductions?.lwf || 0) },
-            { key: 'advanceRecovery', label: 'Adv', getValue: (r: any) => Math.round(r.deductions?.advanceRecovery || 0) },
-            { key: 'fine', label: 'Fine', getValue: (r: any) => Math.round(r.deductions?.fine || 0) },
-            { key: 'totalDeductions', label: 'TOTAL DED', getValue: (r: any) => Math.round(r.deductions?.total || 0) },
-            { key: 'netPay', label: 'NET PAY', getValue: (r: any) => Math.round(r.netPay || 0) }
-        ];
-
-        headers = ['ID', 'Name'];
+    const data: any[][] = results.map(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        const row: any[] = [r.employeeId, emp?.name || ''];
+        
         allColumns.forEach(col => {
-            if (columns.includes(col.key)) {
-                headers.push(col.label);
+            if (activeCols.includes(col.key)) {
+                row.push(col.getValue(r));
             }
         });
+        
+        return row;
+    });
 
-        data = results.map(r => {
-            const emp = employees.find(e => e.id === r.employeeId);
-            const row: any[] = [r.employeeId, emp?.name || ''];
-            
-            allColumns.forEach(col => {
-                if (columns.includes(col.key)) {
-                    row.push(col.getValue(r));
-                }
-            });
-            
-            return row;
-        });
+    const grandTotal: any[] = ['', 'GRAND TOTAL'];
+    allColumns.forEach((col) => {
+        if (activeCols.includes(col.key)) {
+            const idx = headers.indexOf(col.label);
+            const sum = data.reduce((acc: number, row: any[]) => acc + (Number(row[idx]) || 0), 0);
+            grandTotal.push(sum);
+        }
+    });
 
-        grandTotal = ['', 'GRAND TOTAL'];
-        allColumns.forEach((col) => {
-            if (columns.includes(col.key)) {
-                const idx = headers.indexOf(col.label);
-                const sum = data.reduce((acc, row) => acc + (Number(row[idx]) || 0), 0);
-                grandTotal.push(sum);
-            }
-        });
-
-        for (let i = 2; i < headers.length; i++) {
-            colStyles[i] = { halign: 'right' };
-            if (headers[i] === 'GROSS' || headers[i] === 'NET PAY') {
-                colStyles[i].fontStyle = 'bold';
-            }
+    const colStyles: any = {};
+    for (let i = 2; i < headers.length; i++) {
+        colStyles[i] = { halign: 'right' };
+        if (headers[i] === 'GROSS' || headers[i] === 'NET PAY') {
+            colStyles[i].fontStyle = 'bold';
         }
     }
     const doc = new jsPDF('l');
@@ -839,7 +886,7 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
     const fileName = customFilename || getStandardFileName('PaySheet', companyProfile, month, year);
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -943,7 +990,7 @@ export const generatePaySlipsPDF = async (results: PayrollResult[], employees: E
     const fileName = customFilename || getStandardFileName('PaySlips', companyProfile, month, year);
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -1081,7 +1128,7 @@ export const generateLeaveLedgerReport = async (results: PayrollResult[], employ
             l.cl.balance ?? 0
         ];
     });
-    const fileName = getStandardFileName('LeaveLedger', companyProfile, month, year);
+    const fileName = getStandardFileName('Leave_Ledger', companyProfile, month, year);
     const colStyles = {
         5: { fontStyle: 'bold' },
         6: { fontStyle: 'bold' },
@@ -1162,16 +1209,8 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
         const u8 = new TextEncoder().encode(content);
         const savedLocally = await electronSaveReport(fileName, u8, 'txt', companyProfile.establishmentName);
 
-        if (!savedLocally) {
-            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${fileName}.txt`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+        if (!savedLocally.success) {
+            saveTextContent(content, fileName, savedLocally);
             return null;
         }
         return savedLocally.path || null;
@@ -1247,7 +1286,7 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
         const u8 = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
         const res = await electronSaveReport(fileName, u8, 'xlsx', companyProfile.establishmentName);
         if (!res.success) {
-            XLSX.writeFile(wb, `${fileName}.xlsx`);
+            saveExcelWorkbook(wb, fileName, res);
             return null;
         }
         return res.path || null;
@@ -1436,11 +1475,11 @@ export const generatePFForm12A = async (results: PayrollResult[], employees: Emp
     doc.setFontSize(7); doc.setTextColor(130); doc.setFont('helvetica', 'italic');
     doc.text('Generated by PMS — PF Form 12A (Revised) as per EPFO Guidelines', pageW / 2, finalY + 5, { align: 'center' });
 
-    const fileName = getStandardFileName('PFForm12A_Revised', companyProfile, month, year);
+    const fileName = getStandardFileName('PF_Form12A_Revised', companyProfile, month, year);
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -1600,7 +1639,7 @@ export const generateForm16PartBPDF = async (
         const fileName = `${getStandardFileName('Form16_PartB', company, sM, sY)}_${emp.id}_to_${eM}_${eY}`;
         const res = await electronSaveReport(fileName, u8, 'pdf', company.establishmentName);
         if (!res.success) {
-            doc.save(`${fileName}.pdf`);
+            savePdfDoc(doc, fileName, res);
             return null;
         }
         return res.path || null;
@@ -1686,7 +1725,7 @@ export const generateFormB = async (results: PayrollResult[], employees: Employe
             9: { halign: 'right' },
             10: { halign: 'right' },
             11: { halign: 'right' },
-            12: { halign: 'right' }
+            12: { halign: 'right', fontStyle: 'bold' }
         }
     });
 
@@ -1694,7 +1733,7 @@ export const generateFormB = async (results: PayrollResult[], employees: Employe
     const fileName = getStandardFileName('FormB_WageRegister', companyProfile, month, year);
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -1949,8 +1988,14 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
             `${formatIndianNumber(Math.round(r.netPay || 0))}`
         ];
         val4.forEach((v, i) => {
+            if (i === 8) {
+                doc.setFont('helvetica', 'bold');
+            }
             if (v === ':') doc.text(v, colX[i] + 24, y, { align: 'right' });
             else doc.text(v, colX[i] + 24, y, { align: 'right' });
+            if (i === 8) {
+                doc.setFont('helvetica', 'normal');
+            }
         });
         doc.text(" :", pageWidth - 16, y);
         y += 5.5; 
@@ -2070,7 +2115,355 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
     const fileName = customFilename || getStandardFileName(`${sitePrefix}_FormB_Legacy`, companyProfile, month, year);
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
+        return null;
+    }
+    return res.path || null;
+};
+
+export const generateFormI = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageW = doc.internal.pageSize.getWidth();
+    
+    const validResults = results.filter(r => r.payableDays > 0);
+    const activeEmployees = employees.filter(e => validResults.some(r => r.employeeId === e.id));
+    
+    if (activeEmployees.length === 0) {
+        throw new Error('No active employees found to generate Form I');
+    }
+    
+    activeEmployees.forEach((emp, index) => {
+        if (index > 0) {
+            doc.addPage();
+        }
+        
+        let y = 15;
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text('FORM I', pageW / 2, y, { align: 'center' });
+        y += 4;
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.text('(See clause (l) of sub-rule (1) of rule 51)', pageW / 2, y, { align: 'center' });
+        y += 4;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('EMPLOYEE REGISTER', pageW / 2, y, { align: 'center' });
+        y += 6;
+        
+        const estData = [
+            ['Name of the Establishment', (companyProfile.establishmentName || '').toUpperCase()],
+            ['Name of the Employer', (companyProfile.tradeName || companyProfile.establishmentName || '').toUpperCase()],
+            ['Name of the Owner', 'ILCBALA'],
+            ['PAN/TAN of the Employer', `${companyProfile.pan || ''} / ${companyProfile.tan || ''}`],
+            ['Registration Number of the establishment (LIN)', companyProfile.lin || '']
+        ];
+        
+        autoTable(doc, {
+            body: estData,
+            startY: y,
+            theme: 'grid',
+            styles: { fontSize: 8, cellPadding: 2 },
+            columnStyles: {
+                0: { fontStyle: 'bold', cellWidth: 90 },
+                1: { cellWidth: 90 }
+            }
+        });
+        
+        y = (doc as any).lastAutoTable.finalY + 4;
+        
+        const basicPay = emp.basicPay ? `Rs. ${emp.basicPay}` : '';
+        const presentAddr = [emp.doorNo, emp.buildingName, emp.street, emp.area, emp.city, emp.state, emp.pincode].filter(Boolean).join(', ');
+        
+        const empRows = [
+            ['1. Employee Code', emp.id],
+            ['2. Name', emp.name],
+            ['3. Surname', ''],
+            ['4. Gender', emp.gender || ''],
+            ["5. Father's/Mother's/Spouse Name", emp.fatherSpouseName || ''],
+            ['6. Date of Birth', formatDateInd(emp.dob)],
+            ['7. Place of Birth', ''],
+            ['8. Nationality', 'Indian'],
+            ['9. Education Level', ''],
+            ['10. Date of Joining', formatDateInd(emp.doj)],
+            ['11. Designation', emp.designation || ''],
+            ['12. Category (HS/S/SS/US)*', 'Skilled'],
+            ['13. Type of Employment (P/T/FT/T/B)**', 'Permanent'],
+            ['14. Details of Posting', emp.site || emp.branch || ''],
+            ['15. Pay', basicPay],
+            ['16. Promotion', ''],
+            ['17. Mobile Number', emp.mobile || ''],
+            ['18. Universal Account Number (UAN)', emp.uanc || ''],
+            ['19. PAN', emp.pan || ''],
+            ['20. Nominee', emp.spouseName || ''],
+            ['21. Details of Family', emp.spouseName ? `Spouse: ${emp.spouseName}` : ''],
+            ['22. EPS/NPS', emp.isPFExempt ? 'Exempt' : 'EPS Covered'],
+            ['23. ESIC IP No.', emp.esiNumber || ''],
+            ['24. AADHAAR NO.', emp.aadhaarNumber || ''],
+            ['25. Bank A/c Number', emp.bankAccount || ''],
+            ['26. Bank', emp.bankName || ''],
+            ['27. Branch (IFSC)', emp.ifsc || ''],
+            ['28. Present Address', presentAddr],
+            ['29. Permanent Address', presentAddr],
+            ['30. Service Book No.', ''],
+            ['31. Date of Exit', formatDateInd(emp.dol)],
+            ['32. Reason for Exit', emp.leavingReason || ''],
+            ['33. Mark of Identification', ''],
+            ['34. Photo', ''],
+            ['35. Specimen Signature/Thumb Impression', ''],
+            ['36. Remarks', '']
+        ];
+        
+        autoTable(doc, {
+            body: empRows,
+            startY: y,
+            theme: 'grid',
+            styles: { fontSize: 7.5, cellPadding: 1.5 },
+            columnStyles: {
+                0: { fontStyle: 'bold', cellWidth: 90 },
+                1: { cellWidth: 90 }
+            }
+        });
+        
+        const finalY = (doc as any).lastAutoTable.finalY + 4;
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'italic');
+        doc.text('* (Highly Skilled/Skilled/Semi skilled/Unskilled)    ** (Permanent/Temporary/Fixed Term/Trainee/Badli)', 14, finalY);
+    });
+    
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const fileName = getStandardFileName('Form_I_EmployeeRegister', companyProfile, month, year);
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+    
+    if (!res.success) {
+        savePdfDoc(doc, fileName, res);
+        return null;
+    }
+    return res.path || null;
+};
+
+export const generateFormIV = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+    const doc = new jsPDF('l', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('FORM-IV', pageWidth / 2, 12, { align: 'center' });
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text('(See clause (ii) of sub rule (1) of rule 51)', pageWidth / 2, 16, { align: 'center' });
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('REGISTER OF WAGES, OVERTIME, ADVANCES, FINES AND DEDUCTIONS FOR DAMAGE AND LOSS', pageWidth / 2, 21, { align: 'center' });
+    
+    doc.setFontSize(8);
+    doc.text(`Establishment Name: ${companyProfile.establishmentName || ''}`, 14, 27);
+    doc.text(`Employer Name: ${companyProfile.tradeName || companyProfile.establishmentName || ''}`, 14, 31);
+    doc.text(`PAN/TAN: ${companyProfile.pan || ''} / ${companyProfile.tan || ''}`, 14, 35);
+    doc.text(`LIN: ${companyProfile.lin || ''}`, pageWidth - 14, 27, { align: 'right' });
+    doc.text(`Wage Period: ${month} ${year}`, pageWidth - 14, 31, { align: 'right' });
+    
+    const headers = [
+        'Sl',
+        'Code',
+        'Name',
+        'Desig',
+        'Days\nWrk',
+        'OT\nHrs',
+        'Rate\nBasic',
+        'Earned\nBasic',
+        'Earned\nDA',
+        'Earned\nAllow',
+        'Earned\nOT',
+        'Gross\nWages',
+        'Deduct\nEPF',
+        'Deduct\nESI',
+        'Deduct\nTDS',
+        'Deduct\nAdv',
+        'Deduct\nFine',
+        'Total\nDeduct',
+        'Net\nPay',
+        'Pay Date\n/ Sign'
+    ];
+    
+    const validResults = results.filter(r => r.payableDays > 0);
+    const data = validResults.map((r, i) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        
+        const rateBasic = emp?.basicPay || 0;
+        const basic = Math.round(r.earnings.basic || 0);
+        const da = Math.round(r.earnings.da || 0);
+        const allow = Math.round((r.earnings.hra || 0) + (r.earnings.conveyance || 0) + (r.earnings.washing || 0) + (r.earnings.attire || 0) + (r.earnings.special1 || 0) + (r.earnings.special2 || 0) + (r.earnings.special3 || 0));
+        const ot = Math.round(r.earnings.otAmount || 0);
+        const gross = Math.round(r.earnings.total || 0);
+        
+        const epf = Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0));
+        const esi = Math.round(r.deductions.esi || 0);
+        const tds = Math.round(r.deductions.it || 0);
+        const adv = Math.round(r.deductions.advanceRecovery || 0);
+        const fine = Math.round(r.deductions.fine || 0);
+        const totalDeduct = Math.round(r.deductions.total || 0);
+        const net = Math.round(r.netPay || 0);
+        
+        return [
+            i + 1,
+            r.employeeId,
+            emp?.name || '',
+            emp?.designation || '',
+            r.payableDays,
+            '', 
+            formatIndianNumber(rateBasic),
+            formatIndianNumber(basic),
+            formatIndianNumber(da),
+            formatIndianNumber(allow),
+            formatIndianNumber(ot),
+            formatIndianNumber(gross),
+            formatIndianNumber(epf),
+            formatIndianNumber(esi),
+            formatIndianNumber(tds),
+            formatIndianNumber(adv),
+            formatIndianNumber(fine),
+            formatIndianNumber(totalDeduct),
+            formatIndianNumber(net),
+            '' 
+        ];
+    });
+    
+    autoTable(doc, {
+        head: [headers],
+        body: data,
+        startY: 39,
+        theme: 'grid',
+        styles: { fontSize: 6.5, cellPadding: 1.5, textColor: [30, 30, 30] },
+        headStyles: { fillColor: [39, 174, 96], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center', valign: 'middle' },
+        columnStyles: {
+            4: { halign: 'center' },
+            5: { halign: 'center' },
+            6: { halign: 'right' },
+            7: { halign: 'right' },
+            8: { halign: 'right' },
+            9: { halign: 'right' },
+            10: { halign: 'right' },
+            11: { halign: 'right' },
+            12: { halign: 'right' },
+            13: { halign: 'right' },
+            14: { halign: 'right' },
+            15: { halign: 'right' },
+            16: { halign: 'right' },
+            17: { halign: 'right' },
+            18: { halign: 'right', fontStyle: 'bold' }
+        }
+    });
+    
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const fileName = getStandardFileName('Form_IV_WageRegister', companyProfile, month, year);
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+    
+    if (!res.success) {
+        savePdfDoc(doc, fileName, res);
+        return null;
+    }
+    return res.path || null;
+};
+
+export const generateFormIX = async (results: PayrollResult[], employees: Employee[], _attendances: Attendance[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthIndex = MONTHS.indexOf(month);
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+    const daysHeaders = Array.from({ length: daysInMonth }, (_, k) => (k + 1).toString());
+    const headers = [
+        'Sl',
+        'Code',
+        'Name',
+        'Designation',
+        'Shift',
+        'Dept',
+        ...daysHeaders,
+        'Days\nWrk',
+        'OT\nHrs',
+        'Tour\nDetails',
+        'Keeper\nSign'
+    ];
+
+    const validResults = results.filter(r => r.payableDays > 0);
+    const data = validResults.map((r, i) => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        const payable = Math.round(r.payableDays);
+        const dailyData = Array.from({ length: daysInMonth }, (_, k) => {
+            return (k < payable) ? 'P' : '-';
+        });
+
+        return [
+            i + 1,
+            r.employeeId,
+            emp?.name || '',
+            emp?.designation || '',
+            '1', 
+            emp?.department || '',
+            ...dailyData,
+            r.payableDays,
+            '', 
+            '', 
+            ''  
+        ];
+    });
+
+    const doc = new jsPDF('l', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Form IX', pageWidth / 2, 11, { align: 'center' });
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text('(See clause (iii) of sub rule (1) of Rule 51)', pageWidth / 2, 15, { align: 'center' });
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('ATTENDANCE REGISTER CUM MUSTER ROLL', pageWidth / 2, 19, { align: 'center' });
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Establishment Name: ${companyProfile.establishmentName || ''}`, 14, 25);
+    doc.text(`Employer Name: ${companyProfile.tradeName || companyProfile.establishmentName || ''}`, 14, 29);
+    doc.text(`Owner Name: ILCBALA`, 14, 33);
+    doc.text(`LIN: ${companyProfile.lin || ''}`, pageWidth - 14, 25, { align: 'right' });
+    doc.text(`Month of: ${month} ${year}`, pageWidth - 14, 29, { align: 'right' });
+
+    const columnStyles: any = {
+        0: { cellWidth: 7, halign: 'center' },   
+        1: { cellWidth: 12, halign: 'center' },  
+        2: { cellWidth: 22, halign: 'left' },    
+        3: { cellWidth: 15, halign: 'left' },    
+        4: { cellWidth: 8, halign: 'center' },   
+        5: { cellWidth: 14, halign: 'left' }     
+    };
+    
+    for (let c = 6; c < 6 + daysInMonth; c++) {
+        columnStyles[c] = { cellWidth: 4.5, halign: 'center' };
+    }
+    
+    const lastIdx = 6 + daysInMonth;
+    columnStyles[lastIdx] = { cellWidth: 10, halign: 'center', fontStyle: 'bold' };      
+    columnStyles[lastIdx + 1] = { cellWidth: 9, halign: 'center' };                     
+    columnStyles[lastIdx + 2] = { cellWidth: 16, halign: 'left' };                      
+    columnStyles[lastIdx + 3] = { cellWidth: 12, halign: 'center' };                    
+
+    autoTable(doc, {
+        head: [headers],
+        body: data,
+        startY: 37,
+        theme: 'grid',
+        styles: { fontSize: 6, cellPadding: 1, textColor: [30, 30, 30] },
+        headStyles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center', valign: 'middle' },
+        columnStyles: columnStyles
+    });
+
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const fileName = getStandardFileName('Form_IX_AttendanceRegister', companyProfile, month, year);
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+    if (!res.success) {
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -2129,7 +2522,7 @@ export const generateFormC = async (results: PayrollResult[], employees: Employe
     const fileName = getStandardFileName('FormC_MusterRoll', companyProfile, month, year);
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -2269,7 +2662,7 @@ export const generatePFForm3A = async (
     const fileName = getStandardFileName('PF_Form3A', company, 'Annual', fyStart);
     const res = await electronSaveReport(fileName, u8, 'pdf', company.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -2445,7 +2838,7 @@ export const generatePFForm6A = async (
     const fileName = getStandardFileName('PF_Form6A', company, 'Annual', fyStart);
     const res = await electronSaveReport(fileName, u8, 'pdf', company.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -2563,7 +2956,7 @@ export const generateESIExitReport = async (results: PayrollResult[], employees:
     const fileName = getStandardFileName('ESI_Going_Out_Of_Coverage', companyProfile, month, year);
     const res = await electronSaveReport(fileName, u8, 'xlsx', companyProfile.establishmentName);
     if (!res.success) {
-        XLSX.writeFile(wb, `${fileName}.xlsx`);
+        saveExcelWorkbook(wb, fileName, res);
         return null;
     }
     return res.path || null;
@@ -2823,7 +3216,7 @@ export const generateESIForm5 = async (payrollHistory: PayrollResult[], employee
     const fileName = getStandardFileName(`ESI_Form_5_${halfYearPeriod}`, companyProfile, 'SemiAnnual', year);
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -3121,7 +3514,7 @@ export const generateESICodeWagesReport = async (results: PayrollResult[], emplo
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -3295,7 +3688,7 @@ export const generateEPFCodeImpactReport = async (results: PayrollResult[], empl
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -3432,15 +3825,7 @@ export const generateArrearECRText = async (
     const u8 = new TextEncoder().encode(content);
     const res = await electronSaveReport(fileName, u8, 'txt', companyProfile.establishmentName);
     if (!res.success) {
-        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${fileName}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        saveTextContent(content, fileName, res);
         return null;
     }
     return res.path || null;
@@ -3629,7 +4014,7 @@ export const generateArrearECRExcel = async (
     return await generateExcelWorkbook(wb, fileName, companyProfile.establishmentName);
 };
 
-export const generateJoinedEmployeesReport = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateJoinedEmployeesReport = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, payrollHistory?: PayrollResult[]): Promise<string | null> => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const monthIdx = months.indexOf(month);
 
@@ -3639,26 +4024,44 @@ export const generateJoinedEmployeesReport = async (employees: Employee[], month
         return d.getMonth() === monthIdx && d.getFullYear() === year;
     });
 
-    const data = filtered.map(emp => ({
-        'Employee ID': emp.id,
-        'Full Name': emp.name,
-        'Designation': emp.designation,
-        'Division': emp.division || '-',
-        'Department': emp.department || '-',
-        'Gender': emp.gender,
-        'Date of Joining': formatDateInd(emp.doj),
-        'Date of Birth': formatDateInd(emp.dob),
-        'Father/Spouse Name': emp.fatherSpouseName,
-        'Relationship': emp.relationship,
-        'Mobile No': emp.mobile,
-        'Email': emp.email || '-',
-        'Bank Account': emp.bankAccount,
-        'IFSC Code': emp.ifsc,
-        'PAN': emp.pan,
-        'Aadhaar Number': emp.aadhaarNumber,
-        'UAN Number': emp.uanc,
-        'ESI Number': emp.esiNumber || '-'
-    }));
+    const data = filtered.map(emp => {
+        let tenureStr = '0 Days';
+        if (emp.doj) {
+            const doj = new Date(emp.doj);
+            const lastDate = new Date(year, monthIdx + 1, 0).getDate();
+            const dojDate = doj.getDate();
+            const diffDays = lastDate - dojDate + 1;
+
+            const payRecord = payrollHistory?.find(r => r.employeeId === emp.id && r.month === month && r.year === year);
+            if (payRecord) {
+                tenureStr = `${payRecord.payableDays} Days`;
+            } else {
+                tenureStr = `${diffDays} Days`;
+            }
+        }
+
+        return {
+            'Employee ID': emp.id,
+            'Full Name': emp.name,
+            'Designation': emp.designation,
+            'Division': emp.division || '-',
+            'Department': emp.department || '-',
+            'Gender': emp.gender,
+            'Date of Joining': formatDateInd(emp.doj),
+            'Date of Birth': formatDateInd(emp.dob),
+            'Father/Spouse Name': emp.fatherSpouseName,
+            'Relationship': emp.relationship,
+            'Mobile No': emp.mobile,
+            'Email': emp.email || '-',
+            'Bank Account': emp.bankAccount,
+            'IFSC Code': emp.ifsc,
+            'PAN': emp.pan,
+            'Aadhaar Number': emp.aadhaarNumber,
+            'UAN Number': emp.uanc,
+            'ESI Number': emp.esiNumber || '-',
+            'Total Service Period': tenureStr
+        };
+    });
 
     const fileName = getStandardFileName('Employees_Joined', companyProfile, month, year);
     return await generateExcelReport(data, 'Joined_Employees', fileName, {
@@ -4061,7 +4464,7 @@ export const generateConsolidatedLWFReport = async (history: PayrollResult[], em
     });
 };
 
-export const generateJoinedEmployeesPDF = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateJoinedEmployeesPDF = async (employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, payrollHistory?: PayrollResult[]): Promise<string | null> => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const monthIdx = months.indexOf(month);
 
@@ -4087,14 +4490,19 @@ export const generateJoinedEmployeesPDF = async (employees: Employee[], month: s
 
     const tableData = filtered.map((emp, i) => {
         // Calculate Tenure
-        let tenureStr = '0 M';
+        let tenureStr = '0 Days';
         if (emp.doj) {
             const doj = new Date(emp.doj);
-            const now = new Date(year, monthIdx + 1, 0); // End of that month
-            const diffTime = Math.abs(now.getTime() - doj.getTime());
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            if (diffDays < 30) tenureStr = `${diffDays} Days`;
-            else tenureStr = `${Math.floor(diffDays / 30)} M`;
+            const lastDate = new Date(year, monthIdx + 1, 0).getDate();
+            const dojDate = doj.getDate();
+            const diffDays = lastDate - dojDate + 1;
+
+            const payRecord = payrollHistory?.find(r => r.employeeId === emp.id && r.month === month && r.year === year);
+            if (payRecord) {
+                tenureStr = `${payRecord.payableDays} Days`;
+            } else {
+                tenureStr = `${diffDays} Days`;
+            }
         }
 
         return [
@@ -4123,7 +4531,7 @@ export const generateJoinedEmployeesPDF = async (employees: Employee[], month: s
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
 
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -4177,7 +4585,7 @@ export const generateEmployeesLeftPDF = async (employees: Employee[], month: str
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
 
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -4323,7 +4731,7 @@ export const generateContractorMappingPDF = async (
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
 
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -4468,7 +4876,7 @@ export const generatePrincipalMappingPDF = async (
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
 
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;
@@ -4597,7 +5005,7 @@ export const generateESIIPMappingPDF = async (
     const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
 
     if (!res.success) {
-        doc.save(`${fileName}.pdf`);
+        savePdfDoc(doc, fileName, res);
         return null;
     }
     return res.path || null;

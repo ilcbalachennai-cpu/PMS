@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, Calculator, FileText, Settings as SettingsIcon,
   LogOut, Bot, ShieldCheck,
   Loader2, Lock, Unlock, Wrench,
-  CalendarClock, IndianRupee, Megaphone, Maximize, Minimize,
+  CalendarClock, IndianRupee, Megaphone, Maximize, Minimize, Power,
   ArrowRight, RefreshCw, Database,
   ChevronLeft, ChevronRight, X, Eye, EyeOff,
   ShieldAlert, CalendarX, WifiOff, Wifi, Scale, Building2, Plus, Trash2,
@@ -133,6 +133,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const otpInputRef = useRef<HTMLInputElement>(null);
   const isReloadingAfterReset = sessionStorage.getItem('app_is_reloading_after_reset') === 'true';
   const [exitingMessage, setExitingMessage] = useState<string | null>(null);
+  const [isSetupFullScreen, setIsSetupFullScreen] = useState(false);
 
   // --- Initialize Hooks ---
   const { alertConfig, showAlert, closeAlert } = useAlerts();
@@ -240,7 +241,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   }, [companies, showAlert, setCompanies]);
 
-  const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod(activeCompanyId, activeFinancialYear);
+  const { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod } = usePayrollPeriod(activeCompanyId, activeFinancialYear, payrollHistory);
 
   // V04.00.05: Strict Financial Year Isolation Check
   const isFYMismatch = useMemo(() => {
@@ -1979,17 +1980,57 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       )}
 
       {isAppDirectoryConfigured === false ? (
-        <div className="flex flex-col md:flex-row w-full h-full min-h-screen bg-[#020617] overflow-y-auto custom-scrollbar">
-          <div className="md:w-1/3 flex items-center justify-center p-4 border-r border-slate-800/30 bg-[#020617]">
-             <AppSetup onComplete={() => window.location.reload()} />
+        <div className="h-[100dvh] w-full bg-[#020617] flex flex-col items-center justify-center p-4 relative overflow-y-auto custom-scrollbar">
+          {/* Full Screen Toggle Button */}
+          <button
+            onClick={() => {
+              if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                  console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+                });
+                setIsSetupFullScreen(true);
+              } else {
+                document.exitFullscreen();
+                setIsSetupFullScreen(false);
+              }
+            }}
+            className="absolute top-4 right-4 z-50 p-2.5 bg-slate-800/50 hover:bg-slate-700 text-white rounded-full border border-slate-700 backdrop-blur-sm transition-all shadow-lg hover:scale-105"
+            title={isSetupFullScreen ? "Exit Full Screen" : "Enter Full Screen"}
+          >
+            {isSetupFullScreen ? <Minimize size={20} /> : <Maximize size={20} />}
+          </button>
+
+          {/* Quit Application Button */}
+          <button
+            onClick={async () => {
+              const api = (window as any).electronAPI;
+              if (api) {
+                try {
+                  if (api.closeApp) api.closeApp();
+                  else if (api.invoke) api.invoke('close-app');
+                } catch (err) {
+                  console.error("SETUP: Close failed", err);
+                }
+              } else {
+                window.close();
+                setTimeout(() => window.location.reload(), 100);
+              }
+            }}
+            className="absolute top-4 right-16 z-50 p-2.5 bg-red-950/20 hover:bg-red-900/40 text-red-400 rounded-full border border-red-500/30 backdrop-blur-sm transition-all shadow-lg hover:scale-105 flex items-center gap-2 px-4 group"
+            title="Quit Application"
+          >
+            <Power size={18} className="group-hover:rotate-12 transition-transform" />
+            <span className="text-[10px] font-black uppercase tracking-widest hidden sm:block">Quit Application</span>
+          </button>
+
+          {/* Background Decor - Fixed Position to avoid layout shift */}
+          <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+            <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-amber-600/10 rounded-full blur-[100px]"></div>
+            <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-red-900/10 rounded-full blur-[100px]"></div>
           </div>
-          <div className="flex-1 flex items-center justify-center p-4 md:bg-slate-900/10">
-            <Login 
-              onLogin={handleAuthLogin} 
-              currentLogo={logoUrl} 
-              setLogo={handleUpdateLogo} 
-              isLocked={true}
-            />
+
+          <div className="w-full max-w-md relative z-10">
+            <AppSetup onComplete={() => window.location.reload()} />
           </div>
         </div>
       ) : (showRegistrationManual || isRestorationForced || (companies.length === 0)) ? (

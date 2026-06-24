@@ -7,6 +7,7 @@ import { calculatePayroll } from '../services/payrollEngine';
 import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName, openSavedReport } from '../services/reportService';
 import { formatIndianNumber } from '../utils/formatters';
 import { ModalType } from './Shared/CustomModal';
+import { getActivePaySheetColumns } from '../constants';
 
 interface PayrollProcessorProps {
     employees: Employee[];
@@ -183,39 +184,79 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     }, [attendances, advanceLedgers, fines, otRecords, arrearHistory, results.length, isLocked]);
 
     const checkAgeMaturity = () => {
-        const unconfiguredMaturity: Employee[] = [];
+        const unconfigured58: Employee[] = [];
+        const unconfigured60: Employee[] = [];
         const monthIndex = months.indexOf(month);
         activeEmployees.forEach(emp => {
             if (!emp.dob || emp.isPFExempt) return;
             const dob = new Date(emp.dob);
-            const maturityDate = new Date(dob.getFullYear() + 58, dob.getMonth(), dob.getDate());
-            const periodStart = new Date(year, monthIndex, 1);
             const periodEnd = new Date(year, monthIndex + 1, 0);
-            if ((maturityDate < periodStart || (maturityDate >= periodStart && maturityDate <= periodEnd)) && !emp.isDeferredPension) {
-                unconfiguredMaturity.push(emp);
+
+            // Calculate age at the end of the processing month
+            let empAge = periodEnd.getFullYear() - dob.getFullYear();
+            const m = periodEnd.getMonth() - dob.getMonth();
+            if (m < 0 || (m === 0 && periodEnd.getDate() < dob.getDate())) {
+                empAge--;
+            }
+
+            // Checks for age groups
+            if (empAge >= 60) {
+                const isConfigured = !!emp.isPFExempt || (!!emp.epsMaturityConfigured && emp.epsMaturityConfiguredAge !== 58);
+                if (!isConfigured) {
+                    unconfigured60.push(emp);
+                }
+            } else if (empAge >= 58 && empAge < 60) {
+                const isConfigured = !!emp.epsMaturityConfigured || !!emp.isDeferredPension || !!emp.isPFExempt;
+                if (!isConfigured) {
+                    unconfigured58.push(emp);
+                }
             }
         });
-        if (unconfiguredMaturity.length > 0) {
+
+        if (unconfigured58.length > 0 || unconfigured60.length > 0) {
             setModalState({
                 isOpen: true,
                 type: 'error',
-                title: 'Action Required: EPS Maturity (Age 58)',
+                title: 'Action Required: Statutory Settings Check (Age 58+ / 60+)',
                 message: (
-                    <div className="text-left text-sm space-y-4">
-                        <p className="font-bold text-amber-400">The following employees have crossed the age of 58. EPS contributions must stop or be deferred.</p>
-                        <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 max-h-32 overflow-y-auto custom-scrollbar">
-                            <ul className="space-y-2">
-                                {unconfiguredMaturity.map(e => (
-                                    <li key={e.id} className="flex justify-between items-center text-xs">
-                                        <span className="text-white font-semibold">{e.name}</span>
-                                        <span className="text-slate-500 font-mono">DOB: {formatDateInd(e.dob)}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
+                    <div className="text-left text-sm space-y-4 text-slate-300">
+                        {unconfigured58.length > 0 && (
+                            <div className="space-y-2">
+                                <p className="font-bold text-amber-400">The following employees have crossed the age of 58. EPS contributions must stop or be deferred.</p>
+                                <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 max-h-32 overflow-y-auto custom-scrollbar">
+                                    <ul className="space-y-1">
+                                        {unconfigured58.map(e => (
+                                            <li key={e.id} className="flex justify-between items-center text-xs">
+                                                <span className="text-white font-semibold">{e.name}</span>
+                                                <span className="text-slate-400 font-mono">DOB: {formatDateInd(e.dob)}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                        )}
+
+                        {unconfigured60.length > 0 && (
+                            <div className="space-y-2">
+                                <p className="font-bold text-red-400">The following employees have crossed the age of 60. You must select Statutory option 7.A (PF Exempted) or 7.C (Only PF Contribution Allowed).</p>
+                                <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 max-h-32 overflow-y-auto custom-scrollbar">
+                                    <ul className="space-y-1">
+                                        {unconfigured60.map(e => (
+                                            <li key={e.id} className="flex justify-between items-center text-xs">
+                                                <span className="text-white font-semibold">{e.name}</span>
+                                                <span className="text-slate-400 font-mono">DOB: {formatDateInd(e.dob)}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 space-y-2">
                             <p className="font-bold text-sky-400 text-xs uppercase flex items-center gap-2"><AlertTriangle size={12} /> Steps to Resolve</p>
-                            <p className="text-xs text-slate-300 leading-relaxed">Go to <b>Employee Master &gt; Edit Employee &gt; Statutory Options</b> and enable "EPS Maturity Control".<br /><br />Select <b>"Pension Eligible"</b> to continue EPS or <b>"Full PF Redirect"</b> to stop EPS.</p>
+                            <p className="text-xs text-slate-300 leading-relaxed">
+                                Go to <b>Employee Master &gt; Edit Employee &gt; Statutory Options</b> and save their statutory options (either Option 7.A, 7.B, or 7.C).
+                            </p>
                         </div>
                         <p className="text-xs text-center text-red-400 font-bold mt-2">Payroll processing is blocked until settings are updated.</p>
                     </div>
@@ -448,7 +489,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 2
             );
         } else if (!savedPath && showAlert) {
-            showAlert('error', 'Export Failed', 'An unexpected error occurred while saving the draft report. Please check if the file is open elsewhere.');
+            const filename = (window as any).lastGeneratedFileName || 'the file';
+            showAlert('error', 'Export Failed', `Similar file is already open, close "${filename}" to generate the new report`);
         }
     };
 
@@ -479,72 +521,9 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     // }, [results]);
 
     // Dynamic Columns Definition
-    const ALL_COLUMNS = useMemo(() => ['days', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'others', 'bonus', 'leaveEncashment', 'otAmount', 'arrears', 'totalEarnings', 'epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine', 'otherDeductions', 'totalDeductions', 'netPay'], []);
-
     const activeColumns = useMemo(() => {
-        let finalColumns: string[] = [];
-        if (config.enableDynamicPaySheet) {
-            const baseColumns = config.dynamicPaySheetColumns
-                ? config.dynamicPaySheetColumns.map(c => {
-                    const cLower = c.toLowerCase();
-                    const matchedKey = ALL_COLUMNS.find(k => k.toLowerCase() === cLower);
-                    return matchedKey || c;
-                  }).filter(c => c !== 'empid' && c !== 'name')
-                : ['days', 'basic', 'da', 'others', 'leaveEncashment', 'totalEarnings', 'epf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'totalDeductions', 'netPay'];
-            
-            finalColumns = [...baseColumns];
-        } else {
-            // Static order based on user's screenshot, with Leave shifted after Others
-            finalColumns = ['days', 'basic', 'da', 'others', 'leaveEncashment', 'totalEarnings', 'epf', 'esi', 'pt', 'it', 'advanceRecovery', 'otherDeductions', 'totalDeductions', 'netPay'];
-        }
-
-        // Check if any employee has non-zero 'others' (Earnings)
-        const hasOthersBalance = results.some(r => {
-            const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears'];
-            const displayedEarningsKeys = earningsKeys.filter(k => finalColumns.includes(k) && k !== 'others');
-            const sumOfDisplayed = displayedEarningsKeys.reduce((acc, k) => acc + (r?.earnings?.[k as keyof typeof r.earnings] || 0), 0);
-            const othersVal = Math.round((r?.earnings?.total || 0) - sumOfDisplayed);
-            return othersVal !== 0;
-        });
-
-        // Check if any employee has non-zero 'otherDeductions'
-        const hasOtherDeductionsBalance = results.some(r => {
-            const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
-            const displayedDeductionKeys = deductionKeys.filter(k => finalColumns.includes(k) && k !== 'otherDeductions');
-            let sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => acc + (r?.deductions?.[k as keyof typeof r.deductions] || 0), 0);
-            
-            // Explicitly add grouped columns if they are displayed
-            if (finalColumns.includes('pt_it')) {
-                sumOfDisplayed += (r?.deductions?.pt || 0) + (r?.deductions?.it || 0);
-            }
-            
-            const othersVal = Math.round((r?.deductions?.total || 0) - sumOfDisplayed);
-            return othersVal !== 0;
-        });
-
-        // Filter out 'others' if no balance
-        if (!hasOthersBalance) {
-            finalColumns = finalColumns.filter(c => c !== 'others');
-        } else if (!finalColumns.includes('others')) {
-            // Add 'others' if it has balance and was not in baseColumns
-            finalColumns.push('others');
-        }
-
-        // Filter out 'otherDeductions' if no balance
-        if (!hasOtherDeductionsBalance) {
-            finalColumns = finalColumns.filter(c => c !== 'otherDeductions');
-        } else if (!finalColumns.includes('otherDeductions')) {
-            // Add 'otherDeductions' if it has balance and was not in baseColumns
-            finalColumns.push('otherDeductions');
-        }
-
-        // Sort if in dynamic mode
-        if (config.enableDynamicPaySheet) {
-            return finalColumns.sort((a, b) => ALL_COLUMNS.indexOf(a) - ALL_COLUMNS.indexOf(b));
-        }
-        
-        return finalColumns;
-    }, [config.enableDynamicPaySheet, config.dynamicPaySheetColumns, ALL_COLUMNS, results]);
+        return getActivePaySheetColumns(results, config);
+    }, [results, config]);
 
     const columnMap = useMemo(() => ({
         days: { label: 'Days', className: 'text-center text-slate-100', value: (r: PayrollResult) => r.payableDays },
@@ -652,7 +631,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     const earningsCount = activeColumns.filter(c => earningsKeys.includes(c)).length;
     const deductionCount = activeColumns.filter(c => deductionKeys.includes(c)).length;
 
-    const beforeEarningsCount = activeColumns.filter(c => !earningsKeys.includes(c) && !deductionKeys.includes(c) && ALL_COLUMNS.indexOf(c) < ALL_COLUMNS.indexOf('basic')).length + 1; // +1 for Employee Identity
+    const beforeEarningsCount = (activeColumns.includes('days') ? 1 : 0) + 1; // +1 for Employee Identity
     
     const betweenCount = activeColumns.filter(c => c === 'totalEarnings').length;
     
@@ -936,7 +915,20 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             )}
 
             {modalState.isOpen && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"><div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative"><button title="Close Modal" aria-label="Close Modal" onClick={() => setModalState({ ...modalState, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button><div className="flex flex-col items-center gap-2"><div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>{modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle size={24} /> : <AlertCircle size={24} />}</div><h3 className="text-lg font-bold text-white text-center">{modalState.title}</h3><div className="text-sm text-slate-400 text-center w-full">{modalState.message}</div></div><div className="flex gap-3 mt-4"><button onClick={() => setModalState({ ...modalState, isOpen: false })} title="Close" aria-label="Close" className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button></div></div></div>
+                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
+                        <div className="flex flex-col items-center gap-2">
+                            <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>
+                                {modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle size={24} /> : <AlertCircle size={24} />}
+                            </div>
+                            <h3 className="text-lg font-bold text-white text-center">{modalState.title}</h3>
+                            <div className="text-sm text-slate-400 text-center w-full">{modalState.message}</div>
+                        </div>
+                        <div className="flex gap-3 mt-4">
+                            <button onClick={() => setModalState({ ...modalState, isOpen: false })} title="Close" aria-label="Close" className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">OK</button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {previewRecord && (

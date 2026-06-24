@@ -1,8 +1,8 @@
 
 import React, { useState, useMemo, useRef } from 'react';
-import { Upload, Save, Lock, AlertTriangle, CheckCircle2, X, Search, Download, Gavel, Edit2 } from 'lucide-react';
+import { Upload, Save, Lock, AlertTriangle, CheckCircle2, Search, Download, Gavel, Edit2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Employee, FineRecord, PayrollResult, CompanyProfile } from '../types';
+import { Employee, FineRecord, PayrollResult, CompanyProfile, StatutoryConfig } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
 
 interface FineManagerProps {
@@ -14,6 +14,7 @@ interface FineManagerProps {
     savedRecords: PayrollResult[];
     hideContextSelector?: boolean;
     companyProfile: CompanyProfile;
+    config?: StatutoryConfig;
 }
 
 const FineManager: React.FC<FineManagerProps> = ({
@@ -24,7 +25,8 @@ const FineManager: React.FC<FineManagerProps> = ({
     year,
     savedRecords,
     hideContextSelector = false,
-    companyProfile
+    companyProfile,
+    config
 }) => {
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -73,7 +75,19 @@ const FineManager: React.FC<FineManagerProps> = ({
         const existingIndex = fines.findIndex(f => f.employeeId === empId && f.month === month && f.year === year);
         let newFines = [...fines];
 
-        const newVal = (field === 'amount' || field === 'tax') && value === '' ? undefined : value;
+        let newVal: any = value;
+        if (field === 'amount' || field === 'tax') {
+            if (value === '' || value === undefined || value === null) {
+                newVal = field === 'tax' ? undefined : 0;
+            } else {
+                newVal = Number(value);
+                if (isNaN(newVal)) {
+                    newVal = field === 'tax' ? undefined : 0;
+                }
+            }
+        } else if (field === 'reason') {
+            newVal = String(value);
+        }
 
         if (existingIndex >= 0) {
             newFines[existingIndex] = { ...newFines[existingIndex], [field]: newVal };
@@ -84,7 +98,7 @@ const FineManager: React.FC<FineManagerProps> = ({
                 year,
                 amount: field === 'amount' ? Number(newVal) : 0,
                 reason: field === 'reason' ? String(newVal) : '',
-                tax: field === 'tax' ? Number(newVal) : undefined
+                tax: field === 'tax' ? (newVal !== undefined ? Number(newVal) : undefined) : undefined
             });
         }
         setFines(newFines);
@@ -152,14 +166,17 @@ const FineManager: React.FC<FineManagerProps> = ({
                         }
                     }
 
-                    if (id && (amount > 0 || taxVal > 0)) {
+                    const cleanAmount = isNaN(amount) ? 0 : amount;
+                    const cleanTax = isNaN(taxVal) ? undefined : taxVal;
+
+                    if (id && (cleanAmount > 0 || (cleanTax !== undefined && cleanTax > 0))) {
                         newFines.push({
                             employeeId: id,
                             month,
                             year,
-                            amount,
+                            amount: cleanAmount,
                             reason,
-                            tax: taxVal
+                            tax: cleanTax
                         });
                         count++;
                     }
@@ -180,12 +197,14 @@ const FineManager: React.FC<FineManagerProps> = ({
     // --- AGGREGATE TOTALS FOR TABLE SUMMARY ---
     const totalTax = filteredEmployees.reduce((acc, emp) => {
         const rec = fines.find(f => f.employeeId === emp.id && f.month === month && f.year === year);
-        return acc + (rec?.tax || 0);
+        const taxVal = rec && rec.tax !== undefined && rec.tax !== null ? Number(rec.tax) : 0;
+        return acc + (isNaN(taxVal) ? 0 : taxVal);
     }, 0);
 
     const totalFine = filteredEmployees.reduce((acc, emp) => {
         const rec = fines.find(f => f.employeeId === emp.id && f.month === month && f.year === year);
-        return acc + (rec?.amount || 0);
+        const fineVal = rec && rec.amount !== undefined && rec.amount !== null ? Number(rec.amount) : 0;
+        return acc + (isNaN(fineVal) ? 0 : fineVal);
     }, 0);
 
     return (
@@ -260,7 +279,7 @@ const FineManager: React.FC<FineManagerProps> = ({
                                             className={`w-24 bg-[#0f172a] border rounded-lg px-2 py-1.5 text-right text-[11px] font-mono outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-60 disabled:bg-transparent disabled:border-transparent ${rec.tax !== undefined && rec.tax > 0 ? 'text-sky-400 font-bold border-sky-900/50' : 'text-slate-500 border-slate-700/50'}`}
                                             value={rec.tax !== undefined ? rec.tax : ''}
                                             onChange={e => handleUpdate(emp.id, 'tax', e.target.value)}
-                                            placeholder="AUTO"
+                                            placeholder={!config || config.incomeTaxCalculationType === 'Manual' ? 'MANUAL' : 'AUTO'}
                                         />
                                     </td>
                                     <td className="px-3 py-2 text-right">
@@ -305,7 +324,6 @@ const FineManager: React.FC<FineManagerProps> = ({
             {modalState.isOpen && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button title="Close Modal" aria-label="Close Modal" onClick={() => setModalState({ ...modalState, isOpen: false })} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={20} /></button>
                         <div className="flex flex-col items-center gap-2">
                             <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50'}`}>
                                 {modalState.type === 'error' ? <AlertTriangle size={24} /> : <CheckCircle2 size={24} />}
@@ -313,7 +331,7 @@ const FineManager: React.FC<FineManagerProps> = ({
                             <h3 className="text-lg font-bold text-white text-center">{modalState.title}</h3>
                             <p className="text-sm text-slate-400 text-center">{modalState.message}</p>
                         </div>
-                        <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
+                        <button onClick={() => setModalState({ ...modalState, isOpen: false })} className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">OK</button>
                     </div>
                 </div>
             )}

@@ -604,13 +604,9 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                 </table>
             </div>
 
-            {/* Modal for Feedback */}
             {modalState.isOpen && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                        <button onClick={() => setModalState({ ...modalState, isOpen: false })} title="Close Modal" aria-label="Close Modal" className="absolute top-4 right-4 text-slate-400 hover:text-white">
-              <X size={20} />
-            </button>
                         <div className="flex flex-col items-center gap-2">
                             <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>
                                 {modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}
@@ -645,7 +641,7 @@ const LedgerManager: React.FC<LedgerManagerProps> = ({
                   aria-label="Close Notification"
                   className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors"
                 >
-                  Close
+                  OK
                 </button>
               )}
                         </div>

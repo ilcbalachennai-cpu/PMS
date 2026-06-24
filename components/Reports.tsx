@@ -22,6 +22,7 @@ import {
     getMonthAbbr
 } from '../services/reportService';
 import { formatIndianNumber, getCompanyBackupFolder } from '../utils/formatters';
+import { getActivePaySheetColumns } from '../constants';
 
 
 interface ReportsProps {
@@ -649,157 +650,85 @@ const Reports: React.FC<ReportsProps> = ({
 
                     if (validToExport.length === 0) throw new Error(`No data found for the selected ${paySheetFilter}: ${paySheetFilterValue}`);
 
-                    const columns = config.dynamicPaySheetColumns || [];
-                    const enableDynamic = config.enableDynamicPaySheet;
+                    const activeCols = getActivePaySheetColumns(validToExport, config || {});
+
+                    const allColumns = [
+                        { key: 'days', label: 'Days Paid', getValue: (r: any) => r.payableDays },
+                        { key: 'basic', label: 'Basic', getValue: (r: any) => Math.round(r.earnings?.basic || 0) },
+                        { key: 'da', label: 'DA', getValue: (r: any) => Math.round(r.earnings?.da || 0) },
+                        { key: 'retaining', label: 'Retaining Allw', getValue: (r: any) => Math.round(r.earnings?.retainingAllowance || 0) },
+                        { key: 'hra', label: 'HRA', getValue: (r: any) => Math.round(r.earnings?.hra || 0) },
+                        { key: 'conveyance', label: 'Conveyance', getValue: (r: any) => Math.round(r.earnings?.conveyance || 0) },
+                        { 
+                            key: 'others', 
+                            label: 'Others', 
+                            getValue: (r: any) => {
+                                const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears'];
+                                const displayedEarningsKeys = earningsKeys.filter(k => activeCols.includes(k));
+                                const sumOfDisplayed = displayedEarningsKeys.reduce((acc, k) => acc + (r.earnings?.[k] || 0), 0);
+                                return Math.round((r.earnings?.total || 0) - sumOfDisplayed);
+                            }
+                        },
+                        { key: 'totalEarnings', label: 'GROSS EARNINGS', getValue: (r: any) => Math.round(r.earnings?.total || 0) },
+                        { key: 'epf', label: 'PF (EE)', getValue: (r: any) => Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) },
+                        { key: 'esi', label: 'ESI (EE)', getValue: (r: any) => Math.round(r.deductions?.esi || 0) },
+                        { key: 'advanceRecovery', label: 'Advance', getValue: (r: any) => Math.round(r.deductions?.advanceRecovery || 0) },
+                        { key: 'pt', label: 'Prof Tax', getValue: (r: any) => Math.round(r.deductions?.pt || 0) },
+                        { 
+                            key: 'otherDeductions', 
+                            label: 'Others (DED)', 
+                            getValue: (r: any) => {
+                                const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
+                                const displayedDeductionKeys = deductionKeys.filter(k => activeCols.includes(k));
+                                let sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => acc + (r.deductions?.[k] || 0), 0);
+                                return Math.round((r.deductions?.total || 0) - sumOfDisplayed);
+                            }
+                        },
+                        { key: 'totalDeductions', label: 'TOTAL DEDUCTIONS', getValue: (r: any) => Math.round(r.deductions?.total || 0) },
+                        { key: 'netPay', label: 'NET PAY', getValue: (r: any) => Math.round(r.netPay || 0) }
+                    ];
 
                     let excelData: any[] = [];
 
-                    if (!enableDynamic) {
-                        excelData = validToExport.map(r => {
-                            const emp = employees.find(e => e.id === r.employeeId);
-                            return {
-                                'ID': r.employeeId,
-                                'Name': emp?.name,
-                                'Designation': emp?.designation,
-                                'Site': emp?.site || '-',
-                                'Branch': emp?.branch || '-',
-                                'Division': emp?.division || '-',
-                                'Days Paid': r.payableDays,
-                                'Basic': Math.round(r.earnings?.basic || 0),
-                                'DA': Math.round(r.earnings?.da || 0),
-                                'Retaining Allw': Math.round(r.earnings?.retainingAllowance || 0),
-                                'HRA': Math.round(r.earnings?.hra || 0),
-                                'Conveyance': Math.round(r.earnings?.conveyance || 0),
-                                'Washing': Math.round(r.earnings?.washing || 0),
-                                'Attire': Math.round(r.earnings?.attire || 0),
-                                'Special Allw 1': Math.round(r.earnings?.special1 || 0),
-                                'Special Allw 2': Math.round(r.earnings?.special2 || 0),
-                                'Special Allw 3': Math.round(r.earnings?.special3 || 0),
-                                'Bonus': Math.round(r.earnings?.bonus || 0),
-                                'Leave Encash': Math.round(r.earnings?.leaveEncashment || 0),
-                                'Overtime': Math.round(r.earnings?.otAmount || 0),
-                                'GROSS EARNINGS': Math.round(r.earnings?.total || 0),
-                                'PF (EE)': Math.round(r.deductions?.epf || 0),
-                                'VPF': Math.round(r.deductions?.vpf || 0),
-                                'ESI (EE)': Math.round(r.deductions?.esi || 0),
-                                'Prof Tax': Math.round(r.deductions?.pt || 0),
-                                'Income Tax': Math.round(r.deductions?.it || 0),
-                                'LWF': Math.round(r.deductions?.lwf || 0),
-                                'Advance': Math.round(r.deductions?.advanceRecovery || 0),
-                                'Fine': Math.round(r.deductions?.fine || 0),
-                                'TOTAL DEDUCTIONS': Math.round(r.deductions?.total || 0),
-                                'NET PAY': Math.round(r.netPay || 0)
-                            };
-                        });
-
-                        const sum = (key: string) =>
-                            excelData.reduce((acc, row: any) => acc + (Number(row[key]) || 0), 0);
-
-                        const grandTotal: any = {
-                            'ID': '',
-                            'Name': 'GRAND TOTAL',
-                            'Designation': '',
-                            'Site': '',
-                            'Branch': '',
-                            'Division': '',
-                            'Days Paid': sum('Days Paid'),
-                            'Basic': sum('Basic'),
-                            'DA': sum('DA'),
-                            'Retaining Allw': sum('Retaining Allw'),
-                            'HRA': sum('HRA'),
-                            'Conveyance': sum('Conveyance'),
-                            'Washing': sum('Washing'),
-                            'Attire': sum('Attire'),
-                            'Special Allw 1': sum('Special Allw 1'),
-                            'Special Allw 2': sum('Special Allw 2'),
-                            'Special Allw 3': sum('Special Allw 3'),
-                            'Bonus': sum('Bonus'),
-                            'Leave Encash': sum('Leave Encash'),
-                            'Overtime': sum('Overtime'),
-                            'GROSS EARNINGS': sum('GROSS EARNINGS'),
-                            'PF (EE)': sum('PF (EE)'),
-                            'VPF': sum('VPF'),
-                            'ESI (EE)': sum('ESI (EE)'),
-                            'Prof Tax': sum('Prof Tax'),
-                            'Income Tax': sum('Income Tax'),
-                            'LWF': sum('LWF'),
-                            'Advance': sum('Advance'),
-                            'Fine': sum('Fine'),
-                            'TOTAL DEDUCTIONS': sum('TOTAL DEDUCTIONS'),
-                            'NET PAY': sum('NET PAY')
-                        };
-                        excelData.push(grandTotal);
-                    } else {
-                        const allColumns = [
-                            { key: 'basic', label: 'Basic Pay', getValue: (r: any) => Math.round(r.earnings?.basic || 0) },
-                            { key: 'da', label: 'DA', getValue: (r: any) => Math.round(r.earnings?.da || 0) },
-                            { key: 'retaining', label: 'Retn Allow', getValue: (r: any) => Math.round(r.earnings?.retainingAllowance || 0) },
-                            { key: 'hra', label: 'HRA', getValue: (r: any) => Math.round(r.earnings?.hra || 0) },
-                            { key: 'conveyance', label: 'Conveyance', getValue: (r: any) => Math.round(r.earnings?.conveyance || 0) },
-                            { key: 'washing', label: 'Washing', getValue: (r: any) => Math.round(r.earnings?.washing || 0) },
-                            { key: 'attire', label: 'Attire', getValue: (r: any) => Math.round(r.earnings?.attire || 0) },
-                            { key: 'special1', label: 'Special 1', getValue: (r: any) => Math.round(r.earnings?.special1 || 0) },
-                            { key: 'special2', label: 'Special 2', getValue: (r: any) => Math.round(r.earnings?.special2 || 0) },
-                            { key: 'special3', label: 'Special 3', getValue: (r: any) => Math.round(r.earnings?.special3 || 0) },
-                            { key: 'bonus', label: 'Bonus', getValue: (r: any) => Math.round(r.earnings?.bonus || 0) },
-                            { key: 'leaveEncashment', label: 'Leave Encash', getValue: (r: any) => Math.round(r.earnings?.leaveEncashment || 0) },
-                            { key: 'otAmount', label: 'OT Amount', getValue: (r: any) => Math.round(r.earnings?.otAmount || 0) },
-                            { key: 'arrears', label: 'Arrears', getValue: (r: any) => Math.round(r.earnings?.arrears || 0) },
-                            { key: 'totalEarnings', label: 'Total Earnings', getValue: (r: any) => Math.round(r.earnings?.total || 0) },
-                            { key: 'epf', label: 'EPF', getValue: (r: any) => Math.round(r.deductions?.epf || 0) },
-                            { key: 'vpf', label: 'VPF', getValue: (r: any) => Math.round(r.deductions?.vpf || 0) },
-                            { key: 'esi', label: 'ESI', getValue: (r: any) => Math.round(r.deductions?.esi || 0) },
-                            { key: 'pt', label: 'PT', getValue: (r: any) => Math.round(r.deductions?.pt || 0) },
-                            { key: 'it', label: 'IT', getValue: (r: any) => Math.round(r.deductions?.it || 0) },
-                            { key: 'lwf', label: 'LWF', getValue: (r: any) => Math.round(r.deductions?.lwf || 0) },
-                            { key: 'advanceRecovery', label: 'Adv Recovery', getValue: (r: any) => Math.round(r.deductions?.advanceRecovery || 0) },
-                            { key: 'fine', label: 'Fine', getValue: (r: any) => Math.round(r.deductions?.fine || 0) },
-                            { key: 'totalDeductions', label: 'Total Deductions', getValue: (r: any) => Math.round(r.deductions?.total || 0) },
-                            { key: 'netPay', label: 'Net Pay', getValue: (r: any) => Math.round(r.netPay || 0) }
-                        ];
-
-                        excelData = validToExport.map(r => {
-                            const emp = employees.find(e => e.id === r.employeeId);
-                            const row: any = {
-                                'ID': r.employeeId,
-                                'Name': emp?.name,
-                                'Designation': emp?.designation,
-                                'Site': emp?.site || '-',
-                                'Branch': emp?.branch || '-',
-                                'Division': emp?.division || '-',
-                                'Days Paid': r.payableDays,
-                            };
-
-                            allColumns.forEach(col => {
-                                if (columns.includes(col.key)) {
-                                    row[col.label] = col.getValue(r);
-                                }
-                            });
-
-                            return row;
-                        });
-
-                        const sum = (key: string) =>
-                            excelData.reduce((acc, row: any) => acc + (Number(row[key]) || 0), 0);
-
-                        const grandTotal: any = {
-                            'ID': '',
-                            'Name': 'GRAND TOTAL',
-                            'Designation': '',
-                            'Site': '',
-                            'Branch': '',
-                            'Division': '',
-                            'Days Paid': sum('Days Paid'),
+                    excelData = validToExport.map(r => {
+                        const emp = employees.find(e => e.id === r.employeeId);
+                        const row: any = {
+                            'ID': r.employeeId,
+                            'Name': emp?.name,
+                            'Designation': emp?.designation,
+                            'Site': emp?.site || '-',
+                            'Branch': emp?.branch || '-',
+                            'Division': emp?.division || '-',
                         };
 
                         allColumns.forEach(col => {
-                            if (columns.includes(col.key)) {
-                                grandTotal[col.label] = sum(col.label);
+                            if (activeCols.includes(col.key)) {
+                                row[col.label] = col.getValue(r);
                             }
                         });
 
-                        excelData.push(grandTotal);
-                    }
+                        return row;
+                    });
+
+                    const sum = (key: string) =>
+                        excelData.reduce((acc, row: any) => acc + (Number(row[key]) || 0), 0);
+
+                    const grandTotal: any = {
+                        'ID': '',
+                        'Name': 'GRAND TOTAL',
+                        'Designation': '',
+                        'Site': '',
+                        'Branch': '',
+                        'Division': '',
+                    };
+
+                    allColumns.forEach(col => {
+                        if (activeCols.includes(col.key)) {
+                            grandTotal[col.label] = sum(col.label);
+                        }
+                    });
+
+                    excelData.push(grandTotal);
 
                     let customExcelFilename = undefined;
                     if (paySheetFilter !== 'all') {
@@ -1010,7 +939,8 @@ const Reports: React.FC<ReportsProps> = ({
                     2
                 );
             } else {
-                _showAlert('error', 'Generation Failed', 'An unexpected error occurred while saving the report. Please try again or check if the file is open elsewhere.');
+                const filename = (window as any).lastGeneratedFileName || 'the file';
+                _showAlert('error', 'Generation Failed', `Similar file is already open, close "${filename}" to generate the new report`);
             }
 
         } catch (e: any) {

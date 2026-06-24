@@ -71,6 +71,10 @@ export const NATURE_OF_BUSINESS_OPTIONS = [
 ];
 
 export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
+  enablePF: true,
+  enableESI: true,
+  enableBonus: true,
+  enableGratuity: true,
   epfCeiling: 15000,
   epfEmployeeRate: 0.12,
   epfEmployerRate: 0.12,
@@ -165,7 +169,7 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
   gratuityWagesComponents: { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false },
   enableArrearSalary: false,
   enableDynamicPaySheet: false,
-  dynamicPaySheetColumns: ['empid', 'name', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears', 'totalEarnings', 'epf', 'vpf', 'esi', 'pt', 'it', 'lwf', 'advanceRecovery', 'fine', 'totalDeductions', 'netPay']
+  dynamicPaySheetColumns: ['empid', 'name', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'leaveEncashment', 'otAmount', 'totalEarnings', 'epf', 'vpf', 'esi', 'pt', 'it', 'lwf', 'advanceRecovery', 'fine', 'totalDeductions', 'netPay']
 };
 
 export const DEFAULT_LEAVE_POLICY: LeavePolicy = {
@@ -284,3 +288,86 @@ export const MOCK_USERS: User[] = [
 ];
 
 export const SAMPLE_EMPLOYEES: Employee[] = [];
+
+export const getActivePaySheetColumns = (results: any[], config: any) => {
+  // 1. Determine base list of columns based on dynamic mode settings
+  let baseColumns: string[] = [];
+  if (config?.enableDynamicPaySheet && config?.dynamicPaySheetColumns) {
+    baseColumns = config.dynamicPaySheetColumns
+      .map((c: string) => c.toLowerCase())
+      .filter((c: string) => c !== 'empid' && c !== 'name' && c !== 'bonus' && c !== 'arrears');
+  } else {
+    // Default static columns in case dynamic mode is disabled
+    baseColumns = ['days', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'epf', 'esi', 'advanceRecovery', 'pt'];
+  }
+
+  // 2. Filter candidates based on whether they are enabled and have non-zero data for at least one employee
+  const activeCols = baseColumns.filter(col => {
+    // Days and Basic are always kept if present in configuration
+    if (col === 'days' || col === 'basic') return true;
+
+    // Check if there is at least one non-zero record
+    return results.some(r => {
+      if (col === 'da') return (r.earnings?.da || 0) !== 0;
+      if (col === 'retaining') return (r.earnings?.retainingAllowance || 0) !== 0;
+      if (col === 'hra') return (r.earnings?.hra || 0) !== 0;
+      if (col === 'conveyance') return (r.earnings?.conveyance || 0) !== 0;
+      if (col === 'epf') return ((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) !== 0;
+      if (col === 'esi') return (r.deductions?.esi || 0) !== 0;
+      if (col === 'advanceRecovery') return (r.deductions?.advanceRecovery || 0) !== 0;
+      if (col === 'pt') return (r.deductions?.pt || 0) !== 0;
+      return false;
+    });
+  });
+
+  // 3. Calculate if "others" (Earnings balance) has any data
+  const hasOthers = results.some(r => {
+    let activeEarningsSum = 0;
+    if (activeCols.includes('basic')) activeEarningsSum += (r.earnings?.basic || 0);
+    if (activeCols.includes('da')) activeEarningsSum += (r.earnings?.da || 0);
+    if (activeCols.includes('retaining')) activeEarningsSum += (r.earnings?.retainingAllowance || 0);
+    if (activeCols.includes('hra')) activeEarningsSum += (r.earnings?.hra || 0);
+    if (activeCols.includes('conveyance')) activeEarningsSum += (r.earnings?.conveyance || 0);
+
+    const othersValue = Math.round((r.earnings?.total || 0) - activeEarningsSum);
+    return othersValue !== 0;
+  });
+
+  // 4. Calculate if "otherDeductions" (Deductions balance) has any data
+  const hasOtherDeductions = results.some(r => {
+    let activeDeductionsSum = 0;
+    if (activeCols.includes('epf')) activeDeductionsSum += ((r.deductions?.epf || 0) + (r.deductions?.vpf || 0));
+    if (activeCols.includes('esi')) activeDeductionsSum += (r.deductions?.esi || 0);
+    if (activeCols.includes('advanceRecovery')) activeDeductionsSum += (r.deductions?.advanceRecovery || 0);
+    if (activeCols.includes('pt')) activeDeductionsSum += (r.deductions?.pt || 0);
+
+    const otherDeductionsValue = Math.round((r.deductions?.total || 0) - activeDeductionsSum);
+    return otherDeductionsValue !== 0;
+  });
+
+  // 5. Build the final ordered columns list
+  const finalOrdered: string[] = [];
+  if (activeCols.includes('days')) finalOrdered.push('days');
+  if (activeCols.includes('basic')) finalOrdered.push('basic');
+  if (activeCols.includes('da')) finalOrdered.push('da');
+  if (activeCols.includes('retaining')) finalOrdered.push('retaining');
+  if (activeCols.includes('hra')) finalOrdered.push('hra');
+  if (activeCols.includes('conveyance')) finalOrdered.push('conveyance');
+  if (hasOthers) finalOrdered.push('others');
+  
+  // GROSS is always included
+  finalOrdered.push('totalEarnings');
+
+  if (activeCols.includes('epf')) finalOrdered.push('epf');
+  if (activeCols.includes('esi')) finalOrdered.push('esi');
+  if (activeCols.includes('advanceRecovery')) finalOrdered.push('advanceRecovery');
+  if (activeCols.includes('pt')) finalOrdered.push('pt');
+  if (hasOtherDeductions) finalOrdered.push('otherDeductions');
+
+  // TOTAL DED and NET PAY are always included
+  finalOrdered.push('totalDeductions');
+  finalOrdered.push('netPay');
+
+  return finalOrdered;
+};
+

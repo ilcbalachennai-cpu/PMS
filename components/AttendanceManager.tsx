@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef } from 'react';
-import { Upload, CheckCircle2, AlertCircle, Save, Lock, AlertTriangle, Users, Edit2, X, CheckCircle, HelpCircle, Download } from 'lucide-react';
+import { Upload, CheckCircle2, AlertCircle, Save, Lock, AlertTriangle, Users, Edit2, CheckCircle, HelpCircle, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, Attendance, PayrollResult, LeaveLedger, CompanyProfile } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
@@ -262,6 +262,12 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
       setTimeout(() => {
         setIsSaving(false);
         setJustSaved(true);
+        setModalState({
+          isOpen: true,
+          type: 'success',
+          title: 'Attendance Updated',
+          message: 'Attendance changes have been saved successfully.'
+        });
       }, 800);
     } catch (e) {
       console.error(e);
@@ -715,13 +721,9 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
         </table>
       </div>
 
-      {/* GENERAL NOTIFICATION / CONFIRMATION MODAL */}
       {modalState.isOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-            <button onClick={() => setModalState({ ...modalState, isOpen: false })} title="Close Modal" aria-label="Close Modal" className="absolute top-4 right-4 text-slate-400 hover:text-white">
-              <X size={20} />
-            </button>
             <div className="flex flex-col items-center gap-2">
               <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' :
                 modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' :
@@ -762,7 +764,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                   aria-label="Close Notification"
                   className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors"
                 >
-                  Close
+                  OK
                 </button>
               )}
             </div>

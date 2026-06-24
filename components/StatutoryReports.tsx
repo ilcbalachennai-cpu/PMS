@@ -20,6 +20,9 @@ import {
     generateBonusReport,
     generateFormB,
     generateFormC,
+    generateFormI,
+    generateFormIV,
+    generateFormIX,
     generateStateWageRegister,
     generateStatePaySlip,
     generateStateAdvanceRegister,
@@ -42,6 +45,8 @@ import {
 } from '../services/reportService';
 
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
+
+const CALENDAR_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 interface StatutoryReportsProps {
     payrollHistory: PayrollResult[];
@@ -89,6 +94,12 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 }) => {
     const monthsArr = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
 
+    const selectableMonths = useMemo(() => {
+        if (payrollHistory.length === 0) return monthsArr;
+        const unique = Array.from(new Set(payrollHistory.map(r => r.month)));
+        return unique.sort((a, b) => monthsArr.indexOf(a) - monthsArr.indexOf(b));
+    }, [payrollHistory, monthsArr]);
+
     const [startYear, endYear] = useMemo(() => {
         if (!activeFinancialYear) return [new Date().getFullYear(), new Date().getFullYear()];
         const match = activeFinancialYear.match(/FY(\d{2})-(\d{2})/);
@@ -106,6 +117,33 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         const uniqueYears = Array.from(new Set(payrollHistory.map(r => r.year)));
         return uniqueYears.sort((a, b) => a - b);
     }, [payrollHistory, startYear, endYear]);
+
+    useEffect(() => {
+        const isMonthValid = selectableMonths.length === 0 || selectableMonths.includes(globalMonth);
+        const isYearValid = yearOptions.length === 0 || yearOptions.includes(globalYear);
+
+        if (!isMonthValid || !isYearValid) {
+            if (payrollHistory.length > 0) {
+                const autoMonth = selectableMonths[0];
+                const match = payrollHistory.find(r => r.month === autoMonth);
+                if (match) {
+                    setGlobalMonth(match.month);
+                    setGlobalYear(match.year);
+                }
+            }
+        }
+    }, [selectableMonths, yearOptions, globalMonth, globalYear, payrollHistory, setGlobalMonth, setGlobalYear]);
+
+    const handleMonthChange = (selectedMonth: string) => {
+        setGlobalMonth(selectedMonth);
+        const match = payrollHistory.find(r => r.month === selectedMonth);
+        if (match) {
+            setGlobalYear(match.year);
+        } else {
+            const isNextYear = ['January', 'February', 'March'].includes(selectedMonth);
+            setGlobalYear(isNextYear ? endYear : startYear);
+        }
+    };
 
     const [selectedState, setSelectedState] = useState<string>(companyProfile.state || 'Tamil Nadu');
     const [rangeModal, setRangeModal] = useState({ isOpen: false, reportType: '', fromMonth: globalMonth, fromYear: globalYear, toMonth: globalMonth, toYear: globalYear });
@@ -127,8 +165,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
     const isCurrentPeriodConfirmed = useMemo(() => {
         if (!latestFrozenPeriod) return false;
-        const currentVal = (globalYear * 12) + monthsArr.indexOf(globalMonth);
-        const frozenVal = (latestFrozenPeriod.year * 12) + monthsArr.indexOf(latestFrozenPeriod.month);
+        const currentVal = (globalYear * 12) + CALENDAR_MONTHS.indexOf(globalMonth);
+        const frozenVal = (latestFrozenPeriod.year * 12) + CALENDAR_MONTHS.indexOf(latestFrozenPeriod.month);
         return currentVal <= frozenVal;
     }, [globalMonth, globalYear, latestFrozenPeriod]);
 
@@ -149,9 +187,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     const handleDownload = async (reportName: string, format: 'PDF' | 'Excel' | 'Text') => {
         const isPeriodConfirmed = (m: string, y: number): boolean => {
             if (!latestFrozenPeriod) return false;
-            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-            const currentVal = (y * 12) + months.indexOf(m);
-            const frozenVal = (latestFrozenPeriod.year * 12) + months.indexOf(latestFrozenPeriod.month);
+            const currentVal = (y * 12) + CALENDAR_MONTHS.indexOf(m);
+            const frozenVal = (latestFrozenPeriod.year * 12) + CALENDAR_MONTHS.indexOf(latestFrozenPeriod.month);
             return currentVal <= frozenVal;
         };
 
@@ -206,15 +243,15 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 } else if (reportName.includes('Form 12A')) {
                     savedPath = await generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
                 } else if (reportName === 'Employees Joined') {
-                    const monthIdx = monthsArr.indexOf(globalMonth);
+                    const monthIdx = CALENDAR_MONTHS.indexOf(globalMonth);
                     const hasData = employees.some(emp => emp.doj && new Date(emp.doj).getMonth() === monthIdx && new Date(emp.doj).getFullYear() === globalYear);
                     if (!hasData) {
                         setMsgModal({ isOpen: true, title: 'Info', message: `There are no Employees Joined During : ${globalMonth} , ${globalYear}`, type: 'info', onConfirm: null });
                         return;
                     }
-                    savedPath = format === 'PDF' ? await generateJoinedEmployeesPDF(employees, globalMonth, globalYear, companyProfile) : await generateJoinedEmployeesReport(employees, globalMonth, globalYear, companyProfile);
+                    savedPath = format === 'PDF' ? await generateJoinedEmployeesPDF(employees, globalMonth, globalYear, companyProfile, payrollHistory) : await generateJoinedEmployeesReport(employees, globalMonth, globalYear, companyProfile, payrollHistory);
                 } else if (reportName === 'Employees Left') {
-                    const monthIdx = monthsArr.indexOf(globalMonth);
+                    const monthIdx = CALENDAR_MONTHS.indexOf(globalMonth);
                     const hasData = employees.some(emp => emp.dol && new Date(emp.dol).getMonth() === monthIdx && new Date(emp.dol).getFullYear() === globalYear);
                     if (!hasData) {
                         setMsgModal({ isOpen: true, title: 'Info', message: `There are no Employees Left During : ${globalMonth} , ${globalYear}`, type: 'info', onConfirm: null });
@@ -237,6 +274,12 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     savedPath = await generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
                 } else if (reportName.includes('Form C')) {
                     savedPath = await generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
+                } else if (reportName === 'Form I') {
+                    savedPath = await generateFormI(currentData, employees, globalMonth, globalYear, companyProfile);
+                } else if (reportName === 'Form IV') {
+                    savedPath = await generateFormIV(currentData, employees, globalMonth, globalYear, companyProfile);
+                } else if (reportName === 'Form IX') {
+                    savedPath = await generateFormIX(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
                 } else if (reportName === 'Wage Register') {
                     savedPath = await generateStateWageRegister(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.wage);
                 } else if (reportName === 'Wage Slip') {
@@ -250,7 +293,12 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 }
             }
 
-            if (savedPath) _showAlert('success', 'Report Generated', `Saved as ${fileName}`, () => openSavedReport(savedPath), undefined, 'Open Report', undefined, undefined, 2);
+            if (savedPath) {
+                _showAlert('success', 'Report Generated', `Saved as ${fileName}`, () => openSavedReport(savedPath), undefined, 'Open Report', undefined, undefined, 2);
+            } else {
+                const filename = (window as any).lastGeneratedFileName || 'the file';
+                _showAlert('error', 'Generation Failed', `Similar file is already open, close "${filename}" to generate the new report`);
+            }
         } catch (e: any) { setMsgModal({ isOpen: true, title: 'Error', message: e.message, type: 'error', onConfirm: null }); }
     };
 
@@ -259,9 +307,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
         const isPeriodConfirmed = (m: string, y: number): boolean => {
             if (!latestFrozenPeriod) return false;
-            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-            const currentVal = (y * 12) + months.indexOf(m);
-            const frozenVal = (latestFrozenPeriod.year * 12) + months.indexOf(latestFrozenPeriod.month);
+            const currentVal = (y * 12) + CALENDAR_MONTHS.indexOf(m);
+            const frozenVal = (latestFrozenPeriod.year * 12) + CALENDAR_MONTHS.indexOf(latestFrozenPeriod.month);
             return currentVal <= frozenVal;
         };
 
@@ -286,7 +333,12 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             } else if (rangeModal.reportType === 'Form 6A') {
                 savedPath = await generatePFForm6A(payrollHistory, employees, config, rangeModal.fromMonth, rangeModal.fromYear, rangeModal.toMonth, rangeModal.toYear, companyProfile);
             }
-            if (savedPath) _showAlert('success', 'Range Report Generated', 'Saved to your reports folder.', () => openSavedReport(savedPath));
+            if (savedPath) {
+                _showAlert('success', 'Range Report Generated', 'Saved to your reports folder.', () => openSavedReport(savedPath));
+            } else {
+                const filename = (window as any).lastGeneratedFileName || 'the file';
+                _showAlert('error', 'Generation Failed', `Similar file is already open, close "${filename}" to generate the new report`);
+            }
         } catch (err: any) { setMsgModal({ isOpen: true, title: 'Error', message: err.message, type: 'error', onConfirm: null }); }
     };
 
@@ -295,9 +347,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
         const isPeriodConfirmed = (m: string, y: number): boolean => {
             if (!latestFrozenPeriod) return false;
-            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-            const currentVal = (y * 12) + months.indexOf(m);
-            const frozenVal = (latestFrozenPeriod.year * 12) + months.indexOf(latestFrozenPeriod.month);
+            const currentVal = (y * 12) + CALENDAR_MONTHS.indexOf(m);
+            const frozenVal = (latestFrozenPeriod.year * 12) + CALENDAR_MONTHS.indexOf(latestFrozenPeriod.month);
             return currentVal <= frozenVal;
         };
 
@@ -349,6 +400,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     estCode: '',
                     empType: 'Contract Employee'
                 });
+            } else {
+                const filename = (window as any).lastGeneratedFileName || 'the file';
+                _showAlert('error', 'Generation Failed', `Similar file is already open, close "${filename}" to generate the new report`);
             }
         } catch (err: any) { setMsgModal({ isOpen: true, title: 'Error', message: err.message, type: 'error', onConfirm: null }); }
     };
@@ -418,8 +472,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         <div className={`w-1.5 h-1.5 rounded-full ${isCurrentPeriodConfirmed ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
                         {isCurrentPeriodConfirmed ? 'Frozen / Confirmed' : 'Draft Period'}
                     </div>
-                    <select title="Select Month" value={globalMonth} onChange={e => setGlobalMonth(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500">
-                        {monthsArr.map(m => (<option key={m} value={m}>{m}</option>))}
+                    <select title="Select Month" value={globalMonth} onChange={e => handleMonthChange(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500">
+                        {selectableMonths.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
                     <select title="Select Year" value={globalYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500">
                         {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
@@ -471,8 +525,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         <div className="flex items-center justify-center gap-2">
                             <div className="flex items-center gap-1">
                                 <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">From:</span>
-                                 <select title="From Month" value={taxFromMonth} onChange={e => setTaxFromMonth(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] font-bold text-slate-300 outline-none hover:border-slate-500 transition-colors">
-                                    {monthsArr.map(m => <option key={m} value={m}>{m.substring(0,3)}</option>)}
+                                  <select title="From Month" value={taxFromMonth} onChange={e => setTaxFromMonth(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] font-bold text-slate-300 outline-none hover:border-slate-500 transition-colors">
+                                    {selectableMonths.map(m => <option key={m} value={m}>{m.substring(0,3)}</option>)}
                                 </select>
                                 <select title="From Year" value={taxFromYear} onChange={e => setTaxFromYear(+e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] font-bold text-slate-300 outline-none hover:border-slate-500 transition-colors">
                                     {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
@@ -482,7 +536,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                             <div className="flex items-center gap-1">
                                 <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">To:</span>
                                 <select title="To Month" value={taxToMonth} onChange={e => setTaxToMonth(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] font-bold text-amber-500 outline-none hover:border-amber-500/50 transition-colors">
-                                    {monthsArr.map(m => <option key={m} value={m}>{m.substring(0,3)}</option>)}
+                                    {selectableMonths.map(m => <option key={m} value={m}>{m.substring(0,3)}</option>)}
                                 </select>
                                 <select title="To Year" value={taxToYear} onChange={e => setTaxToYear(+e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] font-bold text-amber-500 outline-none hover:border-amber-500/50 transition-colors">
                                     {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
@@ -502,8 +556,11 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             {/* Registers Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <ReportCard title="Central Labour Registers" icon={BookOpen} color="emerald" reports={[
-                    { label: 'Register of Wages (Form B)', action: () => handleDownload('Form B', 'PDF') },
-                    { label: 'Muster Roll (Form C)', action: () => handleDownload('Form C', 'PDF') }
+                    { label: 'Employee Register (Form I)', action: () => handleDownload('Form I', 'PDF') },
+                    { label: 'Attendance Register (Form IX)', action: () => handleDownload('Form IX', 'PDF') },
+                    { label: 'Wages, Overtime, Advance, Fine & Damages (Form IV)', action: () => handleDownload('Form IV', 'PDF') },
+                    { label: 'Register of Wages (Form B) (Legacy)', action: () => handleDownload('Form B', 'PDF'), textColor: 'text-rose-400' },
+                    { label: 'Muster Roll (Form C) (Legacy)', action: () => handleDownload('Form C', 'PDF'), textColor: 'text-rose-400' }
                 ]} />
 
                 <ReportCard
@@ -538,7 +595,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         <div className="space-y-4">
                             <div className="grid grid-cols-2 gap-3">
                                 <select title="From Month" value={rangeModal.fromMonth} onChange={e => setRangeModal(p => ({ ...p, fromMonth: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
-                                    {monthsArr.map(m => (<option key={m} value={m}>{m}</option>))}
+                                    {selectableMonths.map(m => (<option key={m} value={m}>{m}</option>))}
                                 </select>
                                 <select title="From Year" value={rangeModal.fromYear} onChange={e => setRangeModal(p => ({ ...p, fromYear: +e.target.value }))} className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
                                     {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
@@ -547,7 +604,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                             <div className="text-center text-[10px] font-black text-slate-600 uppercase tracking-widest">To</div>
                             <div className="grid grid-cols-2 gap-3">
                                 <select title="To Month" value={rangeModal.toMonth} onChange={e => setRangeModal(p => ({ ...p, toMonth: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
-                                    {monthsArr.map(m => (<option key={m} value={m}>{m}</option>))}
+                                    {selectableMonths.map(m => (<option key={m} value={m}>{m}</option>))}
                                 </select>
                                 <select title="To Year" value={rangeModal.toYear} onChange={e => setGlobalYear(+e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
                                     {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
