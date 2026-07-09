@@ -577,10 +577,17 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
         serialNo++;
       }
 
-      const fileName = `${misPayReportName.replace(/\s+/g, '_')}_${fromP.replace(/\s+/g, '')}_to_${toP.replace(/\s+/g, '')}`;
+      let displayReportName = misPayReportName;
+      if (displayReportName.toLowerCase().startsWith('full ')) {
+          displayReportName = 'MIS ' + displayReportName.substring(5);
+      } else if (displayReportName.toLowerCase().startsWith('full_')) {
+          displayReportName = 'MIS_' + displayReportName.substring(5);
+      }
+
+      const fileName = `${displayReportName.replace(/\s+/g, '_')}_${fromP.replace(/\s+/g, '')}_to_${toP.replace(/\s+/g, '')}`;
 
       const savedPath = await generateDynamicReportPDF(
-        misPayReportName,
+        displayReportName,
         companyProfile.establishmentName,
         `Period: ${fromP} to ${toP} | Records: ${dataRows.length}`,
         headers,
