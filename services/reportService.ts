@@ -3435,7 +3435,36 @@ export const generateESIReturn = async (results: PayrollResult[], employees: Emp
                 }
             }
 
-            const esiWages = isOutOfCoverage ? 0 : (r.payableDays > 0 ? Math.ceil((r.deductions.esi || 0) / (config.esiEmployeeRate || 0.0075)) : 0);
+            let earnedESIWage = 0;
+            if (config.pfEsiCalculationBasis === 'LabourCode') {
+                const earnedWageA = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0);
+                const earnedGross = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0) + 
+                                    (r.earnings.hra || 0) + (r.earnings.conveyance || 0) + (r.earnings.washing || 0) + 
+                                    (r.earnings.attire || 0) + (r.earnings.special1 || 0) + (r.earnings.special2 || 0) + (r.earnings.special3 || 0);
+                const earnedWageC = earnedGross - earnedWageA;
+                let earnedWageD = 0;
+                if (earnedGross > 0) {
+                    const allowancePercentage = earnedWageC / earnedGross;
+                    if (allowancePercentage > 0.50) {
+                        earnedWageD = earnedWageC - Math.round(earnedGross * 0.50);
+                    }
+                }
+                earnedESIWage = earnedWageA + earnedWageD;
+            } else {
+                const comps = config.esiOriginalWagesComponents || { basic: true, da: true };
+                if (comps.basic) earnedESIWage += (r.earnings.basic || 0);
+                if (comps.da) earnedESIWage += (r.earnings.da || 0);
+                if (comps.retaining) earnedESIWage += (r.earnings.retainingAllowance || 0);
+                if (comps.hra) earnedESIWage += (r.earnings.hra || 0);
+                if (comps.conveyance) earnedESIWage += (r.earnings.conveyance || 0);
+                if (comps.washing) earnedESIWage += (r.earnings.washing || 0);
+                if (comps.attire) earnedESIWage += (r.earnings.attire || 0);
+                if (comps.special1) earnedESIWage += (r.earnings.special1 || 0);
+                if (comps.special2) earnedESIWage += (r.earnings.special2 || 0);
+                if (comps.special3) earnedESIWage += (r.earnings.special3 || 0);
+            }
+
+            const esiWages = isOutOfCoverage ? 0 : (r.payableDays > 0 ? earnedESIWage : 0);
             const payableDays = isOutOfCoverage ? 0 : r.payableDays;
 
             return {
@@ -5235,11 +5264,37 @@ export const generateESIChallanPDF = async (
         if (emp && !emp.isESIExempt && (r.deductions.esi > 0 || r.employerContributions.esi > 0)) {
             totalEmployees++;
             
-            // We back-calculate the precise ESI wages used for this deduction.
-            // This guarantees the Total Wages sum exactly aligns with the contributions,
-            // capping correctly and matching legacy ESI reporting expectations.
-            const esiWage = r.payableDays > 0 ? Math.ceil((r.deductions.esi || 0) / (config.esiEmployeeRate || 0.0075)) : 0;
+            // We calculate the exact earned ESI wages using the configuration
+            let earnedESIWage = 0;
+            if (config.pfEsiCalculationBasis === 'LabourCode') {
+                const earnedWageA = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0);
+                const earnedGross = (r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0) + 
+                                    (r.earnings.hra || 0) + (r.earnings.conveyance || 0) + (r.earnings.washing || 0) + 
+                                    (r.earnings.attire || 0) + (r.earnings.special1 || 0) + (r.earnings.special2 || 0) + (r.earnings.special3 || 0);
+                const earnedWageC = earnedGross - earnedWageA;
+                let earnedWageD = 0;
+                if (earnedGross > 0) {
+                    const allowancePercentage = earnedWageC / earnedGross;
+                    if (allowancePercentage > 0.50) {
+                        earnedWageD = earnedWageC - Math.round(earnedGross * 0.50);
+                    }
+                }
+                earnedESIWage = earnedWageA + earnedWageD;
+            } else {
+                const comps = config.esiOriginalWagesComponents || { basic: true, da: true };
+                if (comps.basic) earnedESIWage += (r.earnings.basic || 0);
+                if (comps.da) earnedESIWage += (r.earnings.da || 0);
+                if (comps.retaining) earnedESIWage += (r.earnings.retainingAllowance || 0);
+                if (comps.hra) earnedESIWage += (r.earnings.hra || 0);
+                if (comps.conveyance) earnedESIWage += (r.earnings.conveyance || 0);
+                if (comps.washing) earnedESIWage += (r.earnings.washing || 0);
+                if (comps.attire) earnedESIWage += (r.earnings.attire || 0);
+                if (comps.special1) earnedESIWage += (r.earnings.special1 || 0);
+                if (comps.special2) earnedESIWage += (r.earnings.special2 || 0);
+                if (comps.special3) earnedESIWage += (r.earnings.special3 || 0);
+            }
             
+            const esiWage = r.payableDays > 0 ? earnedESIWage : 0;
             totalWages += esiWage;
             totalEE += Math.round(r.deductions.esi || 0);
             totalER += Math.round(r.employerContributions.esi || 0);
