@@ -93,11 +93,7 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
             const isOnLOP = (emp.leavingReason || '').trim().toUpperCase() === 'ON LOP';
             if (isOnLOP || emp.isPFExempt || r.payableDays === 0) return null;
 
-            const grossWages = Math.round(
-                (r.earnings?.basic || 0) +
-                (r.earnings?.da || 0) +
-                (r.earnings?.retainingAllowance || 0)
-            );
+            const grossWages = Math.round(r.earnings?.total || 0);
 
             // ── Derive ceiling-capped wages from the engine's outputs ──────────
             // (same back-calculation as reportService.ts — keeps both in sync)
