@@ -1136,10 +1136,36 @@ export const generateSinglePayslipU8 = async (
 
 
 export const generateBankStatementPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile): Promise<string | null> => {
-    const headers = ['Emp ID', 'Name', 'Account No', 'IFSC', 'Amount'];
-    const data = results.filter(r => r.netPay > 0).map(r => { const emp = employees.find(e => e.id === r.employeeId); return [r.employeeId, emp?.name, emp?.bankAccount, emp?.ifsc, r.netPay]; });
-    const fileName = getStandardFileName('Bank_Statement', companyProfile, month, year);
-    return await generatePDFTableReport(`Bank Statement - ${month} ${year}`, headers, data, fileName, 'p', '', companyProfile, { 4: { halign: 'right' } });
+    const headers = ['Emp ID', 'Name', 'Site', 'Bank Name', 'Account No', 'IFSC', 'Amount'];
+    
+    let rowData = results.filter(r => r.netPay > 0).map(r => { 
+        const emp = employees.find(e => e.id === r.employeeId); 
+        return {
+            id: r.employeeId,
+            name: emp?.name || '',
+            site: emp?.site || '-',
+            bankName: emp?.bankName || '-',
+            acc: emp?.bankAccount || '',
+            ifsc: emp?.ifsc || '',
+            netPay: r.netPay
+        };
+    });
+
+    rowData.sort((a, b) => {
+        if (a.site < b.site) return -1;
+        if (a.site > b.site) return 1;
+        if (a.bankName < b.bankName) return -1;
+        if (a.bankName > b.bankName) return 1;
+        return 0;
+    });
+
+    const data: any[] = rowData.map(r => [r.id, r.name, r.site, r.bankName, r.acc, r.ifsc, r.netPay]);
+
+    const totalAmount = data.reduce((sum, row) => sum + (Number(row[6]) || 0), 0);
+    data.push(['', 'GRAND TOTAL', '', '', '', '', totalAmount]);
+
+    const fileName = getStandardFileName('Bank Statement', companyProfile, month, year);
+    return await generatePDFTableReport(`Bank Statement - ${month} ${year}`, headers, data, fileName, 'p', '', companyProfile, { 6: { halign: 'right' } });
 };
 
 export const generateLeaveLedgerReport = async (results: PayrollResult[], employees: Employee[], leaveLedgers: LeaveLedger[], month: string, year: number, _format: string, companyProfile: CompanyProfile): Promise<string | null> => {

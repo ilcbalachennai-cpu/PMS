@@ -848,19 +848,45 @@ const Reports: React.FC<ReportsProps> = ({
                 if (bankRecords.length === 0) throw new Error("No employees with positive Net Pay found for Bank Statement.");
 
                 if (format === 'Excel') {
-                    const data = bankRecords.map(r => {
+                    let data = bankRecords.map(r => {
                         const emp = employees.find(e => e.id === r.employeeId);
                         return {
                             'Emp ID': r.employeeId,
                             'Name': emp?.name,
+                            'Site': emp?.site || '-',
                             'Bank Name': emp?.bankName || '-',
                             'Account No': emp?.bankAccount,
                             'IFSC': emp?.ifsc,
                             'Amount': r.netPay
                         };
                     });
-                    const fileName = getStandardFileName('Bank_Statement', companyProfile, month, year);
-                    savedPath = await generateExcelReport(data, 'Bank Statement', fileName);
+
+                    data.sort((a, b) => {
+                        if (a.Site < b.Site) return -1;
+                        if (a.Site > b.Site) return 1;
+                        if (a['Bank Name'] < b['Bank Name']) return -1;
+                        if (a['Bank Name'] > b['Bank Name']) return 1;
+                        return 0;
+                    });
+
+                    const totalAmount = data.reduce((sum, r) => sum + r.Amount, 0);
+                    data.push({
+                        'Emp ID': '',
+                        'Name': 'GRAND TOTAL',
+                        'Site': '',
+                        'Bank Name': '',
+                        'Account No': '',
+                        'IFSC': '',
+                        'Amount': totalAmount
+                    } as any);
+
+                    const fileName = getStandardFileName('Bank Statement', companyProfile, month, year);
+                    savedPath = await generateExcelReport(data, 'Bank Statement', fileName, {
+                        company: companyProfile.establishmentName,
+                        companyId: companyProfile.id,
+                        type: 'Bank Statement',
+                        period: `${month} ${year}`
+                    });
                 } else {
                     savedPath = await generateBankStatementPDF(bankRecords, employees, month, year, companyProfile);
                 }
