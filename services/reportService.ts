@@ -200,7 +200,13 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
                     category += '/ESI';
                 } else if (fileNameLower.includes('pf') || fileNameLower.includes('ecr')) {
                     category += '/PF';
-                } else if (fileNameLower.includes('formb') || fileNameLower.includes('form b') || fileNameLower.includes('form_b')) {
+                } else if (
+                    fileNameLower.includes('formb') || fileNameLower.includes('form b') || fileNameLower.includes('form_b') ||
+                    fileNameLower.includes('form i') || fileNameLower.includes('form_i') ||
+                    fileNameLower.includes('form iv') || fileNameLower.includes('form_iv') ||
+                    fileNameLower.includes('form ix') || fileNameLower.includes('form_ix') ||
+                    fileNameLower.includes('formc') || fileNameLower.includes('form c') || fileNameLower.includes('form_c')
+                ) {
                     category += '/CentralReg';
                 }
             } else {
