@@ -251,6 +251,7 @@ export const autoSizeSheet = (ws: XLSX.WorkSheet) => {
 
 export interface ReportHeaderInfo {
     company: string;
+    companyId?: string;
     type: string;
     period: string;
     regNo?: string;
