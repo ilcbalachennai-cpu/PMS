@@ -1357,6 +1357,23 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
             r.ncpDays, r.refund
         ]);
 
+        const totalGrossWages = rows.reduce((sum, r) => sum + r.grossWages, 0);
+        const totalEPFWages = rows.reduce((sum, r) => sum + r.epfWages, 0);
+        const totalEPSWages = rows.reduce((sum, r) => sum + r.epsWages, 0);
+        const totalEDLIWages = rows.reduce((sum, r) => sum + r.edliWages, 0);
+        const totalEE = rows.reduce((sum, r) => sum + r.eeEPF, 0);
+        const totalEREPS = rows.reduce((sum, r) => sum + r.erEPS, 0);
+        const totalEREPF = rows.reduce((sum, r) => sum + r.erEPF, 0);
+        const totalNCP = rows.reduce((sum, r) => sum + r.ncpDays, 0);
+        const totalRefund = rows.reduce((sum, r) => sum + r.refund, 0);
+
+        dataRows.push([
+            '', 'GRAND TOTAL',
+            totalGrossWages, totalEPFWages, totalEPSWages, totalEDLIWages,
+            totalEE, totalEREPS, totalEREPF,
+            totalNCP, totalRefund
+        ]);
+
         const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...dataRows]);
 
         // Column widths (characters) — tuned to match the image
@@ -1395,7 +1412,7 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
         }
 
         // Right-align numeric columns (index 2+) in data rows
-        for (let ri = 1; ri <= dataRows.length; ri++) {
+        for (let ri = 1; ri < dataRows.length; ri++) {
             // UAN: force text type to prevent scientific notation for long numbers
             const uanAddr = XLSX.utils.encode_cell({ r: ri, c: 0 });
             if (ws[uanAddr]) { ws[uanAddr].t = 's'; }
@@ -1405,6 +1422,19 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
                 if (ws[addr]) {
                     ws[addr].s = { alignment: { horizontal: 'right' }, numFmt: '0' };
                 }
+            }
+        }
+
+        // Style the GRAND TOTAL row (last row)
+        const lastRowIndex = dataRows.length;
+        for (let c = 0; c < colCount; c++) {
+            const addr = XLSX.utils.encode_cell({ r: lastRowIndex, c });
+            if (ws[addr]) {
+                ws[addr].s = {
+                    font: { bold: true },
+                    alignment: { horizontal: c >= 2 ? 'right' : (c === 1 ? 'center' : 'left'), vertical: 'center' },
+                    numFmt: c >= 2 ? '0' : undefined
+                };
             }
         }
 
