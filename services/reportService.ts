@@ -140,9 +140,6 @@ const saveTextContent = (text: string, fileName: string, res: { success: boolean
 export const openSavedReport = async (path: string | undefined | null) => {
     if (path && (window as any).electronAPI) {
         try {
-            if ((window as any).electronAPI.openItemLocation) {
-                await (window as any).electronAPI.openItemLocation(path);
-            }
             if ((window as any).electronAPI.openItemPath) {
                 await (window as any).electronAPI.openItemPath(path);
             }
