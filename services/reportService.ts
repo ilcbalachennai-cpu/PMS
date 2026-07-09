@@ -1900,7 +1900,7 @@ export const generateFormB = async (results: PayrollResult[], employees: Employe
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const fileName = getStandardFileName('FormB_WageRegister', companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'pdf', `${companyProfile.establishmentName}___${companyProfile.id}`);
+    const res = await electronSaveReport(fileName, u8, 'pdf', `${companyProfile.establishmentName}___${companyProfile.id}`, 'StatutoryReports/CentralReg');
     if (!res.success) {
         savePdfDoc(doc, fileName, res);
         return null;
@@ -2282,7 +2282,7 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const sitePrefix = overallSiteName.replace(/\s+/g, '_').replace(/[:]/g, '').toUpperCase();
     const fileName = customFilename || getStandardFileName(`${sitePrefix}_FormB_Legacy`, companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'pdf', `${companyProfile.establishmentName}___${companyProfile.id}`);
+    const res = await electronSaveReport(fileName, u8, 'pdf', `${companyProfile.establishmentName}___${companyProfile.id}`, 'StatutoryReports/CentralReg');
     if (!res.success) {
         savePdfDoc(doc, fileName, res);
         return null;
