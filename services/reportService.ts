@@ -193,7 +193,7 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
             const fileNameLower = fileName.toLowerCase();
             let category = 'OtherReports';
             
-            if (fileNameLower.includes('statereg_')) {
+            if (fileNameLower.includes('statereg')) {
                 category = 'StatutoryReports/StateReg';
             } else if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement') || fileNameLower.includes('payslip') || fileNameLower.includes('pay slip') || fileNameLower.includes('leave')) {
                 category = 'PayReports';
