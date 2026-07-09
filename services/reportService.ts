@@ -159,17 +159,38 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
     
     let finalSubfolder = subfolder;
     if (subfolder) {
-        const firstWord = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9_]/g, '').toUpperCase();
-        const companyFolder = `${firstWord}_Rpt`;
+        let firstWord = '';
+        let cId = 'Rpt';
+        if (subfolder.includes('___')) {
+            const parts = subfolder.split('___');
+            firstWord = parts[0].trim().split(' ')[0].replace(/[^a-zA-Z0-9_]/g, '').toUpperCase();
+            cId = parts[1].trim().replace(/[^a-zA-Z0-9_]/g, '');
+            if (cId === '') cId = 'Rpt';
+        } else {
+            firstWord = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9_]/g, '').toUpperCase();
+        }
+        const companyFolder = `${firstWord}_${cId}_Rpt`;
         
         // Extract month (3 letters) and year (2-4 digits) from the end of the filename
-        const match = fileName.trim().match(/_([A-Za-z]{3})_(\d{2,4})$/);
+        const match = fileName.trim().match(/_([A-Za-z]{3})_(\d{2,4})$/i) || fileName.trim().match(/_([A-Za-z]{3})(\d{2,4})$/i);
         if (match) {
             const monthAbbr = match[1];
             const yearStr = match[2];
             const year2Digit = yearStr.slice(-2);
             const monthFolder = `${monthAbbr}${year2Digit}`;
-            finalSubfolder = `${companyFolder}/${monthFolder}`;
+            
+            // Determine category
+            const fileNameLower = fileName.toLowerCase();
+            let category = 'OtherReports';
+            if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement')) {
+                category = 'PayReports';
+            } else if (fileNameLower.includes('esi') || fileNameLower.includes('pf') || fileNameLower.includes('form') || fileNameLower.includes('ecr')) {
+                category = 'StatutoryReports';
+            } else {
+                category = 'Reports';
+            }
+            
+            finalSubfolder = `${companyFolder}/${monthFolder}/${category}`;
         } else {
             finalSubfolder = companyFolder;
         }
