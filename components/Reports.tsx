@@ -738,14 +738,36 @@ const Reports: React.FC<ReportsProps> = ({
                         return row;
                     });
 
+                    // Append Grand Total Row
+                    const totalRow: any = {
+                        'ID': '',
+                        'Name': 'GRAND TOTAL',
+                        'Designation': '',
+                        'Site': '',
+                        'Branch': '',
+                        'Division': ''
+                    };
+                    allColumns.forEach(col => {
+                        if (activeCols.includes(col.key)) {
+                            const sum = validToExport.reduce((acc, r) => acc + (Number(col.getValue(r)) || 0), 0);
+                            totalRow[col.label] = (col.key === 'days' || sum % 1 !== 0) ? Number(sum.toFixed(2)) : sum;
+                        }
+                    });
+                    excelData.push(totalRow);
+
                     let customExcelFilename = undefined;
                     if (paySheetFilter !== 'all') {
                         const monthAbbr = getMonthAbbr(month);
-                        customExcelFilename = `${paySheetFilterValue} PaySheet ${monthAbbr} ${year}`;
+                        customExcelFilename = `${paySheetFilterValue} Pay Sheet ${monthAbbr} ${year}`;
                     }
 
-                    const fileName = customExcelFilename || getStandardFileName('PaySheet', companyProfile, month, year);
-                    savedPath = await generateExcelReport(excelData, 'Pay Sheet', fileName);
+                    const fileName = customExcelFilename || getStandardFileName('Summary Pay Sheet', companyProfile, month, year);
+                    savedPath = await generateExcelReport(excelData, 'Pay Sheet', fileName, {
+                        company: companyProfile.establishmentName,
+                        companyId: companyProfile.id,
+                        type: 'Pay Sheet',
+                        period: `${month} ${year}`
+                    });
                 } else {
                     const validToExport = validResults.filter(r => {
                         if (paySheetFilter === 'all') return true;
