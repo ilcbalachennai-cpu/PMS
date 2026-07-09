@@ -1280,12 +1280,8 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
 
         const isNonContributing = emp?.isPFExempt || r.payableDays === 0;
 
-        // Gross Wages: Basic + DA + Retaining Allowance (full PF-applicable wages, uncapped)
-        const grossWages = isNonContributing ? 0 : Math.round(
-            (r.earnings.basic || 0) +
-            (r.earnings.da || 0) +
-            (r.earnings.retainingAllowance || 0)
-        );
+        // Gross Wages: Actual total gross earnings of the employee
+        const grossWages = isNonContributing ? 0 : Math.round(r.earnings.total || 0);
 
         // EPF Wages: ceiling-capped wages back-calculated from EE contribution (÷12%)
         const eeEPF = isNonContributing ? 0 : Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0));
