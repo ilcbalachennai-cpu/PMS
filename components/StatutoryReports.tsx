@@ -232,19 +232,19 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             if (taxReportMode === 'Period' && ['PT Report', 'TDS Report', 'Gratuity', 'Bonus', 'LWF Report'].includes(reportName)) {
                 if (reportName === 'PT Report') {
                     const hasPT = payrollHistory.some(r => (r.deductions?.pt || 0) > 0);
-                    if (!hasPT) { _showAlert('error', 'No Data Available', 'There is no Professional Tax data for this period.'); setIsGenerating(false); return; }
+                    if (!hasPT) { _showAlert('error', 'No Data Available', 'There is no Professional Tax data for this period.'); return; }
                     savedPath = await generateConsolidatedPTReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
                 }
                 else if (reportName === 'TDS Report') {
-                    const hasTDS = payrollHistory.some(r => (r.deductions?.tds || 0) > 0);
-                    if (!hasTDS) { _showAlert('error', 'No Data Available', 'There is no TDS data for this period.'); setIsGenerating(false); return; }
+                    const hasTDS = payrollHistory.some(r => (r.deductions?.it || 0) > 0);
+                    if (!hasTDS) { _showAlert('error', 'No Data Available', 'There is no TDS data for this period.'); return; }
                     savedPath = await generateConsolidatedTDSReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
                 }
                 else if (reportName === 'Bonus') savedPath = await generateConsolidatedBonusReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
                 else if (reportName === 'Gratuity') savedPath = await generateConsolidatedGratuityReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile);
                 else if (reportName === 'LWF Report') {
                     const hasLWF = payrollHistory.some(r => (r.deductions?.lwf || 0) > 0 || (r.employerContributions?.lwf || 0) > 0);
-                    if (!hasLWF) { _showAlert('error', 'No Data Available', 'There is no LWF data for this period.'); setIsGenerating(false); return; }
+                    if (!hasLWF) { _showAlert('error', 'No Data Available', 'There is no LWF data for this period.'); return; }
                     savedPath = await generateConsolidatedLWFReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
                 }
             } else {
@@ -256,7 +256,6 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     const hasPFData = currentData.some(r => (r.deductions?.epf || 0) > 0 || (r.employerContributions?.epf || 0) > 0 || (r.employerContributions?.eps || 0) > 0);
                     if (!hasPFData) {
                         _showAlert('error', 'No Data Available', `There is no PF Contribution data for ${globalMonth} ${globalYear}.`);
-                        setIsGenerating(false);
                         return;
                     }
                     savedPath = await generatePFECR(currentData, employees, config, format as 'Excel' | 'Text', fileName, companyProfile);
@@ -304,15 +303,13 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     const hasPTData = currentData.some(r => (r.deductions?.pt || 0) > 0);
                     if (!hasPTData) {
                         _showAlert('error', 'No Data Available', `There is no Professional Tax data for ${globalMonth} ${globalYear}.`);
-                        setIsGenerating(false);
                         return;
                     }
                     savedPath = await generatePTReport(currentData, employees, fileName, companyProfile, globalMonth, globalYear, format as any);
                 } else if (reportName.includes('TDS Report')) {
-                    const hasTDSData = currentData.some(r => (r.deductions?.tds || 0) > 0);
+                    const hasTDSData = currentData.some(r => (r.deductions?.it || 0) > 0);
                     if (!hasTDSData) {
                         _showAlert('error', 'No Data Available', `There is no TDS data for ${globalMonth} ${globalYear}.`);
-                        setIsGenerating(false);
                         return;
                     }
                     savedPath = await generateTDSReport(currentData, employees, fileName, companyProfile, globalMonth, globalYear, format as any);
@@ -320,7 +317,6 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     const hasLWFData = currentData.some(r => (r.deductions?.lwf || 0) > 0 || (r.employerContributions?.lwf || 0) > 0);
                     if (!hasLWFData) {
                         _showAlert('error', 'No Data Available', `There is no LWF data for ${globalMonth} ${globalYear}.`);
-                        setIsGenerating(false);
                         return;
                     }
                     savedPath = await generateLWFReport(currentData, employees, fileName, companyProfile, format as any);
@@ -352,7 +348,6 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     
                     if (!hasAdvanceData) {
                         _showAlert('error', 'No Data Available', 'There is no data for advance for the selected period.');
-                        setIsGenerating(false);
                         return;
                     }
 
