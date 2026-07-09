@@ -212,7 +212,7 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
                 ) {
                     category += '/CentralReg';
                 }
-            } else if (fileNameLower.includes('mis')) {
+            } else if (fileNameLower.includes('mis') || fileNameLower.includes('pay register') || fileNameLower.includes('deduction summary') || fileNameLower.includes('statutory compliance') || fileNameLower.includes('pay data')) {
                 category = 'MIS';
             } else {
                 category = 'Reports';
