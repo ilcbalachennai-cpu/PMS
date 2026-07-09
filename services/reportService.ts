@@ -161,15 +161,25 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
     if (subfolder) {
         let firstWord = '';
         let cId = 'Rpt';
+        let companyFolder = '';
         if (subfolder.includes('___')) {
             const parts = subfolder.split('___');
             firstWord = parts[0].trim().split(' ')[0].replace(/[^a-zA-Z0-9_]/g, '').toUpperCase();
             cId = parts[1].trim().replace(/[^a-zA-Z0-9_]/g, '');
-            if (cId === '') cId = 'Rpt';
+            if (cId === '' || cId === 'Rpt') {
+                companyFolder = `${firstWord}_Rpt`;
+            } else {
+                const digitsOnly = cId.replace(/[^0-9]/g, '');
+                if (digitsOnly.length > 0) {
+                    companyFolder = `${firstWord}_${digitsOnly}_Rpt`;
+                } else {
+                    companyFolder = `${firstWord}_${cId}_Rpt`;
+                }
+            }
         } else {
             firstWord = subfolder.trim().split(' ')[0].replace(/[^a-zA-Z0-9_]/g, '').toUpperCase();
+            companyFolder = `${firstWord}_Rpt`;
         }
-        const companyFolder = `${firstWord}_${cId}_Rpt`;
         
         // Extract month (3 letters) and year (2-4 digits) from the end of the filename
         const match = fileName.trim().match(/_([A-Za-z]{3})_(\d{2,4})$/i) || fileName.trim().match(/_([A-Za-z]{3})(\d{2,4})$/i);
@@ -182,7 +192,7 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
             // Determine category
             const fileNameLower = fileName.toLowerCase();
             let category = 'OtherReports';
-            if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement')) {
+            if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement') || fileNameLower.includes('payslip') || fileNameLower.includes('pay slip')) {
                 category = 'PayReports';
             } else if (fileNameLower.includes('esi') || fileNameLower.includes('pf') || fileNameLower.includes('form') || fileNameLower.includes('ecr')) {
                 category = 'StatutoryReports';
