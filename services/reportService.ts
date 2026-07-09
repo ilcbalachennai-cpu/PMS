@@ -200,6 +200,8 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
                     category += '/ESI';
                 } else if (fileNameLower.includes('pf') || fileNameLower.includes('ecr')) {
                     category += '/PF';
+                } else if (fileNameLower.includes('formb') || fileNameLower.includes('form b') || fileNameLower.includes('form_b')) {
+                    category += '/CentralReg';
                 }
             } else {
                 category = 'Reports';
@@ -1900,7 +1902,7 @@ export const generateFormB = async (results: PayrollResult[], employees: Employe
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const fileName = getStandardFileName('FormB_WageRegister', companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'pdf', `${companyProfile.establishmentName}___${companyProfile.id}`, 'StatutoryReports/CentralReg');
+    const res = await electronSaveReport(fileName, u8, 'pdf', `${companyProfile.establishmentName}___${companyProfile.id}`);
     if (!res.success) {
         savePdfDoc(doc, fileName, res);
         return null;
@@ -2282,7 +2284,7 @@ export const generateLegacyFormB = async (results: PayrollResult[], employees: E
     const u8 = new Uint8Array(doc.output('arraybuffer'));
     const sitePrefix = overallSiteName.replace(/\s+/g, '_').replace(/[:]/g, '').toUpperCase();
     const fileName = customFilename || getStandardFileName(`${sitePrefix}_FormB_Legacy`, companyProfile, month, year);
-    const res = await electronSaveReport(fileName, u8, 'pdf', `${companyProfile.establishmentName}___${companyProfile.id}`, 'StatutoryReports/CentralReg');
+    const res = await electronSaveReport(fileName, u8, 'pdf', `${companyProfile.establishmentName}___${companyProfile.id}`);
     if (!res.success) {
         savePdfDoc(doc, fileName, res);
         return null;
