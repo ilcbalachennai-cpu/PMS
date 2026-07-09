@@ -192,7 +192,10 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
             // Determine category
             const fileNameLower = fileName.toLowerCase();
             let category = 'OtherReports';
-            if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement') || fileNameLower.includes('payslip') || fileNameLower.includes('pay slip') || fileNameLower.includes('leave')) {
+            
+            if (fileNameLower.includes('statereg_')) {
+                category = 'StatutoryReports/StateReg';
+            } else if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement') || fileNameLower.includes('payslip') || fileNameLower.includes('pay slip') || fileNameLower.includes('leave')) {
                 category = 'PayReports';
             } else if (fileNameLower.includes('esi') || fileNameLower.includes('pf') || fileNameLower.includes('form') || fileNameLower.includes('ecr')) {
                 category = 'StatutoryReports';
@@ -807,7 +810,7 @@ export const generateStateWageRegister = async (results: PayrollResult[], employ
     });
 
     const title = `${stateName} Shops & Establishment Act\n${formName} - Register of Wages (${month} ${year})`;
-    const fileName = getStandardFileName(`${stateName.replace(/\s+/g, '')}_${formName.split(' ')[0]}_WageReg`, companyProfile, month, year);
+    const fileName = getStandardFileName(`StateReg_${stateName.replace(/\s+/g, '')}_${formName.split(' ')[0]}_WageReg`, companyProfile, month, year);
     return await generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile, {
         5: { halign: 'right' },
         6: { halign: 'right' },
@@ -820,7 +823,8 @@ export const generateStateWageRegister = async (results: PayrollResult[], employ
 };
 
 export const generateStatePaySlip = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, stateName: string, formName: string): Promise<string | null> => {
-    return await generatePaySlipsPDF(results, employees, month, year, companyProfile, `${stateName} S&E Act - ${formName}`);
+    const customFn = getStandardFileName(`StateReg_${stateName.replace(/\s+/g, '')}_${formName.split(' ')[0]}_PaySlip`, companyProfile, month, year);
+    return await generatePaySlipsPDF(results, employees, month, year, companyProfile, `${stateName} S&E Act - ${formName}`, customFn);
 };
 
 export const generateStateAdvanceRegister = async (results: PayrollResult[], employees: Employee[], advanceLedgers: AdvanceLedger[], month: string, year: number, companyProfile: CompanyProfile, stateName: string, formName: string): Promise<string | null> => {
@@ -865,7 +869,7 @@ export const generateStateAdvanceRegister = async (results: PayrollResult[], emp
     });
 
     const title = `${stateName} Shops & Establishment Act\n${formName} - Register of Advances (${month} ${year})`;
-    const fileName = getStandardFileName(`${stateName.replace(/\s+/g, '')}_${formName.split(' ')[0]}_AdvReg`, companyProfile, month, year);
+    const fileName = getStandardFileName(`StateReg_${stateName.replace(/\s+/g, '')}_${formName.split(' ')[0]}_AdvReg`, companyProfile, month, year);
 
     return await generatePDFTableReport(title, headers, data, fileName, 'l', '', companyProfile, { 3: { halign: 'right' }, 5: { halign: 'center' }, 6: { halign: 'right' }, 7: { halign: 'right', fontStyle: 'bold' } });
 };
