@@ -411,7 +411,7 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
 
   // Quick Presets — Pay Data Analysis
   const loadMisPayPresetFull = () => {
-    setMisPayReportName('Full Pay Register');
+    setMisPayReportName('MIS Pay Register');
     setMisPayOrientation('Landscape (Wide)');
     setMisPayColumns([
       { id: '1', heading: 'Sl No', source: 'Auto', field: '' },
@@ -1991,7 +1991,7 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
                                 {/* Quick Presets for Pay Data */}
                                 <div className="border-t border-slate-800 px-7 py-4 bg-slate-900/30 flex flex-wrap items-center gap-3">
                                     <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Quick Presets:</span>
-                                    <button onClick={loadMisPayPresetFull} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-violet-700 hover:border-violet-600 hover:text-white transition-all">Full Pay Register</button>
+                                    <button onClick={loadMisPayPresetFull} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-violet-700 hover:border-violet-600 hover:text-white transition-all">MIS Pay Register</button>
                                     <button onClick={loadMisPayPresetDeductions} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-violet-700 hover:border-violet-600 hover:text-white transition-all">Deduction Summary</button>
                                     <button onClick={loadMisPayPresetStatutory} className="px-4 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-violet-700 hover:border-violet-600 hover:text-white transition-all">Statutory Compliance</button>
                                 </div>
