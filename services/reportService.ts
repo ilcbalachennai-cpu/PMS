@@ -191,28 +191,29 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
             
             // Determine category
             const fileNameLower = fileName.toLowerCase();
+            const cleanFileNameLower = fileNameLower.replace(/_/g, ' ');
             let category = 'OtherReports';
             
-            if (fileNameLower.includes('statereg')) {
+            if (cleanFileNameLower.includes('statereg')) {
                 category = 'StatutoryReports/StateReg';
-            } else if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement') || fileNameLower.includes('payslip') || fileNameLower.includes('pay slip') || fileNameLower.includes('leave')) {
+            } else if (cleanFileNameLower.includes('pay sheet') || cleanFileNameLower.includes('payroll') || cleanFileNameLower.includes('bank statement') || cleanFileNameLower.includes('cash statement') || cleanFileNameLower.includes('payslip') || cleanFileNameLower.includes('pay slip') || cleanFileNameLower.includes('leave')) {
                 category = 'PayReports';
-            } else if (fileNameLower.includes('esi') || fileNameLower.includes('pf') || fileNameLower.includes('form') || fileNameLower.includes('ecr') || fileNameLower.includes('gratuity') || fileNameLower.includes('bonus')) {
+            } else if (cleanFileNameLower.includes('esi') || cleanFileNameLower.includes('pf') || cleanFileNameLower.includes('form') || cleanFileNameLower.includes('ecr') || cleanFileNameLower.includes('gratuity') || cleanFileNameLower.includes('bonus')) {
                 category = 'StatutoryReports';
-                if (fileNameLower.includes('esi')) {
+                if (cleanFileNameLower.includes('esi')) {
                     category += '/ESI';
-                } else if (fileNameLower.includes('pf') || fileNameLower.includes('ecr')) {
+                } else if (cleanFileNameLower.includes('pf') || cleanFileNameLower.includes('ecr')) {
                     category += '/PF';
                 } else if (
-                    fileNameLower.includes('formb') || fileNameLower.includes('form b') || fileNameLower.includes('form_b') ||
-                    fileNameLower.includes('form i') || fileNameLower.includes('form_i') ||
-                    fileNameLower.includes('form iv') || fileNameLower.includes('form_iv') ||
-                    fileNameLower.includes('form ix') || fileNameLower.includes('form_ix') ||
-                    fileNameLower.includes('formc') || fileNameLower.includes('form c') || fileNameLower.includes('form_c')
+                    cleanFileNameLower.includes('formb') || cleanFileNameLower.includes('form b') || 
+                    cleanFileNameLower.includes('form i') || 
+                    cleanFileNameLower.includes('form iv') || 
+                    cleanFileNameLower.includes('form ix') || 
+                    cleanFileNameLower.includes('formc') || cleanFileNameLower.includes('form c')
                 ) {
                     category += '/CentralReg';
                 }
-            } else if (fileNameLower.includes('mis') || fileNameLower.includes('pay register') || fileNameLower.includes('deduction summary') || fileNameLower.includes('statutory compliance') || fileNameLower.includes('pay data')) {
+            } else if (cleanFileNameLower.includes('mis') || cleanFileNameLower.includes('pay register') || cleanFileNameLower.includes('deduction summary') || cleanFileNameLower.includes('statutory compliance') || cleanFileNameLower.includes('pay data')) {
                 category = 'MIS';
             } else {
                 category = 'Reports';
