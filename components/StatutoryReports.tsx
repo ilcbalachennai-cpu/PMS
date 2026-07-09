@@ -305,7 +305,22 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 } else if (reportName === 'Wage Slip') {
                     savedPath = await generateStatePaySlip(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.slip);
                 } else if (reportName === 'Advance Register') {
-                    savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers, globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
+                    let hasAdvanceData = false;
+                    currentData.forEach(r => {
+                        const ledger = advanceLedgers?.find(a => a.employeeId === r.employeeId);
+                        const recoveryThisMonth = r.deductions?.advanceRecovery || 0;
+                        if (recoveryThisMonth > 0 || (ledger && ledger.totalAdvance > 0)) {
+                            hasAdvanceData = true;
+                        }
+                    });
+                    
+                    if (!hasAdvanceData) {
+                        _showAlert('error', 'No Data Available', 'There is no data for advance for the selected period.');
+                        setIsGenerating(false);
+                        return;
+                    }
+
+                    savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers || [], globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
                 } else if (reportName === 'PF 3A') {
                     savedPath = await generatePFForm3A(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, undefined, companyProfile);
                 } else if (reportName === 'PF 6A') {
