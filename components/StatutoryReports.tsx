@@ -230,17 +230,35 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
         try {
             if (taxReportMode === 'Period' && ['PT Report', 'TDS Report', 'Gratuity', 'Bonus', 'LWF Report'].includes(reportName)) {
-                if (reportName === 'PT Report') savedPath = await generateConsolidatedPTReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
-                else if (reportName === 'TDS Report') savedPath = await generateConsolidatedTDSReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                if (reportName === 'PT Report') {
+                    const hasPT = payrollHistory.some(r => (r.deductions?.pt || 0) > 0);
+                    if (!hasPT) { _showAlert('error', 'No Data Available', 'There is no Professional Tax data for this period.'); setIsGenerating(false); return; }
+                    savedPath = await generateConsolidatedPTReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                }
+                else if (reportName === 'TDS Report') {
+                    const hasTDS = payrollHistory.some(r => (r.deductions?.tds || 0) > 0);
+                    if (!hasTDS) { _showAlert('error', 'No Data Available', 'There is no TDS data for this period.'); setIsGenerating(false); return; }
+                    savedPath = await generateConsolidatedTDSReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                }
                 else if (reportName === 'Bonus') savedPath = await generateConsolidatedBonusReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
                 else if (reportName === 'Gratuity') savedPath = await generateConsolidatedGratuityReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile);
-                else if (reportName === 'LWF Report') savedPath = await generateConsolidatedLWFReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                else if (reportName === 'LWF Report') {
+                    const hasLWF = payrollHistory.some(r => (r.deductions?.lwf || 0) > 0 || (r.employerContributions?.lwf || 0) > 0);
+                    if (!hasLWF) { _showAlert('error', 'No Data Available', 'There is no LWF data for this period.'); setIsGenerating(false); return; }
+                    savedPath = await generateConsolidatedLWFReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                }
             } else {
                 if (currentData.length === 0 && !['Employees Joined', 'Employees Left'].includes(reportName)) {
                     setMsgModal({ isOpen: true, title: 'No Data Found', message: `No payroll records found for ${globalMonth} ${globalYear}.`, type: 'error', onConfirm: null });
                     return;
                 }
                 if (reportName.includes('PF ECR')) {
+                    const hasPFData = currentData.some(r => (r.deductions?.epf || 0) > 0 || (r.employerContributions?.epf || 0) > 0 || (r.employerContributions?.eps || 0) > 0);
+                    if (!hasPFData) {
+                        _showAlert('error', 'No Data Available', `There is no PF Contribution data for ${globalMonth} ${globalYear}.`);
+                        setIsGenerating(false);
+                        return;
+                    }
                     savedPath = await generatePFECR(currentData, employees, config, format as 'Excel' | 'Text', fileName, companyProfile);
                 } else if (reportName === 'PF ECR Arrears') {
                     const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
@@ -283,10 +301,28 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 } else if (reportName.includes('Bonus')) {
                     savedPath = await generateBonusReport(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, companyProfile, format as 'PDF' | 'Excel');
                 } else if (reportName.includes('PT Report')) {
+                    const hasPTData = currentData.some(r => (r.deductions?.pt || 0) > 0);
+                    if (!hasPTData) {
+                        _showAlert('error', 'No Data Available', `There is no Professional Tax data for ${globalMonth} ${globalYear}.`);
+                        setIsGenerating(false);
+                        return;
+                    }
                     savedPath = await generatePTReport(currentData, employees, fileName, companyProfile, globalMonth, globalYear, format as any);
                 } else if (reportName.includes('TDS Report')) {
+                    const hasTDSData = currentData.some(r => (r.deductions?.tds || 0) > 0);
+                    if (!hasTDSData) {
+                        _showAlert('error', 'No Data Available', `There is no TDS data for ${globalMonth} ${globalYear}.`);
+                        setIsGenerating(false);
+                        return;
+                    }
                     savedPath = await generateTDSReport(currentData, employees, fileName, companyProfile, globalMonth, globalYear, format as any);
                 } else if (reportName === 'LWF Report') {
+                    const hasLWFData = currentData.some(r => (r.deductions?.lwf || 0) > 0 || (r.employerContributions?.lwf || 0) > 0);
+                    if (!hasLWFData) {
+                        _showAlert('error', 'No Data Available', `There is no LWF data for ${globalMonth} ${globalYear}.`);
+                        setIsGenerating(false);
+                        return;
+                    }
                     savedPath = await generateLWFReport(currentData, employees, fileName, companyProfile, format as any);
                 } else if (reportName.includes('ESI Exit')) {
                     savedPath = await generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
