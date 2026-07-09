@@ -197,7 +197,7 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
                 category = 'StatutoryReports/StateReg';
             } else if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement') || fileNameLower.includes('payslip') || fileNameLower.includes('pay slip') || fileNameLower.includes('leave')) {
                 category = 'PayReports';
-            } else if (fileNameLower.includes('esi') || fileNameLower.includes('pf') || fileNameLower.includes('form') || fileNameLower.includes('ecr')) {
+            } else if (fileNameLower.includes('esi') || fileNameLower.includes('pf') || fileNameLower.includes('form') || fileNameLower.includes('ecr') || fileNameLower.includes('gratuity')) {
                 category = 'StatutoryReports';
                 if (fileNameLower.includes('esi')) {
                     category += '/ESI';
@@ -3143,10 +3143,10 @@ export const generateESIExitReport = async (results: PayrollResult[], employees:
     return res.path || null;
 };
 
-export const generateGratuityReport = async (employees: Employee[], companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateGratuityReport = async (employees: Employee[], companyProfile: CompanyProfile, month: string, year: number): Promise<string | null> => {
     const headers = ['ID', 'Name', 'DOJ', 'Years', 'Salary', 'Gratuity Accrued'];
     const data = employees.map(e => [e.id, e.name, formatDateInd(e.doj), '0', Math.round(e.basicPay + e.da), '0']);
-    const fileName = getStandardFileName('Gratuity_Report', companyProfile, 'All', 'N_A');
+    const fileName = getStandardFileName('Gratuity_Report', companyProfile, month, year);
     return await generatePDFTableReport('Gratuity Liability Statement', headers, data, fileName, 'l', '', companyProfile, {}, 'As of Date');
 };
 
