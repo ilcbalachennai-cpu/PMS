@@ -1175,14 +1175,28 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
             (r.earnings.retainingAllowance || 0)
         );
 
-        // EPF / EPS / EDLI Wages: ceiling-capped wages back-calculated from EE contribution (÷12%)
+        // EPF Wages: ceiling-capped wages back-calculated from EE contribution (÷12%)
         const eeEPF = isNonContributing ? 0 : Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0));
         const epfWages = isNonContributing ? 0 : (eeEPF > 0 ? Math.round(eeEPF / 0.12) : 0);
-        const epsWages = epfWages;
-        const edliWages = epfWages;
+        
+        // EDLI Wages: capped at 15000 max
+        const edliWages = isNonContributing ? 0 : Math.min(15000, epfWages);
+        
+        // EPS Wages: restricted to 15000 IF Joint Option is NOT exercised.
+        // If 7.E (isEPSEligible) is 'No', then epsWages = 0.
+        const isEPSEligible = emp?.isEPSEligible !== 'No';
+        const isHigherPension = emp?.pfHigherPension?.isHigherPensionOpted === 'Yes';
+        
+        let epsWages = 0;
+        if (!isNonContributing && isEPSEligible) {
+            epsWages = isHigherPension ? epfWages : Math.min(15000, epfWages);
+        }
 
-        const erEPS = isNonContributing ? 0 : Math.round(r.employerContributions.eps || 0);
-        const erEPF = isNonContributing ? 0 : Math.round(r.employerContributions.epf || 0);
+        // ER EPS is strictly 8.33% of EPS Wages
+        const erEPS = (!isNonContributing && isEPSEligible) ? Math.round(epsWages * 0.0833) : 0;
+        
+        // ER EPF is the balance: (Total ER = EE PF) - ER EPS
+        const erEPF = isNonContributing ? 0 : (eeEPF - erEPS);
 
         // NCP Days: non-contributing days = daysInMonth − payableDays
         const ncpDays = isNonContributing
@@ -3226,29 +3240,80 @@ export const generateESIForm5 = async (payrollHistory: PayrollResult[], employee
 // NEW EXPORTS (Fixing Errors)
 // ==========================================
 
-export const generateESIReturn = async (results: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string, _companyProfile: CompanyProfile): Promise<string | null> => {
+export const generateESIReturn = async (results: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string, _companyProfile: CompanyProfile, config: StatutoryConfig): Promise<string | null> => {
     // Note: ESI is only applicable for employees not exempt. 
     // The report normally shows all covered employees.
     const data = results
         .filter(r => {
             const emp = employees.find(e => e.id === r.employeeId);
-            return emp && !emp.isESIExempt;
+            if (!emp || emp.isESIExempt) return false;
+
+            const hasContribution = (r.deductions.esi || 0) > 0 || (r.employerContributions.esi || 0) > 0;
+            if (hasContribution) return true;
+
+            // Calculate standard wage to see if <= ceiling
+            let standardESIWage = 0;
+            if (config.pfEsiCalculationBasis === 'LabourCode') {
+                const basic = emp.basicPay || 0;
+                const da = emp.da || 0;
+                const retaining = emp.retainingAllowance || 0;
+                const wageA = basic + da + retaining;
+                
+                const gross = (emp.basicPay || 0) + (emp.da || 0) + (emp.retainingAllowance || 0) + (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + (emp.attire || 0) + (emp.specialAllowance1 || 0) + (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0);
+                const wageC = gross - wageA;
+                let wageD = 0;
+                if (gross > 0) {
+                    const allowancePercentage = wageC / gross;
+                    if (allowancePercentage > 0.50) {
+                        wageD = wageC - Math.round(gross * 0.50);
+                    }
+                }
+                standardESIWage = Math.round(wageA + wageD);
+            } else {
+                const comps = config.esiOriginalWagesComponents || { basic: true, da: true };
+                if (comps.basic) standardESIWage += (emp.basicPay || 0);
+                if (comps.da) standardESIWage += (emp.da || 0);
+                if (comps.retaining) standardESIWage += (emp.retainingAllowance || 0);
+                if (comps.hra) standardESIWage += (emp.hra || 0);
+                if (comps.conveyance) standardESIWage += (emp.conveyance || 0);
+                if (comps.washing) standardESIWage += (emp.washing || 0);
+                if (comps.attire) standardESIWage += (emp.attire || 0);
+                if (comps.special1) standardESIWage += (emp.specialAllowance1 || 0);
+                if (comps.special2) standardESIWage += (emp.specialAllowance2 || 0);
+                if (comps.special3) standardESIWage += (emp.specialAllowance3 || 0);
+            }
+
+            const isAboveCeiling = standardESIWage > (config.esiCeiling || 21000);
+
+            if (!isAboveCeiling) {
+                return true; // Code wages <= 21000 (e.g. LOP)
+            } else {
+                const hasESINumber = !!(emp.esiNumber && emp.esiNumber.trim().length > 0 && emp.esiNumber !== 'undefined' && emp.esiNumber !== 'null');
+                const isOutOfCoverageRemark = r.esiRemark === 'IP is out of coverage (Salary > Ceiling)';
+                if (hasESINumber && isOutOfCoverageRemark) {
+                    return true;
+                }
+            }
+            return false;
         })
         .map(r => {
             const emp = employees.find(e => e.id === r.employeeId);
             const isLeft = !!emp?.dol;
             const isLOP = (emp?.leavingReason || '').trim().toUpperCase() === 'ON LOP';
+            const isOutOfCoverage = r.esiRemark === 'IP is out of coverage (Salary > Ceiling)' && !!(emp?.esiNumber && emp.esiNumber.trim().length > 0 && emp.esiNumber !== 'undefined' && emp.esiNumber !== 'null') && ((r.deductions.esi || 0) === 0);
 
             let reason: number | string = 0;
             let dolStr = '';
 
-            if (isLOP) {
+            if (isOutOfCoverage) {
+                reason = 4;
+                dolStr = '';
+            } else if (isLOP) {
                 reason = 1;
                 dolStr = '';
             } else if (isLeft) {
                 reason = 2;
                 if (emp?.dol) {
-                    // Formatting DOL as DD-MM-YYYY 
                     const d = new Date(emp.dol);
                     const day = String(d.getDate()).padStart(2, '0');
                     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -3257,14 +3322,13 @@ export const generateESIReturn = async (results: PayrollResult[], employees: Emp
                 }
             }
 
-            const esiWages = r.payableDays > 0
-                ? Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0))
-                : 0;
+            const esiWages = isOutOfCoverage ? 0 : (r.payableDays > 0 ? Math.ceil((r.deductions.esi || 0) / (config.esiEmployeeRate || 0.0075)) : 0);
+            const payableDays = isOutOfCoverage ? 0 : r.payableDays;
 
             return {
-                'IP Number': emp?.esiNumber || '',
+                'IP Number': (!emp?.esiNumber || emp?.esiNumber === 'undefined' || emp?.esiNumber === 'null') ? '' : emp?.esiNumber,
                 'IP Name': emp?.name || '',
-                'No. Of Days': r.payableDays,
+                'No. Of Days': payableDays,
                 'ESI Wages': esiWages,
                 'Reason': reason,
                 'DOL': dolStr
@@ -5008,5 +5072,252 @@ export const generateESIIPMappingPDF = async (
         savePdfDoc(doc, fileName, res);
         return null;
     }
+    return res.path || null;
+};
+
+
+export const appendSummaryRowToExcelData = (data: any[]): any[] => {
+    if (!data || data.length === 0) return data;
+    
+    const firstRow = data[0];
+    const keys = Object.keys(firstRow);
+    const totalRow: any = {};
+    let labelPlaced = false;
+
+    keys.forEach(key => {
+        if (typeof firstRow[key] === 'number') {
+            totalRow[key] = data.reduce((acc, row) => acc + (Number(row[key]) || 0), 0);
+        } else {
+            totalRow[key] = '';
+            if (!labelPlaced && (key.toLowerCase().includes('name') || key.toLowerCase() === 'employee name')) {
+                totalRow[key] = 'GRAND TOTAL';
+                labelPlaced = true;
+            }
+        }
+    });
+    
+    if (!labelPlaced) {
+        totalRow[keys[0]] = 'GRAND TOTAL';
+    }
+
+    return [...data, totalRow];
+};
+
+export const generateESIChallanPDF = async (
+    payrollHistory: PayrollResult[],
+    employees: Employee[],
+    config: StatutoryConfig,
+    companyProfile: CompanyProfile,
+    month: string,
+    year: number,
+    fileName: string
+): Promise<string | null> => {
+    let totalEmployees = 0;
+    let totalWages = 0;
+    let totalEE = 0;
+    let totalER = 0;
+
+    payrollHistory.forEach(r => {
+        const emp = employees.find(e => e.id === r.employeeId);
+        if (emp && !emp.isESIExempt && (r.deductions.esi > 0 || r.employerContributions.esi > 0)) {
+            totalEmployees++;
+            
+            // We back-calculate the precise ESI wages used for this deduction.
+            // This guarantees the Total Wages sum exactly aligns with the contributions,
+            // capping correctly and matching legacy ESI reporting expectations.
+            const esiWage = r.payableDays > 0 ? Math.ceil((r.deductions.esi || 0) / (config.esiEmployeeRate || 0.0075)) : 0;
+            
+            totalWages += esiWage;
+            totalEE += Math.round(r.deductions.esi || 0);
+            totalER += Math.round(r.employerContributions.esi || 0);
+        }
+    });
+
+    const totalAmount = totalEE + totalER;
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageW = doc.internal.pageSize.getWidth();
+    let y = 15;
+
+    // Fonts & Styles
+    const setFontTitle = () => { doc.setFont('helvetica', 'bold'); doc.setFontSize(14); };
+    const setFontNormal = () => { doc.setFont('helvetica', 'normal'); doc.setFontSize(10); };
+    const setFontBold = () => { doc.setFont('helvetica', 'bold'); doc.setFontSize(10); };
+
+    // --- Header ---
+    setFontTitle();
+    doc.text('E.S.I.C.', pageW / 2, y, { align: 'center' });
+    y += 7;
+    doc.text('EMPLOYEES\' STATE INSURANCE CORPORATION', pageW / 2, y, { align: 'center' });
+    y += 7;
+    doc.text('CHALLAN FORM FOR DEPOSIT IN A/C NO.1', pageW / 2, y, { align: 'center' });
+    y += 15;
+
+    // --- Employer Code & Date ---
+    setFontNormal();
+    doc.text('Employer\'s Code :', 15, y);
+    setFontBold();
+    doc.text(companyProfile.esiCode || '', 55, y);
+
+    setFontNormal();
+    doc.text('Date', 130, y - 5);
+    doc.text('Month', 150, y - 5);
+    doc.text('Year', 170, y - 5);
+    
+    const today = new Date();
+    doc.text(String(today.getDate()).padStart(2, '0'), 130, y);
+    doc.text(today.toLocaleString('en-US', { month: 'short' }), 150, y);
+    doc.text(String(today.getFullYear()), 170, y);
+
+    y += 12;
+
+    // --- Factory Name & Address ---
+    doc.text('Name of The Factory / Establishment', 15, y);
+    doc.text('Bank Branch Code:', 125, y + 4);
+    
+    // Draw 3 blank boxes for bank branch code
+    doc.rect(155, y, 10, 6);
+    doc.rect(167, y, 10, 6);
+    doc.rect(179, y, 10, 6);
+
+    y += 6;
+    doc.text('and Addresses :', 15, y);
+    y += 8;
+
+    setFontBold();
+    doc.text(companyProfile.establishmentName, 15, y);
+    y += 6;
+    const addressLine = [companyProfile.doorNo, companyProfile.buildingName, companyProfile.street, companyProfile.locality, companyProfile.city].filter(Boolean).join(', ') + (companyProfile.pincode ? ` - ${companyProfile.pincode}` : '');
+    const addressLines = doc.splitTextToSize(addressLine, 100);
+    doc.text(addressLines, 15, y);
+    y += addressLines.length * 5 + 6;
+
+    // --- Mode of Payment ---
+    setFontNormal();
+    doc.text('Mode of Payment : [ Tick (   ) mode used ]', 15, y);
+    doc.text('Cash', 120, y);
+    doc.rect(130, y - 4, 10, 5); // Cash box
+    doc.text('Cheque', 145, y);
+    doc.rect(160, y - 4, 10, 5); // Cheque box
+    doc.text('D.D', 175, y);
+    doc.rect(185, y - 4, 10, 5); // D.D box
+
+    y += 12;
+
+    // --- Cheque / DD Details ---
+    doc.text('Cheque No / DD No', 15, y);
+    doc.line(50, y + 1, 110, y + 1);
+    
+    doc.text('Dated', 125, y);
+    // 3 small boxes for date
+    doc.rect(140, y - 4, 8, 5);
+    doc.rect(150, y - 4, 8, 5);
+    doc.rect(160, y - 4, 8, 5);
+
+    y += 12;
+
+    // --- Drawn No & Contribution Period ---
+    doc.text('Drawn No :', 15, y);
+    doc.text('Period of', 125, y);
+    doc.text('Month', 145, y);
+    doc.text('Year', 170, y);
+    
+    y += 6;
+    doc.text('( Name of the Bank)', 15, y);
+    doc.line(45, y + 1, 110, y + 1);
+    
+    doc.text('Contribution:', 125, y);
+    setFontBold();
+    doc.text(month.substring(0, 3), 145, y);
+    doc.text(String(year), 170, y);
+
+    y += 8;
+
+    // --- Details of Payment ---
+    doc.line(15, y, 195, y); // Top border
+    y += 6;
+    setFontNormal();
+    doc.text('Details of Payment : [Tick (   ) mode used]', 15, y);
+    
+    doc.text('Regular', 90, y - 2);
+    doc.text('Contribution', 87, y + 2);
+    doc.rect(107, y - 3, 10, 5); // Regular box
+
+    doc.text('Interest', 122, y);
+    doc.rect(136, y - 3, 10, 5); // Interest box
+
+    doc.text('Damages', 151, y);
+    doc.rect(168, y - 3, 10, 5); // Damages box
+
+    doc.text('Others', 182, y);
+    doc.rect(195, y - 3, 10, 5); // Others box
+
+    y += 5;
+    doc.line(15, y, 205, y); // Bottom border
+
+    y += 15;
+
+    // --- Financial Summary Table ---
+    // Number of Employees & Total Wages
+    doc.text('Number of Employees :', 15, y);
+    doc.rect(60, y - 4, 15, 6);
+    doc.text(String(totalEmployees), 67.5, y + 0.5, { align: 'center' });
+
+    doc.text('TOTAL Wages :', 100, y);
+    doc.rect(135, y - 4, 40, 6);
+    doc.text(String(totalWages), 173, y + 0.5, { align: 'right' });
+
+    y += 12;
+
+    // Helpers for rows
+    const drawDots = (startX: number, endX: number, currY: number) => {
+        let x = startX;
+        while (x < endX) {
+            doc.text('.', x, currY);
+            x += 1.5;
+        }
+    };
+
+    const addFinancialRow = (label: string, amount: string | number, currentY: number) => {
+        doc.text(label, 15, currentY);
+        const labelWidth = doc.getTextWidth(label) + 15;
+        drawDots(labelWidth + 2, 130, currentY);
+        doc.rect(135, currentY - 4, 40, 6);
+        if (amount !== '') {
+            doc.text(String(amount), 173, currentY + 0.5, { align: 'right' });
+        }
+    };
+
+    addFinancialRow("Employee's Contribution", totalEE, y);
+    y += 10;
+    addFinancialRow("Employer's Contribution", totalER, y);
+    y += 10;
+    addFinancialRow("# Interest", "", y);
+    y += 10;
+    addFinancialRow("# Damages", "", y);
+    y += 10;
+    addFinancialRow("# Others", "", y);
+    y += 10;
+    
+    setFontBold();
+    doc.text('TOTAL', 15, y);
+    drawDots(30, 130, y);
+    doc.rect(135, y - 4, 40, 6);
+    doc.text(String(totalAmount), 173, y + 0.5, { align: 'right' });
+
+    y += 15;
+
+    // --- Amount in words ---
+    const words = numberToWords(totalAmount);
+    doc.text(`TOTAL amount ( in words ) ${words.replace(/Only$/i, '')} Rupees Only`, 15, y);
+
+    // Save
+    const u8 = new Uint8Array(doc.output('arraybuffer'));
+    const res = await electronSaveReport(fileName, u8, 'pdf', companyProfile.establishmentName);
+
+    if (!res.success) {
+        savePdfDoc(doc, fileName, res);
+        return null;
+    }
+
     return res.path || null;
 };

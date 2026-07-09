@@ -214,3 +214,58 @@ export const normalizeEmployeeDates = (emp: any): any => {
     epfMembershipDate: emp.epfMembershipDate ? parseDateToYYYYMMDD(emp.epfMembershipDate) : undefined,
   };
 };
+
+/**
+ * Checks if any calculation-affecting fields of StatutoryConfig have changed.
+ */
+export const didConfigCalculationFieldsChange = (c1: any, c2: any): boolean => {
+  if (!c1 || !c2) return true;
+  const keys = [
+    'enablePF', 'enableESI', 'enableBonus', 'enableGratuity',
+    'epfCeiling', 'epfEmployeeRate', 'epfEmployerRate',
+    'esiCeiling', 'esiEmployeeRate', 'esiEmployerRate',
+    'enableProfessionalTax', 'ptDeductionCycle', 'ptSlabs',
+    'enableLWF', 'lwfDeductionCycle', 'lwfEmployeeContribution', 'lwfEmployerContribution',
+    'incomeTaxCalculationType', 'bonusRate', 'pfComplianceType',
+    'enableHigherContribution', 'higherContributionType', 'higherContributionComponents',
+    'leaveWagesComponents', 'enableOT', 'otCalculationFactor', 'otComponents',
+    'pfEsiCalculationBasis', 'pfOriginalWagesComponents', 'esiOriginalWagesComponents',
+    'bonusWagesComponents', 'gratuityWagesComponents', 'enableArrearSalary'
+  ];
+  return keys.some(key => JSON.stringify(c1[key]) !== JSON.stringify(c2[key]));
+};
+
+/**
+ * Checks if any payroll calculation-affecting fields of Employee have changed.
+ */
+export const didEmployeePayFieldsChange = (oldEmp: any, newEmp: any): boolean => {
+  if (!oldEmp || !newEmp) return true;
+  const payFields = [
+    'basicPay', 'da', 'retainingAllowance', 'hra', 'conveyance', 'washing', 'attire',
+    'specialAllowance1', 'specialAllowance2', 'specialAllowance3',
+    'isPFExempt', 'isESIExempt', 'isEPSEligible', 'isPTExempt', 'isLWFExempt',
+    'employeeVPFRate', 'isPFHigherWages', 'isEmployerPFHigher',
+    'dob', 'doj', 'dol', 'leavingReason',
+    'isDeferredPension', 'epsMaturityConfigured', 'epsMaturityConfiguredAge'
+  ];
+  
+  for (const field of payFields) {
+    if (oldEmp[field] !== newEmp[field]) return true;
+  }
+  
+  const oldHP = oldEmp.pfHigherPension || {};
+  const newHP = newEmp.pfHigherPension || {};
+  if (
+    oldHP.enabled !== newHP.enabled ||
+    oldHP.contributedBefore2014 !== newHP.contributedBefore2014 ||
+    oldHP.employeeContribution !== newHP.employeeContribution ||
+    oldHP.employerContribution !== newHP.employerContribution ||
+    oldHP.isHigherPensionOpted !== newHP.isHigherPensionOpted
+  ) {
+    return true;
+  }
+  
+  if (oldEmp.epfMembershipDate !== newEmp.epfMembershipDate) return true;
+  
+  return false;
+};

@@ -56,6 +56,7 @@ BharatPay Pro V06 consolidates all administrative setups under the **Settings Po
 #### 1. Company Profile (Establishment Master Identity)
 The first step in setting up a company silo is populating the core business credentials:
 *   **Operational Fields**: Enter exact registered Name, Corporate Address, PAN, GST, EPF Registration Number, and ESIC Code.
+*   **Mandatory Field Locking**: Fields marked with a red asterisk (`*`), including **Allocated Data Size**, are strictly mandatory. Core features like the Employee Master and Payroll Processor will remain **securely locked** until these fields are completed and saved.
 *   **Formatting Compliance**: The system converts the Company Name to ALL CAPITAL LETTERS automatically to ensure compliance with banking and statutory portal formats.
 *   **Downstream Impact**: These credentials are dynamically injected into bank-upload statements, monthly EPF ECR headers, ESI portal returns, and are printed at the header of all payslips and Dynamic Pay Sheets.
 
@@ -71,6 +72,10 @@ This tab acts as the primary calculation controller for the entire system, defin
 
 #### 3. License Management (Entitlements & Hardware Lock)
 Displays active product keys, registration details, allowed company silos, and license expiration periods.
+*   **License Company Limit**: Your license dictates the maximum number of independent companies (Data Silos) you can create. Once this limit is reached, you cannot register new companies. If an active company folder is moved to another machine that has exhausted its limit, it will open in **Read-Only Mode**.
+*   **Employee Data Size Allocation**: Your license provides a global quota of active employees. You must distribute this quota across your companies by setting the **Allocated Data Size** in each Company Profile. For example, a 5000-employee license can be split into 1000 for Company A and 4000 for Company B. A company cannot exceed its allocated employee limit. **If this field in the company profile is left blank, the system will block all actions within that company until the Allocated Data Size is properly updated.**
+
+    ![Allocated Data Size Setting](assets/allocated_data_size.png)
 
 > [!NOTE]
 > **The Crucial Need for Cloud Synchronization:**
@@ -110,6 +115,15 @@ Under the Statutory Configuration tab, you can activate advanced payroll compone
     *   *Activation*: Toggle "Enable Arrear Salary" to ON.
     *   *Importance*: Used for retroactive pay adjustments or delayed compensations.
     *   *Usage*: Once activated, an 'Arrears' column becomes available in the Payroll processor. You can manually input arrear amounts for specific employees, which will be seamlessly added to their gross earnings for that specific month without disrupting standard wage structures.
+
+### 4.2 Dynamic Pay Sheet & Custom Allowances
+
+Under the **Statutory Rules** tab in the Settings Portal, you can heavily customize the appearance of the Payroll outputs:
+
+*   **Custom Allowance Labels**: 
+    *   *Functionality*: Allows you to rename the default "Special Allowance 1", "Special Allowance 2", and "Special Allowance 3" wage components to match your company's actual terminology (e.g., renaming Special Allowance 1 to "Tele. Reimbursement" or "Books & Periodicals"). 
+    *   *Impact*: These custom names dynamically apply across the entire application. Once saved, they will instantly reflect on the front-end Pay Breakup table, the Dynamic Pay Sheet selection buttons, the generated Excel reports, and the printed PDF Pay Slips.
+*   **Dynamic Column Selection**: You can toggle exactly which earning and deduction columns should be visible on the final Pay Sheet and Pay Slips. The selection interface will automatically display your Custom Allowance Labels for easier identification.
 
 ---
 

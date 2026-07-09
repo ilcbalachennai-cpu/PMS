@@ -19,25 +19,35 @@ interface AttendanceManagerProps {
   setLeaveLedgers?: (ledgers: LeaveLedger[]) => void; // Added setter for syncing
   hideContextSelector?: boolean;
   companyProfile: CompanyProfile;
+  justSaved?: boolean;
+  setJustSaved?: (val: boolean) => void;
 }
 
-const AttendanceManager: React.FC<AttendanceManagerProps> = ({
-  employees,
-  attendances,
-  setAttendances,
-  month,
-  year,
-  setMonth,
-  setYear,
-  savedRecords,
-  leaveLedgers,
-  setLeaveLedgers,
-  hideContextSelector = false,
-  companyProfile
-}) => {
+const AttendanceManager: React.FC<AttendanceManagerProps> = (props) => {
+  const {
+    employees,
+    attendances,
+    setAttendances,
+    month,
+    year,
+    setMonth,
+    setYear,
+    savedRecords,
+    leaveLedgers,
+    setLeaveLedgers,
+    hideContextSelector = false,
+    companyProfile
+  } = props;
+
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [justSaved, setJustSaved] = useState(false); // Used for persistent saved state
+  const [localJustSaved, setLocalJustSaved] = useState(false); // Used for persistent saved state
+  const justSaved = props.justSaved !== undefined ? props.justSaved : localJustSaved;
+  const setJustSaved = (val: boolean | ((prev: boolean) => boolean)) => {
+    const nextVal = typeof val === 'function' ? val(justSaved) : val;
+    setLocalJustSaved(nextVal);
+    props.setJustSaved?.(nextVal);
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Dynamic Year Range: Current Year - 5 to Current Year + 1

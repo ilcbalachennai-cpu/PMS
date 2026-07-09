@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { Users } from 'lucide-react';
 import { Employee, User, CompanyProfile } from '../types';
+import { didEmployeePayFieldsChange } from '../utils/formatters';
 
 // Global OS Detection for UI refinement
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
@@ -70,12 +71,13 @@ interface EmployeeListProps {
     globalYear: number;
     activeFinancialYear?: string;
     isLicenseExpired?: boolean;
+    onNavigate?: (view: any, tab?: string, bypassDirty?: boolean) => void;
 }
 
 const EmployeeList: React.FC<EmployeeListProps> = ({
     employees, setEmployees, onAddEmployee, onBulkAddEmployees,
     designations, divisions, branches, sites, currentUser, companyProfile, dataSizeLimit, showAlert,
-    globalMonth, globalYear, activeFinancialYear, isLicenseExpired
+    globalMonth, globalYear, activeFinancialYear, isLicenseExpired, onNavigate
 }) => {
     // --- State Management ---
     const [filterByFY, setFilterByFY] = useState(true);
@@ -322,6 +324,15 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     const handleAddSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
+        // --- ALLOCATED DATA SIZE VALIDATION ---
+        if (!editingId && companyProfile.allocatedDataSize !== undefined) {
+            if (employees.length >= companyProfile.allocatedDataSize) {
+                showAlert('danger', 'Company Limit Reached', `This company has reached its allocated employee limit of ${companyProfile.allocatedDataSize}. You cannot add more employees.`);
+                return;
+            }
+        }
+        // --- END ALLOCATED DATA SIZE VALIDATION ---
+
         // Length validations for Statutory Numbers
         if (newEmpForm.uanc && newEmpForm.uanc.length < 10) {
             showAlert('danger', 'Validation Error', 'UAN Number must be at least 10 digits long.');
@@ -329,6 +340,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         }
         if (newEmpForm.esiNumber && newEmpForm.esiNumber.length < 10) {
             showAlert('danger', 'Validation Error', 'ESI Number must be at least 10 digits long.');
+            return;
+        }
+
+        if (!newEmpForm.isPFExempt && !newEmpForm.isEPSEligible) {
+            showAlert('danger', 'Validation Error', 'Please select Yes/No for 7.E. Employee Eligible for EPS. This is a mandatory field.');
             return;
         }
 
@@ -354,13 +370,37 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
             }
         }
 
+        let payAffected = true;
+        if (editingId) {
+            const original = employees.find(emp => emp.id === editingId);
+            if (original) {
+                payAffected = didEmployeePayFieldsChange(original, data);
+            }
+        }
+
         if (editingId) {
             setEmployees(prev => prev.map(emp => emp.id === editingId ? data : emp));
         } else {
             onAddEmployee(data);
         }
         setIsAdding(false);
-        showAlert('success', 'Employee Saved', `${data.id} ${data.name} Saved Successfully`, undefined, undefined, 'OK', undefined, undefined, 0.7);
+
+        if (payAffected) {
+            showAlert('success', 'Employee Saved', (
+                <div className="space-y-2">
+                    <p className="text-white">{data.id} {data.name} Saved Successfully.</p>
+                    <p className="text-amber-400 font-bold mt-1">
+                        Changes would affect Pay Sheet. Click OK to go to Process Pay &gt; Run Payroll and initiate Recalculate Pay. Click Stay to continue to edit Employees.
+                    </p>
+                </div>
+            ), () => {
+                // Stay here
+            }, () => {
+                onNavigate?.('pay_process');
+            }, 'Stay', 'OK');
+        } else {
+            showAlert('success', 'Employee Saved', `${data.id} ${data.name} Saved Successfully.`, undefined, undefined, 'OK', undefined, undefined, 2);
+        }
     };
 
     const handleImport = async () => {
@@ -372,8 +412,18 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
             if (!file) return;
             setIsImporting(true);
             try {
-                const results = await parseEmployeeXLSX(file, employees, designations, divisions, branches, sites);
+                const results = await parseEmployeeXLSX(file, employees, designations, divisions, branches, sites, companyProfile);
                 if (results.success > 0 && results.successfulEmployees) {
+                    // --- ALLOCATED DATA SIZE VALIDATION FOR BULK IMPORT ---
+                    if (companyProfile.allocatedDataSize !== undefined) {
+                        const newTotal = employees.length + results.successfulEmployees.length;
+                        if (newTotal > companyProfile.allocatedDataSize) {
+                            showAlert('danger', 'Company Limit Exceeded', `Importing these employees would exceed the allocated company limit of ${companyProfile.allocatedDataSize}. Current: ${employees.length}, Trying to add: ${results.successfulEmployees.length}. Import cancelled.`);
+                            setIsImporting(false);
+                            return;
+                        }
+                    }
+                    // --- END ALLOCATED DATA SIZE VALIDATION ---
                     onBulkAddEmployees(results.successfulEmployees);
                 }
                 setImportSummary(results);
@@ -393,10 +443,34 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
             if (!file) return;
             setIsImporting(true);
             try {
-                const results = await parseEmployeeUpdateXLSX(file, employees);
+                const results = await parseEmployeeUpdateXLSX(file, employees, companyProfile);
                 if (results.success > 0 && results.updatedEmployees) {
+                    let payAffected = false;
+                    for (const updated of results.updatedEmployees) {
+                        const original = employees.find(e => e.id === updated.id);
+                        if (original && didEmployeePayFieldsChange(original, updated)) {
+                            payAffected = true;
+                            break;
+                        }
+                    }
                     setEmployees(results.updatedEmployees);
-                    showAlert('success', 'Update Successful', `${results.success} Employees updated successfully.`, undefined, undefined, 'OK', undefined, undefined, 2);
+
+                    if (payAffected) {
+                        showAlert('success', 'Update Successful', (
+                            <div className="space-y-2">
+                                <p className="text-white">{results.success} Employees updated successfully.</p>
+                                <p className="text-amber-400 font-bold mt-1">
+                                    Changes would affect Pay Sheet. Click OK to go to Process Pay &gt; Run Payroll and initiate Recalculate Pay. Click Stay to continue to edit Employees.
+                                </p>
+                            </div>
+                        ), () => {
+                            // Stay here
+                        }, () => {
+                            onNavigate?.('pay_process');
+                        }, 'Stay', 'OK');
+                    } else {
+                        showAlert('success', 'Update Successful', `${results.success} Employees updated successfully.`, undefined, undefined, 'OK', undefined, undefined, 2);
+                    }
                 }
                 setImportSummary(results);
             } finally {
@@ -575,6 +649,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     onToggleFYFilter={setFilterByFY}
                     activeFinancialYear={activeFinancialYear}
                     isLicenseExpired={isLicenseExpired}
+                    isReadOnly={companyProfile?.isReadOnly}
                 />
             </div>
 

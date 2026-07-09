@@ -14,21 +14,31 @@ interface OTManagerProps {
     year: number;
     savedRecords: PayrollResult[];
     companyProfile: CompanyProfile;
+    justSaved?: boolean;
+    setJustSaved?: (val: boolean) => void;
 }
 
-const OTManager: React.FC<OTManagerProps> = ({
-    employees,
-    otRecords,
-    setOTRecords,
-    config,
-    month,
-    year,
-    savedRecords,
-    companyProfile
-}) => {
+const OTManager: React.FC<OTManagerProps> = (props) => {
+    const {
+        employees,
+        otRecords,
+        setOTRecords,
+        config,
+        month,
+        year,
+        savedRecords,
+        companyProfile
+    } = props;
+
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [justSaved, setJustSaved] = useState(true);
+    const [localJustSaved, setLocalJustSaved] = useState(true);
+    const justSaved = props.justSaved !== undefined ? props.justSaved : localJustSaved;
+    const setJustSaved = (val: boolean | ((prev: boolean) => boolean)) => {
+        const nextVal = typeof val === 'function' ? val(justSaved) : val;
+        setLocalJustSaved(nextVal);
+        props.setJustSaved?.(nextVal);
+    };
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];

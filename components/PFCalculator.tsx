@@ -30,13 +30,11 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
 }) => {
     const CHRONO_ORDER = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
 
-    const finalizedRecords = useMemo(() => payrollHistory.filter(r => r.status === 'Finalized'), [payrollHistory]);
-
     const months = useMemo(() => {
-        if (finalizedRecords.length === 0) return ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
-        const unique = Array.from(new Set(finalizedRecords.map(r => r.month)));
+        if (payrollHistory.length === 0) return ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
+        const unique = Array.from(new Set(payrollHistory.map(r => r.month)));
         return unique.sort((a, b) => CHRONO_ORDER.indexOf(a) - CHRONO_ORDER.indexOf(b));
-    }, [finalizedRecords, CHRONO_ORDER]);
+    }, [payrollHistory, CHRONO_ORDER]);
 
     const [startYear, endYear] = useMemo(() => {
         if (!activeFinancialYear) return [new Date().getFullYear(), new Date().getFullYear()];
@@ -48,13 +46,24 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
     }, [activeFinancialYear]);
 
     const yearOptions = useMemo(() => {
-        if (finalizedRecords.length === 0) {
+        if (payrollHistory.length === 0) {
             if (startYear === endYear) return [startYear];
             return [startYear, endYear];
         }
-        const uniqueYears = Array.from(new Set(finalizedRecords.map(r => r.year)));
+        const uniqueYears = Array.from(new Set(payrollHistory.map(r => r.year)));
         return uniqueYears.sort((a, b) => a - b);
-    }, [finalizedRecords, startYear, endYear]);
+    }, [payrollHistory, startYear, endYear]);
+
+    const handleMonthChange = (selectedMonth: string) => {
+        setMonth(selectedMonth);
+        const match = payrollHistory.find(r => r.month === selectedMonth);
+        if (match) {
+            setYear(match.year);
+        } else {
+            const isNextYear = ['January', 'February', 'March'].includes(selectedMonth);
+            setYear(isNextYear ? endYear : startYear);
+        }
+    };
 
     const currentRecords = useMemo(() => {
         return payrollHistory.filter(r => r.month === month && r.year === year);
@@ -170,7 +179,7 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3 bg-[#0f172a] p-2 rounded-xl border border-slate-700">
-                    <select value={month} onChange={e => setMonth(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-blue-400" title="Select Month" aria-label="Select Month">
+                    <select value={month} onChange={e => handleMonthChange(e.target.value)} className="bg-transparent border-r border-slate-700 px-4 py-1 text-sm text-white font-bold outline-none focus:text-blue-400" title="Select Month" aria-label="Select Month">
                         {months.map(m => (<option key={m} value={m}>{m}</option>))}
                     </select>
                     <select value={year} onChange={e => setYear(+e.target.value)} className="bg-transparent px-4 py-1 text-sm text-white font-bold outline-none focus:text-blue-400" title="Select Year" aria-label="Select Year">

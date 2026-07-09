@@ -19,6 +19,7 @@ interface EmployeeToolbarProps {
     onToggleFYFilter?: (val: boolean) => void;
     activeFinancialYear?: string;
     isLicenseExpired?: boolean;
+    isReadOnly?: boolean;
 }
 
 const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
@@ -38,14 +39,15 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
     showFYFilter,
     onToggleFYFilter,
     activeFinancialYear,
-    isLicenseExpired
+    isLicenseExpired,
+    isReadOnly
 }) => {
     return (
         <div className="space-y-2">
             {/* ACTION CARD */}
             <div className="bg-[#1e293b] p-2 rounded-2xl border border-slate-800/80 shadow-2xl flex flex-nowrap items-center justify-between gap-2 transition-all overflow-x-auto custom-scrollbar">
                 <div className="flex items-center flex-nowrap gap-1">
-                    {!isLicenseExpired && (
+                    {!isLicenseExpired && !isReadOnly && (
                         <div className="flex items-center gap-2 bg-[#0f172a] p-1 rounded-xl border border-slate-800">
                             <button
                                 onClick={onDownloadTemplate}
@@ -103,9 +105,14 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
                         </button>
                     )}
                     
+                    {!isLicenseExpired && isReadOnly && (
+                         <div className="px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-950/20 text-red-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                             <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+                             READ-ONLY MODE (LIMIT EXCEEDED)
+                         </div>
+                    )}
 
-
-                    {!isLicenseExpired && (
+                    {!isLicenseExpired && !isReadOnly && (
                         <button
                             onClick={onAddNew}
                             disabled={totalActive >= limit}

@@ -22,25 +22,35 @@ interface LedgerManagerProps {
     viewMode?: 'leave' | 'advance';
     isReadOnly?: boolean;
     companyProfile: CompanyProfile;
+    justSaved?: boolean;
+    setJustSaved?: (val: boolean) => void;
 }
 
-const LedgerManager: React.FC<LedgerManagerProps> = ({
-    employees,
-    leaveLedgers,
-    setLeaveLedgers,
-    advanceLedgers,
-    setAdvanceLedgers,
-    month,
-    year,
-    savedRecords,
-    hideContextSelector = false,
-    viewMode = 'leave',
-    isReadOnly = false,
-    companyProfile
-}) => {
+const LedgerManager: React.FC<LedgerManagerProps> = (props) => {
+    const {
+        employees,
+        leaveLedgers,
+        setLeaveLedgers,
+        advanceLedgers,
+        setAdvanceLedgers,
+        month,
+        year,
+        savedRecords,
+        hideContextSelector = false,
+        viewMode = 'leave',
+        isReadOnly = false,
+        companyProfile
+    } = props;
+
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [justSaved, setJustSaved] = useState(false); // State to track saved/read-only mode
+    const [localJustSaved, setLocalJustSaved] = useState(false); // State to track saved/read-only mode
+    const justSaved = props.justSaved !== undefined ? props.justSaved : localJustSaved;
+    const setJustSaved = (val: boolean | ((prev: boolean) => boolean)) => {
+        const nextVal = typeof val === 'function' ? val(justSaved) : val;
+        setLocalJustSaved(nextVal);
+        props.setJustSaved?.(nextVal);
+    };
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Custom Modal State

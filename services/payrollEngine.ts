@@ -48,6 +48,145 @@ const getComponentBasedWage = (employee: Employee, components: any, factor: numb
     return Math.round(base * factor);
 };
 
+const getESICoverageRemark = (employee: Employee, config: StatutoryConfig, month: string, year: number, payrollHistory: PayrollResult[], standardMonthlyGross: number): string | null => {
+    if (config.enableESI === false || employee.isESIExempt) {
+        return null;
+    }
+
+    const stdBasic = employee.basicPay || 0;
+    const stdDA = employee.da || 0;
+    const stdRetaining = employee.retainingAllowance || 0;
+    const stdWageA = stdBasic + stdDA + stdRetaining;
+    
+    let stdESIWageBase = stdWageA;
+    if (config.pfEsiCalculationBasis === 'OriginalWages') {
+        stdESIWageBase = getComponentBasedWage(employee, config.esiOriginalWagesComponents, 1);
+    } else {
+        const stdGross = standardMonthlyGross;
+        const stdWageC = stdGross - stdWageA;
+        let stdWageD = 0;
+        if (stdGross > 0) {
+            const allowancePercentage = stdWageC / stdGross;
+            if (allowancePercentage > 0.50) {
+                stdWageD = stdWageC - Math.round(stdGross * 0.50);
+            }
+        }
+        stdESIWageBase = stdWageA + stdWageD;
+    }
+
+    const isAboveCeiling = (stdWageA > config.esiCeiling) || (stdESIWageBase > config.esiCeiling);
+
+    const getESIPeriodStart = (m: string, y: number): { month: string; year: number } => {
+        const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const mIdx = months.indexOf(m);
+        if (mIdx >= 3 && mIdx <= 8) return { month: 'April', year: y };
+        else if (mIdx >= 9) return { month: 'October', year: y };
+        else return { month: 'October', year: y - 1 };
+    };
+
+    const getESIPeriodMonthsUpTo = (m: string, y: number): { month: string; year: number }[] => {
+        const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const startInfo = getESIPeriodStart(m, y);
+        const startIdx = months.indexOf(startInfo.month);
+        const list: { month: string; year: number }[] = [];
+        let currYear = startInfo.year;
+        let currMIdx = startIdx;
+        while (true) {
+            const mName = months[currMIdx];
+            list.push({ month: mName, year: currYear });
+            if (mName === m && currYear === y) break;
+            currMIdx++;
+            if (currMIdx > 11) {
+                currMIdx = 0;
+                currYear++;
+            }
+        }
+        return list;
+    };
+
+    const periodMonths = getESIPeriodMonthsUpTo(month, year);
+    const pastPeriodMonths = periodMonths.filter(pm => !(pm.month === month && pm.year === year));
+
+    const pastRecords = payrollHistory.filter(r => 
+        r.employeeId === employee.id &&
+        pastPeriodMonths.some(pm => pm.month === r.month && pm.year === r.year)
+    );
+
+    let earliestRecord: PayrollResult | undefined = undefined;
+    for (const pm of pastPeriodMonths) {
+        const match = pastRecords.find(r => r.month === pm.month && r.year === pm.year);
+        if (match) {
+            earliestRecord = match;
+            break;
+        }
+    }
+
+    const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthIdx = monthsArr.indexOf(month);
+    const isStartOfPeriod = month === 'April' || month === 'October';
+    const periodStart = new Date(year, monthIdx, 1);
+    periodStart.setHours(0, 0, 0, 0);
+
+    const empDOJ = new Date(employee.doj);
+    empDOJ.setHours(0, 0, 0, 0);
+    const isNewJoinee = empDOJ >= periodStart;
+
+    let wasCoveredAtStart = true;
+    if (earliestRecord && earliestRecord.deductions && earliestRecord.deductions.esi !== null && earliestRecord.deductions.esi !== undefined) {
+        if (earliestRecord.esiRemark === 'IP is out of coverage (Salary > Ceiling)') {
+            wasCoveredAtStart = false;
+        } else if (earliestRecord.deductions.esi === 0 && (earliestRecord.esiRemark || '') === '') {
+            const earliestBasic = earliestRecord.earnings.basic || 0;
+            const earliestDA = earliestRecord.earnings.da || 0;
+            const earliestRetaining = earliestRecord.earnings.retainingAllowance || 0;
+            const earliestWageA = earliestBasic + earliestDA + earliestRetaining;
+            
+            let earliestESIBase = earliestWageA;
+            if (config.pfEsiCalculationBasis === 'LabourCode') {
+                const earliestGross = earliestRecord.earnings.total || 0;
+                const earliestWageC = earliestGross - earliestWageA;
+                let earliestWageD = 0;
+                if (earliestGross > 0) {
+                    const allowancePercentage = earliestWageC / earliestGross;
+                    if (allowancePercentage > 0.50) {
+                        earliestWageD = earliestWageC - Math.round(earliestGross * 0.50);
+                    }
+                }
+                earliestESIBase = earliestWageA + earliestWageD;
+            } else {
+                let base = 0;
+                const comps = config.esiOriginalWagesComponents;
+                if (comps.basic) base += (earliestRecord.earnings.basic || 0);
+                if (comps.da) base += (earliestRecord.earnings.da || 0);
+                if (comps.retaining) base += (earliestRecord.earnings.retainingAllowance || 0);
+                if (comps.hra) base += (earliestRecord.earnings.hra || 0);
+                if (comps.conveyance) base += (earliestRecord.earnings.conveyance || 0);
+                if (comps.washing) base += (earliestRecord.earnings.washing || 0);
+                if (comps.attire) base += (earliestRecord.earnings.attire || 0);
+                if (comps.special1) base += (earliestRecord.earnings.special1 || 0);
+                if (comps.special2) base += (earliestRecord.earnings.special2 || 0);
+                if (comps.special3) base += (earliestRecord.earnings.special3 || 0);
+                earliestESIBase = base;
+            }
+            const earliestAboveCeiling = earliestWageA > config.esiCeiling || earliestESIBase > config.esiCeiling;
+            wasCoveredAtStart = !earliestAboveCeiling;
+        } else {
+            wasCoveredAtStart = true;
+        }
+    } else {
+        wasCoveredAtStart = (isStartOfPeriod || isNewJoinee) ? !isAboveCeiling : !isAboveCeiling;
+    }
+
+    if (!wasCoveredAtStart) {
+        return 'IP is out of coverage (Salary > Ceiling)';
+    } else {
+        if (isAboveCeiling) {
+            return 'Continued Coverage (Mid-Period)';
+        }
+        return '';
+    }
+};
+
 export const calculatePayroll = (
     employee: Employee,
     config: StatutoryConfig,
@@ -59,7 +198,8 @@ export const calculatePayroll = (
     advanceOptions: { restrictTo50Percent: boolean } = { restrictTo50Percent: false },
     fines: FineRecord[] = [],
     otRecord: OTRecord | null = null,
-    arrearAmount: number = 0
+    arrearAmount: number = 0,
+    payrollHistory: PayrollResult[] = []
 ): PayrollResult => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const monthIdx = months.indexOf(month);
@@ -115,6 +255,9 @@ export const calculatePayroll = (
         leaveSnapshot.cl.balance = (leaveSnapshot.cl.accumulation || 0) - (leaveSnapshot.cl.availed || 0);
     }
 
+    const standardMonthlyGross = employee.basicPay + (employee.da || 0) + (employee.retainingAllowance || 0) + (employee.hra || 0) + (employee.conveyance || 0) + (employee.washing || 0) + (employee.attire || 0) + (employee.specialAllowance1 || 0) + (employee.specialAllowance2 || 0) + (employee.specialAllowance3 || 0);
+    const baseESIRemark = getESICoverageRemark(employee, config, month, year, payrollHistory, standardMonthlyGross);
+
     if (effectivePayableDays <= 0) {
         return {
             employeeId: employee.id,
@@ -133,7 +276,7 @@ export const calculatePayroll = (
             netPay: 0,
             isCode88: false,
             isESICodeWagesUsed: false,
-            esiRemark: exitRemark || 'No Payable Days',
+            esiRemark: baseESIRemark || exitRemark || 'No Payable Days',
             fineReason: '',
             leaveSnapshot: leaveSnapshot
         };
@@ -165,7 +308,7 @@ export const calculatePayroll = (
     // Removed bonus from grossEarnings as per user request (Bonus is not paid monthly)
     let grossEarnings = basic + da + retaining + hra + conveyance + washing + attire + special1 + special2 + special3 + leaveEncashment;
 
-    const standardMonthlyGross = employee.basicPay + (employee.da || 0) + (employee.retainingAllowance || 0) + (employee.hra || 0) + (employee.conveyance || 0) + (employee.washing || 0) + (employee.attire || 0) + (employee.specialAllowance1 || 0) + (employee.specialAllowance2 || 0) + (employee.specialAllowance3 || 0);
+    // standardGross moved above for early ESI Check
 
     // --- PF Calculation Logic ---
 
@@ -227,6 +370,7 @@ export const calculatePayroll = (
         if (hc.basic) higherWageBase += basic;
         if (hc.da) higherWageBase += da;
         if (hc.retaining) higherWageBase += retaining;
+        if (hc.hra) higherWageBase += hra;
         if (hc.conveyance) higherWageBase += conveyance;
         if (hc.washing) higherWageBase += washing;
         if (hc.attire) higherWageBase += attire;
@@ -236,15 +380,26 @@ export const calculatePayroll = (
 
         higherWageBase = Math.round(higherWageBase);
 
-        // As per Example 6: "Higher Wages (Higher wages even though the code wages is above (a))"
-        // This implies we stick to the Actual Wage (Higher Base) even if Code Wage is higher, 
-        // provided we are in "Higher Contribution" mode which assumes paying on actuals.
-        // And as per Ex 2, 4, 8: We pay on Actuals if > Ceiling.
+        const hcCeiling = Math.round((config.epfCeiling || 15000) * factor);
 
-        basePFWage = higherWageBase;
+        if (higherWageBase < hcCeiling) {
+            let baseVal = higherWageBase;
+            if (grossEarnings > hcCeiling) {
+                baseVal = hcCeiling;
+            }
 
-        // Override isCode88 flag because we are manually forcing the wage base
-        isCode88 = false;
+            if (config.pfEsiCalculationBasis === 'OriginalWages') {
+                basePFWage = baseVal;
+                isCode88 = false;
+            } else {
+                const codeBasisCapped = Math.min(codeWage, hcCeiling);
+                basePFWage = Math.max(baseVal, codeBasisCapped);
+                isCode88 = (basePFWage === codeBasisCapped && wageD > 0);
+            }
+        } else {
+            basePFWage = higherWageBase;
+            isCode88 = false;
+        }
 
     } else {
         // Logic for "Higher Contribution = No" (Examples 1, 3, 5, 7)
@@ -323,20 +478,25 @@ export const calculatePayroll = (
 
         let K5_EPSWage = 0;
         // EPS Logic
-        if (A5 && C5 === 'Higher' && D5 === 'Higher' && E5 && isPre2014) {
-            K5_EPSWage = J5_EPFWage;
-        } else if (!A5 && isPost2014 && basePFWage > config.epfCeiling) {
+        const isGlobalHigherContribBoth = config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer';
+        const isEmployerHigher = D5 === 'Higher' || isGlobalHigherContribBoth;
+        
+        // Employee must meet all these conditions for EPS wages to go above ceiling
+        const isEligibleForHigherEPS = 
+            employee.isEPSEligible === 'Yes' &&
+            A5 === true &&
+            C5 === 'Higher' &&
+            isEmployerHigher &&
+            E5 === true &&
+            isPre2014;
+
+        if (!A5 && isPost2014 && basePFWage > config.epfCeiling) {
             K5_EPSWage = 0; // No EPS for new members > 15k
+        } else if (isEligibleForHigherEPS) {
+            K5_EPSWage = J5_EPFWage; // EPS equals EPF wages
         } else {
-            if (J5_EPFWage > config.epfCeiling) {
-                // Cap EPS at Ceiling if not explicitly eligible for Higher EPS
-                if (D5 === 'Regular') K5_EPSWage = config.epfCeiling;
-                else if (!E5) K5_EPSWage = config.epfCeiling;
-                else if (!A5) K5_EPSWage = config.epfCeiling;
-                else K5_EPSWage = J5_EPFWage;
-            } else {
-                K5_EPSWage = J5_EPFWage;
-            }
+            // Otherwise, cap EPS at Ceiling
+            K5_EPSWage = Math.min(J5_EPFWage, config.epfCeiling);
         }
 
         // Employee Share Calculation
@@ -370,8 +530,8 @@ export const calculatePayroll = (
             epfEmployer = totalLiability - epsEmployer;
         }
 
-        // If employee is 60+ OR (58-60 and WithoutEPS opted), then EPS = 0 and entire Employer share goes to EPF
-        const isWithoutEPS = isAge60OrAbove || (isAge58To60 && employee.deferredPensionOption === 'WithoutEPS');
+        // If employee is 60+ OR (58-60 and WithoutEPS opted) OR NOT EPS Eligible, then EPS = 0 and entire Employer share goes to EPF
+        const isWithoutEPS = isAge60OrAbove || (isAge58To60 && employee.deferredPensionOption === 'WithoutEPS') || employee.isEPSEligible === 'No';
         if (isWithoutEPS) {
             const totalER = epfEmployer + epsEmployer;
             epfEmployer = totalER;
@@ -390,49 +550,19 @@ export const calculatePayroll = (
     let esiEmployee = 0;
     let esiEmployer = 0;
     let isESICodeWagesUsed = false;
-    let esiRemark = exitRemark || '';
+    let esiRemark = exitRemark || baseESIRemark || '';
 
     if (config.enableESI !== false && !employee.isESIExempt) {
-        // ESI Wage Base according to selected Basis
         const esiWageBase = esiStandardBasisWage;
 
         if (config.pfEsiCalculationBasis === 'LabourCode' && wageD > 0) {
             isESICodeWagesUsed = true;
         }
 
-        // Determine if Excluded from Coverage
-        // Step 1: Check if Basic+DA+Retaining > ESI Ceiling
-        // Step 2: Otherwise Check if Code Wages (esiWageBase) > ESI Ceiling
-        let isAboveCeiling = false;
-
-        if (wageA > config.esiCeiling) {
-            isAboveCeiling = true;
-        } else if (esiWageBase > config.esiCeiling) {
-            isAboveCeiling = true;
-        }
-
-        if (isAboveCeiling) {
-            // Under both steps check if Employee is going out of coverage
-            const isStartOfPeriod = month === 'April' || month === 'October';
-
-            const periodStart = new Date(year, monthIdx, 1);
-            periodStart.setHours(0, 0, 0, 0);
-
-            const empDOJ = new Date(employee.doj);
-            empDOJ.setHours(0, 0, 0, 0);
-            const isNewJoinee = empDOJ >= periodStart;
-
-            if (isStartOfPeriod || isNewJoinee) {
-                esiEmployee = 0;
-                esiEmployer = 0;
-                esiRemark = 'IP is out of coverage (Salary > Ceiling)';
-                isESICodeWagesUsed = false;
-            } else {
-                // Continued Coverage
-                esiEmployee = Math.round(esiWageBase * config.esiEmployeeRate);
-                esiEmployer = Math.round(esiWageBase * config.esiEmployerRate);
-                esiRemark = 'Continued Coverage (Mid-Period)';
-            }
+        if (baseESIRemark === 'IP is out of coverage (Salary > Ceiling)') {
+            esiEmployee = 0;
+            esiEmployer = 0;
+            isESICodeWagesUsed = false;
         } else {
             esiEmployee = Math.round(esiWageBase * config.esiEmployeeRate);
             esiEmployer = Math.round(esiWageBase * config.esiEmployerRate);

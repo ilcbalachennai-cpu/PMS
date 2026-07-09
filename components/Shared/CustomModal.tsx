@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { X, CheckCircle2, AlertCircle, Info, AlertTriangle, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info, AlertTriangle, Loader2 } from 'lucide-react';
 
 export type ModalType = 'success' | 'error' | 'info' | 'warning' | 'confirm' | 'danger' | 'loading';
 
@@ -204,16 +204,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     </div>
                 )}
 
-                {(type !== 'confirm' && type !== 'danger' && type !== 'loading') && (
-                    <button
-                        onClick={onClose}
-                        className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors"
-                        title="Close"
-                        aria-label="Close"
-                    >
-                        <X size={18} />
-                    </button>
-                )}
+
             </div>
         </div>
     );

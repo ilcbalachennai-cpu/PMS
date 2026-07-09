@@ -302,7 +302,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   // --- V03.01.02: SMART GATE INITIALIZATION ---
   // Start with the selection gate closed to directly load the Dashboard of the active company
-  const [isCompanyGateOpen, setIsCompanyGateOpen] = useState(false);
+  const [isCompanyGateOpen, setIsCompanyGateOpenState] = useState(() => {
+    const hasSessionUser = sessionStorage.getItem('app_session_user') !== null;
+    const isCompanyLoaded = sessionStorage.getItem('app_is_company_loaded') === 'true';
+    return hasSessionUser && !isCompanyLoaded;
+  });
+
+  const setIsCompanyGateOpen = useCallback((isOpen: boolean) => {
+    setIsCompanyGateOpenState(isOpen);
+    if (isOpen) {
+      sessionStorage.removeItem('app_is_company_loaded');
+    } else {
+      sessionStorage.setItem('app_is_company_loaded', 'true');
+    }
+  }, []);
 
   // --- V03.01.07: Hover Dropdown States ---
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
@@ -848,12 +861,12 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     };
   }, [connStatus.isOnline, verifyLicense]);
 
-  const safeNavigate = (view: View, tab?: string) => {
+  const safeNavigate = (view: View, tab?: string, bypassDirtyCheck = false) => {
     const latestYear = availableFinancialYears.length > 0 
       ? availableFinancialYears[availableFinancialYears.length - 1] 
       : activeFinancialYear;
 
-    if (activeView === View.Settings && isSettingsDirty && view !== View.Settings) {
+    if (activeView === View.Settings && isSettingsDirty && view !== View.Settings && !bypassDirtyCheck) {
       showAlert(
         'confirm',
         'Unsaved Configuration',
@@ -1293,8 +1306,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const handleUpdateLogo = (url: string) => { setLogoUrl(url); safeSave('app_logo', url); };
 
   const handleAddEmployee = (newEmp: Employee) => {
-    if (employees.length >= dataSizeLimit) {
-      showAlert('warning', 'Employee Limit Reached', `Your current license/trial is limited to ${dataSizeLimit} employees. Please upgrade your license to add more.`);
+    const effectiveDataSizeLimit = companyProfile?.allocatedDataSize || dataSizeLimit;
+    if (employees.length >= effectiveDataSizeLimit) {
+      showAlert('warning', 'Employee Limit Reached', `Your company is limited to ${effectiveDataSizeLimit} employees. Please upgrade or reallocate data size to add more.`);
       return;
     }
 
@@ -1344,7 +1358,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const handleBulkAddEmployees = (newEmps: Employee[]) => {
     const currentCount = employees.length;
-    const remainingSpace = dataSizeLimit - currentCount;
+    const effectiveDataSizeLimit = companyProfile?.allocatedDataSize || dataSizeLimit;
+    const remainingSpace = effectiveDataSizeLimit - currentCount;
     if (remainingSpace <= 0) { showAlert('warning', 'Employee Limit reached', "Cannot import more employees. Limit reached."); return; }
     const availableEmps = newEmps.slice(0, remainingSpace);
     if (availableEmps.length < newEmps.length) { showAlert('info', 'Partial Import', `Only ${availableEmps.length} out of ${newEmps.length} employees imported due to license limits.`); }
@@ -1546,7 +1561,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
     if (isAddingNew) {
       const newId = generateCompanyId(data.companyProfile.establishmentName);
-      const newCompany = { ...data.companyProfile, id: newId };
+      const newSignature = 'SIG-' + Math.random().toString(36).substring(2, 15) + '-' + Date.now().toString(36);
+      const newCompany = { ...data.companyProfile, id: newId, companySignature: newSignature };
       
       // CRITICAL: Update visibility flags BEFORE calling addCompany to prevent 
       // redundant Registration mount during the ensuing re-render/context switch
@@ -1563,8 +1579,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     
     if (profileToSave.id === 'default') {
       const firstId = generateCompanyId(profileToSave.establishmentName);
+      const firstSignature = 'SIG-' + Math.random().toString(36).substring(2, 15) + '-' + Date.now().toString(36);
       
       profileToSave.id = firstId;
+      profileToSave.companySignature = firstSignature;
       localStorage.setItem('app_active_company_id', firstId);
       localStorage.setItem('app_companies', JSON.stringify([profileToSave]));
       
@@ -1775,7 +1793,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     companyProfile.street?.trim() &&
     companyProfile.city?.trim() &&
     companyProfile.state?.trim() &&
-    companyProfile.pincode?.trim()
+    companyProfile.pincode?.trim() &&
+    (companyProfile.allocatedDataSize || 0) > 0
   );
   const isNavLocked = (employees.length === 0 && companies.length <= 1) || !isCompanyProfileComplete;
 
@@ -2121,7 +2140,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                           <div className="flex items-center gap-2">
                             {(() => {
                               const emps = localStorage.getItem(`app_employees_${c.id}`);
-                              const hasEmployees = (() => { try { return emps && JSON.parse(emps).length > 0; } catch { return false; } })();
+                              const hasEmployees = (c as any).hasEmployees || (() => { try { return emps && JSON.parse(emps).length > 0; } catch { return false; } })();
                               
                               const profileRaw = localStorage.getItem(`app_company_profile_${c.id}`);
                               const profile = (() => { try { return profileRaw ? JSON.parse(profileRaw) : null; } catch { return null; } })();
@@ -2131,23 +2150,31 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                               
                               let status = 'INITIALIZED';
                               let colorClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+                              let tooltipText = '';
                               
                               if (!hasPAN && !hasEmployees) {
                                 status = 'INITIALIZED';
                                 colorClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+                                tooltipText = 'New company initialized (Profile details and employees blank)';
                               } else if (hasPAN && !hasEmployees) {
                                 status = 'REGISTERED';
                                 colorClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+                                tooltipText = 'Profile partially filled (PAN exists but no employees enrolled)';
                               } else if (hasPAN && hasEmployees) {
                                 status = 'REGISTERED';
                                 colorClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                                tooltipText = 'Fully updated with all the info in company profile';
                               } else if (!hasPAN && hasEmployees) {
                                 status = 'UNREGISTERED';
                                 colorClass = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+                                tooltipText = 'Unregistered / blank in profile (Missing PAN details but has employees)';
                               }
                               
                               return (
-                                <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border transition-colors ${colorClass}`}>
+                                <span 
+                                  className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border transition-colors pointer-events-auto cursor-help ${colorClass}`}
+                                  title={tooltipText}
+                                >
                                   {status}
                                 </span>
                               );
@@ -2192,10 +2219,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                       onClick={() => {
                         const license = getStoredLicense();
                         const limit = license?.companyLimit || 1;
-                        const lifetimeCount = parseInt(localStorage.getItem('app_lifetime_company_creations') || '0');
                         
-                        if (lifetimeCount >= limit) {
-                          showAlert?.('danger', 'License Limit Reached', `Your current license allows a maximum of ${limit} company creation(s). You have reached your lifetime limit and cannot create any more companies. Upgrade your license to create more.`);
+                        if (companies.length >= limit) {
+                          showAlert?.('danger', 'License Limit Reached', `Your current license allows a maximum of ${limit} companies. You have reached your limit and cannot create any more companies. Upgrade your license to create more.`);
                           return;
                         }
 
@@ -2575,6 +2601,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                       <div className="p-3 bg-[#0f172a] border-t border-slate-800">
                         <button 
                           onClick={() => {
+                            const limit = licenseInfo?.companyLimit || 1;
+                            if (companies.length >= limit) {
+                                showAlert('warning', 'Company Limit Reached', `Your license allows a maximum of ${limit} companies. You have reached your limit.`);
+                                return;
+                            }
                             setIsAddingNewCompany(true);
                             setShowRegistrationManual(true);
                           }}
@@ -2826,7 +2857,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                   </div>
                 )}
                 {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={safeNavigate} activeFinancialYear={activeFinancialYear} />}
-                {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={dataSizeLimit} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} />}
+                {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} dataSizeLimit={companyProfile?.allocatedDataSize || 0} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} onNavigate={safeNavigate} />}
                 {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} onNavigate={safeNavigate} setSettingsTab={setSettingsTab} licenseInfo={licenseInfo || undefined} hasPreviousYearData={hasPreviousYearData} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} onNavigate={safeNavigate} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
@@ -2834,7 +2865,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                 {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} activeFinancialYear={activeFinancialYear} />}
-                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} />}
+                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} onNavigate={safeNavigate} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
               {/* --- Database Password Gate Modal --- */}

@@ -126,6 +126,13 @@
             border: 1px solid var(--slate-200);
         }
 
+        .screenshot-img {
+            max-width: 100%;
+            border-radius: 8px;
+            margin: 15px 0;
+            border: 1px solid var(--slate-700);
+        }
+
         .image-caption {
             font-size: 0.85rem;
             color: var(--slate-700);
@@ -297,6 +304,7 @@
                 <br>The first step in setting up a company silo is populating the core business credentials:
                 <ul>
                     <li><em>Operational Fields</em>: Enter exact registered Name, Corporate Address, PAN, GST, EPF Registration Number, and ESIC Code.</li>
+                    <li><em>Mandatory Field Locking</em>: Fields marked with a red asterisk (<code>*</code>), including <strong>Allocated Data Size</strong>, are strictly mandatory. Core features like the Employee Master and Payroll Processor will remain <strong>securely locked</strong> until these fields are completed and saved.</li>
                     <li><em>Formatting Compliance</em>: The system converts the Company Name to ALL CAPITAL LETTERS automatically to ensure compliance with banking and statutory portal formats.</li>
                     <li><em>Downstream Impact</em>: These credentials are dynamically injected into bank-upload statements, monthly EPF ECR headers, ESI portal returns, and are printed at the header of all payslips and Dynamic Pay Sheets.</li>
                 </ul>
@@ -313,6 +321,13 @@
             </li>
             <li class="mt-large"><strong>3. License Management (Entitlements &amp; Hardware Lock)</strong>
                 <br>Displays active product keys, registration details, allowed company silos, and license expiration periods.
+                <ul>
+                    <li><em>License Company Limit</em>: Your license dictates the maximum number of independent companies (Data Silos) you can create. Once this limit is reached, you cannot register new companies. If an active company folder is moved to another machine that has exhausted its limit, it will open in <strong>Read-Only Mode</strong>.</li>
+                    <li><em>Employee Data Size Allocation</em>: Your license provides a global quota of active employees. You must distribute this quota across your companies by setting the <strong>Allocated Data Size</strong> in each Company Profile. For example, a 5000-employee license can be split into 1000 for Company A and 4000 for Company B. A company cannot exceed its allocated employee limit. <strong>If this field in the company profile is left blank, the system will block all actions within that company until the Allocated Data Size is properly updated.</strong>
+                        <br><br>
+                        <img src="assets/allocated_data_size.png" alt="Allocated Data Size Setting" class="screenshot-img">
+                    </li>
+                </ul>
                 <br><strong>The Crucial Need for Cloud Synchronization:</strong>
                 <ul>
                     <li><em>Anti-Piracy &amp; Key Validation</em>: The software utilizes a hardware-locked licensing engine. Cloud synchronization validates hardware bindings and refreshes digital signature tokens to prevent illegal copying.</li>
@@ -364,6 +379,18 @@
                     <li><em>Usage</em>: Once activated, an 'Arrears' column becomes available in the Payroll processor. You can manually input arrear amounts for specific employees, which will be seamlessly added to their gross earnings for that specific month without disrupting standard wage structures.</li>
                 </ul>
             </li>
+        </ul>
+
+        <h3>4.2 Dynamic Pay Sheet & Custom Allowances</h3>
+        <p>Under the <strong>Statutory Rules</strong> tab in the Settings Portal, you can heavily customize the appearance of the Payroll outputs:</p>
+        <ul>
+            <li><strong>Custom Allowance Labels</strong>: 
+                <ul>
+                    <li><em>Functionality</em>: Allows you to rename the default "Special Allowance 1", "Special Allowance 2", and "Special Allowance 3" wage components to match your company's actual terminology (e.g., renaming Special Allowance 1 to "Tele. Reimbursement" or "Books & Periodicals").</li>
+                    <li><em>Impact</em>: These custom names dynamically apply across the entire application. Once saved, they will instantly reflect on the front-end Pay Breakup table, the Dynamic Pay Sheet selection buttons, the generated Excel reports, and the printed PDF Pay Slips.</li>
+                </ul>
+            </li>
+            <li><strong>Dynamic Column Selection</strong>: You can toggle exactly which earning and deduction columns should be visible on the final Pay Sheet and Pay Slips. The selection interface will automatically display your Custom Allowance Labels for easier identification.</li>
         </ul>
 
         <h2>5. Employee Management</h2>

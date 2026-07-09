@@ -130,6 +130,8 @@ export interface StatutoryConfig {
 
 export interface CompanyProfile {
   id: string;
+  companySignature?: string;
+  isReadOnly?: boolean;
   establishmentName: string;
   tradeName: string;
   cin: string; // Corporate ID
@@ -183,6 +185,12 @@ export interface CompanyProfile {
   senderName?: string;
   senderEmail?: string;
   securityPin?: string; // PIN for payroll freeze operations
+  allocatedDataSize?: number; // Quota of employees for this specific company
+
+  // Custom Allowance Labels
+  specialAllowance1Name?: string;
+  specialAllowance2Name?: string;
+  specialAllowance3Name?: string;
 }
 
 export interface Employee {
@@ -244,6 +252,9 @@ export interface Employee {
 
   isPFExempt: boolean;
   isESIExempt: boolean;
+  isEPSEligible?: 'Yes' | 'No' | '';
+  isPTExempt?: boolean;
+  isLWFExempt?: boolean;
   // Employee Level PF Options
   employeeVPFRate: number; // Voluntary contribution above base 12%
   isPFHigherWages: boolean; // Contribute on full basic (no ceiling)

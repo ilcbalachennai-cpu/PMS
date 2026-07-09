@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Save, RefreshCw, Lock, FileText, Eye, AlertCircle, AlertTriangle, X, CheckCircle, Download, Scale, HandCoins, Users, Calculator, Settings } from 'lucide-react';
+import { Save, RefreshCw, Lock, FileText, Eye, AlertCircle, AlertTriangle, X, CheckCircle, Download, Scale, HandCoins, Users, Calculator, Settings, Search } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, FineRecord, OTRecord, ArrearBatch, View, SettingsTab, LicenseData } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
-import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName, openSavedReport } from '../services/reportService';
-import { formatIndianNumber } from '../utils/formatters';
+import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName, openSavedReport, appendSummaryRowToExcelData } from '../services/reportService';
+import { formatIndianNumber, didConfigCalculationFieldsChange, didEmployeePayFieldsChange } from '../utils/formatters';
 import { ModalType } from './Shared/CustomModal';
 import { getActivePaySheetColumns } from '../constants';
 
@@ -33,6 +33,12 @@ interface PayrollProcessorProps {
     onNavigate?: (view: View) => void;
     setSettingsTab?: (tab: SettingsTab) => void;
     licenseInfo?: LicenseData;
+    attendanceJustSaved?: boolean;
+    advanceJustSaved?: boolean;
+    fineJustSaved?: boolean;
+    otJustSaved?: boolean;
+    onSwitchTab?: (tab: 'attendance' | 'ledgers' | 'fines' | 'overtime' | 'arrears' | 'payroll') => void;
+    setEmployees?: React.Dispatch<React.SetStateAction<Employee[]>>;
 }
 
 const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
@@ -52,7 +58,13 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     showAlert,
     onNavigate,
     setSettingsTab,
-    licenseInfo
+    licenseInfo,
+    attendanceJustSaved,
+    advanceJustSaved,
+    fineJustSaved,
+    otJustSaved,
+    onSwitchTab,
+    setEmployees
 }) => {
     const [results, setResults] = useState<PayrollResult[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -60,7 +72,13 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     const [previewRecord, setPreviewRecord] = useState<PayrollResult | null>(null);
     const [masterDataChanged, setMasterDataChanged] = useState(false);
     const [dataIsStale, setDataIsStale] = useState(false);
-    const initialEmployeesRef = React.useRef(employees);
+    const [searchTerm, setSearchTerm] = useState('');
+
+    const hasAnyUnsavedTab =
+        attendanceJustSaved === false ||
+        advanceJustSaved === false ||
+        fineJustSaved === false ||
+        (config.enableOT && otJustSaved === false);
 
     const handleNavigateToSettings = () => {
         localStorage.setItem('settings_initial_tab', SettingsTab.Statutory);
@@ -139,7 +157,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 setIsSaved(false);
             }
         }
-    }, [month, year, savedRecords]);
+
+    }, [month, year, savedRecords, companyProfile.id, config]);
 
     useEffect(() => {
         const tempKey = `app_temp_payroll_${companyProfile.id}_${month}_${year}`;
@@ -148,29 +167,86 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         }
     }, [results, isSaved, month, year]);
 
-    useEffect(() => {
-        // Detect if master data changed since results were loaded/calculated
-        if (results.length > 0 && !isLocked && initialEmployeesRef.current !== employees) {
-            setMasterDataChanged(true);
-            setIsSaved(false);
+    const initialEmployees = useMemo(() => {
+        const employeesKey = `app_calc_employees_${companyProfile.id}_${month}_${year}`;
+        const stored = localStorage.getItem(employeesKey);
+        if (stored) {
+            try {
+                return JSON.parse(stored) as Employee[];
+            } catch (e) {
+                return null;
+            }
         }
-        initialEmployeesRef.current = employees;
-    }, [employees, results.length, isLocked]);
+        return null;
+    }, [companyProfile.id, month, year, results.length]);
+
+    useEffect(() => {
+        if (results.length > 0 && !isLocked) {
+            if (initialEmployees === null) {
+                setMasterDataChanged(true);
+                setIsSaved(false);
+            } else {
+                let payAffected = false;
+                for (const emp of activeEmployees) {
+                    const original = initialEmployees.find(e => e.id === emp.id);
+                    if (!original || didEmployeePayFieldsChange(original, emp)) {
+                        payAffected = true;
+                        break;
+                    }
+                }
+                if (!payAffected) {
+                    for (const orig of initialEmployees) {
+                        const current = activeEmployees.find(e => e.id === orig.id);
+                        if (!current) {
+                            payAffected = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (payAffected) {
+                    setMasterDataChanged(true);
+                    setIsSaved(false);
+                } else {
+                    setMasterDataChanged(false);
+                }
+            }
+        } else {
+            setMasterDataChanged(false);
+        }
+    }, [activeEmployees, initialEmployees, results.length, isLocked]);
 
     const prevAttendancesRef = React.useRef(attendances);
     const prevAdvancesRef = React.useRef(advanceLedgers);
     const prevFinesRef = React.useRef(fines);
     const prevOtRecordsRef = React.useRef(otRecords);
     const prevArrearHistoryRef = React.useRef(arrearHistory);
+    const prevConfigRef = React.useRef(config);
 
     useEffect(() => {
         if (results.length > 0 && !isLocked) {
+            const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
+            const storedConfig = localStorage.getItem(configKey);
+
+            let storedConfigObj = null;
+            if (storedConfig) {
+                try {
+                    storedConfigObj = JSON.parse(storedConfig);
+                } catch (e) {
+                    storedConfigObj = null;
+                }
+            }
+            const configChanged =
+                didConfigCalculationFieldsChange(prevConfigRef.current, config) ||
+                (storedConfigObj ? didConfigCalculationFieldsChange(storedConfigObj, config) : false);
+
             const dataChanged =
                 prevAttendancesRef.current !== attendances ||
                 prevAdvancesRef.current !== advanceLedgers ||
                 prevFinesRef.current !== fines ||
                 prevOtRecordsRef.current !== otRecords ||
-                prevArrearHistoryRef.current !== arrearHistory;
+                prevArrearHistoryRef.current !== arrearHistory ||
+                configChanged;
 
             if (dataChanged) {
                 setDataIsStale(true);
@@ -181,7 +257,10 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         prevFinesRef.current = fines;
         prevOtRecordsRef.current = otRecords;
         prevArrearHistoryRef.current = arrearHistory;
-    }, [attendances, advanceLedgers, fines, otRecords, arrearHistory, results.length, isLocked]);
+        prevConfigRef.current = config;
+    }, [attendances, advanceLedgers, fines, otRecords, arrearHistory, config, results.length, isLocked, companyProfile.id, month, year]);
+
+
 
     const checkAgeMaturity = () => {
         const unconfigured58: Employee[] = [];
@@ -267,7 +346,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         return true;
     };
 
-    const executeCalculation = (restrictedMode = false) => {
+    const executeCalculation = (restrictedMode = false, silent = false) => {
         setIsProcessing(true);
         setTimeout(() => {
             try {
@@ -279,12 +358,18 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                     const shouldRestrict = restrictedMode && complianceConflicts.some(c => c.employeeId === emp.id);
                     const otRecord = otRecords.find(r => r.employeeId === emp.id && r.month === month && r.year === year) || null;
 
-                    return calculatePayroll(emp, config, attendance, leave, advance, month, year, { restrictTo50Percent: shouldRestrict }, fines, otRecord);
+                    return calculatePayroll(emp, config, attendance, leave, advance, month, year, { restrictTo50Percent: shouldRestrict }, fines, otRecord, 0, savedRecords);
                 });
+                const isRecalc = results.length > 0;
                 setResults(calculatedResults);
                 setIsSaved(false);
                 setMasterDataChanged(false); // Clear the warning on successful calculation
                 setDataIsStale(false); // Reset stale state on successful calculation
+
+                const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
+                localStorage.setItem(configKey, JSON.stringify(config));
+                const employeesKey = `app_calc_employees_${companyProfile.id}_${month}_${year}`;
+                localStorage.setItem(employeesKey, JSON.stringify(activeEmployees));
 
                 // Update refs to current values to prevent immediate stale state trigger
                 prevAttendancesRef.current = attendances;
@@ -292,19 +377,77 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 prevFinesRef.current = fines;
                 prevOtRecordsRef.current = otRecords;
                 prevArrearHistoryRef.current = arrearHistory;
+                prevConfigRef.current = config;
 
                 setComplianceConflicts([]); // Clear conflicts after resolution
                 setShowComplianceModal(false);
+
+                if (!silent) {
+                    setModalState({
+                        isOpen: true,
+                        type: 'success',
+                        title: isRecalc ? 'Recalculation Applied Successfully' : 'Payroll Calculation Completed',
+                        message: isRecalc 
+                            ? `Pay data for ${month} ${year} has been updated with the latest inputs and statutory configurations.`
+                            : `Payroll calculation for ${month} ${year} completed successfully.`
+                    });
+                }
             } catch (e) {
                 console.error(e);
             } finally {
                 setIsProcessing(false);
             }
-        }, 800);
+        }, silent ? 0 : 800);
     };
 
     const handleCalculate = () => {
-        if (isLocked) return;
+        if (isLocked || companyProfile.isReadOnly) return;
+
+        if (hasAnyUnsavedTab) {
+            const unsavedTabs: { name: string; key: 'attendance' | 'ledgers' | 'fines' | 'overtime' }[] = [];
+            if (attendanceJustSaved === false) unsavedTabs.push({ name: '1. Attendance', key: 'attendance' });
+            if (advanceJustSaved === false) unsavedTabs.push({ name: '2. Advances', key: 'ledgers' });
+            if (fineJustSaved === false) unsavedTabs.push({ name: '3. Tax & Fines', key: 'fines' });
+            if (config.enableOT && otJustSaved === false) unsavedTabs.push({ name: '4. Overtime', key: 'overtime' });
+
+            setModalState({
+                isOpen: true,
+                type: 'error',
+                title: 'Unsaved Tab Data Warning',
+                message: (
+                    <div className="text-left space-y-3">
+                        <p className="text-xs font-bold text-amber-400 uppercase tracking-tight">
+                            The following module tab(s) are in an unsaved condition:
+                        </p>
+                        <ul className="bg-slate-900/60 p-3 rounded-lg border border-slate-700/80 space-y-2 shadow-inner">
+                            {unsavedTabs.map(tab => (
+                                <li key={tab.key} className="flex items-center justify-between text-xs font-bold text-white py-1.5 px-2.5 rounded bg-slate-800/40 border border-slate-700/50">
+                                    <span className="flex items-center gap-2">
+                                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                                        {tab.name}
+                                    </span>
+                                    {onSwitchTab && (
+                                        <button
+                                            onClick={() => {
+                                                setModalState(prev => ({ ...prev, isOpen: false }));
+                                                onSwitchTab(tab.key);
+                                            }}
+                                            className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded font-bold transition-all shadow font-mono uppercase"
+                                        >
+                                            Go to Tab →
+                                        </button>
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                        <p className="text-[11px] text-slate-300 font-medium leading-relaxed">
+                            Please navigate to the indicated tab(s) and click <strong className="text-emerald-400">'Save'</strong> to save your changes before applying Calculate / Recalculate.
+                        </p>
+                    </div>
+                )
+            });
+            return;
+        }
 
         // --- SEQUENTIAL PROCESSING CHECK REMOVED AS PER USER REQUEST ---
         // (Previously added sequence enforcement was too restrictive)
@@ -356,19 +499,51 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         setIsProcessing(true);
         // Initial Run - Standard Calculation
         setTimeout(() => {
-            const initialResults = activeEmployees.map(emp => {
+            // Check for LOP employees who have returned to work (attendance > 0)
+            const employeesToRestore = activeEmployees.filter(emp => {
+                if ((emp.leavingReason || '').trim().toUpperCase() === 'ON LOP') {
+                    const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year);
+                    if (att && ((att.presentDays || 0) + (att.earnedLeave || 0) + (att.casualLeave || 0) + (att.sickLeave || 0) > 0)) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+
+            if (employeesToRestore.length > 0) {
+                const restoredIds = new Set(employeesToRestore.map(e => e.id));
+                // Update the master employee list to permanently clear LOP status
+                if (setEmployees) {
+                    setEmployees(prev => prev.map(emp => {
+                        if (restoredIds.has(emp.id)) {
+                            return { ...emp, leavingReason: '' };
+                        }
+                        return emp;
+                    }));
+                }
+            }
+
+            // Map over activeEmployees, overriding properties for restored ones so the current run is accurate
+            const processedActiveEmployees = activeEmployees.map(emp => {
+                if (employeesToRestore.some(e => e.id === emp.id)) {
+                    return { ...emp, leavingReason: '' };
+                }
+                return emp;
+            });
+
+            const initialResults = processedActiveEmployees.map(emp => {
                 const attendance = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { employeeId: emp.id, month, year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
                 const leave = leaveLedgers.find(l => l.employeeId === emp.id) || { employeeId: emp.id, el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 }, sl: { eligible: 0, availed: 0, balance: 0 }, cl: { availed: 0, accumulation: 0, balance: 0 } };
                 const advance = advanceLedgers.find(a => a.employeeId === emp.id) || { employeeId: emp.id, opening: 0, totalAdvance: 0, monthlyInstallment: 0, paidAmount: 0, balance: 0, emiCount: 0, manualPayment: 0, recovery: 0 };
                 const otRecord = otRecords.find(r => r.employeeId === emp.id && r.month === month && r.year === year) || null;
 
-                return calculatePayroll(emp, config, attendance, leave, advance, month, year, { restrictTo50Percent: false }, fines, otRecord);
+                return calculatePayroll(emp, config, attendance, leave, advance, month, year, { restrictTo50Percent: false }, fines, otRecord, 0, savedRecords);
             });
 
             // CHECK CONDITION B: Advance > 50% of Code_Gross_Wages
             const conflicts: any[] = [];
             initialResults.forEach(r => {
-                const emp = activeEmployees.find(e => e.id === r.employeeId);
+                const emp = processedActiveEmployees.find(e => e.id === r.employeeId);
                 if (!emp) return;
 
                 const statDed = (r.deductions.epf || 0) + (r.deductions.vpf || 0) + (r.deductions.esi || 0) + (r.deductions.pt || 0) + (r.deductions.it || 0) + (r.deductions.lwf || 0);
@@ -392,10 +567,26 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 setShowComplianceModal(true);
                 setIsProcessing(false);
             } else {
+                const isRecalc = results.length > 0;
                 setResults(initialResults);
                 setIsSaved(false);
                 setMasterDataChanged(false); // Clear the warning on successful calculation
                 setDataIsStale(false); // Reset stale state on successful calculation
+
+                // --- NEW: Trigger Activation if not already activated ---
+                if (companyProfile.companySignature && (window as any).electronAPI?.getActivatedSilos && (window as any).electronAPI?.registerActivatedSilo) {
+                    (window as any).electronAPI.getActivatedSilos().then((res: any) => {
+                        if (res?.success && !res.silos.includes(companyProfile.companySignature!)) {
+                            (window as any).electronAPI.registerActivatedSilo(companyProfile.companySignature!);
+                            console.log(`[Activation] Registered silo signature: ${companyProfile.companySignature}`);
+                        }
+                    });
+                }
+
+                const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
+                localStorage.setItem(configKey, JSON.stringify(config));
+                const employeesKey = `app_calc_employees_${companyProfile.id}_${month}_${year}`;
+                localStorage.setItem(employeesKey, JSON.stringify(activeEmployees));
 
                 // Update refs to current values to prevent immediate stale state trigger
                 prevAttendancesRef.current = attendances;
@@ -403,8 +594,18 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 prevFinesRef.current = fines;
                 prevOtRecordsRef.current = otRecords;
                 prevArrearHistoryRef.current = arrearHistory;
+                prevConfigRef.current = config;
 
                 setIsProcessing(false);
+
+                setModalState({
+                    isOpen: true,
+                    type: 'success',
+                    title: isRecalc ? 'Recalculation Applied Successfully' : 'Payroll Calculation Completed',
+                    message: isRecalc 
+                        ? `Pay data for ${month} ${year} has been updated with the latest inputs and statutory configurations.`
+                        : `Payroll calculation for ${month} ${year} completed successfully.`
+                });
             }
         }, 500);
     };
@@ -415,6 +616,11 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         // Clear temp storage for this period as we are committing it
         const tempKey = `app_temp_payroll_${companyProfile.id}_${month}_${year}`;
         localStorage.removeItem(tempKey);
+
+        const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
+        localStorage.setItem(configKey, JSON.stringify(config));
+        const employeesKey = `app_calc_employees_${companyProfile.id}_${month}_${year}`;
+        localStorage.setItem(employeesKey, JSON.stringify(activeEmployees));
 
         const otherRecords = savedRecords.filter(r => !(r.month === month && r.year === year));
         const newRecords = results.map(r => ({ ...r, status: 'Draft' as const }));
@@ -446,10 +652,10 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 'Conveyance': r?.earnings?.conveyance || 0,
                 'Washing Allw': r?.earnings?.washing || 0,
                 'Attire Allw': r?.earnings?.attire || 0,
-                'Special Allw 1': r?.earnings?.special1 || 0,
-                'Special Allw 2': r?.earnings?.special2 || 0,
-                'Special Allw 3': r?.earnings?.special3 || 0,
-                'Bonus': r?.earnings?.bonus || 0,
+                [companyProfile?.specialAllowance1Name || 'Special Allw 1']: r?.earnings?.special1 || 0,
+                [companyProfile?.specialAllowance2Name || 'Special Allw 2']: r?.earnings?.special2 || 0,
+                [companyProfile?.specialAllowance3Name || 'Special Allw 3']: r?.earnings?.special3 || 0,
+
                 'OT Amount': r?.earnings?.otAmount || 0,
                 'Leave Encash': r?.earnings?.leaveEncashment || 0,
                 'Gross Earnings': r?.earnings?.total || 0,
@@ -470,11 +676,28 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 'Net Pay': r.netPay
             };
         });
-        const ws = XLSX.utils.json_to_sheet(data);
+
+        // Filter out blank columns (where all employees have 0 or '')
+        const keys = Object.keys(data[0] || {});
+        const alwaysKeep = ['Employee ID', 'Name', 'Designation', 'Department', 'Total Days', 'Paid Days', 'Basic Pay', 'Gross Earnings', 'Total Deductions', 'Net Pay'];
+        
+        keys.forEach(key => {
+            if (alwaysKeep.includes(key)) return;
+            
+            const hasData = data.some(row => row[key as keyof typeof row] !== 0 && row[key as keyof typeof row] !== '' && row[key as keyof typeof row] !== null && row[key as keyof typeof row] !== undefined);
+            
+            if (!hasData) {
+                data.forEach(row => {
+                    delete (row as any)[key];
+                });
+            }
+        });
+        const summaryData = appendSummaryRowToExcelData(data);
+        const ws = XLSX.utils.json_to_sheet(summaryData);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Draft Payroll");
         const fileName = getStandardFileName('Draft_Payroll', companyProfile, month, year);
-        const savedPath = await generateExcelWorkbook(wb, fileName);
+        const savedPath = await generateExcelWorkbook(wb, fileName, companyProfile.establishmentName);
 
         if (savedPath && showAlert) {
             showAlert(
@@ -520,6 +743,18 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     //     }), { days: 0, basic: 0, da: 0, leaveEncash: 0, others: 0, gross: 0, pf: 0, esi: 0, ptTds: 0, advance: 0, dedn: 0, net: 0 });
     // }, [results]);
 
+    const filteredResults = useMemo(() => {
+        return results.filter(r => {
+            if (isSaved && r.netPay === 0) return false;
+            if (!searchTerm.trim()) return true;
+            const term = searchTerm.toLowerCase().trim();
+            const emp = employees.find(e => e.id === r.employeeId);
+            const nameMatch = emp?.name?.toLowerCase().includes(term) || false;
+            const idMatch = r.employeeId?.toLowerCase().includes(term) || false;
+            return nameMatch || idMatch;
+        });
+    }, [results, employees, searchTerm, isSaved]);
+
     // Dynamic Columns Definition
     const activeColumns = useMemo(() => {
         return getActivePaySheetColumns(results, config);
@@ -534,7 +769,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         conveyance: { label: 'Conv', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.conveyance || 0) },
         washing: { label: 'Wash', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.washing || 0) },
         attire: { label: 'Attire', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.attire || 0) },
-        special1: { label: 'Spl 1', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special1 || 0) },
+        special1: { label: companyProfile?.specialAllowance1Name || 'Spl 1', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special1 || 0) },
         others: { 
             label: 'Others', 
             className: 'text-right text-slate-300', 
@@ -548,8 +783,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 return Math.round((r?.earnings?.total || 0) - sumOfDisplayed);
             }
         },
-        special2: { label: 'Spl 2', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special2 || 0) },
-        special3: { label: 'Spl 3', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special3 || 0) },
+        special2: { label: companyProfile?.specialAllowance2Name || 'Spl 2', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special2 || 0) },
+        special3: { label: companyProfile?.specialAllowance3Name || 'Spl 3', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special3 || 0) },
         bonus: { label: 'Bonus', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.bonus || 0) },
         leaveEncashment: { label: 'Leave', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.leaveEncashment || 0) },
         otAmount: { label: 'OT', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.otAmount || 0) },
@@ -585,7 +820,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         },
         totalDeductions: { label: 'DEDN', className: 'text-right text-red-300', value: (r: PayrollResult) => Math.round(r?.deductions?.total || 0) },
         netPay: { label: 'Net Pay', className: 'text-right text-emerald-400 font-black bg-emerald-900/10', value: (r: PayrollResult) => Math.round(r?.netPay || 0) }
-    }), [activeColumns]);
+    }), [activeColumns, companyProfile]);
 
     const isSticky = config.enableDynamicPaySheet || false;
 
@@ -625,7 +860,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         };
     }, [results, activeColumns]);
 
-    const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'others', 'bonus', 'leaveEncashment', 'otAmount', 'arrears'];
+    const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'others', 'bonus', 'leaveEncashment', 'otAmount', 'arrears', 'totalEarnings'];
     const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'it', 'lwf', 'fine', 'otherDeductions', 'totalDeductions'];
 
     const earningsCount = activeColumns.filter(c => earningsKeys.includes(c)).length;
@@ -633,13 +868,11 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
     const beforeEarningsCount = (activeColumns.includes('days') ? 1 : 0) + 1; // +1 for Employee Identity
     
-    const betweenCount = activeColumns.filter(c => c === 'totalEarnings').length;
-    
     const afterCount = activeColumns.filter(c => c === 'netPay').length + 1; // +1 for View
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
-            {masterDataChanged && results.length > 0 && !isLocked && (
+            {masterDataChanged && results.length > 0 && !isLocked && !companyProfile.isReadOnly && (
                 <div className="bg-amber-900/20 border border-amber-600/50 p-4 rounded-xl flex items-center justify-between gap-4 animate-pulse">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-amber-600 rounded-lg text-white shadow-lg shadow-amber-900/50">
@@ -647,7 +880,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                         </div>
                         <div>
                             <h3 className="text-sm font-black text-white uppercase tracking-tight">Master Data Updated</h3>
-                            <p className="text-amber-200 text-[10px] font-bold uppercase tracking-wider">Employee master records have changed (e.g. Arrear Revision). Please click "Calculate Sheet" to apply latest wages.</p>
+                            <p className="text-amber-200 text-[10px] font-bold uppercase tracking-wider">EMPLOYEE MASTER RECORDS HAVE BEEN CHANGED AFFECTING THE PAY SHEET. CLICK RECALCULATE TO APPLY THE CHANGES.</p>
                         </div>
                     </div>
                     <button onClick={() => setMasterDataChanged(false)} title="Dismiss Warning" aria-label="Dismiss Warning" className="text-amber-400 hover:text-white transition-colors"><X size={18} /></button>
@@ -667,45 +900,62 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 </div>
                 <div className="flex items-center gap-2">
                     {!isLocked ? (
-                        <>
-                            <button
-                                onClick={handleCalculate}
-                                disabled={isProcessing || !hasAnyAttendance || (results.length > 0 && !isSaved && !dataIsStale)}
-                                title={!hasAnyAttendance ? "No attendance data found for this period" : (isSaved || dataIsStale ? "Recalculate Payroll" : "Calculate Payroll")}
-                                aria-label="Calculate Payroll"
-                                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[12px] rounded-lg transition-all shadow-lg shadow-blue-900/20 disabled:opacity-70 disabled:bg-slate-700 disabled:cursor-not-allowed"
-                            >
-                                {isProcessing ? (
-                                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
-                                ) : (
-                                    !hasAnyAttendance ? <AlertCircle size={15} className="text-amber-400 font-bold" /> : <Calculator size={15} />
-                                )}
-                                {!hasAnyAttendance ? 'No Attendance Data' : (isSaved || dataIsStale ? 'ReCalculate Pay' : 'Calculate Pay')}
-                            </button>
-                            {results.length > 0 && (
+                        (() => {
+                            const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
+                            const storedConfig = localStorage.getItem(configKey);
+                            const isConfigStale = results.length > 0 && (!storedConfig || (() => {
+                                try {
+                                    return didConfigCalculationFieldsChange(JSON.parse(storedConfig), config);
+                                } catch (e) {
+                                    return false;
+                                }
+                            })());
+                            const hasPendingChanges = hasAnyUnsavedTab || dataIsStale || masterDataChanged || isConfigStale;
+                            const isCalculateDisabled = isProcessing || !hasAnyAttendance || (results.length > 0 && !hasPendingChanges) || companyProfile.isReadOnly;
+                            const isSaveDraftDisabled = isSaved || !hasAnyAttendance || hasPendingChanges || results.length === 0 || companyProfile.isReadOnly;
+
+                            return (
                                 <>
                                     <button
-                                        onClick={handleSaveDraft}
-                                        disabled={isSaved || !hasAnyAttendance || dataIsStale}
-                                        title={!hasAnyAttendance ? "Cannot save without attendance data" : (isSaved ? "Already Saved as Draft" : "Save as Draft")}
-                                        aria-label={isSaved ? "Already Saved as Draft" : "Save as Draft"}
-                                        className={`flex items-center gap-1.5 px-4 py-2 font-bold text-[12px] rounded-lg shadow-lg transition-all ${isSaved || !hasAnyAttendance || dataIsStale ? 'bg-emerald-900/20 text-emerald-500/50 border border-emerald-900/30 cursor-not-allowed grayscale-[0.5]' : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20'}`}
+                                        onClick={handleCalculate}
+                                        disabled={isCalculateDisabled}
+                                        title={!hasAnyAttendance ? "No attendance data found for this period" : (results.length > 0 ? (isCalculateDisabled ? "Recalculation in inactive mode until new changes or modifications are initiated" : "Recalculate Payroll with updated changes") : "Calculate Payroll")}
+                                        aria-label="Calculate Payroll"
+                                        className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[12px] rounded-lg transition-all shadow-lg shadow-blue-900/20 disabled:opacity-70 disabled:bg-slate-700 disabled:cursor-not-allowed"
                                     >
-                                        <Save size={15} />
-                                        {dataIsStale ? 'Save Draft' : (isSaved ? 'Draft Saved' : 'Save Draft')}
+                                        {isProcessing ? (
+                                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
+                                        ) : (
+                                            !hasAnyAttendance ? <AlertCircle size={15} className="text-amber-400 font-bold" /> : (companyProfile.isReadOnly ? <AlertCircle size={15} className="text-red-400" /> : <Calculator size={15} />)
+                                        )}
+                                        {companyProfile.isReadOnly ? 'Read-Only Mode' : (!hasAnyAttendance ? 'No Attendance Data' : (results.length > 0 ? 'ReCalculate Pay' : 'Calculate Pay'))}
                                     </button>
-                                    <button
-                                        onClick={handleExportDraft}
-                                        disabled={!hasAnyAttendance}
-                                        className={`p-2 rounded-lg border transition-all shadow-lg font-black text-[12px] ${!hasAnyAttendance ? 'bg-slate-800/50 text-slate-600 border-slate-800 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'}`}
-                                        title={!hasAnyAttendance ? "No data to export" : "Export to Excel"}
-                                        aria-label="Export to Excel"
-                                    >
-                                        <Download size={14} />
-                                    </button>
+                                    {results.length > 0 && (
+                                        <>
+                                            <button
+                                                onClick={handleSaveDraft}
+                                                disabled={isSaveDraftDisabled}
+                                                title={!hasAnyAttendance ? "Cannot save without attendance data" : (hasPendingChanges ? "New edits or statutory rule changes detected. Please Recalculate before saving draft." : (isSaved ? "Draft Already Saved" : "Save as Draft"))}
+                                                aria-label={isSaved ? "Draft Already Saved" : "Save as Draft"}
+                                                className={`flex items-center gap-1.5 px-4 py-2 font-bold text-[12px] rounded-lg shadow-lg transition-all ${isSaveDraftDisabled ? 'bg-emerald-900/20 text-emerald-500/50 border border-emerald-900/30 cursor-not-allowed grayscale-[0.5]' : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20'}`}
+                                            >
+                                                <Save size={15} />
+                                                {isSaved ? 'Draft Saved' : 'Save Draft'}
+                                            </button>
+                                            <button
+                                                onClick={handleExportDraft}
+                                                disabled={!hasAnyAttendance}
+                                                className={`p-2 rounded-lg border transition-all shadow-lg font-black text-[12px] ${!hasAnyAttendance ? 'bg-slate-800/50 text-slate-600 border-slate-800 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'}`}
+                                                title={!hasAnyAttendance ? "No data to export" : "Export to Excel"}
+                                                aria-label="Export to Excel"
+                                            >
+                                                <Download size={14} />
+                                            </button>
+                                        </>
+                                    )}
                                 </>
-                            )}
-                        </>
+                            );
+                        })()
                     ) : (
                         <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-900/20 border border-amber-900/50 rounded-lg text-amber-400 text-[10px] font-black uppercase tracking-tight">
                             <Lock size={12} /> View Only
@@ -741,7 +991,26 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                 <span className="text-red-400 font-mono text-xs">{absentCount}</span>
                             </div>
                         </div>
-                        <div className="ml-auto">
+                        <div className="ml-auto flex items-center gap-3">
+                            <div className="relative flex items-center">
+                                <Search size={13} className="absolute left-2.5 text-slate-400 pointer-events-none" />
+                                <input
+                                    type="text"
+                                    value={searchTerm}
+                                    onChange={e => setSearchTerm(e.target.value)}
+                                    placeholder="Filter by EMP / Name..."
+                                    className="w-44 md:w-56 pl-8 pr-7 py-1.5 bg-slate-900/90 border border-slate-700/80 rounded-lg text-xs font-medium text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all shadow-inner"
+                                />
+                                {searchTerm && (
+                                    <button
+                                        onClick={() => setSearchTerm('')}
+                                        className="absolute right-2 text-slate-400 hover:text-white p-0.5 rounded transition-colors"
+                                        title="Clear Search"
+                                    >
+                                        <X size={12} />
+                                    </button>
+                                )}
+                            </div>
                             <button
                                 onClick={() => {
                                     if (!licenseInfo?.splDynamic) {
@@ -775,12 +1044,17 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                             <thead className="bg-[#0f172a] text-sky-400 text-[10px] uppercase tracking-normal font-bold sticky top-0 z-20 shadow-md">
                                 <tr className="border-b border-slate-800 text-[9px] uppercase tracking-wider text-slate-500">
                                     <th colSpan={beforeEarningsCount} className={`px-3 py-1 bg-[#0f172a] ${isSticky ? 'sticky left-0 z-30 shadow-[4px_0_4px_-4px_rgba(0,0,0,0.5)]' : ''}`}></th>
-                                    <th colSpan={earningsCount} className="px-1.5 py-1 text-center bg-[#0f172a]">
-                                        <span className="underline decoration-sky-500/50 underline-offset-2 font-black text-sky-400">Pay Breakup</span>
+                                    <th colSpan={earningsCount} className="px-2 py-1.5 text-center bg-[#0f172a]">
+                                        <div className="flex flex-col items-center justify-center gap-1">
+                                            <span className="font-black text-sky-400 tracking-widest text-[10px] uppercase">Pay Breakup</span>
+                                            <div className="w-full h-[3px] bg-gradient-to-r from-sky-500 via-blue-500 to-sky-400 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.6)]"></div>
+                                        </div>
                                     </th>
-                                    <th colSpan={betweenCount} className="px-1.5 py-1 bg-[#0f172a]"></th>
-                                    <th colSpan={deductionCount} className="px-1.5 py-1 text-center bg-[#0f172a]">
-                                        <span className="underline decoration-pink-500/50 underline-offset-2 font-black text-pink-400">Deduction Breakup</span>
+                                    <th colSpan={deductionCount} className="px-2 py-1.5 text-center bg-[#0f172a]">
+                                        <div className="flex flex-col items-center justify-center gap-1">
+                                            <span className="font-black text-pink-400 tracking-widest text-[10px] uppercase">Deduction Breakup</span>
+                                            <div className="w-full h-[3px] bg-gradient-to-r from-pink-500 via-rose-500 to-pink-400 rounded-full shadow-[0_0_8px_rgba(244,63,94,0.6)]"></div>
+                                        </div>
                                     </th>
                                     <th colSpan={afterCount} className={`px-2 py-1 bg-[#0f172a] ${isSticky ? 'sticky right-0 z-30 shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.5)]' : ''}`}></th>
                                 </tr>
@@ -805,34 +1079,42 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800">
-                                {results.filter(r => !isSaved || r.netPay > 0).map(r => {
-                                    const emp = employees.find(e => e.id === r.employeeId);
-                                    const isZeroAttendance = r.payableDays === 0;
+                                {filteredResults.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={activeColumns.length + 2} className="px-4 py-8 text-center text-slate-400 text-xs italic font-medium bg-[#1e293b]">
+                                            No employee records found matching "{searchTerm}"
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    filteredResults.map(r => {
+                                        const emp = employees.find(e => e.id === r.employeeId);
+                                        const isZeroAttendance = r.payableDays === 0;
 
-                                    return (
-                                        <tr key={r.employeeId} className={`group hover:bg-slate-800/50 transition-colors ${isZeroAttendance ? 'opacity-40 grayscale-[0.5] font-medium italic select-none pointer-events-none' : ''}`}>
-                                            <td className={`px-3 py-2 bg-[#1e293b] group-hover:bg-slate-800/50 transition-colors whitespace-nowrap ${isSticky ? 'sticky left-0 z-10 shadow-[4px_0_4px_-4px_rgba(0,0,0,0.5)]' : ''}`}>
-                                                <div className="text-xs font-bold text-white uppercase tracking-normal">{emp?.name}</div>
-                                                <div className="text-[9px] text-slate-500 font-mono uppercase tracking-normal">{r.employeeId}</div>
-                                            </td>
-                                            {activeColumns.map(colId => {
-                                                const col = columnMap[colId as keyof typeof columnMap];
-                                                if (!col) return null;
-                                                const val = col.value(r);
-                                                return (
-                                                    <td key={colId} className={`px-1.5 py-2 font-mono text-[11px] whitespace-nowrap ${col.className}`}>
-                                                        {colId === 'days' ? val : formatIndianNumber(val)}
-                                                    </td>
-                                                );
-                                            })}
-                                            <td className={`px-2 py-2 text-center bg-[#1e293b] group-hover:bg-slate-800/50 transition-colors whitespace-nowrap ${isSticky ? 'sticky right-0 z-10 shadow-[4px_0_4px_-4px_rgba(0,0,0,0.5)]' : ''}`}>
-                                                <button onClick={() => setPreviewRecord(r)} className="p-1.5 bg-blue-900/20 text-blue-400 hover:text-white hover:bg-blue-600 rounded-lg transition-colors" title={`View Pay Slip for ${emp?.name}`} aria-label={`View Pay Slip for ${emp?.name}`}>
-                                                    <Eye size={12} />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                                        return (
+                                            <tr key={r.employeeId} className={`group hover:bg-slate-800/50 transition-colors ${isZeroAttendance ? 'opacity-40 grayscale-[0.5] font-medium italic select-none pointer-events-none' : ''}`}>
+                                                <td className={`px-3 py-2 bg-[#1e293b] group-hover:bg-slate-800/50 transition-colors whitespace-nowrap ${isSticky ? 'sticky left-0 z-10 shadow-[4px_0_4px_-4px_rgba(0,0,0,0.5)]' : ''}`}>
+                                                    <div className="text-xs font-bold text-white uppercase tracking-normal">{emp?.name}</div>
+                                                    <div className="text-[9px] text-slate-500 font-mono uppercase tracking-normal">{r.employeeId}</div>
+                                                </td>
+                                                {activeColumns.map(colId => {
+                                                    const col = columnMap[colId as keyof typeof columnMap];
+                                                    if (!col) return null;
+                                                    const val = col.value(r);
+                                                    return (
+                                                        <td key={colId} className={`px-1.5 py-2 font-mono text-[11px] whitespace-nowrap ${col.className}`}>
+                                                            {colId === 'days' ? val : formatIndianNumber(val)}
+                                                        </td>
+                                                    );
+                                                })}
+                                                <td className={`px-2 py-2 text-center bg-[#1e293b] group-hover:bg-slate-800/50 transition-colors whitespace-nowrap ${isSticky ? 'sticky right-0 z-10 shadow-[4px_0_4px_-4px_rgba(0,0,0,0.5)]' : ''}`}>
+                                                    <button onClick={() => setPreviewRecord(r)} className="p-1.5 bg-blue-900/20 text-blue-400 hover:text-white hover:bg-blue-600 rounded-lg transition-colors" title={`View Pay Slip for ${emp?.name}`} aria-label={`View Pay Slip for ${emp?.name}`}>
+                                                        <Eye size={12} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                )}
                             </tbody>
                             <tfoot className="sticky bottom-0 z-20 bg-[#0f172a]/95 backdrop-blur-md border-t-2 border-slate-700 shadow-[0_-4px_10px_rgba(0,0,0,0.3)]">
                                 <tr className="text-[10px] font-black uppercase tracking-tight">
@@ -977,7 +1259,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                     <div className="flex justify-between"><span className="text-slate-500 font-bold uppercase">ESI No</span><span className="font-bold text-slate-900">{emp.esiNumber || 'N/A'}</span></div>
                                     <div className="flex justify-between"><span className="text-slate-500 font-bold uppercase">PAN No</span><span className="font-bold text-slate-900">{emp.pan || 'N/A'}</span></div>
                                 </div>
-                                    <div className="border border-slate-800"><div className="grid grid-cols-4 bg-slate-800 text-white text-xs font-bold uppercase text-center divide-x divide-slate-600"><div className="p-2">Earnings</div><div className="p-2">Amount (₹)</div><div className="p-2">Deductions</div><div className="p-2">Amount (₹)</div></div><div className="grid grid-cols-4 text-xs divide-x divide-slate-300"><div className="space-y-1 p-2"><div className="text-slate-600">Basic Pay</div><div className="text-slate-600">DA</div><div className="text-slate-600">Retaining Allw</div><div className="text-slate-600">HRA</div><div className="text-slate-600">Conveyance</div><div className="text-slate-600">Washing Allw</div><div className="text-slate-600">Special Allw</div><div className="text-slate-600">Overtime Pay</div><div className="text-slate-600">Leave Encash</div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.earnings?.basic || 0).toFixed(2)}</div><div>{(r?.earnings?.da || 0).toFixed(2)}</div><div>{(r?.earnings?.retainingAllowance || 0).toFixed(2)}</div><div>{(r?.earnings?.hra || 0).toFixed(2)}</div><div>{(r?.earnings?.conveyance || 0).toFixed(2)}</div><div>{other.toFixed(2)}</div><div>{special.toFixed(2)}</div><div className="font-bold text-blue-600">{(r?.earnings?.otAmount || 0).toFixed(2)}</div><div>{(r?.earnings?.leaveEncashment || 0).toFixed(2)}</div></div><div className="space-y-1 p-2"><div className="text-slate-600">Provident Fund {r.isCode88 ? '*' : ''}{isPropPFCapped ? <span className="text-[#000080] font-bold"> #</span> : ''}</div><div className="text-slate-600">ESI {r.isESICodeWagesUsed ? '**' : ''}</div><div className="text-slate-600">Professional Tax</div><div className="text-slate-600">Income Tax</div><div className="text-slate-600">VPF</div><div className="text-slate-600">LWF</div><div className="text-slate-600">Adv Recovery</div><div className="text-red-600 font-bold">Fine / Damages</div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.deductions?.epf || 0).toFixed(2)}</div><div>{(r?.deductions?.esi || 0).toFixed(2)}</div><div>{(r?.deductions?.pt || 0).toFixed(2)}</div><div>{(r?.deductions?.it || 0).toFixed(2)}</div><div>{(r?.deductions?.vpf || 0).toFixed(2)}</div><div>{(r?.deductions?.lwf || 0).toFixed(2)}</div><div>{(r?.deductions?.advanceRecovery || 0).toFixed(2)}</div><div className="text-red-600 font-bold">{(r?.deductions?.fine || 0).toFixed(2)}</div></div></div><div className="grid grid-cols-4 bg-slate-100 border-t border-slate-800 text-xs font-bold divide-x divide-slate-300"><div className="p-2 text-slate-800">Gross Earnings</div><div className="p-2 text-right text-slate-900">{(r?.earnings?.total || 0).toFixed(2)}</div><div className="p-2 text-slate-800">Total Deductions</div><div className="p-2 text-right text-slate-900">{(r?.deductions?.total || 0).toFixed(2)}</div></div></div>
+                                    <div className="border border-slate-800"><div className="grid grid-cols-4 bg-slate-800 text-white text-xs font-bold uppercase text-center divide-x divide-slate-600"><div className="p-2">Earnings</div><div className="p-2">Amount (₹)</div><div className="p-2">Deductions</div><div className="p-2">Amount (₹)</div></div><div className="grid grid-cols-4 text-xs divide-x divide-slate-300"><div className="space-y-1 p-2"><div className="text-slate-600">Basic Pay</div><div className="text-slate-600">DA</div><div className="text-slate-600">Retaining Allw</div><div className="text-slate-600">HRA</div><div className="text-slate-600">Conveyance</div><div className="text-slate-600">Washing Allw</div><div className="text-slate-600">{companyProfile?.specialAllowance1Name || 'Special Allw 1'}</div><div className="text-slate-600">{companyProfile?.specialAllowance2Name || 'Special Allw 2'}</div><div className="text-slate-600">{companyProfile?.specialAllowance3Name || 'Special Allw 3'}</div><div className="text-slate-600">Overtime Pay</div><div className="text-slate-600">Leave Encash</div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.earnings?.basic || 0).toFixed(2)}</div><div>{(r?.earnings?.da || 0).toFixed(2)}</div><div>{(r?.earnings?.retainingAllowance || 0).toFixed(2)}</div><div>{(r?.earnings?.hra || 0).toFixed(2)}</div><div>{(r?.earnings?.conveyance || 0).toFixed(2)}</div><div>{other.toFixed(2)}</div><div>{(r?.earnings?.special1 || 0).toFixed(2)}</div><div>{(r?.earnings?.special2 || 0).toFixed(2)}</div><div>{(r?.earnings?.special3 || 0).toFixed(2)}</div><div className="font-bold text-blue-600">{(r?.earnings?.otAmount || 0).toFixed(2)}</div><div>{(r?.earnings?.leaveEncashment || 0).toFixed(2)}</div></div><div className="space-y-1 p-2"><div className="text-slate-600">Provident Fund {r.isCode88 ? '*' : ''}{isPropPFCapped ? <span className="text-[#000080] font-bold"> #</span> : ''}</div><div className="text-slate-600">ESI {r.isESICodeWagesUsed ? '**' : ''}</div><div className="text-slate-600">Professional Tax</div><div className="text-slate-600">Income Tax</div><div className="text-slate-600">VPF</div><div className="text-slate-600">LWF</div><div className="text-slate-600">Adv Recovery</div><div className="text-red-600 font-bold">Fine / Damages</div><div className="text-slate-600"></div><div className="text-slate-600"></div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.deductions?.epf || 0).toFixed(2)}</div><div>{(r?.deductions?.esi || 0).toFixed(2)}</div><div>{(r?.deductions?.pt || 0).toFixed(2)}</div><div>{(r?.deductions?.it || 0).toFixed(2)}</div><div>{(r?.deductions?.vpf || 0).toFixed(2)}</div><div>{(r?.deductions?.lwf || 0).toFixed(2)}</div><div>{(r?.deductions?.advanceRecovery || 0).toFixed(2)}</div><div className="text-red-600 font-bold">{(r?.deductions?.fine || 0).toFixed(2)}</div><div></div><div></div></div></div><div className="grid grid-cols-4 bg-slate-100 border-t border-slate-800 text-xs font-bold divide-x divide-slate-300"><div className="p-2 text-slate-800">Gross Earnings</div><div className="p-2 text-right text-slate-900">{(r?.earnings?.total || 0).toFixed(2)}</div><div className="p-2 text-slate-800">Total Deductions</div><div className="p-2 text-right text-slate-900">{(r?.deductions?.total || 0).toFixed(2)}</div></div></div>
                                     <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 flex flex-col md:flex-row justify-between items-center gap-4"><div><p className="text-xs font-bold text-blue-800 uppercase tracking-widest">Net Salary Payable</p><p className="text-[10px] text-blue-600 italic mt-1 max-w-sm">{numberToWords(Math.round(r?.netPay || 0))} Rupees Only</p></div><div className="text-3xl font-black text-blue-900">₹ {formatIndianNumber(Math.round(r?.netPay || 0))}</div></div>
                                     <div className="text-[10px] text-slate-400 space-y-1 pt-4 border-t border-slate-200">{r.isCode88 && <p>* PF calculated on Code Wages (Social Security Code 2020)</p>}{r.isESICodeWagesUsed && <p>** ESI calculated on Code Wages (Social Security Code 2020)</p>}{isPropPFCapped && <p className="text-[#000080] font-bold italic"># Proportionate Wages(15000*days worked/actual days of the month) considered for PF Calculation due to Non Contribution Days (NCP)</p>}{r.esiRemark && <p className="text-amber-600 font-bold">{r.esiRemark}</p>}<p className="text-center italic mt-4">This is a computer-generated document and does not require a signature.</p></div></>
                                 );

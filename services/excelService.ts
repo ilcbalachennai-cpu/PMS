@@ -18,7 +18,7 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
             const now = new Date();
             const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
             const fileName = getStandardFileName('Employee_Export', company || {} as any, months[now.getMonth()], now.getFullYear());
-            const path = await generateExcelWorkbook(wb, fileName);
+            const path = await generateExcelWorkbook(wb, fileName, company?.establishmentName);
             return path;
         }
 
@@ -32,8 +32,8 @@ export const generateEmployeeXLSX = async (data?: any[], company?: CompanyProfil
             "PAN Number", "Aadhaar Number", "UAN Number", "PF Member ID", "ESI Number",
             "Bank Account Number", "Bank Name", "Bank Branch", "IFSC Code",
             "Basic Pay", "DA", "Retaining Allowance", "HRA", "Conveyance",
-            "Washing Allowance", "Attire Allowance", "Special Allowance 1",
-            "Special Allowance 2", "Special Allowance 3",
+            "Washing Allowance", "Attire Allowance", company?.specialAllowance1Name || "Special Allowance 1",
+            company?.specialAllowance2Name || "Special Allowance 2", company?.specialAllowance3Name || "Special Allowance 3",
             "PF Exempt (Yes/No)", "ESI Exempt (Yes/No)",
             "Higher Pension Enabled (Yes/No)",
             "HP: Pre-2014 Contrib (Yes/No)",
@@ -187,7 +187,8 @@ export const parseEmployeeXLSX = async (
     designations: string[],
     divisions: string[],
     branches: string[],
-    sites: string[]
+    sites: string[],
+    companyProfile?: CompanyProfile
 ): Promise<any> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -350,9 +351,9 @@ export const parseEmployeeXLSX = async (
                         conveyance: Number(getVal(['Conveyance']) || 0),
                         washing: Number(getVal(['Washing Allowance', 'Washing']) || 0),
                         attire: Number(getVal(['Attire Allowance', 'Attire']) || 0),
-                        specialAllowance1: Number(getVal(['Special Allowance 1', 'Special 1']) || 0),
-                        specialAllowance2: Number(getVal(['Special Allowance 2', 'Special 2']) || 0),
-                        specialAllowance3: Number(getVal(['Special Allowance 3', 'Special 3']) || 0),
+                        specialAllowance1: Number(getVal([companyProfile?.specialAllowance1Name || 'Special Allowance 1', 'Special Allowance 1', 'Special 1']) || 0),
+                        specialAllowance2: Number(getVal([companyProfile?.specialAllowance2Name || 'Special Allowance 2', 'Special Allowance 2', 'Special 2']) || 0),
+                        specialAllowance3: Number(getVal([companyProfile?.specialAllowance3Name || 'Special Allowance 3', 'Special Allowance 3', 'Special 3']) || 0),
 
                         isPFExempt: isTrue(getVal(['PF Exempt', 'PF Exempted'])),
                         isESIExempt: isTrue(getVal(['ESI Exempt', 'ESI Exempted'])),
@@ -539,8 +540,8 @@ export const generateEmployeeUpdateTemplateXLSX = async (employees: Employee[], 
             "PAN Number", "Aadhaar Number", "UAN Number (LOCKED)", "PF Member ID", "ESI Number (LOCKED)",
             "Bank Account Number", "Bank Name", "Bank Branch", "IFSC Code",
             "Basic Pay", "DA", "Retaining Allowance", "HRA", "Conveyance",
-            "Washing Allowance", "Attire Allowance", "Special Allowance 1",
-            "Special Allowance 2", "Special Allowance 3",
+            "Washing Allowance", "Attire Allowance", company?.specialAllowance1Name || "Special Allowance 1",
+            company?.specialAllowance2Name || "Special Allowance 2", company?.specialAllowance3Name || "Special Allowance 3",
             "PF Exempt (Yes/No)", "ESI Exempt (Yes/No)",
             "Higher Pension Enabled (Yes/No)",
             "HP: Pre-2014 Contrib (Yes/No)",
@@ -645,10 +646,7 @@ export const generateEmployeeUpdateTemplateXLSX = async (employees: Employee[], 
 /**
  * Parses Employee Update XLSX and updates existing employees
  */
-export const parseEmployeeUpdateXLSX = async (
-    file: File,
-    existingEmployees: Employee[]
-): Promise<any> => {
+export const parseEmployeeUpdateXLSX = async (file: File, existingEmployees: Employee[], companyProfile?: CompanyProfile): Promise<any> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
 
@@ -700,59 +698,82 @@ export const parseEmployeeUpdateXLSX = async (
 
                     const existingEmp = updatedEmployees[empIndex];
 
+                    const updateNum = (keys: string[], oldVal: any) => {
+                        const val = getVal(keys);
+                        if (val === null || val === undefined || String(val).trim() === '') return oldVal;
+                        return Number(val);
+                    };
+
+                    const updateStr = (keys: string[], oldVal: any) => {
+                        const val = getVal(keys);
+                        if (val === null || val === undefined || String(val).trim() === '') return oldVal;
+                        return String(val);
+                    };
+
+                    const updateDate = (keys: string[], oldVal: any) => {
+                        const val = getVal(keys);
+                        if (val === null || val === undefined || String(val).trim() === '') return oldVal;
+                        return parseIndDate(val);
+                    };
+
                     // Update allowed fields
                     const updatedEmp: Employee = {
                         ...existingEmp,
-                        gender: (getVal(['Gender', 'Gender (LOCKED)']) as any) || existingEmp.gender,
-                        dob: parseIndDate(getVal(['Date of Birth (DD-MM-YYYY)', 'Date of Birth (LOCKED)', 'Date of Birth', 'DOB', 'Birth Date', 'Date of Birth (DD/MM/YYYY)', 'Date of Birth (DD.MM.YYYY)', 'BirthDate'])) || existingEmp.dob,
-                        doj: parseIndDate(getVal(['Date of Joining (DD-MM-YYYY)', 'Date of Joining (LOCKED)', 'Date of Joining', 'DOJ', 'Joining Date', 'Date of Join', 'Date of Joining (DD/MM/YYYY)', 'Date of Joining (DD.MM.YYYY)', 'DateofJoining', 'Date of Appointment'])) || existingEmp.doj,
-                        dol: parseIndDate(getVal(['Date of Leaving (DD-MM-YYYY)', 'Date of Leaving (LOCKED)', 'Date of Leaving', 'DOL'])) || existingEmp.dol,
-                        leavingReason: String(getVal(['Reason for Leaving', 'Reason']) || existingEmp.leavingReason),
-                        designation: String(getVal(['Designation', 'Designations', 'Desingation', 'Desg', 'Desig', 'Job Title', 'Role']) || existingEmp.designation),
-                        division: String(getVal(['Department/Division', 'Department', 'Division', 'Department/Division (LOCKED)']) || existingEmp.division),
-                        department: String(getVal(['Department/Division', 'Department', 'Division', 'Department/Division (LOCKED)']) || existingEmp.department),
-                        branch: String(getVal(['Branch', 'Branch (LOCKED)']) || existingEmp.branch),
-                        site: String(getVal(['Site', 'Site (LOCKED)']) || existingEmp.site),
-                        mobile: String(getVal(['Mobile Number', 'Mobile', 'Mobile No']) || existingEmp.mobile),
-                        email: String(getVal(['mail_id', 'Mail ID', 'Email', 'Email ID']) || existingEmp.email),
-                        fatherSpouseName: String(getVal(['Father or Spouse Name', 'Father Name', 'Spouse Name']) || existingEmp.fatherSpouseName),
-                        relationship: String(getVal(['Relationship']) || existingEmp.relationship),
-                        maritalStatus: String(getVal(['Married (Yes/No)', 'Married', 'Marital Status']) || existingEmp.maritalStatus) === 'Yes' ? 'Yes' : 'No',
-                        spouseName: String(getVal(['Spouse Name', 'Wife Name', 'Husband Name']) || existingEmp.spouseName),
-                        spouseGender: (getVal(['Spouse Gender']) as any) || existingEmp.spouseGender,
-                        spouseAadhaar: String(getVal(['Spouse Aadhaar Number', 'Spouse Aadhaar', 'Spouse UID']) || existingEmp.spouseAadhaar),
-                        doorNo: String(getVal(['Door No', 'House No', 'Flat No']) || existingEmp.doorNo),
-                        buildingName: String(getVal(['Building Name', 'Building']) || existingEmp.buildingName),
-                        street: String(getVal(['Street']) || existingEmp.street),
-                        area: String(getVal(['Area']) || existingEmp.area),
-                        city: String(getVal(['City']) || existingEmp.city),
-                        state: String(getVal(['State']) || existingEmp.state),
-                        pincode: String(getVal(['Pincode', 'Pin Code']) || existingEmp.pincode),
-                        pan: String(getVal(['PAN Number', 'PAN', 'PAN No', 'PAN Number (LOCKED)']) || existingEmp.pan).toUpperCase(),
-                        aadhaarNumber: String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No', 'Aadhaar Number (LOCKED)']) || existingEmp.aadhaarNumber),
-                        bankAccount: String(getVal(['Bank Account Number', 'Bank Account', 'Account No', 'Account Number']) || existingEmp.bankAccount),
-                        bankName: String(getVal(['Bank Name', 'Bank']) || existingEmp.bankName),
-                        bankBranch: String(getVal(['Bank Branch', 'Branch Name']) || existingEmp.bankBranch),
-                        ifsc: String(getVal(['IFSC Code', 'IFSC']) || existingEmp.ifsc),
-                        basicPay: Number(getVal(['Basic Pay', 'Basic']) || existingEmp.basicPay),
-                        da: Number(getVal(['DA']) || existingEmp.da),
-                        retainingAllowance: Number(getVal(['Retaining Allowance']) || existingEmp.retainingAllowance),
-                        hra: Number(getVal(['HRA']) || existingEmp.hra),
-                        conveyance: Number(getVal(['Conveyance']) || existingEmp.conveyance),
-                        washing: Number(getVal(['Washing Allowance']) || existingEmp.washing),
-                        attire: Number(getVal(['Attire Allowance']) || existingEmp.attire),
-                        specialAllowance1: Number(getVal(['Special Allowance 1']) || existingEmp.specialAllowance1),
-                        specialAllowance2: Number(getVal(['Special Allowance 2']) || existingEmp.specialAllowance2),
-                        specialAllowance3: Number(getVal(['Special Allowance 3']) || existingEmp.specialAllowance3),
-                        isPFExempt: isTrue(getVal(['PF Exempt (Yes/No)'])) || existingEmp.isPFExempt,
-                        isESIExempt: isTrue(getVal(['ESI Exempt (Yes/No)'])) || existingEmp.isESIExempt,
+                        gender: updateStr(['Gender', 'Gender (LOCKED)'], existingEmp.gender) as any,
+                        dob: updateDate(['Date of Birth (DD-MM-YYYY)', 'Date of Birth (LOCKED)', 'Date of Birth', 'DOB', 'Birth Date', 'Date of Birth (DD/MM/YYYY)', 'Date of Birth (DD.MM.YYYY)', 'BirthDate'], existingEmp.dob),
+                        doj: updateDate(['Date of Joining (DD-MM-YYYY)', 'Date of Joining (LOCKED)', 'Date of Joining', 'DOJ', 'Joining Date', 'Date of Join', 'Date of Joining (DD/MM/YYYY)', 'Date of Joining (DD.MM.YYYY)', 'DateofJoining', 'Date of Appointment'], existingEmp.doj),
+                        dol: updateDate(['Date of Leaving (DD-MM-YYYY)', 'Date of Leaving (LOCKED)', 'Date of Leaving', 'DOL'], existingEmp.dol),
+                        leavingReason: updateStr(['Reason for Leaving', 'Reason'], existingEmp.leavingReason),
+                        designation: updateStr(['Designation', 'Designations', 'Desingation', 'Desg', 'Desig', 'Job Title', 'Role'], existingEmp.designation),
+                        division: updateStr(['Department/Division', 'Department', 'Division', 'Department/Division (LOCKED)'], existingEmp.division),
+                        department: updateStr(['Department/Division', 'Department', 'Division', 'Department/Division (LOCKED)'], existingEmp.department),
+                        branch: updateStr(['Branch', 'Branch (LOCKED)'], existingEmp.branch),
+                        site: updateStr(['Site', 'Site (LOCKED)'], existingEmp.site),
+                        mobile: updateStr(['Mobile Number', 'Mobile', 'Mobile No'], existingEmp.mobile),
+                        email: updateStr(['mail_id', 'Mail ID', 'Email', 'Email ID'], existingEmp.email),
+                        fatherSpouseName: updateStr(['Father or Spouse Name', 'Father Name', 'Spouse Name'], existingEmp.fatherSpouseName),
+                        relationship: updateStr(['Relationship'], existingEmp.relationship),
+                        maritalStatus: updateStr(['Married (Yes/No)', 'Married', 'Marital Status'], existingEmp.maritalStatus) === 'Yes' ? 'Yes' : 'No',
+                        spouseName: updateStr(['Spouse Name', 'Wife Name', 'Husband Name'], existingEmp.spouseName),
+                        spouseGender: updateStr(['Spouse Gender'], existingEmp.spouseGender) as any,
+                        spouseAadhaar: updateStr(['Spouse Aadhaar Number', 'Spouse Aadhaar', 'Spouse UID'], existingEmp.spouseAadhaar),
+                        doorNo: updateStr(['Door No', 'House No', 'Flat No'], existingEmp.doorNo),
+                        buildingName: updateStr(['Building Name', 'Building'], existingEmp.buildingName),
+                        street: updateStr(['Street'], existingEmp.street),
+                        area: updateStr(['Area'], existingEmp.area),
+                        city: updateStr(['City'], existingEmp.city),
+                        state: updateStr(['State'], existingEmp.state),
+                        pincode: updateStr(['Pincode', 'Pin Code'], existingEmp.pincode),
+                        pan: updateStr(['PAN Number', 'PAN', 'PAN No', 'PAN Number (LOCKED)'], existingEmp.pan).toUpperCase(),
+                        aadhaarNumber: updateStr(['Aadhaar Number', 'Aadhaar', 'Aadhaar No', 'Aadhaar Number (LOCKED)'], existingEmp.aadhaarNumber),
+                        uanc: updateStr(['UAN Number', 'UAN', 'UAN No', 'UAN Number (LOCKED)'], existingEmp.uanc).trim(),
+                        pfNumber: updateStr(['PF Member ID', 'PF ID', 'PF Number', 'PF Member ID (LOCKED)'], existingEmp.pfNumber).trim(),
+                        esiNumber: updateStr(['ESI Number', 'ESI IP Number', 'ESI No', 'ESI Number (LOCKED)'], existingEmp.esiNumber).trim(),
+                        bankAccount: updateStr(['Bank Account Number', 'Bank Account', 'Account No', 'Account Number'], existingEmp.bankAccount),
+                        bankName: updateStr(['Bank Name', 'Bank'], existingEmp.bankName),
+                        bankBranch: updateStr(['Bank Branch', 'Branch Name'], existingEmp.bankBranch),
+                        ifsc: updateStr(['IFSC Code', 'IFSC'], existingEmp.ifsc),
+                        basicPay: updateNum(['Basic Pay', 'Basic'], existingEmp.basicPay),
+                        da: updateNum(['DA'], existingEmp.da),
+                        retainingAllowance: updateNum(['Retaining Allowance'], existingEmp.retainingAllowance),
+                        hra: updateNum(['HRA'], existingEmp.hra),
+                        conveyance: updateNum(['Conveyance'], existingEmp.conveyance),
+                        washing: updateNum(['Washing Allowance'], existingEmp.washing),
+                        attire: updateNum(['Attire Allowance'], existingEmp.attire),
+                        specialAllowance1: updateNum([companyProfile?.specialAllowance1Name || 'Special Allowance 1', 'Special Allowance 1'], existingEmp.specialAllowance1),
+                        specialAllowance2: updateNum([companyProfile?.specialAllowance2Name || 'Special Allowance 2', 'Special Allowance 2'], existingEmp.specialAllowance2),
+                        specialAllowance3: updateNum([companyProfile?.specialAllowance3Name || 'Special Allowance 3', 'Special Allowance 3'], existingEmp.specialAllowance3),
+                        isPFExempt: getVal(['PF Exempt (Yes/No)']) !== null && getVal(['PF Exempt (Yes/No)']) !== undefined && String(getVal(['PF Exempt (Yes/No)'])).trim() !== '' ? isTrue(getVal(['PF Exempt (Yes/No)'])) : existingEmp.isPFExempt,
+                        isESIExempt: getVal(['ESI Exempt (Yes/No)']) !== null && getVal(['ESI Exempt (Yes/No)']) !== undefined && String(getVal(['ESI Exempt (Yes/No)'])).trim() !== '' ? isTrue(getVal(['ESI Exempt (Yes/No)'])) : existingEmp.isESIExempt,
+                        isPTExempt: getVal(['PT Exempt (Yes/No)']) !== null && getVal(['PT Exempt (Yes/No)']) !== undefined && String(getVal(['PT Exempt (Yes/No)'])).trim() !== '' ? isTrue(getVal(['PT Exempt (Yes/No)'])) : existingEmp.isPTExempt,
+                        isLWFExempt: getVal(['LWF Exempt (Yes/No)']) !== null && getVal(['LWF Exempt (Yes/No)']) !== undefined && String(getVal(['LWF Exempt (Yes/No)'])).trim() !== '' ? isTrue(getVal(['LWF Exempt (Yes/No)'])) : existingEmp.isLWFExempt,
                         pfHigherPension: {
                             ...existingEmp.pfHigherPension,
-                            enabled: isTrue(getVal(['Higher Pension Enabled (Yes/No)'])) || existingEmp.pfHigherPension?.enabled || false,
-                            contributedBefore2014: (getVal(['HP: Pre-2014 Contrib (Yes/No)']) as any) || existingEmp.pfHigherPension?.contributedBefore2014,
-                            employeeContribution: (getVal(['HP: EE Contrib (Regular/Higher)']) as any) || existingEmp.pfHigherPension?.employeeContribution,
-                            employerContribution: (getVal(['HP: ER Contrib (Regular/Higher)']) as any) || existingEmp.pfHigherPension?.employerContribution,
-                            isHigherPensionOpted: (getVal(['HP: Joint Option (Yes/No)']) as any) || existingEmp.pfHigherPension?.isHigherPensionOpted,
+                            enabled: getVal(['Higher Pension Enabled (Yes/No)']) !== null && getVal(['Higher Pension Enabled (Yes/No)']) !== undefined && String(getVal(['Higher Pension Enabled (Yes/No)'])).trim() !== '' ? isTrue(getVal(['Higher Pension Enabled (Yes/No)'])) : existingEmp.pfHigherPension?.enabled || false,
+                            contributedBefore2014: updateStr(['HP: Pre-2014 Contrib (Yes/No)'], existingEmp.pfHigherPension?.contributedBefore2014) as any,
+                            employeeContribution: updateStr(['HP: EE Contrib (Regular/Higher)'], existingEmp.pfHigherPension?.employeeContribution) as any,
+                            employerContribution: updateStr(['HP: ER Contrib (Regular/Higher)'], existingEmp.pfHigherPension?.employerContribution) as any,
+                            isHigherPensionOpted: updateStr(['HP: Joint Option (Yes/No)'], existingEmp.pfHigherPension?.isHigherPensionOpted) as any,
                             dojImpact: existingEmp.pfHigherPension?.dojImpact || ''
                         },
                         epfMembershipDate: parseIndDate(getVal(['HP: EPF Membership Date (DD-MM-YYYY)'])) || existingEmp.epfMembershipDate

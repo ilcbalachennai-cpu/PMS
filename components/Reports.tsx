@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, UserX, Save, TrendingUp, Eye, EyeOff } from 'lucide-react';
+import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, UserX, Save, TrendingUp, Eye, EyeOff, Database } from 'lucide-react';
 
 // Global OS Detection for UI refinement
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
@@ -101,7 +101,7 @@ const Reports: React.FC<ReportsProps> = ({
     // General Modal State
     const [modalState, setModalState] = useState<{
         isOpen: boolean;
-        type: 'confirm' | 'success' | 'error' | 'loading';
+        type: 'confirm' | 'success' | 'error' | 'loading' | 'backup_check';
         title: string;
         message: string | React.ReactNode;
         onConfirm?: () => void;
@@ -154,8 +154,8 @@ const Reports: React.FC<ReportsProps> = ({
 
         if (!isMonthValid || !isYearValid) {
             if (savedRecords.length > 0) {
-                // Find the first available record chronologically
-                const autoMonth = selectableMonths[0];
+                // Find the last available record chronologically
+                const autoMonth = selectableMonths[selectableMonths.length - 1];
                 const match = savedRecords.find(r => r.month === autoMonth);
                 if (match) {
                     setMonth(match.month);
@@ -500,10 +500,19 @@ const Reports: React.FC<ReportsProps> = ({
     };
 
     const handleExitChange = (id: string, field: 'dol' | 'reason', value: string) => {
-        setExitData(prev => ({
-            ...prev,
-            [id]: { ...prev[id], [field]: value }
-        }));
+        setExitData(prev => {
+            const current = prev[id] || { dol: '', reason: '' };
+            const updated = { ...current, [field]: value };
+            if (field === 'reason' && value !== '' && value !== 'ON LOP' && !updated.dol) {
+                const currentMIdx = months.indexOf(month);
+                const currentYear = year;
+                updated.dol = `${currentYear}-${String(currentMIdx + 1).padStart(2, '0')}-01`;
+            }
+            return {
+                ...prev,
+                [id]: updated
+            };
+        });
     };
 
     const processExitAndFreeze = async () => {
@@ -609,8 +618,16 @@ const Reports: React.FC<ReportsProps> = ({
             return;
         }
 
-        setPinPurpose('BEFORE_BACKUP');
-        setShowPinModal(true);
+        setModalState({
+            isOpen: true,
+            type: 'backup_check',
+            title: 'Backup Verification Check',
+            message: 'Have you taken a full backup of the data before final freezing?',
+            onConfirm: () => {
+                setPinPurpose('BEFORE_BACKUP');
+                setShowPinModal(true);
+            }
+        });
     };
 
 
@@ -659,21 +676,32 @@ const Reports: React.FC<ReportsProps> = ({
                         { key: 'retaining', label: 'Retaining Allw', getValue: (r: any) => Math.round(r.earnings?.retainingAllowance || 0) },
                         { key: 'hra', label: 'HRA', getValue: (r: any) => Math.round(r.earnings?.hra || 0) },
                         { key: 'conveyance', label: 'Conveyance', getValue: (r: any) => Math.round(r.earnings?.conveyance || 0) },
+                        { key: 'washing', label: 'Washing Allw', getValue: (r: any) => Math.round(r.earnings?.washing || 0) },
+                        { key: 'attire', label: 'Attire Allw', getValue: (r: any) => Math.round(r.earnings?.attire || 0) },
+                        { key: 'special1', label: 'Special 1', getValue: (r: any) => Math.round(r.earnings?.special1 || 0) },
+                        { key: 'special2', label: 'Special 2', getValue: (r: any) => Math.round(r.earnings?.special2 || 0) },
+                        { key: 'special3', label: 'Special 3', getValue: (r: any) => Math.round(r.earnings?.special3 || 0) },
+                        { key: 'leaveEncashment', label: 'Leave Encash', getValue: (r: any) => Math.round(r.earnings?.leaveEncashment || 0) },
+                        { key: 'otAmount', label: 'OT Amount', getValue: (r: any) => Math.round(r.earnings?.otAmount || 0) },
                         { 
                             key: 'others', 
                             label: 'Others', 
                             getValue: (r: any) => {
                                 const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears'];
                                 const displayedEarningsKeys = earningsKeys.filter(k => activeCols.includes(k));
-                                const sumOfDisplayed = displayedEarningsKeys.reduce((acc, k) => acc + (r.earnings?.[k] || 0), 0);
+                                const sumOfDisplayed = displayedEarningsKeys.reduce((acc, k) => acc + (k === 'retaining' ? (r.earnings?.retainingAllowance || 0) : (r.earnings?.[k] || 0)), 0);
                                 return Math.round((r.earnings?.total || 0) - sumOfDisplayed);
                             }
                         },
                         { key: 'totalEarnings', label: 'GROSS EARNINGS', getValue: (r: any) => Math.round(r.earnings?.total || 0) },
-                        { key: 'epf', label: 'PF (EE)', getValue: (r: any) => Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) },
+                        { key: 'epf', label: 'PF (EE)', getValue: (r: any) => activeCols.includes('vpf') ? Math.round(r.deductions?.epf || 0) : Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) },
+                        { key: 'vpf', label: 'VPF (EE)', getValue: (r: any) => Math.round(r.deductions?.vpf || 0) },
                         { key: 'esi', label: 'ESI (EE)', getValue: (r: any) => Math.round(r.deductions?.esi || 0) },
                         { key: 'advanceRecovery', label: 'Advance', getValue: (r: any) => Math.round(r.deductions?.advanceRecovery || 0) },
                         { key: 'pt', label: 'Prof Tax', getValue: (r: any) => Math.round(r.deductions?.pt || 0) },
+                        { key: 'it', label: 'Income Tax', getValue: (r: any) => Math.round(r.deductions?.it || 0) },
+                        { key: 'lwf', label: 'LWF', getValue: (r: any) => Math.round(r.deductions?.lwf || 0) },
+                        { key: 'fine', label: 'Fine', getValue: (r: any) => Math.round(r.deductions?.fine || 0) },
                         { 
                             key: 'otherDeductions', 
                             label: 'Others (DED)', 
@@ -709,26 +737,6 @@ const Reports: React.FC<ReportsProps> = ({
 
                         return row;
                     });
-
-                    const sum = (key: string) =>
-                        excelData.reduce((acc, row: any) => acc + (Number(row[key]) || 0), 0);
-
-                    const grandTotal: any = {
-                        'ID': '',
-                        'Name': 'GRAND TOTAL',
-                        'Designation': '',
-                        'Site': '',
-                        'Branch': '',
-                        'Division': '',
-                    };
-
-                    allColumns.forEach(col => {
-                        if (activeCols.includes(col.key)) {
-                            grandTotal[col.label] = sum(col.label);
-                        }
-                    });
-
-                    excelData.push(grandTotal);
 
                     let customExcelFilename = undefined;
                     if (paySheetFilter !== 'all') {
@@ -1486,25 +1494,55 @@ const Reports: React.FC<ReportsProps> = ({
                                                                 <span className="text-xs text-slate-500 font-mono font-bold select-none">-</span>
                                                             </div>
                                                         ) : (() => {
-                                                            const mIdx = months.indexOf(month);
-                                                            const totalDays = new Date(year, mIdx + 1, 0).getDate();
-                                                            const daysArray = Array.from({ length: totalDays }, (_, i) => i + 1);
+                                                            const currentMIdx = months.indexOf(month);
+                                                            const currentYear = year;
+
+                                                            const prevDate = new Date(currentYear, currentMIdx - 1, 1);
+                                                            const prevMIdx = prevDate.getMonth();
+                                                            const prevYear = prevDate.getFullYear();
+
+                                                            const curDate = new Date(currentYear, currentMIdx, 1);
+                                                            const curMIdx = curDate.getMonth();
+                                                            const curYear = curDate.getFullYear();
+
+                                                            let selectedYear = curYear;
+                                                            let selectedMIdx = curMIdx;
                                                             let selectedDay = 1;
+
                                                             if (data.dol) {
                                                                 const parts = data.dol.split('-');
                                                                 if (parts.length === 3) {
+                                                                    selectedYear = parseInt(parts[0], 10);
+                                                                    selectedMIdx = parseInt(parts[1], 10) - 1;
                                                                     selectedDay = parseInt(parts[2], 10);
                                                                 }
                                                             }
+
+                                                            // Ensure selected month matches either prev or cur; if not, default to current
+                                                            const isPrevSelected = selectedYear === prevYear && selectedMIdx === prevMIdx;
+                                                            const isCurSelected = selectedYear === curYear && selectedMIdx === curMIdx;
+                                                            if (!isPrevSelected && !isCurSelected) {
+                                                                selectedYear = curYear;
+                                                                selectedMIdx = curMIdx;
+                                                            }
+
+                                                            const totalDaysInSelectedMonth = new Date(selectedYear, selectedMIdx + 1, 0).getDate();
+                                                            if (selectedDay > totalDaysInSelectedMonth) {
+                                                                selectedDay = totalDaysInSelectedMonth;
+                                                            }
+
+                                                            const daysArray = Array.from({ length: totalDaysInSelectedMonth }, (_, i) => i + 1);
+
                                                             return (
                                                                 <div className="flex items-center gap-2">
+                                                                    {/* Day Selector */}
                                                                     <select
-                                                                        className="bg-[#0f172a] border border-slate-600 rounded-lg px-3 py-2 text-white text-xs w-20 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 outline-none transition-all custom-scrollbar"
+                                                                        className="bg-[#0f172a] border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs w-16 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 outline-none transition-all custom-scrollbar"
                                                                         value={selectedDay}
                                                                         onChange={(e) => {
                                                                             const dayVal = e.target.value;
                                                                             if (dayVal) {
-                                                                                const newDol = `${year}-${String(mIdx + 1).padStart(2, '0')}-${String(dayVal).padStart(2, '0')}`;
+                                                                                const newDol = `${selectedYear}-${String(selectedMIdx + 1).padStart(2, '0')}-${String(dayVal).padStart(2, '0')}`;
                                                                                 handleExitChange(r.employeeId, 'dol', newDol);
                                                                             }
                                                                         }}
@@ -1512,13 +1550,35 @@ const Reports: React.FC<ReportsProps> = ({
                                                                         aria-label={`Select Day of Leaving for ${emp?.name}`}
                                                                     >
                                                                         {daysArray.map(d => (
-                                                                            <option key={d} value={d} className="bg-[#0f172a] text-white">
+                                                                            <option key={d} value={d}>
                                                                                 {String(d).padStart(2, '0')}
                                                                             </option>
                                                                         ))}
                                                                     </select>
+
+                                                                    {/* Month Selector */}
+                                                                    <select
+                                                                        className="bg-[#0f172a] border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs w-24 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 outline-none transition-all custom-scrollbar"
+                                                                        value={`${selectedYear}-${selectedMIdx}`}
+                                                                        onChange={(e) => {
+                                                                            const [newYStr, newMStr] = e.target.value.split('-');
+                                                                            const newY = parseInt(newYStr, 10);
+                                                                            const newM = parseInt(newMStr, 10);
+                                                                            const maxDays = new Date(newY, newM + 1, 0).getDate();
+                                                                            const adjustedDay = selectedDay > maxDays ? maxDays : selectedDay;
+                                                                            const newDol = `${newY}-${String(newM + 1).padStart(2, '0')}-${String(adjustedDay).padStart(2, '0')}`;
+                                                                            handleExitChange(r.employeeId, 'dol', newDol);
+                                                                        }}
+                                                                        title={`Select Month of Leaving for ${emp?.name}`}
+                                                                        aria-label={`Select Month of Leaving for ${emp?.name}`}
+                                                                    >
+                                                                        <option value={`${prevYear}-${prevMIdx}`}>{months[prevMIdx]}</option>
+                                                                        <option value={`${curYear}-${curMIdx}`}>{months[curMIdx]}</option>
+                                                                    </select>
+
+                                                                    {/* Frozen Year Label */}
                                                                     <span className="text-xs text-slate-400 font-mono font-bold select-none">
-                                                                        {` - ${String(mIdx + 1).padStart(2, '0')} - ${year}`}
+                                                                        {` - ${selectedYear}`}
                                                                     </span>
                                                                 </div>
                                                             );
@@ -1604,12 +1664,22 @@ const Reports: React.FC<ReportsProps> = ({
                             <h3 className="text-lg font-bold text-white text-center">{modalState.title}</h3>
                             <div className="text-sm text-slate-400 text-center whitespace-pre-line w-full">{modalState.message}</div>
                         </div>
-                        <div className="flex gap-3 mt-4">
-                            {modalState.type === 'confirm' ? (
-                                <>
+                        <div className="mt-4 w-full">
+                            {modalState.type === 'backup_check' ? (
+                                <div className="flex flex-col gap-2 w-full">
+                                    <div className="flex gap-3">
+                                        <button onClick={handleModalClose} title="Cancel Action" aria-label="Cancel Action" className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors text-xs uppercase tracking-wider">Cancel</button>
+                                        <button onClick={() => { handleModalClose(); modalState.onConfirm?.(); }} title="Confirm OK" aria-label="Confirm OK" className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg text-xs uppercase tracking-wider">OK</button>
+                                    </div>
+                                    <button onClick={() => { handleModalClose(); onNavigate('settings', 'DATA'); }} title="Initiate Backup" aria-label="Initiate Backup" className="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-colors shadow-lg flex items-center justify-center gap-2 text-xs uppercase tracking-wider">
+                                        <Database size={12} /> Initiate Backup
+                                    </button>
+                                </div>
+                            ) : modalState.type === 'confirm' ? (
+                                <div className="flex gap-3 w-full">
                                     <button onClick={handleModalClose} title="Cancel Action" aria-label="Cancel Action" className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-800 transition-colors">Cancel</button>
                                     <button onClick={modalState.onConfirm} title="Confirm Action" aria-label="Confirm Action" className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg">Confirm</button>
-                                </>
+                                </div>
                             ) : (
                                 <button onClick={handleModalClose} title="Close Modal" aria-label="Close Modal" className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">Close</button>
                             )}

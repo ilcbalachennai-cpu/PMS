@@ -23,7 +23,20 @@ export const usePayrollData = (showAlert: any) => {
   const [companies, setCompanies] = useState<CompanyProfile[]>(() => {
     try {
       const saved = localStorage.getItem('app_companies');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const seen = new Set<string>();
+          const cleaned: CompanyProfile[] = [];
+          for (const c of parsed) {
+            if (c && c.id && c.id.trim() !== '' && !seen.has(c.id)) {
+              seen.add(c.id);
+              cleaned.push(c);
+            }
+          }
+          return cleaned;
+        }
+      }
       
       // Migration: Check if single profile exists
       const oldProfile = localStorage.getItem('app_company_profile');
@@ -152,46 +165,49 @@ export const usePayrollData = (showAlert: any) => {
     return '../public/logo.png';
   });
 
-  // Cleanup missing companies on mount
+  // Cleanup missing, empty-ID, or duplicate companies registry entries automatically
   useEffect(() => {
+    let active = true;
     const cleanupCompanies = async () => {
       if (!window.electronAPI?.listSilos) return;
       
       try {
         const res = await window.electronAPI.listSilos();
+        if (!active) return;
         if (res.success && res.silos) {
           const foundSilos = res.silos as string[];
           
-            setCompanies(prevCompanies => {
-              let updated = false;
-              let newCompanies = [...prevCompanies];
-
-              // 1. Remove missing silos
-              const filtered = newCompanies.filter(c => foundSilos.includes(c.id));
-              if (filtered.length !== newCompanies.length) {
-                console.log(`[Cleanup] Removed ${newCompanies.length - filtered.length} missing companies from registry.`);
-                newCompanies = filtered;
+          setCompanies(prevCompanies => {
+            let updated = false;
+            const seen = new Set<string>();
+            const cleaned: CompanyProfile[] = [];
+            
+            for (const c of prevCompanies) {
+              if (!c.id || c.id.trim() === '') {
                 updated = true;
+                continue;
               }
+              if (!foundSilos.includes(c.id)) {
+                updated = true;
+                continue;
+              }
+              if (seen.has(c.id)) {
+                updated = true;
+                continue;
+              }
+              seen.add(c.id);
+              cleaned.push(c);
+            }
 
-              // 2. Auto-Rescue found silos that are NOT in the registry
-              // V06.01.02: Disabled automatic frontend rescue to respect intentional "Remove From List Only" actions.
-              // Users can use the manual "Rescue Organizations" button from the Settings menu instead.
-              const existingIds = newCompanies.map(c => c.id);
-              const missingSilos = foundSilos.filter(s => !existingIds.includes(s));
-              if (missingSilos.length > 0) {
-                console.log(`[Auto-Rescue] Found ${missingSilos.length} unregistered physical folders. Ignored automatically to respect manual delinking.`);
+            if (updated) {
+              console.log(`[Registry Sync] Sanitized companies registry. Cleaned up ${prevCompanies.length - cleaned.length} entries.`);
+              localStorage.setItem('app_companies', JSON.stringify(cleaned));
+              if (window.electronAPI?.dbSetGlobal) {
+                window.electronAPI.dbSetGlobal('app_companies', cleaned);
               }
-
-              // Only update if something was actually changed
-              if (updated) {
-                localStorage.setItem('app_companies', JSON.stringify(newCompanies));
-                if (window.electronAPI?.dbSetGlobal) {
-                  window.electronAPI.dbSetGlobal('app_companies', newCompanies);
-                }
-                return newCompanies;
-              }
-              return prevCompanies;
+              return cleaned;
+            }
+            return prevCompanies;
           });
         }
       } catch (e) {
@@ -200,7 +216,10 @@ export const usePayrollData = (showAlert: any) => {
     };
 
     cleanupCompanies();
-  }, [setCompanies]);
+    return () => {
+      active = false;
+    };
+  }, [companies, setCompanies]);
 
   // Save activeCompanyId and switch backend data silo
   useEffect(() => {
@@ -709,31 +728,32 @@ export const usePayrollData = (showAlert: any) => {
     }
   }, [companyProfile, activeCompanyId]);
 
-  // V04.03.02: JIT Hydration for missing app_companies in LocalStorage
-  // (Crucial for when backend registry is intact but renderer cache was wiped)
+  // V04.03.02: JIT Hydration for app_companies in LocalStorage on startup
   useEffect(() => {
-    if (companies.length === 0 && window.electronAPI?.dbGetGlobal) {
+    if (window.electronAPI?.dbGetGlobal) {
       window.electronAPI.dbGetGlobal('app_companies').then((res: any) => {
         if (res) {
           try {
             const parsed = typeof res === 'string' ? JSON.parse(res) : res;
             if (Array.isArray(parsed) && parsed.length > 0) {
-              console.log("[usePayrollData] Successfully recovered app_companies from global registry");
               setCompanies(parsed);
               localStorage.setItem('app_companies', JSON.stringify(parsed));
               
-              // --- V05 BREAK LOOP ---
               if (localStorage.getItem('app_is_reset_mode') === 'true') {
                  localStorage.removeItem('app_is_reset_mode');
                  window.location.reload();
               }
             }
           } catch (e) {
-            console.error("Failed to parse app_companies during JIT hydration", e);
+            console.error("Failed to parse app_companies during startup hydration", e);
           }
         }
       });
-    } else if (companies.length > 0 && localStorage.getItem('app_is_reset_mode') === 'true') {
+    }
+  }, []);
+
+  useEffect(() => {
+    if (companies.length > 0 && localStorage.getItem('app_is_reset_mode') === 'true') {
         localStorage.removeItem('app_is_reset_mode');
         window.location.reload();
     }
@@ -754,10 +774,40 @@ export const usePayrollData = (showAlert: any) => {
     
     // For profile, prioritized companies list, then storage
     const found = companies.find(c => c.id === activeCompanyId);
-    if (found) {
-        setCompanyProfile(found);
-    } else {
-        reloadState('app_company_profile', setCompanyProfile, INITIAL_COMPANY_PROFILE);
+    let profileToLoad = found || getStoredInitial('app_company_profile', INITIAL_COMPANY_PROFILE);
+
+    // Retroactive Patch for Legacy Companies (Pre-Hash Setup)
+    if (profileToLoad.id && !profileToLoad.companySignature) {
+        const retroSignature = `SIG-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+        profileToLoad = { ...profileToLoad, companySignature: retroSignature };
+        localStorage.setItem('app_company_profile', JSON.stringify(profileToLoad));
+        
+        // Update the global companies registry
+        setCompanies(prev => {
+            const updated = prev.map(c => c.id === profileToLoad.id ? { ...c, companySignature: retroSignature } : c);
+            localStorage.setItem('app_companies', JSON.stringify(updated));
+            return updated;
+        });
+        console.log(`[Patch] Applied retroactive hash signature to legacy company: ${profileToLoad.establishmentName}`);
+    }
+
+    setCompanyProfile(profileToLoad);
+
+    if (window.electronAPI?.getActivatedSilos) {
+        window.electronAPI.getActivatedSilos().then((res: any) => {
+            if (res?.success) {
+                const licenseRaw = localStorage.getItem('app_license_data');
+                const license = licenseRaw ? JSON.parse(licenseRaw) : { companyLimit: 1 };
+                const limit = license.companyLimit || 1;
+                const sig = profileToLoad.companySignature;
+                const isActivated = sig ? res.silos.includes(sig) : false;
+                const shouldBeReadOnly = !isActivated && res.silos.length >= limit;
+                
+                if (profileToLoad.isReadOnly !== shouldBeReadOnly) {
+                    setCompanyProfile((prev: any) => ({ ...prev, isReadOnly: shouldBeReadOnly }));
+                }
+            }
+        });
     }
 
     reloadState('app_leave_policy', setLeavePolicy, DEFAULT_LEAVE_POLICY);
@@ -864,13 +914,34 @@ export const usePayrollData = (showAlert: any) => {
   }, [activeCompanyId, purgeState]);
 
   const addCompany = useCallback(async (newCompany: CompanyProfile, initialConfig?: StatutoryConfig) => {
+    // 1. Switch Electron process to the new Company Silo to physically create it!
+    if (window.electronAPI?.switchCompanyData) {
+      if (window.electronAPI.dbSetGlobal) {
+         await window.electronAPI.dbSetGlobal('app_active_company_id', newCompany.id);
+      }
+      await window.electronAPI.switchCompanyData(newCompany.id);
+    }
+
+    // 2. Write company profile and config to the new silo immediately so it hydrates correctly
+    const profileKey = `app_company_profile_${newCompany.id}`;
+    localStorage.setItem(profileKey, JSON.stringify(newCompany));
+    if (window.electronAPI?.dbSet) {
+      await window.electronAPI.dbSet('app_company_profile', newCompany);
+      await window.electronAPI.dbSet(`${newCompany.id}_app_setup_complete`, 'true');
+    }
+
+    if (initialConfig) {
+      const configKey = `app_config_${newCompany.id}`;
+      localStorage.setItem(configKey, JSON.stringify(initialConfig));
+      if (window.electronAPI?.dbSet) {
+        await window.electronAPI.dbSet('app_config', initialConfig);
+      }
+    }
+
+    // 3. NOW update the registry state (triggers cleanup that depends on physical silo existing)
     const updated = [...companies, newCompany];
-    setCompanies(updated);
-    localStorage.setItem('app_companies', JSON.stringify(updated));
     
-    // --- LIFETIME CREATION TRACKER ---
     let lifetimeCount = parseInt(localStorage.getItem('app_lifetime_company_creations') || '0');
-    // If uninitialized, seed with current companies length before adding
     if (lifetimeCount === 0) {
       lifetimeCount = companies.length;
     }
@@ -882,17 +953,11 @@ export const usePayrollData = (showAlert: any) => {
       await window.electronAPI.dbSetGlobal('app_lifetime_company_creations', lifetimeCount);
     }
     
-    // Switch to new silo
-    switchCompany(newCompany.id);
+    localStorage.setItem('app_companies', JSON.stringify(updated));
+    setCompanies(updated);
 
-    // If initial config provided, write it to the new silo immediately
-    if (initialConfig) {
-      const configKey = `${newCompany.id}_app_config`;
-      localStorage.setItem(configKey, JSON.stringify(initialConfig));
-      if (window.electronAPI?.dbSet) {
-        await window.electronAPI.dbSet('app_config', initialConfig);
-      }
-    }
+    // 4. Switch React State to trigger the UI switch and hydration
+    switchCompany(newCompany.id);
     
     showAlert('success', 'Organization Added', `${newCompany.establishmentName} has been provisioned.`);
   }, [companies, switchCompany, showAlert]);

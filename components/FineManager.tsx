@@ -15,22 +15,32 @@ interface FineManagerProps {
     hideContextSelector?: boolean;
     companyProfile: CompanyProfile;
     config?: StatutoryConfig;
+    justSaved?: boolean;
+    setJustSaved?: (val: boolean) => void;
 }
 
-const FineManager: React.FC<FineManagerProps> = ({
-    employees,
-    fines,
-    setFines,
-    month,
-    year,
-    savedRecords,
-    hideContextSelector = false,
-    companyProfile,
-    config
-}) => {
+const FineManager: React.FC<FineManagerProps> = (props) => {
+    const {
+        employees,
+        fines,
+        setFines,
+        month,
+        year,
+        savedRecords,
+        hideContextSelector = false,
+        companyProfile,
+        config
+    } = props;
+
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [justSaved, setJustSaved] = useState(false);
+    const [localJustSaved, setLocalJustSaved] = useState(false);
+    const justSaved = props.justSaved !== undefined ? props.justSaved : localJustSaved;
+    const setJustSaved = (val: boolean | ((prev: boolean) => boolean)) => {
+        const nextVal = typeof val === 'function' ? val(justSaved) : val;
+        setLocalJustSaved(nextVal);
+        props.setJustSaved?.(nextVal);
+    };
     const [searchTerm, setSearchTerm] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
 

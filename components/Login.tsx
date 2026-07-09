@@ -212,7 +212,23 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
         usernameRef.current.focus();
       }
     }, 100);
-    return () => clearTimeout(timer);
+
+    let updateCloseTimer: NodeJS.Timeout | null = null;
+    const api = (window as any).electronAPI;
+    if (api && api.closeUpdateMessage) {
+      updateCloseTimer = setTimeout(() => {
+        api.closeUpdateMessage()
+          .then((res: any) => console.log('[UpdateMsg] HTA message window closed successfully:', res))
+          .catch((err: any) => console.warn('[UpdateMsg] Failed to close HTA window:', err));
+      }, 1000);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      if (updateCloseTimer) {
+        clearTimeout(updateCloseTimer);
+      }
+    };
   }, []);
 
   const toggleFullScreen = () => {

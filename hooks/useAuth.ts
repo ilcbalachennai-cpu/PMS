@@ -23,6 +23,7 @@ export const useAuth = () => {
   const logout = useCallback(() => {
     sessionStorage.removeItem('app_session_user');
     sessionStorage.removeItem('patch_session_suppressed');
+    sessionStorage.removeItem('app_is_company_loaded');
     setCurrentUser(null);
   }, []);
 

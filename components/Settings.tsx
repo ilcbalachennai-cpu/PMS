@@ -16,7 +16,7 @@ import {
     getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
     requestResetOTP, getAppDeveloper, APP_VERSION, APP_PATCH_TIMESTAMP
 } from '../services/licenseService';
-import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, generateBackupFilename, getCompanyBackupFolder } from '../utils/formatters';
+import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, generateBackupFilename, getCompanyBackupFolder, didConfigCalculationFieldsChange } from '../utils/formatters';
 import { getMonthAbbr } from '../services/reportService';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 import { executeDiagnosticExport } from '../utils/diagnostics';
@@ -58,6 +58,7 @@ interface SettingsProps {
     activeFinancialYear?: string;
     isLicenseExpired?: boolean;
     latestPatchTimestamp?: string | null;
+    onNavigate?: (view: any, tab?: string, bypassDirty?: boolean) => void;
 }
 
 const UsageTimeClock = () => {
@@ -82,7 +83,7 @@ const Settings: React.FC<SettingsProps> = ({
     userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange,
     showAlert, verifyLicense, activeCompanyId = 'default', onRescueOrganizations,
     globalMonth = 'April', globalYear = 2025, activeFinancialYear, isLicenseExpired,
-    latestPatchTimestamp
+    latestPatchTimestamp, onNavigate
 }) => {
     const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${key}_${activeCompanyId}`;
     const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
@@ -134,12 +135,24 @@ const Settings: React.FC<SettingsProps> = ({
     const [selectedStatePreset, setSelectedStatePreset] = useState<string>('Tamil Nadu');
     const [selectedLWFState, setSelectedLWFState] = useState<string>('Tamil Nadu');
     const [targetPurgeCompanyId, setTargetPurgeCompanyId] = useState<string>(activeCompanyId);
+    const [enrolledEmployeeCount, setEnrolledEmployeeCount] = useState<number>(0);
 
     // V03.01.07: Sync local state when props change (e.g. after switching companies)
     useEffect(() => {
         setFormData(config);
         setProfileData(companyProfile);
         setLocalLeavePolicy(leavePolicy);
+        
+        // Fetch current enrolled employees for data size logic
+        try {
+            const empsData = localStorage.getItem(getCKey('app_employees'));
+            if (empsData) {
+                const emps = JSON.parse(empsData);
+                setEnrolledEmployeeCount(Array.isArray(emps) ? emps.length : 0);
+            } else {
+                setEnrolledEmployeeCount(0);
+            }
+        } catch(e) { setEnrolledEmployeeCount(0); }
     }, [config, companyProfile, leavePolicy]);
 
     useEffect(() => {
@@ -235,6 +248,23 @@ const Settings: React.FC<SettingsProps> = ({
     const [processStatus, setProcessStatus] = useState('');
 
     const [licenseInfo, setLicenseInfo] = useState<LicenseData | null>(() => getStoredLicense());
+
+    const availableQuota = useMemo(() => {
+        const globalLimit = licenseInfo?.dataSize || 5000;
+        let totalOtherQuota = 0;
+        try {
+            const savedCompanies = localStorage.getItem('app_companies');
+            if (savedCompanies) {
+                const companiesList = JSON.parse(savedCompanies);
+                companiesList.forEach((c: any) => {
+                    if (c.id !== profileData.id) {
+                        totalOtherQuota += (c.allocatedDataSize || 0);
+                    }
+                });
+            }
+        } catch (e) {}
+        return globalLimit - totalOtherQuota;
+    }, [licenseInfo, profileData.id]);
     const [newLicenseKey, setNewLicenseKey] = useState('');
     const [newUserName, setNewUserName] = useState(licenseInfo?.userName || '');
     const [newRegEmail, setNewRegEmail] = useState(licenseInfo?.registeredTo || '');
@@ -1595,19 +1625,9 @@ const Settings: React.FC<SettingsProps> = ({
                 const res = await window.electronAPI.runBackup(encrypted, fileName, subfolderPath);
 
                 if (res.success) {
-                    // Also trigger a standard browser download so they get a copy in their Downloads folder
-                    try {
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        window.URL.revokeObjectURL(url);
-                    } catch (dlErr) {
-                        console.error("Browser backup copy failed:", dlErr);
-                    }
-
                     setProcessProgress(100);
                     setProcessStatus('Backup Saved Successfully');
-                    showAlert?.('success', 'Backup Created', `Your data has been saved to the default location and a copy has been downloaded to your computer as: ${res.fileName || fileName}`, () => {
+                    showAlert?.('success', 'Backup Created', `Your data has been successfully saved to the default backup location as: ${res.fileName || fileName}`, () => {
                         // Open the folder location ONLY after clicking OK
                         if (res.filePath && window.electronAPI.openItemLocation) {
                             window.electronAPI.openItemLocation(res.filePath);
@@ -1750,11 +1770,66 @@ const Settings: React.FC<SettingsProps> = ({
     };
 
     const handleSave = async () => {
+        // --- DATA SIZE VALIDATION ---
+        const newAllocatedSize = profileData.allocatedDataSize;
+        if (newAllocatedSize !== undefined && newAllocatedSize !== null && String(newAllocatedSize).trim() !== '') {
+            const numSize = Number(newAllocatedSize);
+            if (numSize < enrolledEmployeeCount) {
+                showAlert?.('error', 'Allocation Failed', `Cannot reduce data size below the actual enrolled employees (${enrolledEmployeeCount}).`);
+                return;
+            }
+
+            const globalLimit = licenseInfo?.dataSize || 5000;
+            let totalOtherQuota = 0;
+            try {
+                const savedCompanies = localStorage.getItem('app_companies');
+                if (savedCompanies) {
+                    const companiesList = JSON.parse(savedCompanies);
+                    companiesList.forEach((c: any) => {
+                        if (c.id !== profileData.id) {
+                            totalOtherQuota += (c.allocatedDataSize || 0);
+                        }
+                    });
+                }
+            } catch (e) { console.error(e) }
+            
+            const balanceAvailable = globalLimit - totalOtherQuota;
+            if (numSize > balanceAvailable) {
+                showAlert?.('error', 'Limit Exceeded', `The data size entered is above the overall limit. Only ${balanceAvailable} is available as balance quota.`);
+                return;
+            }
+        } else {
+            showAlert?.('error', 'Validation Failed', 'Allocated Data Size is mandatory.');
+            return;
+        }
+        // --- END DATA SIZE VALIDATION ---
+
         const sanitizedProfile = {
             ...profileData,
             establishmentName: (profileData.establishmentName || '').trim().toUpperCase()
         };
         const sanitizedConfig = { ...formData };
+        if (sanitizedConfig.pfOriginalWagesComponents) {
+            sanitizedConfig.pfOriginalWagesComponents = {
+                ...sanitizedConfig.pfOriginalWagesComponents,
+                basic: true,
+                da: true,
+                retaining: true,
+                hra: false,
+                conveyance: false,
+                washing: false,
+                attire: false
+            };
+        }
+        if (sanitizedConfig.esiOriginalWagesComponents) {
+            sanitizedConfig.esiOriginalWagesComponents = {
+                ...sanitizedConfig.esiOriginalWagesComponents,
+                basic: true,
+                da: true,
+                retaining: true,
+                hra: true
+            };
+        }
         if (sanitizedConfig.enableDynamicPaySheet && sanitizedConfig.dynamicPaySheetColumns) {
             const cols = [...sanitizedConfig.dynamicPaySheetColumns];
             if (!cols.includes('totalEarnings')) {
@@ -1771,6 +1846,7 @@ const Settings: React.FC<SettingsProps> = ({
         setFormData(sanitizedConfig);
         setConfig(sanitizedConfig);
         setCompanyProfile(sanitizedProfile);
+        setProfileData(sanitizedProfile);
         setLeavePolicy(localLeavePolicy);
 
         // Persist to LocalStorage and DB
@@ -1807,6 +1883,36 @@ const Settings: React.FC<SettingsProps> = ({
 
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
+
+        if (didConfigCalculationFieldsChange(config, sanitizedConfig)) {
+            showAlert?.(
+                'info',
+                'Configuration Saved',
+                (
+                    <div className="space-y-2">
+                        <p className="text-white">Configuration saved successfully.</p>
+                        <p className="text-amber-400 font-bold mt-1">
+                            Changes would affect Pay Sheet. Click OK to go to Process Pay &gt; Run Payroll and initiate Recalculate Pay. Click Stay to remain in Settings.
+                        </p>
+                    </div>
+                ),
+                () => {
+                    onDirtyChange?.(false);
+                },
+                () => {
+                    onDirtyChange?.(false);
+                    onNavigate?.('pay_process', undefined, true);
+                },
+                'Stay',
+                'OK'
+            );
+        } else {
+            showAlert?.(
+                'success',
+                'Configuration Saved',
+                'Configuration details saved successfully.'
+            );
+        }
     };
 
     const executeFactoryReset = () => {
@@ -1971,7 +2077,10 @@ const Settings: React.FC<SettingsProps> = ({
                         )}
                         <button
                             onClick={handleSave}
-                            className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-[11px] font-black transition-all shadow-xl active:scale-95 ${saved
+                            disabled={companyProfile?.isReadOnly}
+                            className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-[11px] font-black transition-all shadow-xl active:scale-95 ${companyProfile?.isReadOnly
+                                ? 'bg-red-500/10 text-red-500 border border-red-500/30 cursor-not-allowed'
+                                : saved
                                 ? 'bg-emerald-600 text-white shadow-emerald-900/40 ring-2 ring-emerald-500/50'
                                 : isDirty
                                     ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/40 ring-2 ring-white/20'
@@ -2081,7 +2190,7 @@ const Settings: React.FC<SettingsProps> = ({
                                     <h4 className="font-bold text-sm tracking-tight">Labour Code Wages</h4>
                                 </div>
                                 <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
-                                    PF/ESI Wages = Basic + DA + Excess Allowances (if Allowances &gt; 50% of Gross). Subject to Statutory Ceiling for PF.
+                                    PF/ESI Wages = Basic + DA + RTA + Excess Allowances (if Allowances &gt; 50% of Gross). Subject to Statutory Ceiling for PF.
                                 </p>
                                 {formData.pfEsiCalculationBasis === 'LabourCode' && (
                                     <div className="absolute top-0 right-0 p-2">
@@ -2113,6 +2222,49 @@ const Settings: React.FC<SettingsProps> = ({
                             </button>
                         </div>
                     </div>
+
+                    {/* PF & ESI APPLICABILITY - Only shows if LabourCode selected */}
+                    {formData.pfEsiCalculationBasis === 'LabourCode' && (
+                        <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in slide-in-from-top-4 duration-500">
+                            <div className="p-4 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Scale size={16} className="text-blue-400" />
+                                    <h3 className="font-black uppercase tracking-tighter text-xs text-slate-300">Code Wages Applicability</h3>
+                                </div>
+                                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Enable or disable statutory deductions globally under Code Wages</span>
+                            </div>
+                            <div className="p-5 flex flex-col md:flex-row gap-4">
+                                <label htmlFor="enable-pf-code" className="flex-1 flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition-all cursor-pointer">
+                                    <div className="flex items-center gap-3">
+                                        <input
+                                            id="enable-pf-code"
+                                            type="checkbox"
+                                            className="w-4 h-4 rounded border-slate-700 text-blue-500 bg-slate-900 focus:ring-blue-500 focus:ring-offset-slate-900"
+                                            checked={formData.enablePF !== false}
+                                            onChange={e => setFormData({ ...formData, enablePF: e.target.checked })}
+                                            title="Enable PF under Code Wages"
+                                        />
+                                        <span className="text-xs font-bold text-slate-300 uppercase">PF Applicable</span>
+                                    </div>
+                                    <span className="text-[9px] text-slate-500 font-bold uppercase">PF Deduction Enabled</span>
+                                </label>
+                                <label htmlFor="enable-esi-code" className="flex-1 flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition-all cursor-pointer">
+                                    <div className="flex items-center gap-3">
+                                        <input
+                                            id="enable-esi-code"
+                                            type="checkbox"
+                                            className="w-4 h-4 rounded border-slate-700 text-pink-500 bg-slate-900 focus:ring-pink-500 focus:ring-offset-slate-900"
+                                            checked={formData.enableESI !== false}
+                                            onChange={e => setFormData({ ...formData, enableESI: e.target.checked })}
+                                            title="Enable ESI under Code Wages"
+                                        />
+                                        <span className="text-xs font-bold text-slate-300 uppercase">ESI Applicable</span>
+                                    </div>
+                                    <span className="text-[9px] text-slate-500 font-bold uppercase">ESI Deduction Enabled</span>
+                                </label>
+                            </div>
+                        </div>
+                    )}
 
                     {/* PF LEGACY WAGES COMPONENTS - Only shows if OriginalWages selected */}
                     {formData.pfEsiCalculationBasis === 'OriginalWages' && (
@@ -2146,21 +2298,31 @@ const Settings: React.FC<SettingsProps> = ({
                                         {[
                                             { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
                                             { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                            { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
-                                            { key: 'special3', label: 'Allow 3' },
+                                            { key: 'attire', label: 'Attire' }, 
+                                            { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, 
+                                            { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' },
+                                            { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' },
                                         ].map(comp => {
-                                            const isLocked = comp.key === 'basic' || comp.key === 'da';
+                                            const isMandatoryLocked = comp.key === 'basic' || comp.key === 'da' || comp.key === 'retaining';
+                                            const isHraLocked = comp.key === 'hra' || comp.key === 'conveyance' || comp.key === 'washing' || comp.key === 'attire';
+                                            const isLocked = isMandatoryLocked || isHraLocked;
                                             const components = formData.pfOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.pfOriginalWagesComponents;
-                                            const isActive = isLocked ? true : components[comp.key as keyof typeof components];
+                                            const isActive = isMandatoryLocked ? true : (isHraLocked ? false : components[comp.key as keyof typeof components]);
+                                            let btnStyle = 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700';
+                                            if (isActive) {
+                                                btnStyle = 'bg-blue-600 border-blue-400 text-white shadow-blue-900/20';
+                                            } else if (isHraLocked) {
+                                                btnStyle = 'bg-red-950/20 border-red-950 text-red-500/50';
+                                            }
                                             return (
                                                 <button
                                                     key={comp.key}
                                                     disabled={isLocked}
                                                     onClick={() => handlePFOriginalWagesToggle(comp.key as any)}
-                                                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-blue-600 border-blue-400 text-white shadow-blue-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700'} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
-                                                    title={isLocked ? "Mandatory Component" : `Toggle ${comp.label} for PF Base`}
+                                                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${btnStyle} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
+                                                    title={isMandatoryLocked ? "Mandatory Component" : (isHraLocked ? `${comp.label} Excluded from Standard PF Base (No Selection Allowed)` : `Toggle ${comp.label} for PF Base`)}
                                                 >
-                                                    {isActive ? <CheckSquare size={14} className={isLocked ? 'shrink-0 text-blue-200' : 'shrink-0'} /> : <Square size={14} className="shrink-0 opacity-40" />}
+                                                    {isActive ? <CheckSquare size={14} className={isLocked ? 'shrink-0 text-blue-200' : 'shrink-0'} /> : <Square size={14} className="shrink-0 opacity-20" />}
                                                     <span className="truncate">{comp.label} {isLocked && <span className="opacity-40 ml-1">(Locked)</span>}</span>
                                                 </button>
                                             );
@@ -2203,19 +2365,29 @@ const Settings: React.FC<SettingsProps> = ({
                                         {[
                                             { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
                                             { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                            { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
-                                            { key: 'special3', label: 'Allow 3' },
+                                            { key: 'attire', label: 'Attire' }, 
+                                            { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, 
+                                            { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' },
+                                            { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' },
                                         ].map(comp => {
-                                            const isLocked = comp.key === 'basic' || comp.key === 'da';
+                                            const isMandatoryLocked = comp.key === 'basic' || comp.key === 'da' || comp.key === 'retaining' || comp.key === 'hra';
+                                            const isInactiveLocked = comp.key === 'conveyance' || comp.key === 'washing' || comp.key === 'attire';
+                                            const isLocked = isMandatoryLocked || isInactiveLocked;
                                             const components = formData.esiOriginalWagesComponents || INITIAL_STATUTORY_CONFIG.esiOriginalWagesComponents;
-                                            const isActive = isLocked ? true : components[comp.key as keyof typeof components];
+                                            const isActive = isMandatoryLocked ? true : (isInactiveLocked ? false : components[comp.key as keyof typeof components]);
+                                            let btnStyle = 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-pink-900/20 hover:border-pink-500/30';
+                                            if (isActive) {
+                                                btnStyle = 'bg-pink-600 border-pink-400 text-white shadow-pink-900/20';
+                                            } else if (isInactiveLocked) {
+                                                btnStyle = 'bg-red-950/20 border-red-950 text-red-500/50';
+                                            }
                                             return (
                                                 <button
                                                     key={comp.key}
                                                     disabled={isLocked}
                                                     onClick={() => handleESIOriginalWagesToggle(comp.key as any)}
-                                                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${isActive ? 'bg-pink-600 border-pink-400 text-white shadow-pink-900/20' : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-pink-900/20 hover:border-pink-500/30'} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
-                                                    title={isLocked ? "Mandatory Component" : `Toggle ${comp.label} for ESI Base`}
+                                                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm ${btnStyle} ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
+                                                    title={isMandatoryLocked ? "Mandatory Component" : (isInactiveLocked ? `${comp.label} Excluded from Standard ESI Base (No Selection Allowed)` : `Toggle ${comp.label} for ESI Base`)}
                                                 >
                                                     {isActive ? <CheckSquare size={14} className={isLocked ? 'shrink-0 text-pink-200' : 'shrink-0'} /> : <Square size={14} className="shrink-0 opacity-40" />}
                                                     <span className="truncate">{comp.label} {isLocked && <span className="opacity-40 ml-1">(Locked)</span>}</span>
@@ -2306,9 +2478,9 @@ const Settings: React.FC<SettingsProps> = ({
                                                 { key: 'conveyance', label: 'Conveyance' },
                                                 { key: 'washing', label: 'Washing' },
                                                 { key: 'attire', label: 'Attire' },
-                                                { key: 'special1', label: 'Special 1' },
-                                                { key: 'special2', label: 'Special 2' },
-                                                { key: 'special3', label: 'Special 3' },
+                                                { key: 'special1', label: profileData.specialAllowance1Name || 'Special 1' },
+                                                { key: 'special2', label: profileData.specialAllowance2Name || 'Special 2' },
+                                                { key: 'special3', label: profileData.specialAllowance3Name || 'Special 3' },
                                                 { key: 'leaveEncashment', label: 'Leave Encash' },
                                                 { key: 'otAmount', label: 'OT Amount' },
                                                 { key: 'epf', label: 'EPF' },
@@ -2340,6 +2512,28 @@ const Settings: React.FC<SettingsProps> = ({
                                                     </button>
                                                 );
                                             })}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="pt-5 mt-5 border-t border-slate-800">
+                                        <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-1 flex items-center gap-2">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.8)]"></div>
+                                            Custom Allowance Labels
+                                        </h4>
+                                        <p className="text-[10px] text-amber-400/90 font-medium mb-4 ml-3.5">User defined name for Special Allowance</p>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase">Special Allowance 1 Label</label>
+                                                <input type="text" maxLength={20} className="w-full bg-slate-900/50 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="e.g. Tele. Reimburse" value={profileData.specialAllowance1Name || ''} onChange={e => setProfileData({ ...profileData, specialAllowance1Name: e.target.value })} title="Custom Label for Special Allowance 1 (Max 20 chars)" />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase">Special Allowance 2 Label</label>
+                                                <input type="text" maxLength={20} className="w-full bg-slate-900/50 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="e.g. Books & Periodicals" value={profileData.specialAllowance2Name || ''} onChange={e => setProfileData({ ...profileData, specialAllowance2Name: e.target.value })} title="Custom Label for Special Allowance 2 (Max 20 chars)" />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase">Special Allowance 3 Label</label>
+                                                <input type="text" maxLength={20} className="w-full bg-slate-900/50 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="e.g. Other Allowance" value={profileData.specialAllowance3Name || ''} onChange={e => setProfileData({ ...profileData, specialAllowance3Name: e.target.value })} title="Custom Label for Special Allowance 3 (Max 20 chars)" />
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -2409,7 +2603,7 @@ const Settings: React.FC<SettingsProps> = ({
                                                     ))}
                                                 </div>
                                             </div>
-                                            <p className="text-[9px] text-amber-300 italic leading-relaxed">* PF Wages will be taken from Higher Contribution Base only if it exceeds Code Wages (Clause 88).</p>
+                                            <p className="text-[9px] text-amber-300 italic leading-relaxed">* PF Wages will be taken from Higher Contribution based on Legacy Wage Ceiling or Code Wages.</p>
                                         </div>
                                     )}
                                 </div>
@@ -2420,8 +2614,10 @@ const Settings: React.FC<SettingsProps> = ({
                                         <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
                                             {[
                                                 { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
-                                                { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' },
-                                                { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' }, { key: 'special3', label: 'Allow 3' },
+                                                { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' },
+                                                { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, 
+                                                { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' }, 
+                                                { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' },
                                             ].map(comp => {
                                                 const components = formData.higherContributionComponents || INITIAL_STATUTORY_CONFIG.higherContributionComponents;
                                                 const isActive = components[comp.key as keyof typeof components];
@@ -2493,7 +2689,7 @@ const Settings: React.FC<SettingsProps> = ({
                         <div className="p-6 space-y-4">
                             <p className="text-xs text-slate-400 mb-2">Select the wage components to include for Leave Encashment Calculation (EL/SL/CL).</p>
                             <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3">
-                                {[{ key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' }, { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Special 1' }, { key: 'special2', label: 'Special 2' }, { key: 'special3', label: 'Special 3' }].map(comp => {
+                                {[{ key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' }, { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' }, { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' }, { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' }].map(comp => {
                                     const components = formData.leaveWagesComponents || INITIAL_STATUTORY_CONFIG.leaveWagesComponents;
                                     const isActive = components[comp.key as keyof typeof components];
                                     return <button key={comp.key} onClick={() => handleLeaveWagesToggle(comp.key as any)} className={`flex items-center gap-2 p-2 rounded-lg border text-[10px] font-bold transition-all ${isActive ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`} title={`Toggle ${comp.label} for Leave Encashment`} aria-label={`Toggle ${comp.label} for Leave Encashment`}>{isActive ? <CheckSquare size={14} /> : <Square size={14} />}<span className="truncate">{comp.label}</span></button>;
@@ -2552,8 +2748,10 @@ const Settings: React.FC<SettingsProps> = ({
                                         {[
                                             { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
                                             { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                            { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Special 1' }, { key: 'special2', label: 'Special 2' },
-                                            { key: 'special3', label: 'Special 3' }
+                                            { key: 'attire', label: 'Attire' }, 
+                                            { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, 
+                                            { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' },
+                                            { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' }
                                         ].map(comp => {
                                             const isActive = formData.otComponents?.[comp.key as keyof typeof formData.otComponents];
                                             return (
@@ -2657,8 +2855,8 @@ const Settings: React.FC<SettingsProps> = ({
                                                     {[
                                                         { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
                                                         { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                                        { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
-                                                        { key: 'special3', label: 'Allow 3' }
+                                                        { key: 'attire', label: 'Attire' }, { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' },
+                                                        { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' }
                                                     ].map(comp => {
                                                         const isLocked = comp.key === 'basic' || comp.key === 'da';
                                                         const components = formData.bonusWagesComponents || INITIAL_STATUTORY_CONFIG.bonusWagesComponents;
@@ -2733,8 +2931,8 @@ const Settings: React.FC<SettingsProps> = ({
                                                             {[
                                                                 { key: 'basic', label: 'Basic' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
                                                                 { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                                                { key: 'attire', label: 'Attire' }, { key: 'special1', label: 'Allow 1' }, { key: 'special2', label: 'Allow 2' },
-                                                                { key: 'special3', label: 'Allow 3' }
+                                                                { key: 'attire', label: 'Attire' }, { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' },
+                                                                { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' }
                                                             ].map(comp => {
                                                                 const isLocked = comp.key === 'basic' || comp.key === 'da';
                                                                 const components = formData.gratuityWagesComponents || INITIAL_STATUTORY_CONFIG.gratuityWagesComponents;
@@ -2934,6 +3132,17 @@ const Settings: React.FC<SettingsProps> = ({
                                         <input id="profile-est-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500 uppercase" placeholder="Your Name - as mentioned in App request mail" value={profileData.establishmentName} onChange={e => setProfileData({ ...profileData, establishmentName: e.target.value.toUpperCase() })} title="Establishment Name" aria-label="Establishment Name" />
                                     </div>
                                     <div className="space-y-1">
+                                        <div className="flex items-center justify-between">
+                                            <label htmlFor="profile-data-size" className="text-[10px] font-bold text-emerald-400 uppercase">Allocated Data Size<span className="text-red-500 text-sm ml-0.5">*</span></label>
+                                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md">
+                                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Utilized:</span>
+                                                <span className="text-[9px] font-mono font-bold text-white">{enrolledEmployeeCount}</span>
+                                            </div>
+                                        </div>
+                                        <input id="profile-data-size" type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-emerald-400 font-bold outline-none focus:ring-1 focus:ring-emerald-500 placeholder:text-slate-600" placeholder={`Licensed Data Size: ${licenseInfo?.dataSize || 5000} | Balance: ${availableQuota}`} value={profileData.allocatedDataSize ?? ''} onChange={e => setProfileData({ ...profileData, allocatedDataSize: e.target.value ? Number(e.target.value) : undefined })} title="Allocated Data Size (Employee Quota)" aria-label="Allocated Data Size" />
+                                        <p className="text-[9px] text-slate-500 mt-1">This company cannot enroll more employees than this allocated quota.</p>
+                                    </div>
+                                    <div className="space-y-1">
                                         <label htmlFor="profile-db-pass" className="text-[10px] font-bold text-sky-400 uppercase">Database Access Password (Optional)</label>
                                         <div className="relative">
                                             <input
@@ -3023,7 +3232,7 @@ const Settings: React.FC<SettingsProps> = ({
                                     <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-port" className="text-[10px] font-bold text-slate-400 uppercase">PORT</label><input id="smtp-port" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="465" value={profileData.smtpPort || ''} onChange={e => { const port = parseInt(e.target.value); let sec = profileData.smtpSecurity || 'None'; if (port === 465) sec = 'SSL'; else if (port === 587) sec = 'TLS'; setProfileData({ ...profileData, smtpPort: port || undefined, smtpSecurity: sec as any }); }} /></div>
                                     <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-security" className="text-[10px] font-bold text-slate-400 uppercase">SECURITY</label><select id="smtp-security" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono" value={profileData.smtpSecurity || 'None'} onChange={e => setProfileData({ ...profileData, smtpSecurity: e.target.value as any })}><option value="None">None</option><option value="SSL">SSL</option><option value="TLS">TLS</option></select></div>
                                     <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-user" className="text-[10px] font-bold text-slate-400 uppercase">SMTP USER (EMAIL)</label><input id="smtp-user" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="your.email@gmail.com" value={profileData.smtpUser || ''} onChange={e => setProfileData({ ...profileData, smtpUser: e.target.value })} /></div>
-                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-password" className="text-[10px] font-bold text-slate-400 uppercase">SMTP PASSWORD</label><input id="smtp-password" type="password" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="••••••••••••••••" value={profileData.smtpPassword || ''} onChange={e => setProfileData({ ...profileData, smtpPassword: e.target.value })} /></div>
+                                    <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-password" className="text-[10px] font-bold text-slate-400 uppercase">SMTP PASSWORD</label><input id="smtp-password" type="password" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-amber-500 font-mono placeholder:text-slate-500 tracking-widest" placeholder="••••••••••••••••" value={profileData.smtpPassword || ''} onChange={e => setProfileData({ ...profileData, smtpPassword: e.target.value })} /></div>
                                     <div className="space-y-1 flex flex-col justify-end"><label htmlFor="smtp-sender-name" className="text-[10px] font-bold text-slate-400 uppercase">SENDER NAME (IN MAIL)</label><input id="smtp-sender-name" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 placeholder:text-slate-500" placeholder="HR Department" value={profileData.senderName || ''} onChange={e => setProfileData({ ...profileData, senderName: e.target.value })} /></div>
                                     <div className="space-y-1 flex flex-col justify-end md:col-span-2 xl:col-span-3"><label htmlFor="smtp-sender-email" className="text-[10px] font-bold text-slate-400 uppercase">REPLY-TO EMAIL (IF DIFFERENT)</label><input id="smtp-sender-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-emerald-500 font-mono placeholder:text-slate-500" placeholder="hr@yourcompany.com" value={profileData.senderEmail || ''} onChange={e => setProfileData({ ...profileData, senderEmail: e.target.value })} /></div>
                                 </div>
@@ -3050,7 +3259,7 @@ const Settings: React.FC<SettingsProps> = ({
                                                 <input
                                                     id="security-pin-input"
                                                     type={showPin ? "text" : "password"}
-                                                    className="w-full bg-slate-950 border border-amber-900/30 rounded-lg p-3 text-sm text-white font-mono outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-700"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white font-mono outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-slate-700 tracking-widest"
                                                     placeholder="Enter Security Password"
                                                     value={profileData.securityPin || ''}
                                                     onChange={e => setProfileData({ ...profileData, securityPin: e.target.value })}
@@ -3337,7 +3546,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         onClick={() => requireAuth(() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); })}
                                         className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
                                     >
-                                        <Lock size={14} /> Authorize & Backup
+                                        <Lock size={14} /> Initiate Local Backup
                                     </button>
                                 </div>
 
@@ -3653,11 +3862,11 @@ const Settings: React.FC<SettingsProps> = ({
             {
                 showBackupModal && (
                     <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
-                            {!isProcessing && <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Backup Modal"><X size={20} /></button>}
+                        <div className="bg-[#052a16] w-full max-w-sm rounded-2xl border border-emerald-700/50 shadow-2xl shadow-emerald-900/20 p-6 flex flex-col gap-4 relative">
+                            {!isProcessing && <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-emerald-500/50 hover:text-emerald-300" title="Close" aria-label="Close Backup Modal"><X size={20} /></button>}
                             <div className="flex flex-col items-center gap-2">
-                                <div className="p-4 bg-blue-900/20 text-blue-400 rounded-full border border-blue-900/50 mb-2">{backupMode === 'EXPORT' ? <Lock size={32} /> : <Database size={32} />}</div>
-                                <h3 className="text-xl font-black text-white text-center uppercase tracking-widest">{backupMode === 'EXPORT' ? 'SECURE EXPORT' : 'SECURE RESTORE'}</h3>
+                                <div className="p-4 bg-emerald-900/30 text-emerald-400 rounded-full border border-emerald-700/50 mb-2">{backupMode === 'EXPORT' ? <Lock size={32} /> : <Database size={32} />}</div>
+                                <h3 className="text-xl font-black text-emerald-50 text-center uppercase tracking-widest">{backupMode === 'EXPORT' ? 'SECURE EXPORT' : 'SECURE RESTORE'}</h3>
                             </div>
 
                             <div className="space-y-4 mt-2">
@@ -3688,7 +3897,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         title="Password"
                                         autoFocus
                                         disabled={isMachineLocked && !isBCACFile}
-                                        className={`w-full bg-[#0f172a] border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all ${(isMachineLocked && !isBCACFile) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        className={`w-full bg-[#021109] border border-emerald-900/50 rounded-xl px-4 py-3 text-white placeholder-emerald-900/50 outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all ${(isMachineLocked && !isBCACFile) ? 'opacity-50 cursor-not-allowed' : ''} font-mono tracking-widest`}
                                         value={encryptionKey}
                                         onChange={(e) => setEncryptionKey(e.target.value)}
                                     />
@@ -3710,13 +3919,13 @@ const Settings: React.FC<SettingsProps> = ({
 
                                 {/* V03.01.07: Removed 'Restore into current company profile' to avoid data pollution */}
 
-                                {processStatus && <p className="text-[10px] text-blue-400 font-bold text-center animate-pulse uppercase tracking-widest">{processStatus}</p>}
+                                {processStatus && <p className="text-[10px] text-emerald-400 font-bold text-center animate-pulse uppercase tracking-widest">{processStatus}</p>}
 
                                 {isProcessing && (
-                                    <div className="w-full bg-[#0f172a] border border-slate-800 h-2.5 rounded-full overflow-hidden shadow-inner my-2">
+                                    <div className="w-full bg-[#021109] border border-emerald-900/50 h-2.5 rounded-full overflow-hidden shadow-inner my-2">
                                         <div
                                             ref={progressRef}
-                                            className="h-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-all duration-500 ease-out shadow-[0_0_12px_rgba(59,130,246,0.4)]"
+                                            className="h-full bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-400 transition-all duration-500 ease-out shadow-[0_0_12px_rgba(16,185,129,0.4)]"
                                         ></div>
                                     </div>
                                 )}
@@ -3724,7 +3933,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 <button
                                     onClick={backupMode === 'EXPORT' ? handleEncryptedExport : backupMode === 'MIGRATE' ? initiateLegacyMigration : initiateRestore}
                                     disabled={isProcessing || (backupMode !== 'EXPORT' && !selectedBackupFile)}
-                                    className={`w-full ${backupMode === 'MIGRATE' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'} disabled:opacity-50 text-white font-black text-xs py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-widest`}
+                                    className={`w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-widest border border-emerald-500/50`}
                                 >
                                     {isProcessing ? <Loader2 size={16} className="animate-spin" /> : (backupMode === 'EXPORT' ? <Download size={16} /> : <RefreshCw size={16} />)}
                                     {backupMode === 'EXPORT' ? 'DOWNLOAD ENCRYPTED BACKUP' : backupMode === 'MIGRATE' ? 'MIGRATE & RESTORE' : 'RESTORE DATA'}

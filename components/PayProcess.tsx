@@ -55,6 +55,18 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
     const masterFileInputRef = useRef<HTMLInputElement>(null);
     const payrollTabRef = useRef<HTMLDivElement>(null);
 
+    const [attendanceJustSaved, setAttendanceJustSaved] = useState<boolean>(true);
+    const [advanceJustSaved, setAdvanceJustSaved] = useState<boolean>(true);
+    const [fineJustSaved, setFineJustSaved] = useState<boolean>(true);
+    const [otJustSaved, setOtJustSaved] = useState<boolean>(true);
+
+    React.useEffect(() => {
+        setAttendanceJustSaved(true);
+        setAdvanceJustSaved(true);
+        setFineJustSaved(true);
+        setOtJustSaved(true);
+    }, [props.month, props.year]);
+
     // Compute lock status
     const isLocked = useMemo(() => {
         return props.savedRecords.some(r => r.month === props.month && r.year === props.year && r.status === 'Finalized');
@@ -489,6 +501,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         setLeaveLedgers={props.setLeaveLedgers}
                         hideContextSelector={true}
                         companyProfile={props.companyProfile}
+                        justSaved={attendanceJustSaved}
+                        setJustSaved={setAttendanceJustSaved}
                     />
                 </div>
 
@@ -508,6 +522,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         hideContextSelector={true}
                         viewMode="advance"
                         companyProfile={props.companyProfile}
+                        justSaved={advanceJustSaved}
+                        setJustSaved={setAdvanceJustSaved}
                     />
                 </div>
 
@@ -522,6 +538,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         hideContextSelector={true}
                         companyProfile={props.companyProfile}
                         config={props.config}
+                        justSaved={fineJustSaved}
+                        setJustSaved={setFineJustSaved}
                     />
                 </div>
 
@@ -536,6 +554,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                             year={props.year}
                             savedRecords={props.savedRecords}
                             companyProfile={props.companyProfile}
+                            justSaved={otJustSaved}
+                            setJustSaved={setOtJustSaved}
                         />
                     ) : (
                         <div className="flex flex-col items-center justify-center h-[50vh] bg-[#0f172a]/30 rounded-2xl border border-slate-800/50 backdrop-blur-sm text-center px-6">
@@ -587,6 +607,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 <div ref={payrollTabRef} className={activeTab === 'payroll' ? 'block' : 'hidden'}>
                     <PayrollProcessor
                         employees={props.employees}
+                        setEmployees={props.setEmployees as React.Dispatch<React.SetStateAction<Employee[]>>}
                         config={props.config}
                         onNavigate={props.onNavigate}
                         setSettingsTab={props.setSettingsTab}
@@ -609,6 +630,11 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         arrearHistory={props.arrearHistory}
                         showAlert={props.showAlert}
                         licenseInfo={props.licenseInfo}
+                        attendanceJustSaved={attendanceJustSaved}
+                        advanceJustSaved={advanceJustSaved}
+                        fineJustSaved={fineJustSaved}
+                        otJustSaved={otJustSaved}
+                        onSwitchTab={(tab) => setActiveTab(tab)}
                     />
                 </div>
             </div>

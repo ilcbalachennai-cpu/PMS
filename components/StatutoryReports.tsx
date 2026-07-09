@@ -8,6 +8,7 @@ import {
     generateArrearECRExcel,
     generatePFForm12A,
     generateESIReturn,
+    generateESIChallanPDF,
     generateESIForm5,
     generateESIExitReport,
     generateJoinedEmployeesReport,
@@ -67,12 +68,12 @@ interface StatutoryReportsProps {
 }
 
 const STATE_FORM_MAPPINGS: Record<string, { wage: string; slip: string; advance: string }> = {
-    'Tamil Nadu': { wage: 'Form R (Wage Register)', slip: 'Form T (Wage Slip)', advance: 'Form P (Advances)' },
-    'Karnataka': { wage: 'Form T (Wage Register)', slip: 'Form V (Wage Slip)', advance: 'Form XXII (Advances)' },
-    'Maharashtra': { wage: 'Form II (Wage Register)', slip: 'Form III (Wage Slip)', advance: 'Form IV (Advances)' },
-    'Andhra Pradesh': { wage: 'Form XXIII (Wage Register)', slip: 'Form XXIV (Wage Slip)', advance: 'Form XXII (Advances)' },
-    'Telangana': { wage: 'Form XXIII (Wage Register)', slip: 'Form XXIV (Wage Slip)', advance: 'Form XXII (Advances)' },
-    'West Bengal': { wage: 'Form J (Register of Wages)', slip: 'Form H (Pay Slip)', advance: 'Form M (Advances)' },
+    'Tamil Nadu': { wage: 'Form R - Wage Register', slip: 'Form T - Wage Slip', advance: 'Form P - Advances' },
+    'Karnataka': { wage: 'Form T - Wage Register', slip: 'Form V - Wage Slip', advance: 'Form XXII - Advances' },
+    'Maharashtra': { wage: 'Form II - Wage Register', slip: 'Form III - Wage Slip', advance: 'Form IV - Advances' },
+    'Andhra Pradesh': { wage: 'Form XXIII - Wage Register', slip: 'Form XXIV - Wage Slip', advance: 'Form XXII - Advances' },
+    'Telangana': { wage: 'Form XXIII - Wage Register', slip: 'Form XXIV - Wage Slip', advance: 'Form XXII - Advances' },
+    'West Bengal': { wage: 'Form J - Register of Wages', slip: 'Form H - Pay Slip', advance: 'Form M - Advances' },
     'Default': { wage: 'Wage Register', slip: 'Pay Slip', advance: 'Advance Register' }
 };
 
@@ -117,6 +118,13 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         const uniqueYears = Array.from(new Set(payrollHistory.map(r => r.year)));
         return uniqueYears.sort((a, b) => a - b);
     }, [payrollHistory, startYear, endYear]);
+
+    useEffect(() => {
+        if (latestFrozenPeriod) {
+            setGlobalMonth(latestFrozenPeriod.month);
+            setGlobalYear(latestFrozenPeriod.year);
+        }
+    }, []); // Initialize to latest frozen period on mount
 
     useEffect(() => {
         const isMonthValid = selectableMonths.length === 0 || selectableMonths.includes(globalMonth);
@@ -238,8 +246,20 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
                     if (!batch) throw new Error(`No arrears processed for ${globalMonth} ${globalYear}`);
                     savedPath = format === 'Excel' ? await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName, companyProfile) : await generateArrearECRText(batch, payrollHistory, employees, config, fileName, companyProfile);
-                } else if (reportName.includes('ESI Monthly')) {
-                    savedPath = await generateESIReturn(currentData, employees, 'Excel', fileName, companyProfile);
+                } else if (reportName === 'ESI Monthly' || reportName === 'ESI Challan') {
+                    const hasESIData = currentData.some(r => {
+                        const emp = employees.find(e => e.id === r.employeeId);
+                        return emp && !emp.isESIExempt && (r.deductions.esi > 0 || r.employerContributions.esi > 0);
+                    });
+                    if (!hasESIData) {
+                        setMsgModal({ isOpen: true, title: 'Info', message: `There is no ESI Contribution data for ${globalMonth} ${globalYear}.`, type: 'info', onConfirm: null });
+                        return;
+                    }
+                    if (reportName === 'ESI Monthly') {
+                        savedPath = await generateESIReturn(currentData, employees, 'Excel', fileName, companyProfile, config);
+                    } else {
+                        savedPath = await generateESIChallanPDF(currentData, employees, config, companyProfile, globalMonth, globalYear, fileName);
+                    }
                 } else if (reportName.includes('Form 12A')) {
                     savedPath = await generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
                 } else if (reportName === 'Employees Joined') {
@@ -497,6 +517,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
                 <ReportCard title="ESI Act, 1948" icon={ShieldCheck} color="pink" reports={[
                     { label: 'ESI Monthly Return', action: () => handleDownload('ESI Monthly', 'Excel'), format: 'XLSX' },
+                    { label: 'ESI Monthly Contribution Challan', action: () => handleDownload('ESI Challan', 'PDF'), format: 'PDF' },
                     { label: 'Form 5 (Contribution)', action: () => openRangeModal('Form 5'), format: 'PDF' },
                     { label: 'ESI Exit/OoC IP', action: () => handleDownload('ESI Exit', 'Excel'), format: 'XLSX' },
                     { label: 'Employees Joined During the Month', action: (fmt) => handleDownload('Employees Joined', fmt), format: 'BOTH', textColor: 'text-sky-400' },
@@ -556,11 +577,11 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             {/* Registers Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <ReportCard title="Central Labour Registers" icon={BookOpen} color="emerald" reports={[
-                    { label: 'Employee Register (Form I)', action: () => handleDownload('Form I', 'PDF') },
-                    { label: 'Attendance Register (Form IX)', action: () => handleDownload('Form IX', 'PDF') },
-                    { label: 'Wages, Overtime, Advance, Fine & Damages (Form IV)', action: () => handleDownload('Form IV', 'PDF') },
-                    { label: 'Register of Wages (Form B) (Legacy)', action: () => handleDownload('Form B', 'PDF'), textColor: 'text-rose-400' },
-                    { label: 'Muster Roll (Form C) (Legacy)', action: () => handleDownload('Form C', 'PDF'), textColor: 'text-rose-400' }
+                    { label: 'Form I - Employee Register', action: () => handleDownload('Form I', 'PDF') },
+                    { label: 'Form IX - Attendance Register', action: () => handleDownload('Form IX', 'PDF') },
+                    { label: 'Form IV - Wages, Overtime, Advance, Fine & Damages', action: () => handleDownload('Form IV', 'PDF') },
+                    { label: 'Form B - Register of Wages (Legacy)', action: () => handleDownload('Form B', 'PDF'), textColor: 'text-rose-400' },
+                    { label: 'Form C - Muster Roll (Legacy)', action: () => handleDownload('Form C', 'PDF'), textColor: 'text-rose-400' }
                 ]} />
 
                 <ReportCard

@@ -1326,10 +1326,10 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                     </div>
                                 </div>
                             ) : (
-                                <div className="bg-[#1e293b]/50 border border-slate-800 p-8 rounded-2xl space-y-8 animate-in zoom-in-95 duration-200">
+                                <div className="bg-[#052a16]/80 border border-emerald-900/50 shadow-2xl shadow-emerald-900/20 p-8 rounded-2xl space-y-8 animate-in zoom-in-95 duration-200">
                                     <div className="flex items-center gap-3">
-                                        <Database className="text-blue-400" size={24} />
-                                        <h3 className="font-bold text-lg">Restore Data Backup</h3>
+                                        <Database className="text-emerald-400" size={24} />
+                                        <h3 className="font-bold text-lg text-emerald-50">Restore Data Backup</h3>
                                     </div>
 
                                     <div className="space-y-6">
@@ -1361,7 +1361,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                                     onChange={e => setEncryptionKey(e.target.value)}
                                                     title="Decryption Password"
                                                     aria-label="Decryption Password"
-                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono"
+                                                    className="w-full bg-[#021109] border border-emerald-900/50 rounded-xl p-3.5 pl-10 text-white focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all font-mono tracking-widest placeholder-emerald-900/50"
                                                     placeholder="Enter decryption password"
                                                 />
                                             </div>
@@ -1378,7 +1378,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                                         <button
                                             onClick={executeRestore}
                                             disabled={isProcessing}
-                                            className="px-10 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest rounded-xl shadow-xl shadow-blue-500/20 transition-all flex items-center gap-2 disabled:opacity-50"
+                                            className="px-10 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase tracking-widest rounded-xl shadow-xl shadow-emerald-900/20 transition-all flex items-center gap-2 disabled:opacity-50 border border-emerald-500/50"
                                         >
                                             {isProcessing ? <Loader2 className="animate-spin" size={20} /> : <Upload size={20} />} Restore & Finish
                                         </button>

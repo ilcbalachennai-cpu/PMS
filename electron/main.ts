@@ -398,9 +398,12 @@ function createWindow() {
     });
     mainWindow.once('ready-to-show', () => {
         if (mainWindow) mainWindow.show();
-        try {
-            spawn('taskkill', ['/F', '/IM', 'mshta.exe'], { windowsHide: true });
-        } catch (e) {}
+        // Fallback: Kill mshta.exe after 15 seconds if the renderer doesn't call 'close-update-message'
+        setTimeout(() => {
+            try {
+                spawn('taskkill', ['/F', '/IM', 'mshta.exe'], { windowsHide: true });
+            } catch (e) {}
+        }, 15000);
     });
 
     mainWindow.on('close', (e) => {
@@ -443,6 +446,17 @@ function createWindow() {
         }
     });
 
+    ipcMain.handle('close-update-message', () => {
+        try {
+            console.log('[IPC] close-update-message requested');
+            spawn('taskkill', ['/F', '/IM', 'mshta.exe'], { windowsHide: true });
+            return { success: true };
+        } catch (e: any) {
+            console.error('[IPC] close-update-message failed:', e);
+            return { success: false, error: e.message };
+        }
+    });
+
     ipcMain.handle('check-close-requested', () => {
         if (closeRequested) {
             app.quit();
@@ -460,9 +474,14 @@ function createWindow() {
         });
         
         mainWindow.webContents.on('before-input-event', (event, input) => {
-            if ((input.control && input.shift && input.key.toLowerCase() === 'i') || input.key === 'F12') {
+            const key = input.key.toLowerCase();
+            if ((input.control && input.shift && (key === 'i' || key === 'j' || key === 'c')) || input.key === 'F12') {
                 event.preventDefault();
             }
+        });
+
+        mainWindow.webContents.on('context-menu', (e) => {
+            e.preventDefault();
         });
     }
 
@@ -603,9 +622,6 @@ app.whenReady().then(() => {
     if (!gotTheLock) return; // Prevent main app initialization when running as second instance
     
     // Dismiss any lingering patch update UI popups seamlessly
-    try {
-        execSync('taskkill /F /IM mshta.exe /T', { stdio: 'ignore', windowsHide: true });
-    } catch (e) {}
     try {
         execSync('taskkill /F /IM wscript.exe /T', { stdio: 'ignore', windowsHide: true });
     } catch (e) {}
@@ -903,7 +919,22 @@ ipcMain.handle('open-user-manual', async () => {
             } else {
                 // In production, extract to temp to bypass asar shell restrictions
                 const tempDir = app.getPath('temp');
-                const tempManualPath = path.join(tempDir, 'BPP_User_Manual.html');
+                
+                // Clean up old cached manual files to prevent temp directory bloat
+                try {
+                    const files = fs.readdirSync(tempDir);
+                    for (const file of files) {
+                        if (file.startsWith('BPP_User_Manual_') && file.endsWith('.html')) {
+                            fs.unlinkSync(path.join(tempDir, file));
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to cleanup old manual files', e);
+                }
+
+                // Add timestamp to filename to permanently bust the browser cache!
+                const cacheBuster = Date.now();
+                const tempManualPath = path.join(tempDir, `BPP_User_Manual_${cacheBuster}.html`);
                 
                 const content = fs.readFileSync(manualPath);
                 fs.writeFileSync(tempManualPath, content as any);
@@ -1086,18 +1117,47 @@ async function performAutoRescue(rootDb: Database.Database, appPaths: any) {
             } catch (e) {}
         }
 
-        // If the user already has companies registered, we don't strictly *need* to rescue automatically
-        // because it might be intentional. But for a fresh config wipe, `existingComps` will be empty.
-        // We will rescue any silos that aren't registered ONLY if the registry is empty.
-        if (existingComps.length > 0) return;
-
         const silos = fs.readdirSync(dataDir)
             .filter(name => {
                 const siloPath = path.join(dataDir, name);
                 return fs.statSync(siloPath).isDirectory() && fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
             })
             .filter(name => name !== '.icon-ico');
-        
+
+        // Clean up the existing list: remove missing, empty ID, or duplicate silos
+        let updatedRegistry = false;
+        const seen = new Set<string>();
+        const cleanedComps: any[] = [];
+
+        for (const c of existingComps) {
+            if (!c.id || c.id.trim() === '') {
+                updatedRegistry = true;
+                continue;
+            }
+            if (!silos.includes(c.id)) {
+                updatedRegistry = true;
+                continue;
+            }
+            if (seen.has(c.id)) {
+                updatedRegistry = true;
+                continue;
+            }
+            seen.add(c.id);
+            cleanedComps.push(c);
+        }
+
+        if (updatedRegistry) {
+            rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)').run('app_companies', JSON.stringify(cleanedComps));
+            console.log(`[AutoRescue] Cleaned up and sanitized registry database on startup.`);
+            existingComps = cleanedComps;
+            existingIds = existingComps.map((c: any) => c.id);
+        }
+
+        // If the user already has companies registered, we don't strictly *need* to rescue automatically
+        // because it might be intentional. But for a fresh config wipe, `existingComps` will be empty.
+        // We will rescue any silos that aren't registered ONLY if the registry is empty.
+        if (existingComps.length > 0) return;
+
         const missingSilos = silos.filter(s => !existingIds.includes(s));
         if (missingSilos.length === 0) return;
 
@@ -1415,6 +1475,29 @@ function autoHealAppCompanies(rootDbPath: string, dataDir: string): any[] | null
 }
 // --- END AUTO-HEALING ---
 
+// Helper to check if a specific company silo contains any enrolled employees
+function siloHasEmployees(siloDataPath: string, siloId: string): boolean {
+    const siloDbPath = path.join(siloDataPath, siloId, 'active_db.sqlite');
+    if (!fs.existsSync(siloDbPath)) return false;
+    try {
+        const siloDb = new Database(siloDbPath, { readonly: true });
+        const stmt = siloDb.prepare('SELECT value FROM store WHERE key = ?');
+        const row = stmt.get(`app_employees_${siloId}`) as { value: string } | undefined;
+        siloDb.close();
+        if (row && row.value) {
+            try {
+                const parsed = JSON.parse(row.value);
+                return Array.isArray(parsed) && parsed.length > 0;
+            } catch (e) {
+                return false;
+            }
+        }
+    } catch (e) {
+        console.warn(`[siloHasEmployees] Failed to check silo ${siloId}`, e);
+    }
+    return false;
+}
+
 ipcMain.handle('db-get-global', async (_, key) => {
     try {
         console.log(`[db-get-global] Requested key: ${key}. appBasePath: ${appBasePath}`);
@@ -1438,12 +1521,24 @@ ipcMain.handle('db-get-global', async (_, key) => {
         // --- V06.01.07: Call Auto Heal ---
         if (key === 'app_companies' && (!row || !row.value || row.value === '[]')) {
             const healed = autoHealAppCompanies(rootDbPath, paths.data);
-            if (healed) return healed;
+            if (healed) {
+                return healed.map((c: any) => ({
+                    ...c,
+                    hasEmployees: siloHasEmployees(paths.data, c.id)
+                }));
+            }
         }
 
         if (row && row.value) {
            try {
-              return JSON.parse(row.value);
+              let parsed = JSON.parse(row.value);
+              if (key === 'app_companies' && Array.isArray(parsed)) {
+                  parsed = parsed.map((c: any) => ({
+                      ...c,
+                      hasEmployees: siloHasEmployees(paths.data, c.id)
+                  }));
+              }
+              return parsed;
            } catch (e) {
               return row.value;
            }
@@ -1470,6 +1565,48 @@ ipcMain.handle('db-set-global', async (_, { key, value }) => {
     } catch (e: any) {
         return { success: false, error: e.message };
     }
+});
+
+const LIMIT_KEY = crypto.scryptSync('BPP_SECURE_COMPANY_LIMIT_KEY_2026', 'salt', 32);
+const LIMIT_IV = Buffer.alloc(16, 0); 
+
+function readActivatedSilos(): string[] {
+    try {
+        const filePath = path.join(app.getPath('userData'), 'sys_limit.bin');
+        if (!fs.existsSync(filePath)) return [];
+        const encrypted = fs.readFileSync(filePath, 'utf8');
+        const decipher = crypto.createDecipheriv('aes-256-cbc', LIMIT_KEY as any, LIMIT_IV as any);
+        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return JSON.parse(decrypted);
+    } catch (e) {
+        return [];
+    }
+}
+
+function writeActivatedSilos(silos: string[]) {
+    try {
+        const filePath = path.join(app.getPath('userData'), 'sys_limit.bin');
+        const cipher = crypto.createCipheriv('aes-256-cbc', LIMIT_KEY as any, LIMIT_IV as any);
+        let encrypted = cipher.update(JSON.stringify(silos), 'utf8', 'hex');
+        encrypted += cipher.final('hex');
+        fs.writeFileSync(filePath, encrypted, 'utf8');
+    } catch (e) {
+        console.error("Failed to write sys_limit", e);
+    }
+}
+
+ipcMain.handle('get-activated-silos', async () => {
+    return { success: true, silos: readActivatedSilos() };
+});
+
+ipcMain.handle('register-activated-silo', async (_, signature: string) => {
+    const silos = readActivatedSilos();
+    if (!silos.includes(signature)) {
+        silos.push(signature);
+        writeActivatedSilos(silos);
+    }
+    return { success: true, silos };
 });
 
 ipcMain.handle('list-silos', async () => {

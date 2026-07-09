@@ -31,8 +31,8 @@ const ExportModal: React.FC<ExportModalProps> = ({
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-[#1e293b] w-full max-w-3xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-                <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-[#0f172a]">
+            <div className="bg-[#1e293b] w-full max-w-3xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+                <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-[#0f172a] shrink-0">
                     <div>
                         <h3 className="text-xl font-bold text-white flex items-center gap-2">
                             <Download size={20} className="text-blue-400" /> Secure Data Export
@@ -42,7 +42,7 @@ const ExportModal: React.FC<ExportModalProps> = ({
                     <button onClick={onClose} title="Close Export Modal" aria-label="Close Export Modal" className="text-slate-400 hover:text-white"><X size={20} /></button>
                 </div>
 
-                <div className="p-6 space-y-8">
+                <div className="p-6 space-y-8 flex-1 overflow-y-auto">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Format</label>
@@ -96,8 +96,17 @@ const ExportModal: React.FC<ExportModalProps> = ({
                     </div>
                 </div>
 
-                <div className="p-6 bg-[#1e293b] border-t border-slate-800">
-                    <button onClick={onSubmit} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-900/20 transition-all text-sm flex items-center justify-center gap-2">
+                <div className="p-6 bg-[#1e293b] border-t border-slate-800 flex gap-3 shrink-0">
+                    <button
+                        onClick={onClose}
+                        className="flex-1 bg-slate-800/50 hover:bg-slate-800 text-slate-300 font-bold py-3.5 rounded-xl border border-slate-700 transition-all text-sm flex items-center justify-center gap-2"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onSubmit}
+                        className="flex-[2] bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-900/20 transition-all text-sm flex items-center justify-center gap-2"
+                    >
                         SECURE DOWNLOAD ({exportConfig.selectedColumns.length} cols)
                     </button>
                 </div>
