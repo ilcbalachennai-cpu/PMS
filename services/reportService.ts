@@ -197,7 +197,7 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
                 category = 'StatutoryReports/StateReg';
             } else if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement') || fileNameLower.includes('payslip') || fileNameLower.includes('pay slip') || fileNameLower.includes('leave')) {
                 category = 'PayReports';
-            } else if (fileNameLower.includes('esi') || fileNameLower.includes('pf') || fileNameLower.includes('form') || fileNameLower.includes('ecr') || fileNameLower.includes('gratuity')) {
+            } else if (fileNameLower.includes('esi') || fileNameLower.includes('pf') || fileNameLower.includes('form') || fileNameLower.includes('ecr') || fileNameLower.includes('gratuity') || fileNameLower.includes('bonus')) {
                 category = 'StatutoryReports';
                 if (fileNameLower.includes('esi')) {
                     category += '/ESI';
