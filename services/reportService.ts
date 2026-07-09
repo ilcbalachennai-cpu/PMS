@@ -1457,34 +1457,46 @@ export const generatePFForm12A = async (results: PayrollResult[], employees: Emp
     // const daysInMonth = new Date(year, mIdx + 1, 0).getDate(); // available for future use
 
     // ── Compute totals from payroll results (same logic as ECR) ──────────────
-    let totalGrossWages = 0, totalEPFWages = 0, totalEPSWages = 0;
+    let totalGrossWages = 0, totalEPFWages = 0, totalEPSWages = 0, totalEDLIWages = 0;
     let totalEEShare = 0, totalERepsShare = 0, totalERepfShare = 0;
 
     results.forEach(r => {
         const emp = employees.find(e => e.id === r.employeeId);
         const isOnLOP = (emp?.leavingReason || '').trim().toUpperCase() === 'ON LOP';
-        if (isOnLOP || emp?.isPFExempt || r.payableDays === 0) return; // skip non-contributors
+        
+        if (isOnLOP) return; // skip for totals in 12A
 
-        const gross = Math.round((r.earnings.basic || 0) + (r.earnings.da || 0) + (r.earnings.retainingAllowance || 0));
+        const isNonContributing = emp?.isPFExempt || r.payableDays === 0;
+        if (isNonContributing) return;
+
+        const gross = Math.round(r.earnings.total || 0);
         const ee = Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0));
-        const epf = ee > 0 ? Math.round(ee / 0.12) : 0;
-        const eps = Math.round(r.employerContributions.eps || 0);
-        const epfEr = Math.round(r.employerContributions.epf || 0);
+        const epfWages = ee > 0 ? Math.round(ee / 0.12) : 0;
+        const edliWages = Math.min(15000, epfWages);
+        
+        const isEPSEligible = emp?.isEPSEligible !== 'No';
+        const isHigherPension = emp?.pfHigherPension?.isHigherPensionOpted === 'Yes';
+        
+        let epsWages = 0;
+        if (isEPSEligible) {
+            epsWages = isHigherPension ? epfWages : Math.min(15000, epfWages);
+        }
+
+        const erEPS = isEPSEligible ? Math.round(epsWages * 0.0833) : 0;
+        const erEPF = ee - erEPS;
 
         totalGrossWages += gross;
-        totalEPFWages += epf;
-        totalEPSWages += Math.round(eps / 0.0833); // back-calc EPS wages from 8.33%
+        totalEPFWages += epfWages;
+        totalEPSWages += epsWages;
+        totalEDLIWages += edliWages;
         totalEEShare += ee;
-        totalERepsShare += eps;
-        totalERepfShare += epfEr;
+        totalERepsShare += erEPS;
+        totalERepfShare += erEPF;
     });
 
-    // Round EPS wages to nearest integer
-    totalEPSWages = Math.round(totalEPSWages);
-
-    const edliWages = totalEPSWages;
+    const edliWages = totalEDLIWages;
     const edliAmount = Math.round(edliWages * 0.005);          // 0.50% EDLI
-    const adminCharges = Math.round(totalEPFWages * 0.005);      // 0.50% Admin on EPF wages (min 500)
+    const adminCharges = Math.max(500, Math.round(totalEPFWages * 0.005));      // 0.50% Admin on EPF wages (min 500)
     const adminEDLI = 0;                                      // Admin EDLI (currently 0%)
     const totalEmployer = totalERepsShare + totalERepfShare + edliAmount + adminCharges + adminEDLI;
     const grandTotal = totalEEShare + totalEmployer;
