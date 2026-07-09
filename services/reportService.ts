@@ -3157,6 +3157,7 @@ export const generateBonusReport = async (_history: PayrollResult[], employees: 
     if (format === 'Excel') {
         return await generateExcelReport([{ ID: '', Name: '', Wages: 0, Bonus: 0 }], 'Bonus', fileName, {
             company: company.establishmentName || 'Company',
+            companyId: company.id,
             type: 'Bonus Statement',
             period: `For the Month of: ${sM} ${sY}`
         });
