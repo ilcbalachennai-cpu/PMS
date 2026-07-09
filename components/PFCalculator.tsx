@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { Calculator, Download, FileText, AlertCircle, FileSpreadsheet, Building2, IndianRupee, Users, Lock } from 'lucide-react';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile } from '../types';
-import { generatePFECR, generatePFForm12A } from '../services/reportService';
+import { generatePFECR, generatePFForm12A, openSavedReport } from '../services/reportService';
 import { formatIndianNumber } from '../utils/formatters';
 
 interface PFCalculatorProps {
@@ -15,6 +15,7 @@ interface PFCalculatorProps {
     year: number;
     setYear: (y: number) => void;
     activeFinancialYear?: string;
+    showAlert: any;
 }
 
 const PFCalculator: React.FC<PFCalculatorProps> = ({
@@ -26,7 +27,8 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
     setMonth,
     year,
     setYear,
-    activeFinancialYear
+    activeFinancialYear,
+    showAlert
 }) => {
     const CHRONO_ORDER = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
 
@@ -151,14 +153,32 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
         };
     }, [currentRecords, employees, config]);
 
-    const handleDownloadECR = () => {
+    const handleDownloadECR = async () => {
         if (currentRecords.length === 0) return;
-        generatePFECR(currentRecords, employees, config, 'Text', `PF_ECR_${month}_${year}`, companyProfile);
+        try {
+            const savedPath = await generatePFECR(currentRecords, employees, config, 'Text', `PF_ECR_${month}_${year}`, companyProfile);
+            if (savedPath) {
+                openSavedReport(savedPath);
+                showAlert('success', 'Report Generated', `ECR Text file saved to ${savedPath}`);
+            }
+        } catch (error: any) {
+            console.error(error);
+            showAlert('error', 'Generation Failed', error.message || 'Failed to generate ECR Text file');
+        }
     };
 
-    const handleDownloadChallan = () => {
+    const handleDownloadChallan = async () => {
         if (currentRecords.length === 0) return;
-        generatePFForm12A(currentRecords, employees, config, companyProfile, month, year);
+        try {
+            const savedPath = await generatePFForm12A(currentRecords, employees, config, companyProfile, month, year);
+            if (savedPath) {
+                openSavedReport(savedPath);
+                showAlert('success', 'Report Generated', `Form 12A PDF saved to ${savedPath}`);
+            }
+        } catch (error: any) {
+            console.error(error);
+            showAlert('error', 'Generation Failed', error.message || 'Failed to generate Form 12A PDF');
+        }
     };
 
     return (
