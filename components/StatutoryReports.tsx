@@ -296,7 +296,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     }
                     savedPath = format === 'PDF' ? await generateEmployeesLeftPDF(employees, globalMonth, globalYear, companyProfile) : await generateLeftEmployeesReport(employees, globalMonth, globalYear, companyProfile);
                 } else if (reportName.includes('Gratuity')) {
-                    savedPath = await generateGratuityReport(employees, companyProfile, globalMonth, globalYear);
+                    savedPath = await generateGratuityReport(employees, companyProfile, globalMonth, globalYear, format as 'PDF' | 'Excel');
                 } else if (reportName.includes('Bonus')) {
                     savedPath = await generateBonusReport(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, companyProfile, format as 'PDF' | 'Excel');
                 } else if (reportName.includes('PT Report')) {

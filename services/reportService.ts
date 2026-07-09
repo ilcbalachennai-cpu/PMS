@@ -3143,10 +3143,28 @@ export const generateESIExitReport = async (results: PayrollResult[], employees:
     return res.path || null;
 };
 
-export const generateGratuityReport = async (employees: Employee[], companyProfile: CompanyProfile, month: string, year: number): Promise<string | null> => {
+export const generateGratuityReport = async (employees: Employee[], companyProfile: CompanyProfile, month: string, year: number, format: 'PDF' | 'Excel'): Promise<string | null> => {
     const headers = ['ID', 'Name', 'DOJ', 'Years', 'Salary', 'Gratuity Accrued'];
     const data = employees.map(e => [e.id, e.name, formatDateInd(e.doj), '0', Math.round(e.basicPay + e.da), '0']);
     const fileName = getStandardFileName('Gratuity_Report', companyProfile, month, year);
+
+    if (format === 'Excel') {
+        const excelData = employees.map(e => ({
+            ID: e.id,
+            Name: e.name,
+            DOJ: formatDateInd(e.doj),
+            Years: 0,
+            Salary: Math.round(e.basicPay + e.da),
+            'Gratuity Accrued': 0
+        }));
+        return await generateExcelReport(excelData, 'Gratuity', fileName, {
+            company: companyProfile.establishmentName || 'Company',
+            companyId: companyProfile.id,
+            type: 'Gratuity Liability Statement',
+            period: `As of Date: ${month} ${year}`
+        });
+    }
+
     return await generatePDFTableReport('Gratuity Liability Statement', headers, data, fileName, 'l', '', companyProfile, {}, 'As of Date');
 };
 
