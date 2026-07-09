@@ -933,8 +933,13 @@ const Reports: React.FC<ReportsProps> = ({
                             'CL Balance': l.cl.balance || 0
                         };
                     });
-                    const fileName = getStandardFileName('LeaveLedger', companyProfile, month, year);
-                    savedPath = await generateExcelReport(data, 'Leave Ledger', fileName);
+                    const fileName = getStandardFileName('Leave Ledger', companyProfile, month, year);
+                    savedPath = await generateExcelReport(data, 'Leave Ledger', fileName, {
+                        company: companyProfile.establishmentName,
+                        companyId: companyProfile.id,
+                        type: 'Leave Ledger',
+                        period: `${month} ${year}`
+                    });
                 } else {
                     savedPath = await generateLeaveLedgerReport(currentResults, activeEmps, leaveLedgers, month, year, 'AC', companyProfile);
                 }

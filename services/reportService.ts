@@ -1186,7 +1186,7 @@ export const generateLeaveLedgerReport = async (results: PayrollResult[], employ
             l.cl.balance ?? 0
         ];
     });
-    const fileName = getStandardFileName('Leave_Ledger', companyProfile, month, year);
+    const fileName = getStandardFileName('Leave Ledger', companyProfile, month, year);
     const colStyles = {
         5: { fontStyle: 'bold' },
         6: { fontStyle: 'bold' },
