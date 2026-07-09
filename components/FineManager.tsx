@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { Upload, Save, Lock, AlertTriangle, CheckCircle2, Search, Download, Gavel, Edit2 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { Employee, FineRecord, PayrollResult, CompanyProfile, StatutoryConfig } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
 

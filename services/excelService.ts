@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { Employee, CompanyProfile } from '../types';
 import { generateExcelReport, generateExcelWorkbook, generateTemplateWorkbook, generatePDFTableReport, getStandardFileName } from './reportService';
 

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, CheckCircle2, ArrowRight, GitMerge, Lock, TrendingUp, UploadCloud, AlertCircle, RotateCw } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord, View, LicenseData, SettingsTab } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
 import AttendanceManager from './AttendanceManager';

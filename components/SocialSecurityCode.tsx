@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { ShieldCheck, Landmark, X, ReceiptText, Info, Calendar, Scale, BookOpen, Lock, Upload, Calculator } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { PayrollResult, Employee, StatutoryConfig, CompanyProfile } from '../types';
 import {
     generateEPFCodeImpactReport,

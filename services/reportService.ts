@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
@@ -281,6 +281,51 @@ export const generateExcelReport = async (data: any[], sheetName: string, fileNa
         ws = XLSX.utils.json_to_sheet(data);
     }
 
+    const range = XLSX.utils.decode_range(ws['!ref'] || "A1:A1");
+    const headerRowIdx = headerInfo ? 5 : 0;
+    
+    for (let R = range.s.r; R <= range.e.r; ++R) {
+        let isGrandTotalRow = false;
+        
+        // Check for GRAND TOTAL
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+            if (cell && cell.v && String(cell.v).toUpperCase().includes('GRAND TOTAL')) {
+                isGrandTotalRow = true;
+                break;
+            }
+        }
+
+        // Apply styles
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+            let cell = ws[cellRef];
+
+            if (isGrandTotalRow) {
+                if (!cell) {
+                    cell = { t: 's', v: '' };
+                    ws[cellRef] = cell;
+                }
+                cell.s = {
+                    fill: { fgColor: { rgb: "00008B" } }, // Dark Blue
+                    font: { bold: true, color: { rgb: "FFFFFF" } } // White Bold
+                };
+            } else if (R === headerRowIdx) {
+                if (cell) {
+                    cell.s = {
+                        fill: { fgColor: { rgb: "2980B9" } },
+                        font: { bold: true, color: { rgb: "FFFFFF" } }
+                    };
+                }
+            } else if (R < headerRowIdx && headerInfo && cell) {
+                // Style company header info at the top
+                cell.s = {
+                    font: { bold: true, sz: 12, color: { rgb: "333333" } }
+                };
+            }
+        }
+    }
+
     autoSizeSheet(ws);
 
     const wb = XLSX.utils.book_new();
@@ -432,7 +477,16 @@ export const generatePDFTableReport = async (title: string, headers: string[], d
         theme: 'grid',
         styles: { fontSize: 8 },
         headStyles: { fillColor: [41, 128, 185] },
-        columnStyles: columnStyles
+        columnStyles: columnStyles,
+        didParseCell: (hookData: any) => {
+            if (hookData.section === 'body' && hookData.row.raw && Array.isArray(hookData.row.raw)) {
+                if (hookData.row.raw.includes('GRAND TOTAL')) {
+                    hookData.cell.styles.fillColor = [0, 0, 139];
+                    hookData.cell.styles.textColor = [255, 255, 255];
+                    hookData.cell.styles.fontStyle = 'bold';
+                }
+            }
+        }
     });
 
     const u8 = new Uint8Array(doc.output('arraybuffer'));

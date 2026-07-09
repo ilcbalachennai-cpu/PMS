@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Save, RefreshCw, Lock, FileText, Eye, AlertCircle, AlertTriangle, X, CheckCircle, Download, Scale, HandCoins, Users, Calculator, Settings, Search } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, FineRecord, OTRecord, ArrearBatch, View, SettingsTab, LicenseData } from '../types';
 import { calculatePayroll } from '../services/payrollEngine';
 import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName, openSavedReport, appendSummaryRowToExcelData } from '../services/reportService';
