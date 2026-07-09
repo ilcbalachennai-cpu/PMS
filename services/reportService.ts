@@ -161,11 +161,15 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
     if (subfolder) {
         let firstWord = '';
         let cId = 'Rpt';
+        let categoryOverride = '';
         let companyFolder = '';
         if (subfolder.includes('___')) {
             const parts = subfolder.split('___');
             firstWord = parts[0].trim().split(' ')[0].replace(/[^a-zA-Z0-9_]/g, '').toUpperCase();
             cId = parts[1].trim().replace(/[^a-zA-Z0-9_]/g, '');
+            if (parts.length > 2) {
+                categoryOverride = parts[2].trim();
+            }
             if (cId === '' || cId === 'Rpt') {
                 companyFolder = `${firstWord}_Rpt`;
             } else {
@@ -194,7 +198,9 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
             const cleanFileNameLower = fileNameLower.replace(/_/g, ' ');
             let category = 'OtherReports';
             
-            if (cleanFileNameLower.includes('statereg')) {
+            if (categoryOverride) {
+                category = categoryOverride;
+            } else if (cleanFileNameLower.includes('statereg')) {
                 category = 'StatutoryReports/StateReg';
             } else if (cleanFileNameLower.includes('pay sheet') || cleanFileNameLower.includes('payroll') || cleanFileNameLower.includes('bank statement') || cleanFileNameLower.includes('cash statement') || cleanFileNameLower.includes('payslip') || cleanFileNameLower.includes('pay slip') || cleanFileNameLower.includes('leave')) {
                 category = 'PayReports';
@@ -629,7 +635,7 @@ export const generateDynamicReportPDF = async (
     const safeTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
     const cleanFileName = fileName || getStandardFileName(safeTitle, company, toPeriod.split(' ')[0], toPeriod.split(' ')[1] || new Date().getFullYear());
 
-    const res = await electronSaveReport(cleanFileName, u8, 'pdf', `${company.establishmentName}___${company.id}`);
+    const res = await electronSaveReport(cleanFileName, u8, 'pdf', `${company.establishmentName}___${company.id}___MIS`);
     if (res.success) {
 
         return res.path || null;
