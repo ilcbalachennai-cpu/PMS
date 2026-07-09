@@ -182,7 +182,7 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
         }
         
         // Extract month (3 letters) and year (2-4 digits) from the end of the filename
-        const match = fileName.trim().match(/_([A-Za-z]{3})_(\d{2,4})$/i) || fileName.trim().match(/_([A-Za-z]{3})(\d{2,4})$/i);
+        const match = fileName.trim().match(/_([A-Za-z]{3})_(\d{2,4})$/i) || fileName.trim().match(/_([A-Za-z]{3})(\d{2,4})$/i) || fileName.trim().match(/([A-Za-z]{3})[a-z]*_?(\d{2,4})$/i);
         if (match) {
             const monthAbbr = match[1];
             const yearStr = match[2];
@@ -212,6 +212,8 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
                 ) {
                     category += '/CentralReg';
                 }
+            } else if (fileNameLower.includes('mis')) {
+                category = 'MIS';
             } else {
                 category = 'Reports';
             }
