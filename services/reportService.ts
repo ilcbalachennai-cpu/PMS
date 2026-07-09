@@ -192,10 +192,15 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
             // Determine category
             const fileNameLower = fileName.toLowerCase();
             let category = 'OtherReports';
-            if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement') || fileNameLower.includes('payslip') || fileNameLower.includes('pay slip')) {
+            if (fileNameLower.includes('pay sheet') || fileNameLower.includes('payroll') || fileNameLower.includes('bank statement') || fileNameLower.includes('cash statement') || fileNameLower.includes('payslip') || fileNameLower.includes('pay slip') || fileNameLower.includes('leave')) {
                 category = 'PayReports';
             } else if (fileNameLower.includes('esi') || fileNameLower.includes('pf') || fileNameLower.includes('form') || fileNameLower.includes('ecr')) {
                 category = 'StatutoryReports';
+                if (fileNameLower.includes('esi')) {
+                    category += '/ESI';
+                } else if (fileNameLower.includes('pf') || fileNameLower.includes('ecr')) {
+                    category += '/PF';
+                }
             } else {
                 category = 'Reports';
             }
@@ -3460,7 +3465,7 @@ export const generateESIReturn = async (results: PayrollResult[], employees: Emp
 
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-        return await generateExcelWorkbook(wb, fileName, _companyProfile.establishmentName);
+        return await generateExcelWorkbook(wb, fileName, `${_companyProfile.establishmentName}___${_companyProfile.id}`);
     }
     return null;
 };
