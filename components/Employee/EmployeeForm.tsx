@@ -752,7 +752,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                         <FormSectionHeader icon={ShieldAlert} title="7. Statutory Options & Exemptions" color="text-amber-400" />
                         <div className="bg-slate-900/30 p-6 rounded-xl border border-slate-800 space-y-6">
                             {/* A. PF Exempted (Para 69) */}
-                            <div className={`flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 ${is7CActive || !!newEmpForm.isDeferredPension ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
+                            <div className={`flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 ${is7CActive || !!newEmpForm.isDeferredPension || newEmpForm.isEPSEligible === 'Yes' ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
                                 <div>
                                     <h4 className="text-sm font-bold text-white">A. PF Exempted (Para 69)</h4>
                                     <p className="text-[10px] text-slate-400">Employee excluded from EPF coverage. (Also disables Higher Pension & age options)</p>
@@ -766,7 +766,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                         type="checkbox" 
                                         className="sr-only peer" 
                                         checked={newEmpForm.isPFExempt} 
-                                        disabled={!!newEmpForm.isDeferredPension || is7CActive} 
+                                        disabled={!!newEmpForm.isDeferredPension || is7CActive || newEmpForm.isEPSEligible === 'Yes'} 
                                         onChange={e => {
                                             const isExempt = e.target.checked;
                                             setNewEmpForm(prev => ({
@@ -781,7 +781,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                             }));
                                         }} 
                                     />
-                                    <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 ${newEmpForm.isDeferredPension || is7CActive ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                                    <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 ${newEmpForm.isDeferredPension || is7CActive || newEmpForm.isEPSEligible === 'Yes' ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
                                 </label>
                             </div>
 
