@@ -837,7 +837,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                 name="deferredPensionType" 
                                                 value="WithoutEPS" 
                                                 checked={newEmpForm.deferredPensionOption === 'WithoutEPS'} 
-                                                onChange={() => setNewEmpForm(prev => ({ ...prev, deferredPensionOption: 'WithoutEPS' }))}
+                                                onChange={() => setNewEmpForm(prev => ({ ...prev, deferredPensionOption: 'WithoutEPS', isEPSEligible: 'No' }))}
                                                 className="w-4 h-4 text-amber-500 bg-slate-900 border-slate-700 focus:ring-amber-500 focus:ring-offset-slate-900 focus:ring-2" 
                                             />
                                             <div className="text-xs">
@@ -882,7 +882,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                             </div>
 
                             {/* D. Employee Eligible for EPS */}
-                            <div className={`flex flex-col md:flex-row md:items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 gap-4 ${newEmpForm.isPFExempt ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
+                            <div className={`flex flex-col md:flex-row md:items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 gap-4 ${newEmpForm.isPFExempt || newEmpForm.deferredPensionOption === 'WithoutEPS' ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
                                 <div className="flex-1">
                                     <h4 className="text-sm font-bold text-white">D. Employee Eligible for EPS <span className="text-red-500">*</span></h4>
                                     <p className="text-[10px] text-slate-400">Note: Employee Date of joining as member for the first time is on or after 01-09-2014 and PF Wages is above ₹15000.</p>
@@ -893,7 +893,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                         aria-label="Employee Eligible for EPS"
                                         className={`bg-slate-800 border ${!newEmpForm.isEPSEligible ? 'border-red-500/50' : 'border-slate-600'} rounded-lg p-2 text-xs text-white outline-none focus:ring-1 focus:ring-sky-500 ${hasProcessedPayroll && !isEPSUnlocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         required
-                                        disabled={newEmpForm.isPFExempt || (hasProcessedPayroll && !isEPSUnlocked)}
+                                        disabled={newEmpForm.isPFExempt || newEmpForm.deferredPensionOption === 'WithoutEPS' || (hasProcessedPayroll && !isEPSUnlocked)}
                                         value={newEmpForm.isEPSEligible || ''}
                                         onChange={e => setNewEmpForm({ ...newEmpForm, isEPSEligible: e.target.value as 'Yes' | 'No' })}
                                     >
