@@ -154,6 +154,31 @@ The Personnel Master module provides a set of highly optimized, bulk-operation t
 > [!WARNING]
 > **Irreversible Employee Deletion:** Deleting an employee profile permanently purges all master record details and statutory identity parameters from the isolated silo database. To prevent accidental data loss, this function requires active **Administrator Password Authentication** and a secondary safety confirmation. Deletion will affect historical payroll references; for separated employees, it is highly recommended to record a **Date of Leaving (DOL)** instead of performing a hard purge.
 
+### 5.2 Statutory Options & Exemptions (The 7.A - 7.E Framework)
+
+When onboarding or updating an employee, configuring their statutory profile correctly is critical to ensure the payroll calculation engine processes Provident Fund (PF) and Pension (EPS) accurately. The system features an intelligent, cascading framework (Sections 7.A through 7.E) that automatically locks or unlocks dependent options to prevent contradictory selections.
+
+**7.A: PF Exempted (Para 69)**
+*   **Purpose:** Marks the employee as completely excluded from EPF/EPS coverage. Both employee and employer contributions will be forced to strictly zero (0).
+*   **Logic:** Checking this option locks 7.D to "No" and disables 7.E. It cannot be checked if the employee is marked as an active EPS contributor (7.D = Yes).
+
+**7.B: Deferred Pension Option (Age 58 to 60)**
+*   **Purpose:** Handles the statutory rule allowing employees aged 58-60 to defer their pension withdrawal.
+*   **Logic:** This section only activates dynamically when the system detects the employee's age is between 58 and 60.
+    *   **a. With Pension Contribution:** The employee continues to contribute to EPS. The system forces 7.D to "Yes" and locks it.
+    *   **b. Without Pension Contribution:** EPS stops. The entire 12% employer share is routed to EPF. The system forces 7.D to "No" and locks 7.E.
+
+**7.C: Employee Age Above 60 (Only PF Contribution Allowed)**
+*   **Purpose:** Enforces the mandate that EPS contributions must stop entirely when an employee reaches 60 years of age.
+*   **Logic:** This section activates automatically when the employee crosses 60. It routes 100% of the employer's contribution directly to EPF, disabling 7.A to enforce the age-based calculation override.
+
+**7.D: Employee Eligible for EPS**
+*   **Purpose:** Determines if the 8.33% employer share should be directed to the Pension Fund.
+*   **Logic:** Explicitly setting this to "Yes" disables the PF Exemption (7.A). Setting it to "No" disables Higher Pension (7.E). This dropdown is forcefully taken over by the system if 7.A, 7.B(a), or 7.B(b) are toggled.
+
+**7.E: Enable Higher Pension Option (EPS 95)**
+*   **Purpose:** Calculates EPS contributions on actual uncapped gross wages instead of the standard ₹15,000 ceiling limit (Joint Option).
+*   **Logic:** This toggle acts as a strict dependent. It remains greyed out and completely locked unless 7.D is actively confirmed as "Yes".
 
 ---
 
