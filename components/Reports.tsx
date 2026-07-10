@@ -803,49 +803,37 @@ const Reports: React.FC<ReportsProps> = ({
                         savedPath = await generateSimplePaySheetPDF(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName, config);
                     }
                 }
-            } else if (reportType === 'Pay Slips') {
-                let slipRecords = currentResults.filter(r => r.netPay > 0);
-                let customSlipFilename = undefined;
-                let customSlipTitle = undefined;
+            } else if (['Pay Slips', 'Bank Statement', 'Leave Ledger', 'Advance Shortfall'].includes(reportType)) {
+                let filteredResults = currentResults;
+                let customTitlePrefix = '';
 
                 if (paySlipFilter === 'all') {
                     if (selectedEmployeeId !== 'all') {
-                        slipRecords = slipRecords.filter(r => r.employeeId === selectedEmployeeId);
+                        filteredResults = filteredResults.filter(r => r.employeeId === selectedEmployeeId);
                     }
-                } else if (paySlipFilter === 'site') {
-                    if (!paySlipFilterValue) throw new Error("Please select a Site first.");
-                    slipRecords = slipRecords.filter(r => {
+                } else {
+                    if (!paySlipFilterValue) throw new Error(`Please select a ${paySlipFilter.charAt(0).toUpperCase() + paySlipFilter.slice(1)} first.`);
+                    filteredResults = filteredResults.filter(r => {
                         const emp = employees.find(e => e.id === r.employeeId);
-                        return emp?.site === paySlipFilterValue;
+                        if (paySlipFilter === 'site') return emp?.site === paySlipFilterValue;
+                        if (paySlipFilter === 'branch') return emp?.branch === paySlipFilterValue;
+                        if (paySlipFilter === 'division') return emp?.division === paySlipFilterValue;
+                        return true;
                     });
-                    const monthAbbr = getMonthAbbr(month);
-                    customSlipFilename = `${paySlipFilterValue} PaySlips ${monthAbbr} ${year}`;
-                    customSlipTitle = `Pay Slips - ${paySlipFilterValue} - ${month} ${year}`;
-                } else if (paySlipFilter === 'branch') {
-                    if (!paySlipFilterValue) throw new Error("Please select a Branch first.");
-                    slipRecords = slipRecords.filter(r => {
-                        const emp = employees.find(e => e.id === r.employeeId);
-                        return emp?.branch === paySlipFilterValue;
-                    });
-                    const monthAbbr = getMonthAbbr(month);
-                    customSlipFilename = `${paySlipFilterValue} PaySlips ${monthAbbr} ${year}`;
-                    customSlipTitle = `Pay Slips - ${paySlipFilterValue} - ${month} ${year}`;
-                } else if (paySlipFilter === 'division') {
-                    if (!paySlipFilterValue) throw new Error("Please select a Division first.");
-                    slipRecords = slipRecords.filter(r => {
-                        const emp = employees.find(e => e.id === r.employeeId);
-                        return emp?.division === paySlipFilterValue;
-                    });
-                    const monthAbbr = getMonthAbbr(month);
-                    customSlipFilename = `${paySlipFilterValue} PaySlips ${monthAbbr} ${year}`;
-                    customSlipTitle = `Pay Slips - ${paySlipFilterValue} - ${month} ${year}`;
+                    customTitlePrefix = `${paySlipFilterValue} `;
                 }
 
-                if (slipRecords.length === 0) throw new Error("No matching payroll records found for the selected filter.");
-                savedPath = await generatePaySlipsPDF(slipRecords, employees, month, year, companyProfile, customSlipTitle, customSlipFilename);
-            } else if (reportType === 'Bank Statement') {
-                const bankRecords = currentResults.filter(r => r.netPay > 0);
-                if (bankRecords.length === 0) throw new Error("No employees with positive Net Pay found for Bank Statement.");
+                if (reportType === 'Pay Slips') {
+                    let slipRecords = filteredResults.filter(r => r.netPay > 0);
+                    const monthAbbr = getMonthAbbr(month);
+                    let customSlipFilename = customTitlePrefix ? `${customTitlePrefix.trim()} PaySlips ${monthAbbr} ${year}` : undefined;
+                    let customSlipTitle = customTitlePrefix ? `Pay Slips - ${paySlipFilterValue} - ${month} ${year}` : undefined;
+
+                    if (slipRecords.length === 0) throw new Error("No matching payroll records found for the selected filter.");
+                    savedPath = await generatePaySlipsPDF(slipRecords, employees, month, year, companyProfile, customSlipTitle, customSlipFilename);
+                } else if (reportType === 'Bank Statement') {
+                    const bankRecords = filteredResults.filter(r => r.netPay > 0);
+                    if (bankRecords.length === 0) throw new Error("No employees with positive Net Pay found for Bank Statement.");
 
                 if (format === 'Excel') {
                     let data = bankRecords.map(r => {
@@ -880,7 +868,7 @@ const Reports: React.FC<ReportsProps> = ({
                         'Amount': totalAmount
                     } as any);
 
-                    const fileName = getStandardFileName('Bank Statement', companyProfile, month, year);
+                    const fileName = getStandardFileName(customTitlePrefix ? `${customTitlePrefix.trim()} Bank Statement` : 'Bank Statement', companyProfile, month, year);
                     savedPath = await generateExcelReport(data, 'Bank Statement', fileName, {
                         company: companyProfile.establishmentName,
                         companyId: companyProfile.id,
@@ -890,20 +878,28 @@ const Reports: React.FC<ReportsProps> = ({
                 } else {
                     savedPath = await generateBankStatementPDF(bankRecords, employees, month, year, companyProfile);
                 }
-            } else if (reportType === 'Leave Ledger') {
-                const resultsMap = new Map<string, PayrollResult>(currentResults.map(r => [r.employeeId, r]));
-                const periodStart = new Date(year, months.indexOf(month), 1);
-                const periodEnd = new Date(year, months.indexOf(month) + 1, 0);
+                } else if (reportType === 'Leave Ledger') {
+                    const resultsMap = new Map<string, PayrollResult>(filteredResults.map(r => [r.employeeId, r]));
+                    const periodStart = new Date(year, months.indexOf(month), 1);
+                    const periodEnd = new Date(year, months.indexOf(month) + 1, 0);
 
-                const activeEmps = employees.filter(emp => {
-                    const doj = new Date(emp.doj);
-                    if (doj > periodEnd) return false;
-                    if (emp.dol) {
-                        const dol = new Date(emp.dol);
-                        if (dol < periodStart) return false;
-                    }
-                    return true;
-                });
+                    const activeEmps = employees.filter(emp => {
+                        if (paySlipFilter !== 'all') {
+                            if (paySlipFilter === 'site' && emp.site !== paySlipFilterValue) return false;
+                            if (paySlipFilter === 'branch' && emp.branch !== paySlipFilterValue) return false;
+                            if (paySlipFilter === 'division' && emp.division !== paySlipFilterValue) return false;
+                        } else if (selectedEmployeeId !== 'all') {
+                            if (emp.id !== selectedEmployeeId) return false;
+                        }
+
+                        const doj = new Date(emp.doj);
+                        if (doj > periodEnd) return false;
+                        if (emp.dol) {
+                            const dol = new Date(emp.dol);
+                            if (dol < periodStart) return false;
+                        }
+                        return true;
+                    });
 
                 if (activeEmps.length === 0) throw new Error("No active employees found for the selected period.");
 
@@ -933,7 +929,7 @@ const Reports: React.FC<ReportsProps> = ({
                             'CL Balance': l.cl.balance || 0
                         };
                     });
-                    const fileName = getStandardFileName('Leave Ledger', companyProfile, month, year);
+                    const fileName = getStandardFileName(customTitlePrefix ? `${customTitlePrefix.trim()} Leave Ledger` : 'Leave Ledger', companyProfile, month, year);
                     savedPath = await generateExcelReport(data, 'Leave Ledger', fileName, {
                         company: companyProfile.establishmentName,
                         companyId: companyProfile.id,
@@ -941,10 +937,10 @@ const Reports: React.FC<ReportsProps> = ({
                         period: `${month} ${year}`
                     });
                 } else {
-                    savedPath = await generateLeaveLedgerReport(currentResults, activeEmps, leaveLedgers, month, year, 'AC', companyProfile);
+                    savedPath = await generateLeaveLedgerReport(filteredResults, activeEmps, leaveLedgers, month, year, 'AC', companyProfile);
                 }
             } else if (reportType === 'Advance Shortfall') {
-                const shortfallData = currentResults.map(r => {
+                const shortfallData = filteredResults.map(r => {
                     const emp = employees.find(e => e.id === r.employeeId);
                     const adv = advanceLedgers.find(a => a.employeeId === r.employeeId);
                     if (!adv || (adv.recovery || 0) === 0) return null;
@@ -968,8 +964,9 @@ const Reports: React.FC<ReportsProps> = ({
                 }
 
                 savedPath = await generateAdvanceShortfallReport(shortfallData, month, year, format, companyProfile);
-            } else if (reportType === 'Arrear Report') {
-                let batch: ArrearBatch | undefined;
+            }
+        } else if (reportType === 'Arrear Report') {
+            let batch: ArrearBatch | undefined;
                 if (arrearHistory && arrearHistory.length > 0) {
                     const [selectedMonth, selectedYear] = arrearSelectedPeriod.split('-');
                     batch = arrearHistory.find(b => b.month === selectedMonth && b.year === parseInt(selectedYear, 10));
@@ -1252,18 +1249,18 @@ const Reports: React.FC<ReportsProps> = ({
                                 </div>
                             )}
 
-                            {reportType === 'Pay Slips' && currentResults.length > 0 && (
+                            {['Pay Slips', 'Bank Statement', 'Leave Ledger', 'Advance Shortfall'].includes(reportType) && currentResults.length > 0 && (
                                 <div className="space-y-3 mt-2 animate-in fade-in slide-in-from-top-2 border-t border-slate-800 pt-4">
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Filter Slips By</label>
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Filter Report By</label>
                                         <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
                                             {(['all', 'site', 'branch', 'division'] as const).map(f => (
                                                 <button
                                                     key={f}
                                                     disabled={!isLocked}
                                                     onClick={() => { setPaySlipFilter(f); setPaySlipFilterValue(''); setSelectedEmployeeId('all'); }}
-                                                    title={!isLocked ? "Freeze payroll to configure filters" : `Filter Slips by ${f}`}
-                                                    aria-label={`Filter Slips by ${f}`}
+                                                    title={!isLocked ? "Freeze payroll to configure filters" : `Filter Report by ${f}`}
+                                                    aria-label={`Filter Report by ${f}`}
                                                     className={`flex-1 py-1.5 text-[10px] uppercase font-black rounded-md transition-all ${
                                                         !isLocked
                                                             ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed'
@@ -1286,8 +1283,8 @@ const Reports: React.FC<ReportsProps> = ({
                                                 value={selectedEmployeeId}
                                                 onChange={e => setSelectedEmployeeId(e.target.value)}
                                                 className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors custom-scrollbar disabled:opacity-50 disabled:cursor-not-allowed"
-                                                title={!isLocked ? "Freeze payroll to configure filters" : "Select Employee for Pay Slip"}
-                                                aria-label="Select Employee for Pay Slip"
+                                                title={!isLocked ? "Freeze payroll to configure filters" : "Select Employee for Report"}
+                                                aria-label="Select Employee for Report"
                                             >
                                                 <option value="all" className="bg-[#0f172a] text-white">All Employees</option>
                                                 {currentResults
