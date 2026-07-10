@@ -776,7 +776,8 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                 isDeferredPension: isExempt ? false : prev.isDeferredPension,
                                                 deferredPensionOption: isExempt ? undefined : prev.deferredPensionOption,
                                                 epsMaturityConfigured: isExempt ? true : false,
-                                                epsMaturityConfiguredAge: isExempt ? (isAge60OrAbove ? 60 : (isAge58To60 ? 58 : undefined)) : undefined
+                                                epsMaturityConfiguredAge: isExempt ? (isAge60OrAbove ? 60 : (isAge58To60 ? 58 : undefined)) : undefined,
+                                                isEPSEligible: isExempt ? 'No' : prev.isEPSEligible
                                             }));
                                         }} 
                                     />
@@ -894,7 +895,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                         className={`bg-slate-800 border ${!newEmpForm.isEPSEligible ? 'border-red-500/50' : 'border-slate-600'} rounded-lg p-2 text-xs text-white outline-none focus:ring-1 focus:ring-sky-500 ${hasProcessedPayroll && !isEPSUnlocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         required
                                         disabled={newEmpForm.isPFExempt || newEmpForm.deferredPensionOption === 'WithoutEPS' || (hasProcessedPayroll && !isEPSUnlocked)}
-                                        value={newEmpForm.isEPSEligible || ''}
+                                        value={newEmpForm.isPFExempt || newEmpForm.deferredPensionOption === 'WithoutEPS' ? 'No' : (newEmpForm.isEPSEligible || '')}
                                         onChange={e => setNewEmpForm({ ...newEmpForm, isEPSEligible: e.target.value as 'Yes' | 'No' })}
                                     >
                                         <option value="" disabled>Select Yes/No</option>
