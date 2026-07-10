@@ -785,110 +785,106 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                             </div>
 
                             {/* B. Deferred Pension Option (Age 58 to 60) */}
-                            {isAge58To60 && (
-                                <div className={`p-4 bg-slate-900 rounded-lg border border-slate-700 space-y-4 ${newEmpForm.isPFExempt ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <h4 className="text-sm font-bold text-white">B. Deferred Pension Option (Age 58 to 60)</h4>
-                                            <p className="text-[10px] text-slate-400">Employee age is {age} (eligible for deferred pension up to 60 years).</p>
-                                        </div>
-                                        <label htmlFor="deferredPensionInput" className="relative inline-flex items-center cursor-pointer">
-                                            <input 
-                                                id="deferredPensionInput" 
-                                                tabIndex={isRejoining ? -1 : undefined} 
-                                                title="Deferred Pension Option" 
-                                                aria-label="Deferred Pension Option" 
-                                                type="checkbox" 
-                                                className="sr-only peer" 
-                                                checked={!!newEmpForm.isDeferredPension} 
-                                                disabled={newEmpForm.isPFExempt} 
-                                                onChange={e => {
-                                                    const opted = e.target.checked;
-                                                    setNewEmpForm(prev => ({
-                                                        ...prev,
-                                                        isDeferredPension: opted,
-                                                        deferredPensionOption: opted ? 'WithEPS' : undefined,
-                                                        epsMaturityConfigured: true
-                                                    }));
-                                                }} 
-                                            />
-                                            <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600 ${newEmpForm.isPFExempt ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
-                                        </label>
-                                    </div>
-
-                                    {newEmpForm.isDeferredPension && (
-                                        <div className="grid grid-cols-2 gap-4 bg-slate-800/40 p-4 rounded-xl border border-slate-700 animate-in slide-in-from-top-2">
-                                            <label className="flex items-center gap-3 cursor-pointer">
-                                                <input 
-                                                    type="radio" 
-                                                    name="deferredPensionType" 
-                                                    value="WithEPS" 
-                                                    checked={newEmpForm.deferredPensionOption === 'WithEPS'} 
-                                                    onChange={() => setNewEmpForm(prev => ({ ...prev, deferredPensionOption: 'WithEPS' }))}
-                                                    className="w-4 h-4 text-amber-500 bg-slate-900 border-slate-700 focus:ring-amber-500 focus:ring-offset-slate-900 focus:ring-2" 
-                                                />
-                                                <div className="text-xs">
-                                                    <span className="font-bold text-white block">a. With Pension Contribution</span>
-                                                    <span className="text-[10px] text-slate-400">Calculate standard PF and EPS splits.</span>
-                                                </div>
-                                            </label>
-                                            <label className="flex items-center gap-3 cursor-pointer">
-                                                <input 
-                                                    type="radio" 
-                                                    name="deferredPensionType" 
-                                                    value="WithoutEPS" 
-                                                    checked={newEmpForm.deferredPensionOption === 'WithoutEPS'} 
-                                                    onChange={() => setNewEmpForm(prev => ({ ...prev, deferredPensionOption: 'WithoutEPS' }))}
-                                                    className="w-4 h-4 text-amber-500 bg-slate-900 border-slate-700 focus:ring-amber-500 focus:ring-offset-slate-900 focus:ring-2" 
-                                                />
-                                                <div className="text-xs">
-                                                    <span className="font-bold text-white block">b. Without Pension Contribution</span>
-                                                    <span className="text-[10px] text-slate-400">Employer share (entire 12%) goes to Provident Fund.</span>
-                                                </div>
-                                            </label>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* C. Employee Age Above 60 (Only PF Contribution Allowed) */}
-                            {isAge60OrAbove && (
-                                <div className={`flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 ${newEmpForm.isPFExempt ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
+                            <div className={`p-4 bg-slate-900 rounded-lg border border-slate-700 space-y-4 ${(newEmpForm.isPFExempt || !isAge58To60) ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
+                                <div className="flex items-center justify-between">
                                     <div>
-                                        <h4 className="text-sm font-bold text-white">C. Employee Age Above 60 (Only PF Contribution Allowed)</h4>
-                                        <p className="text-[10px] text-slate-400">Employee age is {age} (&gt;= 60). No EPS contribution allowed, 100% EPF allocation active.</p>
+                                        <h4 className="text-sm font-bold text-white">B. Deferred Pension Option (Age 58 to 60)</h4>
+                                        <p className="text-[10px] text-slate-400">Employee age is {age} (eligible for deferred pension up to 60 years).</p>
                                     </div>
-                                    <label htmlFor="pfAge60Input" className="relative inline-flex items-center cursor-pointer">
+                                    <label htmlFor="deferredPensionInput" className="relative inline-flex items-center cursor-pointer">
                                         <input 
-                                            id="pfAge60Input" 
+                                            id="deferredPensionInput" 
                                             tabIndex={isRejoining ? -1 : undefined} 
-                                            title="Only PF Contribution Allowed" 
-                                            aria-label="Only PF Contribution Allowed" 
+                                            title="Deferred Pension Option" 
+                                            aria-label="Deferred Pension Option" 
                                             type="checkbox" 
                                             className="sr-only peer" 
-                                            checked={!newEmpForm.isPFExempt && !!newEmpForm.epsMaturityConfigured && (!newEmpForm.epsMaturityConfiguredAge || newEmpForm.epsMaturityConfiguredAge === 60)} 
-                                            disabled={newEmpForm.isPFExempt} 
+                                            checked={!!newEmpForm.isDeferredPension} 
+                                            disabled={newEmpForm.isPFExempt || !isAge58To60} 
                                             onChange={e => {
-                                                const checked = e.target.checked;
+                                                const opted = e.target.checked;
                                                 setNewEmpForm(prev => ({
                                                     ...prev,
-                                                    epsMaturityConfigured: checked,
-                                                    epsMaturityConfiguredAge: checked ? 60 : undefined,
-                                                    isPFExempt: false,
-                                                    isDeferredPension: false,
-                                                    deferredPensionOption: undefined
+                                                    isDeferredPension: opted,
+                                                    deferredPensionOption: opted ? 'WithEPS' : undefined,
+                                                    epsMaturityConfigured: true
                                                 }));
                                             }} 
                                         />
-                                        <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 ${newEmpForm.isPFExempt ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                                        <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600 ${newEmpForm.isPFExempt || !isAge58To60 ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
                                     </label>
                                 </div>
-                            )}
 
-                            {/* E. Employee Eligible for EPS */}
+                                {newEmpForm.isDeferredPension && (
+                                    <div className="grid grid-cols-2 gap-4 bg-slate-800/40 p-4 rounded-xl border border-slate-700 animate-in slide-in-from-top-2">
+                                        <label className="flex items-center gap-3 cursor-pointer">
+                                            <input 
+                                                type="radio" 
+                                                name="deferredPensionType" 
+                                                value="WithEPS" 
+                                                checked={newEmpForm.deferredPensionOption === 'WithEPS'} 
+                                                onChange={() => setNewEmpForm(prev => ({ ...prev, deferredPensionOption: 'WithEPS' }))}
+                                                className="w-4 h-4 text-amber-500 bg-slate-900 border-slate-700 focus:ring-amber-500 focus:ring-offset-slate-900 focus:ring-2" 
+                                            />
+                                            <div className="text-xs">
+                                                <span className="font-bold text-white block">a. With Pension Contribution</span>
+                                                <span className="text-[10px] text-slate-400">Calculate standard PF and EPS splits.</span>
+                                            </div>
+                                        </label>
+                                        <label className="flex items-center gap-3 cursor-pointer">
+                                            <input 
+                                                type="radio" 
+                                                name="deferredPensionType" 
+                                                value="WithoutEPS" 
+                                                checked={newEmpForm.deferredPensionOption === 'WithoutEPS'} 
+                                                onChange={() => setNewEmpForm(prev => ({ ...prev, deferredPensionOption: 'WithoutEPS' }))}
+                                                className="w-4 h-4 text-amber-500 bg-slate-900 border-slate-700 focus:ring-amber-500 focus:ring-offset-slate-900 focus:ring-2" 
+                                            />
+                                            <div className="text-xs">
+                                                <span className="font-bold text-white block">b. Without Pension Contribution</span>
+                                                <span className="text-[10px] text-slate-400">Employer share (entire 12%) goes to Provident Fund.</span>
+                                            </div>
+                                        </label>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* C. Employee Age Above 60 (Only PF Contribution Allowed) */}
+                            <div className={`flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 ${(newEmpForm.isPFExempt || !isAge60OrAbove) ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
+                                <div>
+                                    <h4 className="text-sm font-bold text-white">C. Employee Age Above 60 (Only PF Contribution Allowed)</h4>
+                                    <p className="text-[10px] text-slate-400">Employee age is {age} (&gt;= 60). No EPS contribution allowed, 100% EPF allocation active.</p>
+                                </div>
+                                <label htmlFor="pfAge60Input" className="relative inline-flex items-center cursor-pointer">
+                                    <input 
+                                        id="pfAge60Input" 
+                                        tabIndex={isRejoining ? -1 : undefined} 
+                                        title="Only PF Contribution Allowed" 
+                                        aria-label="Only PF Contribution Allowed" 
+                                        type="checkbox" 
+                                        className="sr-only peer" 
+                                        checked={!newEmpForm.isPFExempt && !!newEmpForm.epsMaturityConfigured && (!newEmpForm.epsMaturityConfiguredAge || newEmpForm.epsMaturityConfiguredAge === 60)} 
+                                        disabled={newEmpForm.isPFExempt || !isAge60OrAbove} 
+                                        onChange={e => {
+                                            const checked = e.target.checked;
+                                            setNewEmpForm(prev => ({
+                                                ...prev,
+                                                epsMaturityConfigured: checked,
+                                                epsMaturityConfiguredAge: checked ? 60 : undefined,
+                                                isPFExempt: false,
+                                                isDeferredPension: false,
+                                                deferredPensionOption: undefined
+                                            }));
+                                        }} 
+                                    />
+                                    <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 ${newEmpForm.isPFExempt || !isAge60OrAbove ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                                </label>
+                            </div>
+
+                            {/* D. Employee Eligible for EPS */}
                             <div className={`flex flex-col md:flex-row md:items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 gap-4 ${newEmpForm.isPFExempt ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
                                 <div className="flex-1">
-                                    <h4 className="text-sm font-bold text-white">E. Employee Eligible for EPS <span className="text-red-500">*</span></h4>
+                                    <h4 className="text-sm font-bold text-white">D. Employee Eligible for EPS <span className="text-red-500">*</span></h4>
                                     <p className="text-[10px] text-slate-400">Note: Employee Date of joining as member for the first time is on or after 01-09-2014 and PF Wages is above ₹15000.</p>
                                 </div>
                                 <div className="flex items-center gap-3">
@@ -931,11 +927,11 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 </div>
                             </div>
 
-                            {/* F. Enable Higher Pension Option (EPS 95) */}
+                            {/* E. Enable Higher Pension Option (EPS 95) */}
                             <div className={`p-4 bg-slate-900 rounded-lg border border-slate-700 space-y-4 ${(newEmpForm.isPFExempt || newEmpForm.isEPSEligible === 'No') ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <h4 className="text-sm font-bold text-amber-400">F. Enable Higher Pension Option (EPS 95)</h4>
+                                        <h4 className="text-sm font-bold text-amber-400">E. Enable Higher Pension Option (EPS 95)</h4>
                                         <p className="text-[10px] text-slate-400">Apply for Higher Pension on Actual Wages (Joint Option).</p>
                                     </div>
                                      <label htmlFor="higherPensionToggle" className="relative inline-flex items-center cursor-pointer">
@@ -977,10 +973,10 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 )}
                             </div>
 
-                            {/* G. ESI Exempted */}
+                            {/* F. ESI Exempted */}
                             <div className="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700">
                                 <div>
-                                    <h4 className="text-sm font-bold text-white">G. ESI Exempted</h4>
+                                    <h4 className="text-sm font-bold text-white">F. ESI Exempted</h4>
                                     <p className="text-[10px] text-slate-400">Above Wage Ceiling or not covered.</p>
                                 </div>
                                  <label htmlFor="esiExemptInput" className="relative inline-flex items-center cursor-pointer">
