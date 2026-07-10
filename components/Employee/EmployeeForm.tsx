@@ -886,7 +886,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                             )}
 
                             {/* E. Employee Eligible for EPS */}
-                            <div className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 gap-4">
+                            <div className={`flex flex-col md:flex-row md:items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 gap-4 ${newEmpForm.isPFExempt ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
                                 <div className="flex-1">
                                     <h4 className="text-sm font-bold text-white">E. Employee Eligible for EPS <span className="text-red-500">*</span></h4>
                                     <p className="text-[10px] text-slate-400">Note: Employee Date of joining as member for the first time is on or after 01-09-2014 and PF Wages is above ₹15000.</p>
@@ -897,7 +897,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                         aria-label="Employee Eligible for EPS"
                                         className={`bg-slate-800 border ${!newEmpForm.isEPSEligible ? 'border-red-500/50' : 'border-slate-600'} rounded-lg p-2 text-xs text-white outline-none focus:ring-1 focus:ring-sky-500 ${hasProcessedPayroll && !isEPSUnlocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         required
-                                        disabled={hasProcessedPayroll && !isEPSUnlocked}
+                                        disabled={newEmpForm.isPFExempt || (hasProcessedPayroll && !isEPSUnlocked)}
                                         value={newEmpForm.isEPSEligible || ''}
                                         onChange={e => setNewEmpForm({ ...newEmpForm, isEPSEligible: e.target.value as 'Yes' | 'No' })}
                                     >
