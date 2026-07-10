@@ -381,8 +381,16 @@ BharatPay Pro provides advanced data maintenance tools to ensure your establishm
 ### 11.1 Backup Data (LOCAL SECURE BACKUP)
 Creates a high-security encrypted snapshot (`.enc`) of the active establishment's database. It is highly recommended to perform a backup before every payroll finalization.
 
-### 11.2 Restore Data (UNIVERSAL RESTORATION)
+### 11.2 Restore Data (UNIVERSAL RESTORATION & MACHINE PORTABILITY)
 Imports an existing backup into the current establishment silo. This will overwrite the current unit's data with the contents of the backup. Use this for data recovery or migration.
+
+> [!TIP]
+> **Porting Data Between Licensed Machines:**
+> To move an establishment's data from Machine A to Machine B:
+> 1. Perform a **Backup Data** operation on Machine A to generate the `.enc` snapshot file.
+> 2. Transfer the `.enc` file to Machine B (via USB or email).
+> 3. On Machine B, register a new empty company profile (or open an existing one) to act as the destination silo. Note: Machine B must have an active license with enough "Company Quota" and "Employee Quota" to hold the incoming data.
+> 4. Run the **Restore Data** function inside the target silo on Machine B and select the `.enc` file. The establishment is now successfully ported!
 
 ### 11.3 Previous Version Data (LEGACY MIGRATION)
 Provides a seamless import path for legacy databases, restoring structured employee and historical pay records from previous V3 or V4 major versions into the new multi-unit environment.
