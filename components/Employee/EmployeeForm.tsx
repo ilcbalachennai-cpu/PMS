@@ -928,15 +928,25 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                             </div>
 
                             {/* E. Enable Higher Pension Option (EPS 95) */}
-                            <div className={`p-4 bg-slate-900 rounded-lg border border-slate-700 space-y-4 ${(newEmpForm.isPFExempt || newEmpForm.isEPSEligible === 'No') ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
+                            <div className={`p-4 bg-slate-900 rounded-lg border border-slate-700 space-y-4 ${(newEmpForm.isPFExempt || newEmpForm.isEPSEligible !== 'Yes') ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <h4 className="text-sm font-bold text-amber-400">E. Enable Higher Pension Option (EPS 95)</h4>
                                         <p className="text-[10px] text-slate-400">Apply for Higher Pension on Actual Wages (Joint Option).</p>
                                     </div>
                                      <label htmlFor="higherPensionToggle" className="relative inline-flex items-center cursor-pointer">
-                                        <input id="higherPensionToggle" tabIndex={isRejoining ? -1 : undefined} title="Enable Higher Pension" aria-label="Enable Higher Pension" type="checkbox" className="sr-only peer" checked={newEmpForm.pfHigherPension?.enabled} onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, enabled: e.target.checked } }))} />
-                                        <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                                        <input 
+                                            id="higherPensionToggle" 
+                                            tabIndex={isRejoining ? -1 : undefined} 
+                                            title="Enable Higher Pension" 
+                                            aria-label="Enable Higher Pension" 
+                                            type="checkbox" 
+                                            className="sr-only peer" 
+                                            disabled={newEmpForm.isPFExempt || newEmpForm.isEPSEligible !== 'Yes'}
+                                            checked={newEmpForm.pfHigherPension?.enabled} 
+                                            onChange={e => setNewEmpForm(prev => ({ ...prev, pfHigherPension: { ...prev.pfHigherPension!, enabled: e.target.checked } }))} 
+                                        />
+                                        <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600 ${(newEmpForm.isPFExempt || newEmpForm.isEPSEligible !== 'Yes') ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
                                     </label>
                                 </div>
 
