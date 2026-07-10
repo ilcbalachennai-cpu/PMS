@@ -116,6 +116,20 @@
             color: #92400e;
         }
 
+        .highlight-box.success {
+            background-color: #f0fdf4;
+            border-left-color: #22c55e;
+        }
+
+        .highlight-box.success strong {
+            color: #166534;
+        }
+
+        .mt-small {
+            margin-top: 10px;
+        }
+
+
         .screenshot {
             display: block;
             max-width: 100%;
@@ -759,10 +773,10 @@
         <h3>10.2 Restore Data (UNIVERSAL RESTORATION &amp; MACHINE PORTABILITY)</h3>
         <p>Imports an existing backup into the current establishment silo. This will overwrite the current unit's data with the contents of the backup. Use this for data recovery or migration.</p>
 
-        <div class="highlight-box" style="background-color: #f0fdf4; border-left-color: #22c55e;">
+        <div class="highlight-box success">
             <strong>Porting Data Between Licensed Machines:</strong><br>
             To move an establishment's data from Machine A to Machine B:
-            <ol style="margin-top: 10px;">
+            <ol class="mt-small">
                 <li>Perform a <strong>Backup Data</strong> operation on Machine A to generate the <code>.enc</code> snapshot file.</li>
                 <li>Transfer the <code>.enc</code> file to Machine B (via USB or email).</li>
                 <li>On Machine B, register a new empty company profile (or open an existing one) to act as the destination silo. <em>Note: Machine B must have an active license with enough "Company Quota" and "Employee Quota" to hold the incoming data.</em></li>
