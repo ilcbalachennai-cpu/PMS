@@ -171,6 +171,49 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
 
     const currentForms = useMemo(() => STATE_FORM_MAPPINGS[selectedState] || STATE_FORM_MAPPINGS['Default'], [selectedState]);
 
+    const [statFilter, setStatFilter] = useState<'all' | 'site' | 'branch' | 'division'>('all');
+    const [statFilterValue, setStatFilterValue] = useState<string>('');
+
+    const filteredEmployees = useMemo(() => {
+        if (statFilter === 'all' || !statFilterValue) return employees;
+        return employees.filter(e => {
+            if (statFilter === 'site') return e.site === statFilterValue;
+            if (statFilter === 'branch') return e.branch === statFilterValue;
+            if (statFilter === 'division') return e.division === statFilterValue;
+            return true;
+        });
+    }, [employees, statFilter, statFilterValue]);
+
+    const filteredHistory = useMemo(() => {
+        if (statFilter === 'all' || !statFilterValue) return payrollHistory;
+        const empIds = new Set(filteredEmployees.map(e => e.id));
+        return payrollHistory.filter(r => empIds.has(r.employeeId));
+    }, [payrollHistory, filteredEmployees, statFilter, statFilterValue]);
+
+    const filteredAttendances = useMemo(() => {
+        if (statFilter === 'all' || !statFilterValue) return attendances;
+        const empIds = new Set(filteredEmployees.map(e => e.id));
+        return attendances.filter(a => empIds.has(a.employeeId));
+    }, [attendances, filteredEmployees, statFilter, statFilterValue]);
+
+    const filteredAdvanceLedgers = useMemo(() => {
+        if (statFilter === 'all' || !statFilterValue) return advanceLedgers;
+        const empIds = new Set(filteredEmployees.map(e => e.id));
+        return advanceLedgers.filter(a => empIds.has(a.employeeId));
+    }, [advanceLedgers, filteredEmployees, statFilter, statFilterValue]);
+
+    const filterOptions = useMemo(() => {
+        if (statFilter === 'all') return [];
+        return Array.from(new Set(
+            employees.map(e => {
+                if (statFilter === 'site') return e.site;
+                if (statFilter === 'branch') return e.branch;
+                if (statFilter === 'division') return e.division;
+                return undefined;
+            }).filter(Boolean)
+        )).sort();
+    }, [employees, statFilter]);
+
     const isCurrentPeriodConfirmed = useMemo(() => {
         if (!latestFrozenPeriod) return false;
         const currentVal = (globalYear * 12) + CALENDAR_MONTHS.indexOf(globalMonth);
@@ -193,6 +236,11 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     };
 
     const handleDownload = async (reportName: string, format: 'PDF' | 'Excel' | 'Text') => {
+        const employees = filteredEmployees;
+        const payrollHistory = filteredHistory;
+        const attendances = filteredAttendances;
+        const advanceLedgers = filteredAdvanceLedgers;
+
         const isPeriodConfirmed = (m: string, y: number): boolean => {
             if (!latestFrozenPeriod) return false;
             const currentVal = (y * 12) + CALENDAR_MONTHS.indexOf(m);
@@ -369,6 +417,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     };
 
     const handleGenerateRange = async () => {
+        const employees = filteredEmployees;
+        const payrollHistory = filteredHistory;
+        
         setRangeModal(p => ({ ...p, isOpen: false }));
 
         const isPeriodConfirmed = (m: string, y: number): boolean => {
@@ -409,6 +460,9 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     };
 
     const handleGenerateMapping = async () => {
+        const employees = filteredEmployees;
+        const payrollHistory = filteredHistory;
+
         setMappingModal(p => ({ ...p, isOpen: false }));
 
         const isPeriodConfirmed = (m: string, y: number): boolean => {
@@ -545,6 +599,48 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
                     </select>
                 </div>
+            </div>
+
+            {/* Filter Report By Section */}
+            <div className="bg-[#1e293b] p-4 rounded-xl border border-slate-800 flex flex-col md:flex-row gap-6 shadow-xl">
+                <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Filter Report By</label>
+                    <div className="flex gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                        {(['all', 'site', 'branch', 'division'] as const).map(f => (
+                            <button
+                                key={f}
+                                onClick={() => { setStatFilter(f); setStatFilterValue(''); }}
+                                title={`Filter by ${f}`}
+                                aria-label={`Filter by ${f}`}
+                                className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-md transition-all ${
+                                    statFilter === f
+                                        ? 'bg-indigo-600 text-white'
+                                        : 'text-slate-500 hover:text-white'
+                                }`}
+                            >
+                                {f}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {statFilter !== 'all' && (
+                    <div className="space-y-2 flex-1 max-w-sm animate-in fade-in zoom-in-95">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                            Select {statFilter === 'site' ? 'Site' : statFilter === 'branch' ? 'Branch' : 'Division'}
+                        </label>
+                        <select
+                            value={statFilterValue}
+                            onChange={e => setStatFilterValue(e.target.value)}
+                            className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-indigo-500 transition-colors"
+                        >
+                            <option value="" className="bg-[#0f172a] text-white">-- Select {statFilter === 'site' ? 'Site' : statFilter === 'branch' ? 'Branch' : 'Division'} --</option>
+                            {filterOptions.map(val => (
+                                <option key={val} value={val!} className="bg-[#0f172a] text-white">{val}</option>
+                            ))}
+                        </select>
+                    </div>
+                )}
             </div>
 
             {/* Main Compliance Grid */}
