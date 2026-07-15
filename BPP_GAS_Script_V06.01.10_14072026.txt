@@ -854,6 +854,7 @@ function onOpen() {
         .addItem('Password Reset', 'showPasswordResetForm')
         .addSeparator()
         .addItem('Repair Status Sync', 'repairLicenseDatabase')
+        .addItem('Drop Company Signature', 'showDropSignatureForm')
         .addItem('⚡ Enable Background Auto-Cleanup', 'setupAutoCleanupTrigger').addToUi();
 }
 
@@ -2362,6 +2363,196 @@ function onEdit(e) {
     sheet.getRange(2, 6).setValue("'"+timestamp); // Update Column F
     console.log("🛠️ App_Config Timestamp Updated due to change in Column " + col + ": " + timestamp);
   }
+}
+
+// ==========================================
+// DROP COMPANY SIGNATURE ADMIN TOOL
+// ==========================================
+
+function showDropSignatureForm() {
+    var html = HtmlService.createHtmlOutput(`
+    <!DOCTYPE html><html><head><style>
+      body{font-family:"Segoe UI",sans-serif;padding:25px;background:#f8fafc;color:#1e293b;}
+      h3{margin-top:0;color:#0f172a;text-transform:uppercase;border-bottom:3px solid #3b82f6;padding-bottom:10px;margin-bottom:15px;font-size:18px;}
+      .form-label{display:block;font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:4px;}
+      input,select{width:100%;padding:10px;margin-bottom:12px;border:1.5px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-size:12px;}
+      button{width:100%;padding:12px;background:#3b82f6;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;margin-top:5px; transition:0.2s;}
+      button:hover{background:#2563eb;}
+      button:disabled{background:#94a3b8;cursor:not-allowed;}
+      .btn-danger{background:#ef4444;}
+      .btn-danger:hover{background:#dc2626;}
+      #status{display:none;padding:10px;border-radius:8px;margin-bottom:12px;font-size:11px;font-weight:bold;text-align:center;}
+      .err{background:#fee2e2;color:#991b1b;}.ok{background:#dcfce7;color:#166534;}
+    </style></head><body>
+      <h3>Drop Company Signature</h3>
+      
+      <label class="form-label">User's Machine ID or Email</label>
+      <input type="text" id="mId" placeholder="e.g. M-123456 or user@email.com">
+      
+      <button id="btnFetch" onclick="fetchSigs()">Fetch Signatures</button>
+
+      <div id="sigArea" style="display:none; margin-top:15px;">
+        <label class="form-label">Active Signatures in Column R</label>
+        <select id="sigSelect"></select>
+        <button id="btnDrop" class="btn-danger" onclick="dropSig()">Drop Selected Signature</button>
+      </div>
+
+      <div id="status"></div>
+
+      <script>
+        function showMsg(msg, isErr){
+          var el=document.getElementById('status');
+          el.textContent=msg; el.style.display='block';
+          el.className=isErr?'err':'ok';
+        }
+        function fetchSigs(){
+          var id = document.getElementById('mId').value.trim();
+          if(!id) return showMsg("Please enter Machine ID or Email.", true);
+          document.getElementById('btnFetch').disabled = true;
+          document.getElementById('btnFetch').innerText = "Fetching...";
+          showMsg("Searching database...", false);
+          
+          google.script.run.withSuccessHandler(function(res){
+            document.getElementById('btnFetch').disabled = false;
+            document.getElementById('btnFetch').innerText = "Fetch Signatures";
+            if(!res.success){
+               showMsg(res.message, true);
+               document.getElementById('sigArea').style.display='none';
+            }else{
+               showMsg("Found " + res.signatures.length + " signatures for " + res.name, false);
+               var sel = document.getElementById('sigSelect');
+               sel.innerHTML = '';
+               if(res.signatures.length === 0){
+                   var opt = document.createElement('option');
+                   opt.text = "No active signatures found";
+                   sel.add(opt);
+                   document.getElementById('btnDrop').disabled = true;
+               } else {
+                   res.signatures.forEach(function(s){
+                     var opt = document.createElement('option');
+                     opt.text = s; opt.value = s;
+                     sel.add(opt);
+                   });
+                   document.getElementById('btnDrop').disabled = false;
+               }
+               document.getElementById('sigArea').style.display='block';
+            }
+          }).fetchUserSignatures(id);
+        }
+
+        function dropSig(){
+          var id = document.getElementById('mId').value.trim();
+          var sig = document.getElementById('sigSelect').value;
+          if(!sig) return;
+          if(!confirm("Are you sure you want to permanently delete signature '" + sig + "' from Column R?\\n\\nThis will instantly free up a slot for the user.")) return;
+          
+          document.getElementById('btnDrop').disabled = true;
+          document.getElementById('btnDrop').innerText = "Dropping...";
+          
+          google.script.run.withSuccessHandler(function(res){
+             if(res.success){
+                showMsg(res.message, false);
+                document.getElementById('btnDrop').innerText = "Dropped Successfully";
+                setTimeout(fetchSigs, 1500); // refresh list
+             }else{
+                showMsg(res.message, true);
+                document.getElementById('btnDrop').disabled = false;
+                document.getElementById('btnDrop').innerText = "Drop Selected Signature";
+             }
+          }).dropUserSignature(id, sig);
+        }
+      </script>
+    </body></html>`)
+    .setWidth(350).setHeight(400);
+    SpreadsheetApp.getUi().showModalDialog(html, 'Admin Controls');
+}
+
+function fetchUserSignatures(identifier) {
+    identifier = String(identifier).trim().toLowerCase();
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName('BPP_APP_License');
+    if (!sheet) return { success: false, message: "License sheet not found." };
+    
+    const data = sheet.getDataRange().getValues();
+    // Search Machine ID (col 9 / index 8) or Email (col 6 / index 5)
+    for (let i = 1; i < data.length; i++) {
+        const mId = String(data[i][8]).trim().toLowerCase();
+        const email = String(data[i][5]).trim().toLowerCase();
+        
+        if (mId === identifier || email === identifier) {
+            const rawSigs = String(data[i][17] || "").trim(); // Column R is index 17
+            let sigArray = [];
+            if (rawSigs !== "") {
+                sigArray = rawSigs.split(',').map(s => s.trim()).filter(s => s !== "");
+            }
+            return {
+                success: true,
+                name: data[i][1],
+                signatures: sigArray
+            };
+        }
+    }
+    return { success: false, message: "User not found." };
+}
+
+function dropUserSignature(identifier, signatureToDrop) {
+    identifier = String(identifier).trim().toLowerCase();
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName('BPP_APP_License');
+    
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+        const mId = String(data[i][8]).trim().toLowerCase();
+        const email = String(data[i][5]).trim().toLowerCase();
+        
+        if (mId === identifier || email === identifier) {
+            const rawSigs = String(data[i][17] || "").trim(); // Column R
+            let sigArray = rawSigs !== "" ? rawSigs.split(',').map(s => s.trim()).filter(s => s !== "") : [];
+            
+            const initialLength = sigArray.length;
+            sigArray = sigArray.filter(s => s !== signatureToDrop);
+            
+            if (sigArray.length === initialLength) {
+                return { success: false, message: "Signature not found in user's record." };
+            }
+            
+            // Save back to Column R
+            const newSigsStr = sigArray.join(', ');
+            sheet.getRange(i + 1, 18).setValue(newSigsStr);
+            
+            // Send Email Notification
+            const userName = data[i][1];
+            const userEmail = data[i][5];
+            
+            try {
+                if (userEmail && String(userEmail).indexOf('@') > 0) {
+                    const htmlBody = `
+                        <div style="font-family:sans-serif; padding:20px; max-width:600px; margin:0 auto; border:1px solid #e5e7eb; border-radius:8px;">
+                            <h2 style="color:#2563eb;">BharatPay Pro - Slot Available</h2>
+                            <p>Dear ${userName},</p>
+                            <p>We are writing to confirm that a company slot has been successfully cleared on your account.</p>
+                            <p><strong>Signature Removed:</strong> ${signatureToDrop}</p>
+                            <p>You can now open your BharatPay Pro application. The old company will automatically disappear, and you will be able to register a new company in the available slot.</p>
+                            <br>
+                            <p>Regards,<br>BharatPay Pro Support Team</p>
+                        </div>
+                    `;
+                    MailApp.sendEmail({
+                        to: userEmail,
+                        subject: "BharatPay Pro - Company Slot Freed",
+                        htmlBody: htmlBody
+                    });
+                }
+            } catch(e) {
+                console.error("Failed to send email", e);
+            }
+            
+            logSecurityAudit(ss, 'DROP_SIGNATURE', 'SUCCESS', `Signature ${signatureToDrop} dropped. Notified ${userEmail}`, {machineId: data[i][8], email: data[i][5]});
+            
+            return { success: true, message: "Signature dropped successfully!" };
+        }
+    }
+    return { success: false, message: "User not found." };
 }
 
 // END OF SCRIPT
