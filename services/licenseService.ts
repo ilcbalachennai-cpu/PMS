@@ -4,7 +4,7 @@ import { LicenseData } from '../types';
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzE10qkCCczPH-_eCQ_cJBRGpu28viV8zhNRCw2iD0Rha3y_1HIuWNPGAjHBrqsHeEB/exec";
 export const APP_VERSION = "06.01.10";
-export const APP_PATCH_TIMESTAMP = "15-07-2026 19:36:25"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_PATCH_TIMESTAMP = "15-07-2026 20:22:17"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -1373,6 +1373,17 @@ export const validateLicenseStartup = async (
                     }
                   } catch (err) {
                     console.warn("Failed to wipe local company signatures during hard reset", err);
+                  }
+                } else {
+                  // We have at least one active signature synced from the cloud (Column R).
+                  // This means the patch was successful, and a signature is fixed.
+                  // We can now safely mark the patch as fully complete, preventing future cache wipes.
+                  if ((window as any).electronAPI && (window as any).electronAPI.markPatchComplete) {
+                      try {
+                          await (window as any).electronAPI.markPatchComplete();
+                      } catch (e) {
+                          console.warn("Failed to mark patch complete", e);
+                      }
                   }
                 }
 

@@ -2547,6 +2547,20 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
     });
 });
 
+ipcMain.handle('mark-patch-complete', async () => {
+    try {
+        const markerPath = path.join(app.getPath('userData'), 'signature_patch_applied.marker');
+        if (!fs.existsSync(markerPath)) {
+            fs.writeFileSync(markerPath, 'Applied on: ' + new Date().toISOString());
+            console.log('✅ Signature patch cache wipe marked as complete (from Cloud Sync).');
+        }
+        return { success: true };
+    } catch (e) {
+        console.error('Failed to create marker file:', e);
+        return { success: false };
+    }
+});
+
 ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchTimestamp?: string }) => {
     const isSilent = options?.silent ?? false;
     const installerPath = getInstallerPath();
@@ -2601,8 +2615,7 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
                         console.log('🧹 Deleted Local Storage for clean update');
                     }
                     
-                    fs.writeFileSync(markerPath, 'Applied on: ' + new Date().toISOString());
-                    console.log('✅ Signature patch cache wipe executed and marked as complete.');
+                    console.log('🧹 Signature patch cache wipe executed. Awaiting cloud sync for permanent marker.');
                 } else {
                     console.log('⏩ Skipping cache wipe: Signature patch marker already exists.');
                 }
