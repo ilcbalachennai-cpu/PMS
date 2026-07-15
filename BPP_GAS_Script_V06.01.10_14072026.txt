@@ -2526,8 +2526,8 @@ function dropUserSignature(identifier, signatureToDrop) {
             
             try {
                 if (userEmail && String(userEmail).indexOf('@') > 0) {
-                    // Clean up signature for user-facing email (remove the random hash at the end)
-                    // e.g. "USIG-ADMIN_123456-ABCD" becomes "USIG-ADMIN_123456"
+                    // Clean up signature for user-facing email 
+                    // e.g. "USIG-ADMIN_123456-ABCD" becomes "ADMIN_123456"
                     let displaySig = signatureToDrop;
                     const sigParts = signatureToDrop.split('-');
                     if (sigParts.length >= 2) {
@@ -2538,6 +2538,13 @@ function dropUserSignature(identifier, signatureToDrop) {
                         } else {
                             displaySig = signatureToDrop; // fallback
                         }
+                    }
+                    
+                    // Remove "USIG-" or "SIG-" prefix so it matches their Data folder name
+                    if (displaySig.startsWith('USIG-')) {
+                        displaySig = displaySig.substring(5);
+                    } else if (displaySig.startsWith('SIG-')) {
+                        displaySig = displaySig.substring(4);
                     }
 
                     const htmlBody = `
