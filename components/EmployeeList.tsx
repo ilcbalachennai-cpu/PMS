@@ -25,23 +25,60 @@ import DocumentPreviewModal from './Employee/Modals/DocumentPreviewModal';
 const AVAILABLE_COLUMNS = [
     { key: 'id', label: 'Employee ID' },
     { key: 'name', label: 'Full Name' },
+    { key: 'gender', label: 'Gender' },
+    { key: 'dob', label: 'Date of Birth (DD-MM-YYYY)' },
     { key: 'designation', label: 'Designation' },
-    { key: 'division', label: 'Department' },
+    { key: 'division', label: 'Department/Division' },
     { key: 'branch', label: 'Branch' },
-    { key: 'site', label: 'Work Site' },
-    { key: 'doj', label: 'Date of Join' },
-    { key: 'mobile', label: 'Contact No' },
-    { key: 'uanc', label: 'UAN (PF)' },
-    { key: 'pfNumber', label: 'PF Number' },
+    { key: 'site', label: 'Site' },
+    { key: 'doj', label: 'Date of Joining (DD-MM-YYYY)' },
+    { key: 'mobile', label: 'Mobile Number' },
+    { key: 'email', label: 'mail_id' },
+    { key: 'fatherSpouseName', label: 'Father or Spouse Name' },
+    { key: 'relationship', label: 'Relationship' },
+    { key: 'maritalStatus', label: 'Married (Yes/No)' },
+    { key: 'spouseName', label: 'Spouse Name' },
+    { key: 'spouseGender', label: 'Spouse Gender' },
+    { key: 'spouseAadhaar', label: 'Spouse Aadhaar Number' },
+    { key: 'doorNo', label: 'Door No' },
+    { key: 'buildingName', label: 'Building Name' },
+    { key: 'street', label: 'Street' },
+    { key: 'area', label: 'Area' },
+    { key: 'city', label: 'City' },
+    { key: 'state', label: 'State' },
+    { key: 'pincode', label: 'Pincode' },
+    { key: 'pan', label: 'PAN Number' },
+    { key: 'aadhaarNumber', label: 'Aadhaar Number' },
+    { key: 'uanc', label: 'UAN Number' },
+    { key: 'pfNumber', label: 'PF Member ID' },
     { key: 'esiNumber', label: 'ESI Number' },
-    { key: 'pan', label: 'PAN Card' },
-    { key: 'aadhaarNumber', label: 'Aadhaar No' },
-    { key: 'bankAccount', label: 'Bank A/c' },
+    { key: 'bankAccount', label: 'Bank Account Number' },
+    { key: 'bankName', label: 'Bank Name' },
+    { key: 'bankBranch', label: 'Bank Branch' },
     { key: 'ifsc', label: 'IFSC Code' },
-    { key: 'basicPay', label: 'Basic' },
+    { key: 'basicPay', label: 'Basic Pay' },
     { key: 'da', label: 'DA' },
+    { key: 'retainingAllowance', label: 'Retaining Allowance' },
     { key: 'hra', label: 'HRA' },
-    { key: 'gross', label: 'Gross Wage' }
+    { key: 'conveyance', label: 'Conveyance' },
+    { key: 'washing', label: 'Washing Allowance' },
+    { key: 'attire', label: 'Attire Allowance' },
+    { key: 'specialAllowance1', label: 'Special Allowance 1' },
+    { key: 'specialAllowance2', label: 'Special Allowance 2' },
+    { key: 'specialAllowance3', label: 'Special Allowance 3' },
+    { key: 'isPFExempt', label: 'PF Exempt (Yes/No)' },
+    { key: 'isESIExempt', label: 'ESI Exempt (Yes/No)' },
+    { key: 'pfHigherPension_enabled', label: 'Higher Pension Enabled (Yes/No)' },
+    { key: 'pfHigherPension_contributedBefore2014', label: 'HP: Pre-2014 Contrib (Yes/No)' },
+    { key: 'epfMembershipDate', label: 'HP: EPF Membership Date (DD-MM-YYYY)' },
+    { key: 'pfHigherPension_employeeContribution', label: 'HP: EE Contrib (Regular/Higher)' },
+    { key: 'pfHigherPension_employerContribution', label: 'HP: ER Contrib (Regular/Higher)' },
+    { key: 'pfHigherPension_isHigherPensionOpted', label: 'HP: Joint Option (Yes/No)' },
+    { key: 'initialOpeningBalances_el', label: 'EL Opening Balance' },
+    { key: 'initialOpeningBalances_sl', label: 'SL Opening Balance' },
+    { key: 'initialOpeningBalances_cl', label: 'CL Opening Balance' },
+    { key: 'dol', label: 'Date of Leaving (DD-MM-YYYY)' },
+    { key: 'leavingReason', label: 'Reason for Leaving' }
 ];
 
 interface EmployeeListProps {
@@ -55,6 +92,7 @@ interface EmployeeListProps {
     sites: string[];
     currentUser?: User;
     companyProfile: CompanyProfile;
+    setCompanyProfile: React.Dispatch<React.SetStateAction<CompanyProfile>>;
     dataSizeLimit: number;
     showAlert: (
         type: 'info' | 'success' | 'warning' | 'danger' | 'confirm',
@@ -76,7 +114,7 @@ interface EmployeeListProps {
 
 const EmployeeList: React.FC<EmployeeListProps> = ({
     employees, setEmployees, onAddEmployee, onBulkAddEmployees,
-    designations, divisions, branches, sites, currentUser, companyProfile, dataSizeLimit, showAlert,
+    designations, divisions, branches, sites, currentUser, companyProfile, setCompanyProfile, dataSizeLimit, showAlert,
     globalMonth, globalYear, activeFinancialYear, isLicenseExpired, onNavigate
 }) => {
     // --- State Management ---
@@ -378,17 +416,44 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
             }
         }
 
+        let newlyTriggeredEsi = false;
+        let newlyTriggeredEpf = false;
+
         if (editingId) {
             setEmployees(prev => prev.map(emp => emp.id === editingId ? data : emp));
         } else {
+            const newTotal = employees.length + 1;
+            if (newTotal >= 10 && !companyProfile.esiApplicabilityTriggered) {
+                newlyTriggeredEsi = true;
+            }
+            if (newTotal >= 20 && !companyProfile.epfApplicabilityTriggered) {
+                newlyTriggeredEpf = true;
+            }
+            
+            if (newlyTriggeredEsi || newlyTriggeredEpf) {
+                setCompanyProfile(prev => ({
+                    ...prev,
+                    esiApplicabilityTriggered: prev.esiApplicabilityTriggered || newlyTriggeredEsi,
+                    epfApplicabilityTriggered: prev.epfApplicabilityTriggered || newlyTriggeredEpf
+                }));
+            }
             onAddEmployee(data);
         }
         setIsAdding(false);
+
+        let milestoneMessage = '';
+        if (newlyTriggeredEsi) {
+            milestoneMessage += 'ESI Code Registration is mandatory to be obtained within 15 days of date of joining of the 10th employee. ';
+        }
+        if (newlyTriggeredEpf) {
+            milestoneMessage += 'EPF code is mandatory and to be obtained within 15 days from the date of joining of the 20th employee. ';
+        }
 
         if (payAffected) {
             showAlert('success', 'Employee Saved', (
                 <div className="space-y-2">
                     <p className="text-white">{data.id} {data.name} Saved Successfully.</p>
+                    {milestoneMessage && <p className="text-red-400 font-bold">{milestoneMessage}</p>}
                     <p className="text-amber-400 font-bold mt-1">
                         Changes would affect Pay Sheet. Click OK to go to Process Pay &gt; Run Payroll and initiate Recalculate Pay. Click Stay to continue to edit Employees.
                     </p>
@@ -399,7 +464,12 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                 onNavigate?.('pay_process');
             }, 'Stay', 'OK');
         } else {
-            showAlert('success', 'Employee Saved', `${data.id} ${data.name} Saved Successfully.`, undefined, undefined, 'OK', undefined, undefined, 2);
+            showAlert('success', 'Employee Saved', (
+                <div className="space-y-2">
+                    <p className="text-white">{data.id} {data.name} Saved Successfully.</p>
+                    {milestoneMessage && <p className="text-red-400 font-bold">{milestoneMessage}</p>}
+                </div>
+            ), undefined, undefined, 'OK', undefined, undefined, milestoneMessage ? 10 : 2);
         }
     };
 
@@ -424,6 +494,35 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                         }
                     }
                     // --- END ALLOCATED DATA SIZE VALIDATION ---
+                    const newTotal = employees.length + results.successfulEmployees.length;
+                    let newlyTriggeredEsi = false;
+                    let newlyTriggeredEpf = false;
+
+                    if (newTotal >= 10 && !companyProfile.esiApplicabilityTriggered) {
+                        newlyTriggeredEsi = true;
+                    }
+                    if (newTotal >= 20 && !companyProfile.epfApplicabilityTriggered) {
+                        newlyTriggeredEpf = true;
+                    }
+
+                    if (newlyTriggeredEsi || newlyTriggeredEpf) {
+                        setCompanyProfile(prev => ({
+                            ...prev,
+                            esiApplicabilityTriggered: prev.esiApplicabilityTriggered || newlyTriggeredEsi,
+                            epfApplicabilityTriggered: prev.epfApplicabilityTriggered || newlyTriggeredEpf
+                        }));
+                        let msg = '';
+                        if (newlyTriggeredEsi) msg += 'ESI Code Registration is mandatory within 15 days of 10th employee joining.\n';
+                        if (newlyTriggeredEpf) msg += 'EPF Code Registration is mandatory within 15 days of 20th employee joining.\n';
+                        
+                        // We attach it to the result so the modal can show it, or we just alert right away
+                        // If we alert right away, the modal might overlap it. 
+                        // Let's defer it or just show it anyway.
+                        setTimeout(() => {
+                            showAlert('warning', 'Statutory Milestone Reached', msg, undefined, undefined, 'OK', undefined, undefined, 10);
+                        }, 500);
+                    }
+
                     onBulkAddEmployees(results.successfulEmployees);
                 }
                 setImportSummary(results);
@@ -493,13 +592,35 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                 const dataToExport = filteredEmployees.map(emp => {
                     const row: any = {};
                     exportModal.selectedColumns.forEach(col => {
+                        const colDef = AVAILABLE_COLUMNS.find(c => c.key === col);
+                        let headerName = colDef ? colDef.label : col;
+
+                        if (col === 'specialAllowance1') headerName = companyProfile?.specialAllowance1Name || 'Special Allowance 1';
+                        if (col === 'specialAllowance2') headerName = companyProfile?.specialAllowance2Name || 'Special Allowance 2';
+                        if (col === 'specialAllowance3') headerName = companyProfile?.specialAllowance3Name || 'Special Allowance 3';
+
+                        const formatDate = (dateStr?: string) => {
+                            if (!dateStr) return '';
+                            const matchYMD = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                            return matchYMD ? `${matchYMD[3]}-${matchYMD[2]}-${matchYMD[1]}` : dateStr;
+                        };
+
                         if (col === 'gross') {
-                            row[col] = calculateGrossWage(emp);
-                        } else if (col === 'doj' && emp.doj) {
-                            const matchYMD = emp.doj.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-                            row[col] = matchYMD ? `${matchYMD[3]}-${matchYMD[2]}-${matchYMD[1]}` : emp.doj;
+                            row[headerName] = calculateGrossWage(emp);
+                        } else if (['doj', 'dob', 'epfMembershipDate', 'dol'].includes(col)) {
+                            row[headerName] = formatDate((emp as any)[col]);
+                        } else if (col === 'isPFExempt' || col === 'isESIExempt') {
+                            row[headerName] = emp[col] ? 'Yes' : 'No';
+                        } else if (col.startsWith('pfHigherPension_')) {
+                            const subKey = col.replace('pfHigherPension_', '');
+                            let val = emp.pfHigherPension ? (emp.pfHigherPension as any)[subKey] : '';
+                            if (typeof val === 'boolean') val = val ? 'Yes' : 'No';
+                            row[headerName] = val || '';
+                        } else if (col.startsWith('initialOpeningBalances_')) {
+                            const subKey = col.replace('initialOpeningBalances_', '');
+                            row[headerName] = emp.initialOpeningBalances ? (emp.initialOpeningBalances as any)[subKey] : 0;
                         } else {
-                            row[col] = (emp as any)[col];
+                            row[headerName] = (emp as any)[col] || '';
                         }
                     });
                     return row;

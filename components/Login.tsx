@@ -446,6 +446,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
         }
 
         if (syncResult.valid) {
+          if (syncResult.data?.isLimitExceeded) {
+              alert(`⚠️ ${syncResult.message || "Company Limit Exceeded!"}\n\nYou can still access your existing companies, but creating new ones is disabled.`);
+          }
+          
           setFailedAttempts(0);
           // Re-read users after sync
           const updatedUsersRaw = localStorage.getItem('app_users');

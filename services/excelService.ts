@@ -265,18 +265,18 @@ export const parseEmployeeXLSX = async (
                         return null;
                     };
 
-                    const excelId = String(getVal(['Employee ID', 'ID', 'Emp ID', 'Employee ID (LOCKED)', 'Employee ID (LOCKED) ']) || '').trim();
-                    const name = String(getVal(['Full Name', 'Name', 'Employee Name', 'Full Name (LOCKED)']) || '').trim();
+                    const excelId = String(getVal(['Employee ID', 'ID', 'Emp ID', 'Employee ID (LOCKED)', 'Employee ID (LOCKED) ', 'id']) || '').trim();
+                    const name = String(getVal(['Full Name', 'Name', 'Employee Name', 'Full Name (LOCKED)', 'name']) || '').trim();
                     if (!name || name === 'Unknown') {
                         rejectedRecords.push({ row: rowNum, name: 'Unknown', id: excelId, reason: "Missing 'Full Name'. Skipped." });
                         return;
                     }
 
-                    const uan = String(getVal(['UAN Number', 'UAN', 'UAN No', 'UAN Number (LOCKED)']) || '').trim();
-                    const aadhaar = String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No', 'Aadhaar Number (LOCKED)']) || '').trim();
-                    const pan = String(getVal(['PAN Number', 'PAN', 'PAN No', 'PAN Number (LOCKED)']) || '').trim().toLowerCase();
-                    const esi = String(getVal(['ESI Number', 'ESI IP Number', 'ESI No', 'ESI Number (LOCKED)']) || '').trim();
-                    const pf = String(getVal(['PF Member ID', 'PF ID', 'PF Number', 'PF Member ID (LOCKED)']) || '').trim();
+                    const uan = String(getVal(['UAN Number', 'UAN', 'UAN No', 'UAN Number (LOCKED)', 'uanc']) || '').trim();
+                    const aadhaar = String(getVal(['Aadhaar Number', 'Aadhaar', 'Aadhaar No', 'Aadhaar Number (LOCKED)', 'aadhaarNumber']) || '').trim();
+                    const pan = String(getVal(['PAN Number', 'PAN', 'PAN No', 'PAN Number (LOCKED)', 'pan']) || '').trim().toLowerCase();
+                    const esi = String(getVal(['ESI Number', 'ESI IP Number', 'ESI No', 'ESI Number (LOCKED)', 'esiNumber']) || '').trim();
+                    const pf = String(getVal(['PF Member ID', 'PF ID', 'PF Number', 'PF Member ID (LOCKED)', 'pfNumber']) || '').trim();
 
                     if (!aadhaar) {
                         rejectedRecords.push({ row: rowNum, name, id: excelId, reason: "Missing 'Aadhaar Number'. Skipped." });
@@ -340,10 +340,10 @@ export const parseEmployeeXLSX = async (
                         uanc: uan,
                         pfNumber: pf,
                         esiNumber: esi,
-                        bankAccount: String(getVal(['Bank Account Number', 'Account No', 'Bank A/c']) || ''),
-                        bankName: String(getVal(['Bank Name', 'Bank']) || ''),
-                        bankBranch: String(getVal(['Bank Branch', 'Branch Name']) || ''),
-                        ifsc: String(getVal(['IFSC Code', 'IFSC']) || ''),
+                        bankAccount: String(getVal(['Bank Account Number', 'Account No', 'Bank A/c', 'bankAccount']) || ''),
+                        bankName: String(getVal(['Bank Name', 'Bank', 'bankName']) || ''),
+                        bankBranch: String(getVal(['Bank Branch', 'Branch Name', 'bankBranch']) || ''),
+                        ifsc: String(getVal(['IFSC Code', 'IFSC', 'ifsc']) || ''),
                         basicPay: Number(getVal(['Basic Pay', 'Basic']) || 0),
                         da: Number(getVal(['DA', 'Dearness Allowance']) || 0),
                         retainingAllowance: Number(getVal(['Retaining Allowance', 'RA']) || 0),

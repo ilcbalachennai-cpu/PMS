@@ -646,6 +646,27 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
             return;
         }
 
+        // --- NEW: Block at creation if limit is exhausted ---
+        if (isNewCompany) {
+            try {
+                const license = getStoredLicense();
+                const limit = license?.companyLimit || 1;
+                
+                if ((window as any).electronAPI?.getActivatedSilos) {
+                    const res = await (window as any).electronAPI.getActivatedSilos();
+                    if (res?.success && res.silos) {
+                        if (res.silos.length >= limit) {
+                            setError(`Company Registration Blocked: Your license is limited to ${limit} active company/companies. The limit has already been reached. Please contact support to upgrade your license.`);
+                            containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                            return;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("Failed to check pre-creation limit", e);
+            }
+        }
+
         setIsProcessing(true);
 
         // Sync Password to Cloud (Wait for result to ensure integrity)

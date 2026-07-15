@@ -39,7 +39,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   deploymentStep: externalStep,
   isVersionUpdate = false
 }) => {
-  const [secondsLeft, setSecondsLeft] = React.useState(20);
+
   const [installStep, setInstallStep] = React.useState(3);
   const [marqueeIdx, setMarqueeIdx] = React.useState(0);
   const progRef1 = React.useRef<HTMLDivElement>(null);
@@ -59,24 +59,7 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
     });
   }, [downloadProgress, state, isOpen]);
 
-  // Countdown logic for mandatory patches
-  React.useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (isOpen && state === 'PATCH' && isMandatory) {
-      setSecondsLeft(20);
-      timer = setInterval(() => {
-        setSecondsLeft(prev => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            onUpdateNow();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => { if (timer) clearInterval(timer); };
-  }, [isOpen, state, isMandatory, onUpdateNow]);
+  // Countdown logic removed: user must manually click to install
 
   // Simulated Progress Steps for INSTALLING state
   React.useEffect(() => {
@@ -375,13 +358,10 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
                     </p>
                 </div>
 
-                {/* Mandatory Timer */}
+                {/* Mandatory badge moved or removed since we removed the blocking overlay */}
                 {isMandatory && !isDownloading && !isPreparing && (
-                  <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-6 z-[100]">
-                      <div className="space-y-4 w-full max-w-[200px] p-6 bg-black border border-red-500 shadow-2xl rounded-[1.5rem]">
-                         <p className="text-[7px] text-red-500 font-black uppercase tracking-[0.2em]">Mandatory</p>
-                         <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Launch In <span className="text-red-500 tabular-nums">{secondsLeft}s</span></h2>
-                      </div>
+                  <div className="absolute top-4 right-4 bg-red-500/20 border border-red-500/50 text-red-500 text-[8px] font-black uppercase tracking-widest px-3 py-1 rounded-full animate-pulse z-[100]">
+                      Mandatory Update
                   </div>
                 )}
             </div>

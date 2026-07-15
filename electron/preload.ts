@@ -68,6 +68,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     wipeAllData: () => ipcRenderer.invoke('wipe-all-data'),
     getActivatedSilos: () => ipcRenderer.invoke('get-activated-silos'),
     registerActivatedSilo: (signature: string) => ipcRenderer.invoke('register-activated-silo', signature),
+    removeActivatedSilo: (signature: string) => ipcRenderer.invoke('remove-activated-silo', signature),
+    wipeActivatedSilos: () => ipcRenderer.invoke('wipe-activated-silos'),
     listSilos: () => ipcRenderer.invoke('list-silos'),
     deleteSilo: (companyId: string) => ipcRenderer.invoke('delete-silo', companyId),
     wipeCompanyData: (companyId: string) => ipcRenderer.invoke('wipe-company-data', companyId),

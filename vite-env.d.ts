@@ -18,6 +18,8 @@ declare global {
             listSilos: () => Promise<{ success: boolean; silos?: string[]; error?: string }>;
             getActivatedSilos: () => Promise<{ success: boolean; silos: string[] }>;
             registerActivatedSilo: (signature: string) => Promise<{ success: boolean; silos: string[] }>;
+            removeActivatedSilo: (signature: string) => Promise<{ success: boolean; silos: string[] }>;
+            wipeActivatedSilos: () => Promise<{ success: boolean; silos: string[] }>;
             dbSetGlobal: (key: string, value: any) => Promise<void>;
             dbGetGlobal: (key: string) => Promise<any>;
         };

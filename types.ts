@@ -138,6 +138,8 @@ export interface CompanyProfile {
   lin: string; // Labour Identification No
   pfCode: string;
   esiCode: string;
+  esiApplicabilityTriggered?: boolean;
+  epfApplicabilityTriggered?: boolean;
   gstNo: string;
   pan: string;
   ptNo: string;
@@ -453,7 +455,7 @@ export enum SettingsTab {
 
 export interface LicenseData {
   key: string;
-  status: 'Active' | 'Inactive' | 'Expired' | 'Trial' | 'REGISTERED' | 'ACTIVE' | 'PENDING_RESTORE' | 'PENDING_SYNC' | 'LICENSE ACTIVE' | 'TRIAL_EXPIRED' | 'LICENSE_EXPIRED' | 'TRIAL EXPIRED' | 'LICENSE EXPIRED';
+  status?: 'Active' | 'Inactive' | 'Expired' | 'Trial' | 'REGISTERED' | 'ACTIVE' | 'PENDING_RESTORE' | 'PENDING_SYNC' | 'TRIAL_EXPIRED' | 'LICENSE_EXPIRED' | 'TRIAL EXPIRED' | 'LICENSE EXPIRED' | 'LICENSE ACTIVE' | 'DEVELOPER ACTIVE' | 'TRIAL ACTIVE' | 'SECURITY_TAMPERED' | 'LIMIT_EXCEEDED';
   userName: string;
   userID: string;
   registeredTo: string; // Mail ID
@@ -468,6 +470,7 @@ export interface LicenseData {
   splDynamic?: boolean; // Access to Dynamic Pay Sheet
   splMIS?: boolean; // Access to MIS
   companyLimit?: number; // Multi-company creation limit
+  cloudSignatures?: string[]; // Server-validated cloud company signatures
 }
 
 export interface OTRecord {

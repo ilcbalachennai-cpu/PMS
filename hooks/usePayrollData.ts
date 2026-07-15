@@ -10,6 +10,7 @@ import {
   DEFAULT_LEAVE_POLICY 
 } from '../constants';
 import { getBackupFileName, getMonthAbbr } from '../services/reportService';
+import { getStoredLicense } from '../services/licenseService';
 import { getCompanyBackupFolder, generateCompanyId, normalizeEmployeeDates } from '../utils/formatters';
 
 export const usePayrollData = (showAlert: any) => {
@@ -761,7 +762,7 @@ export const usePayrollData = (showAlert: any) => {
 
   // --- DATA RE-HYDRATION ON COMPANY SWITCH ---
   useEffect(() => {
-    if (isResetting) return;
+    if (isResetting || isHydrating) return;
     
     // Helper to reload a single state from scoped storage
     const reloadState = (key: string, setter: (val: any) => void, fallback: any) => {
@@ -772,23 +773,50 @@ export const usePayrollData = (showAlert: any) => {
     reloadState('app_employees', setEmployees, []);
     reloadState('app_config', setConfig, INITIAL_STATUTORY_CONFIG);
     
-    // For profile, prioritized companies list, then storage
+    // For profile, SQLite (storedProfile) is the absolute source of truth!
+    // The global registry (found) is just an index and might be missing fields or out of date.
     const found = companies.find(c => c.id === activeCompanyId);
-    let profileToLoad = found || getStoredInitial('app_company_profile', INITIAL_COMPANY_PROFILE);
+    let storedProfile = getStoredInitial('app_company_profile', INITIAL_COMPANY_PROFILE);
+    
+    // Base the profile on SQLite data if available, otherwise fallback to the registry's data
+    let profileToLoad = (storedProfile && storedProfile.id && storedProfile.id !== '') 
+        ? { ...storedProfile } 
+        : (found ? { ...found } : { ...INITIAL_COMPANY_PROFILE });
 
-    // Retroactive Patch for Legacy Companies (Pre-Hash Setup)
-    if (profileToLoad.id && !profileToLoad.companySignature) {
-        const retroSignature = `SIG-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-        profileToLoad = { ...profileToLoad, companySignature: retroSignature };
-        localStorage.setItem('app_company_profile', JSON.stringify(profileToLoad));
-        
-        // Update the global companies registry
+    // V06.01.12 FIX: Rescue Integrity & Signature Merging
+    let needsRegistryUpdate = false;
+
+    if (found) {
+        // If the registry has a signature that SQLite doesn't, merge it into profileToLoad
+        if (found.companySignature && !profileToLoad.companySignature) {
+            profileToLoad.companySignature = found.companySignature;
+            needsRegistryUpdate = true; // We should probably sync this back to SQLite, but Retroactive Patch handles it
+        }
+
+        // Check if the registry is out of sync with the rich SQLite profile
+        if (JSON.stringify(found) !== JSON.stringify(profileToLoad)) {
+            needsRegistryUpdate = true;
+        }
+    }
+
+    if (needsRegistryUpdate) {
         setCompanies(prev => {
-            const updated = prev.map(c => c.id === profileToLoad.id ? { ...c, companySignature: retroSignature } : c);
+            const updated = prev.map(c => c.id === profileToLoad.id ? { ...c, ...profileToLoad } : c);
             localStorage.setItem('app_companies', JSON.stringify(updated));
+            if (window.electronAPI?.dbSetGlobal) {
+                // @ts-ignore
+                window.electronAPI.dbSetGlobal('app_companies', updated);
+            }
             return updated;
         });
-        console.log(`[Patch] Applied retroactive hash signature to legacy company: ${profileToLoad.establishmentName}`);
+        console.log(`[Rescue Integrity] Restored full profile & signature from Silo DB for: ${profileToLoad.id}`);
+    }
+
+    // --- LEGACY PATCH REMOVED ---
+    // Signatures are no longer blindly generated for loaded companies.
+    // Companies lacking a signature will remain Read-Only until manually activated.
+    if (profileToLoad.id && !profileToLoad.companySignature) {
+        console.log(`[License Integrity] Company ${profileToLoad.establishmentName} loaded without a signature. It will remain Read-Only until activated.`);
     }
 
     setCompanyProfile(profileToLoad);
@@ -796,9 +824,8 @@ export const usePayrollData = (showAlert: any) => {
     if (window.electronAPI?.getActivatedSilos) {
         window.electronAPI.getActivatedSilos().then((res: any) => {
             if (res?.success) {
-                const licenseRaw = localStorage.getItem('app_license_data');
-                const license = licenseRaw ? JSON.parse(licenseRaw) : { companyLimit: 1 };
-                const limit = license.companyLimit || 1;
+                const license = getStoredLicense();
+                const limit = license?.companyLimit || 1;
                 const sig = profileToLoad.companySignature;
                 const isActivated = sig ? res.silos.includes(sig) : false;
                 const shouldBeReadOnly = !isActivated && res.silos.length >= limit;
@@ -838,7 +865,7 @@ export const usePayrollData = (showAlert: any) => {
     } catch (e) {
       setLogoUrl(prev => prev && prev.startsWith('data:') ? prev : '../public/logo.png');
     }
-  }, [activeCompanyId, activeFinancialYear, isResetting, reloadTrigger, getCKey]);
+  }, [activeCompanyId, activeFinancialYear, isResetting, reloadTrigger, getCKey, isHydrating]);
 
   // --- PERSISTENCE HELPERS ---
   const safeSave = useCallback(async (key: string, data: any) => {

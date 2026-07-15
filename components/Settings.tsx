@@ -136,13 +136,14 @@ const Settings: React.FC<SettingsProps> = ({
     const [selectedLWFState, setSelectedLWFState] = useState<string>('Tamil Nadu');
     const [targetPurgeCompanyId, setTargetPurgeCompanyId] = useState<string>(activeCompanyId);
     const [enrolledEmployeeCount, setEnrolledEmployeeCount] = useState<number>(0);
+    const [registeredSiloCount, setRegisteredSiloCount] = useState<number | null>(null);
 
     // V03.01.07: Sync local state when props change (e.g. after switching companies)
     useEffect(() => {
         setFormData(config);
         setProfileData(companyProfile);
         setLocalLeavePolicy(leavePolicy);
-        
+
         // Fetch current enrolled employees for data size logic
         try {
             const empsData = localStorage.getItem(getCKey('app_employees'));
@@ -152,7 +153,7 @@ const Settings: React.FC<SettingsProps> = ({
             } else {
                 setEnrolledEmployeeCount(0);
             }
-        } catch(e) { setEnrolledEmployeeCount(0); }
+        } catch (e) { setEnrolledEmployeeCount(0); }
     }, [config, companyProfile, leavePolicy]);
 
     useEffect(() => {
@@ -262,7 +263,7 @@ const Settings: React.FC<SettingsProps> = ({
                     }
                 });
             }
-        } catch (e) {}
+        } catch (e) { }
         return globalLimit - totalOtherQuota;
     }, [licenseInfo, profileData.id]);
     const [newLicenseKey, setNewLicenseKey] = useState('');
@@ -302,6 +303,17 @@ const Settings: React.FC<SettingsProps> = ({
             }
         };
         fetchDir();
+
+        // Fetch activated silos count for display
+        if ((window as any).electronAPI?.getActivatedSilos) {
+            (window as any).electronAPI.getActivatedSilos().then((res: any) => {
+                if (res?.success && Array.isArray(res.silos)) {
+                    // Filter out any REVOKE tags from the visible count
+                    const activeOnly = res.silos.filter((s: string) => !s.startsWith("REVOKE:"));
+                    setRegisteredSiloCount(activeOnly.length);
+                }
+            }).catch(() => {});
+        }
     }, []);
 
     useEffect(() => {
@@ -836,7 +848,7 @@ const Settings: React.FC<SettingsProps> = ({
                     setIsProcessing(true);
                     const getCKey = (key: string) => {
                         const transactionalKeys = [
-                            'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 
+                            'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
                             'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
                         ];
                         if (activeFinancialYear && transactionalKeys.includes(key)) {
@@ -920,82 +932,82 @@ const Settings: React.FC<SettingsProps> = ({
                                     localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(val));
                                 } else if (storageKey === 'users') {
                                     localStorage.setItem('app_users', JSON.stringify(val));
-                                 } else {
-                                     if (Array.isArray(val) && targetId !== 'default') {
-                                         val = val.map((item: any) => ({ ...item, companyId: targetId }));
-                                     }
-                                     
-                                     const transactionalKeys = [
-                                         'attendance', 'leave_ledgers', 'advance_ledgers', 
-                                         'payroll_history', 'fines', 'arrear_history', 'ot_records'
-                                     ];
-                                     
-                                     if (transactionalKeys.includes(storageKey) && Array.isArray(val)) {
-                                         const partitions: Record<string, any[]> = {};
-                                         val.forEach((item: any) => {
-                                             const fy = item.financialYear || item.fy;
-                                             if (fy && typeof fy === 'string' && /^FY\d{2}-\d{2}$/.test(fy)) {
-                                                 if (!partitions[fy]) partitions[fy] = [];
-                                                 partitions[fy].push(item);
-                                             } else {
-                                                 const m = item.month;
-                                                 const y = parseInt(item.year);
-                                                 if (m && !isNaN(y)) {
-                                                     const startY = (['January', 'February', 'March'].includes(m)) ? y - 1 : y;
-                                                     const endY = startY + 1;
-                                                     const computedFy = `FY${String(startY).slice(-2)}-${String(endY).slice(-2)}`;
-                                                     if (!partitions[computedFy]) partitions[computedFy] = [];
-                                                     partitions[computedFy].push(item);
-                                                 }
-                                             }
-                                         });
+                                } else {
+                                    if (Array.isArray(val) && targetId !== 'default') {
+                                        val = val.map((item: any) => ({ ...item, companyId: targetId }));
+                                    }
 
-                                         // Safe Fallback: If no partitions were resolved, but val has elements and storageKey is a ledger key
-                                         if (Object.keys(partitions).length === 0 && val.length > 0 && activeFinancialYear && (storageKey === 'leave_ledgers' || storageKey === 'advance_ledgers')) {
-                                             partitions[activeFinancialYear] = val;
-                                         }
+                                    const transactionalKeys = [
+                                        'attendance', 'leave_ledgers', 'advance_ledgers',
+                                        'payroll_history', 'fines', 'arrear_history', 'ot_records'
+                                    ];
 
-                                         if (activeFinancialYear && !partitions[activeFinancialYear]) {
-                                             partitions[activeFinancialYear] = [];
-                                         }
+                                    if (transactionalKeys.includes(storageKey) && Array.isArray(val)) {
+                                        const partitions: Record<string, any[]> = {};
+                                        val.forEach((item: any) => {
+                                            const fy = item.financialYear || item.fy;
+                                            if (fy && typeof fy === 'string' && /^FY\d{2}-\d{2}$/.test(fy)) {
+                                                if (!partitions[fy]) partitions[fy] = [];
+                                                partitions[fy].push(item);
+                                            } else {
+                                                const m = item.month;
+                                                const y = parseInt(item.year);
+                                                if (m && !isNaN(y)) {
+                                                    const startY = (['January', 'February', 'March'].includes(m)) ? y - 1 : y;
+                                                    const endY = startY + 1;
+                                                    const computedFy = `FY${String(startY).slice(-2)}-${String(endY).slice(-2)}`;
+                                                    if (!partitions[computedFy]) partitions[computedFy] = [];
+                                                    partitions[computedFy].push(item);
+                                                }
+                                            }
+                                        });
 
-                                         for (const [fy, partitionVal] of Object.entries(partitions)) {
-                                             const targetKey = `app_${storageKey}_${fy}_${targetId}`;
-                                             try {
-                                                 localStorage.setItem(targetKey, JSON.stringify(partitionVal));
-                                             } catch (e) {
-                                                 console.warn(`[RESTORE] LocalStorage partition write failed for ${targetKey}`, e);
-                                             }
-                                             if (window.electronAPI?.dbSet) {
-                                                 try {
-                                                     await window.electronAPI.dbSet(targetKey, partitionVal);
-                                                 } catch (sqliteErr) {
-                                                     console.error(`[RESTORE] Direct SQLite write failed for ${targetKey}:`, sqliteErr);
-                                                 }
-                                             }
-                                         }
-                                     } else {
-                                         const targetKey = getCKey(`app_${storageKey}`);
-                                         localStorage.setItem(targetKey, JSON.stringify(val));
-                                         if (window.electronAPI?.dbSet) {
-                                             const flatKey = storageKey === 'users' ? 'app_users' : (storageKey === 'company_profile' ? 'app_company_profile' : `app_${storageKey}`);
-                                             const targetDbKey = storageKey === 'users' ? 'app_users' : getCKey(flatKey);
-                                             try {
-                                                 await window.electronAPI.dbSet(targetDbKey, val);
-                                             } catch (sqliteErr) {
-                                                 console.error(`[RESTORE] Direct SQLite write failed for ${targetDbKey}:`, sqliteErr);
-                                             }
-                                         }
-                                     }
-                                 }
-                             } catch (err: any) {
-                                 console.warn(`[RESTORE] localStorage write failed for key ${storageKey}:`, err.message || err);
-                                 if (err.name === 'QuotaExceededError' || err.code === 22 || err.message?.toLowerCase().includes('quota')) {
-                                     console.error(`[RESTORE] Logo or data storage exceeded localStorage quota. Skipping localStorage write, proceeding with SQLite direct write.`);
-                                 } else {
-                                     throw err;
-                                 }
-                             }
+                                        // Safe Fallback: If no partitions were resolved, but val has elements and storageKey is a ledger key
+                                        if (Object.keys(partitions).length === 0 && val.length > 0 && activeFinancialYear && (storageKey === 'leave_ledgers' || storageKey === 'advance_ledgers')) {
+                                            partitions[activeFinancialYear] = val;
+                                        }
+
+                                        if (activeFinancialYear && !partitions[activeFinancialYear]) {
+                                            partitions[activeFinancialYear] = [];
+                                        }
+
+                                        for (const [fy, partitionVal] of Object.entries(partitions)) {
+                                            const targetKey = `app_${storageKey}_${fy}_${targetId}`;
+                                            try {
+                                                localStorage.setItem(targetKey, JSON.stringify(partitionVal));
+                                            } catch (e) {
+                                                console.warn(`[RESTORE] LocalStorage partition write failed for ${targetKey}`, e);
+                                            }
+                                            if (window.electronAPI?.dbSet) {
+                                                try {
+                                                    await window.electronAPI.dbSet(targetKey, partitionVal);
+                                                } catch (sqliteErr) {
+                                                    console.error(`[RESTORE] Direct SQLite write failed for ${targetKey}:`, sqliteErr);
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        const targetKey = getCKey(`app_${storageKey}`);
+                                        localStorage.setItem(targetKey, JSON.stringify(val));
+                                        if (window.electronAPI?.dbSet) {
+                                            const flatKey = storageKey === 'users' ? 'app_users' : (storageKey === 'company_profile' ? 'app_company_profile' : `app_${storageKey}`);
+                                            const targetDbKey = storageKey === 'users' ? 'app_users' : getCKey(flatKey);
+                                            try {
+                                                await window.electronAPI.dbSet(targetDbKey, val);
+                                            } catch (sqliteErr) {
+                                                console.error(`[RESTORE] Direct SQLite write failed for ${targetDbKey}:`, sqliteErr);
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (err: any) {
+                                console.warn(`[RESTORE] localStorage write failed for key ${storageKey}:`, err.message || err);
+                                if (err.name === 'QuotaExceededError' || err.code === 22 || err.message?.toLowerCase().includes('quota')) {
+                                    console.error(`[RESTORE] Logo or data storage exceeded localStorage quota. Skipping localStorage write, proceeding with SQLite direct write.`);
+                                } else {
+                                    throw err;
+                                }
+                            }
 
                             restoredCount++;
                             restoredData[storageKey] = val;
@@ -1473,7 +1485,7 @@ const Settings: React.FC<SettingsProps> = ({
 
             const getMergedSiloData = (baseKey: string, defaultValue: any) => {
                 const transactionalKeys = [
-                    'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 
+                    'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
                     'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
                 ];
 
@@ -1513,7 +1525,7 @@ const Settings: React.FC<SettingsProps> = ({
                                     if (Array.isArray(parsed)) {
                                         merged = parsed;
                                     }
-                                } catch (e) {}
+                                } catch (e) { }
                             }
                         }
                         return merged;
@@ -1524,7 +1536,7 @@ const Settings: React.FC<SettingsProps> = ({
                         if (match) {
                             try {
                                 return typeof match.value === 'string' ? JSON.parse(match.value) : match.value;
-                            } catch (e) {}
+                            } catch (e) { }
                         }
                     }
                 }
@@ -1553,7 +1565,7 @@ const Settings: React.FC<SettingsProps> = ({
                                             merged = merged.concat(mapped);
                                         }
                                     }
-                                } catch (e) {}
+                                } catch (e) { }
                             }
                         }
                     }
@@ -1792,7 +1804,7 @@ const Settings: React.FC<SettingsProps> = ({
                     });
                 }
             } catch (e) { console.error(e) }
-            
+
             const balanceAvailable = globalLimit - totalOtherQuota;
             if (numSize > balanceAvailable) {
                 showAlert?.('error', 'Limit Exceeded', `The data size entered is above the overall limit. Only ${balanceAvailable} is available as balance quota.`);
@@ -2081,16 +2093,16 @@ const Settings: React.FC<SettingsProps> = ({
                             className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-[11px] font-black transition-all shadow-xl active:scale-95 ${companyProfile?.isReadOnly
                                 ? 'bg-red-500/10 text-red-500 border border-red-500/30 cursor-not-allowed'
                                 : saved
-                                ? 'bg-emerald-600 text-white shadow-emerald-900/40 ring-2 ring-emerald-500/50'
-                                : isDirty
-                                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/40 ring-2 ring-white/20'
-                                    : 'bg-slate-800 text-slate-400 cursor-default opacity-80'
+                                    ? 'bg-emerald-600 text-white shadow-emerald-900/40 ring-2 ring-emerald-500/50'
+                                    : isDirty
+                                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/40 ring-2 ring-white/20'
+                                        : 'bg-slate-800 text-slate-400 cursor-default opacity-80'
                                 }`}
-                            title="Save Configuration"
+                            title={companyProfile?.isReadOnly ? "Configuration is locked (Read-Only Mode or License Limit Reached)" : "Save Configuration"}
                             aria-label="Save Configuration"
                         >
-                            {saved ? <CheckCircle2 size={14} /> : isDirty ? <Save size={14} /> : <Save size={14} />}
-                            {saved ? 'DATA SAVED' : isDirty ? 'SAVE CONFIGURATION' : 'SAVE CONFIGURATION'}
+                            {companyProfile?.isReadOnly ? <AlertCircle size={14} /> : saved ? <CheckCircle2 size={14} /> : <Save size={14} />}
+                            {companyProfile?.isReadOnly ? 'READ ONLY MODE' : saved ? 'DATA SAVED' : isDirty ? 'SAVE CONFIGURATION' : 'SAVE CONFIGURATION'}
                         </button>
                     </div>
                 </div>
@@ -2298,8 +2310,8 @@ const Settings: React.FC<SettingsProps> = ({
                                         {[
                                             { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
                                             { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                            { key: 'attire', label: 'Attire' }, 
-                                            { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, 
+                                            { key: 'attire', label: 'Attire' },
+                                            { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' },
                                             { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' },
                                             { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' },
                                         ].map(comp => {
@@ -2365,8 +2377,8 @@ const Settings: React.FC<SettingsProps> = ({
                                         {[
                                             { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
                                             { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                            { key: 'attire', label: 'Attire' }, 
-                                            { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, 
+                                            { key: 'attire', label: 'Attire' },
+                                            { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' },
                                             { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' },
                                             { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' },
                                         ].map(comp => {
@@ -2450,8 +2462,8 @@ const Settings: React.FC<SettingsProps> = ({
                                                 { key: 'totalDeductions', label: 'Total Deductions' },
                                                 { key: 'netPay', label: 'Net Pay' }
                                             ].map(comp => (
-                                                <div 
-                                                    key={comp.key} 
+                                                <div
+                                                    key={comp.key}
                                                     title={`${comp.label} is mandatory`}
                                                     className="flex items-center gap-2 p-2 rounded-lg border bg-slate-800/80 border-slate-700/80 text-slate-200 text-[10px] font-bold cursor-not-allowed"
                                                 >
@@ -2514,7 +2526,7 @@ const Settings: React.FC<SettingsProps> = ({
                                             })}
                                         </div>
                                     </div>
-                                    
+
                                     <div className="pt-5 mt-5 border-t border-slate-800">
                                         <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-1 flex items-center gap-2">
                                             <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.8)]"></div>
@@ -2615,8 +2627,8 @@ const Settings: React.FC<SettingsProps> = ({
                                             {[
                                                 { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
                                                 { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' }, { key: 'attire', label: 'Attire' },
-                                                { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, 
-                                                { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' }, 
+                                                { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' },
+                                                { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' },
                                                 { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' },
                                             ].map(comp => {
                                                 const components = formData.higherContributionComponents || INITIAL_STATUTORY_CONFIG.higherContributionComponents;
@@ -2748,8 +2760,8 @@ const Settings: React.FC<SettingsProps> = ({
                                         {[
                                             { key: 'basic', label: 'Basic Pay' }, { key: 'da', label: 'DA' }, { key: 'retaining', label: 'Retn Allow' },
                                             { key: 'hra', label: 'HRA' }, { key: 'conveyance', label: 'Conveyance' }, { key: 'washing', label: 'Washing' },
-                                            { key: 'attire', label: 'Attire' }, 
-                                            { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' }, 
+                                            { key: 'attire', label: 'Attire' },
+                                            { key: 'special1', label: profileData?.specialAllowance1Name || 'Special 1' },
                                             { key: 'special2', label: profileData?.specialAllowance2Name || 'Special 2' },
                                             { key: 'special3', label: profileData?.specialAllowance3Name || 'Special 3' }
                                         ].map(comp => {
@@ -3005,13 +3017,13 @@ const Settings: React.FC<SettingsProps> = ({
                                                     <td className="py-3"><input type="number" onFocus={(e) => e.target.select()} className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white w-24 font-mono font-bold text-amber-400" value={slab.amount} onChange={e => handleSlabChange(i, 'amount', +e.target.value)} title="PT Amount for Slab" aria-label="PT Amount for Slab" /></td>
                                                     {formData.ptDeductionCycle === 'HalfYearly' && (
                                                         <td className="py-3">
-                                                            <input 
-                                                                type="number" 
-                                                                readOnly 
-                                                                className="bg-slate-800/50 border border-slate-800 rounded px-2 py-1 text-xs text-slate-400 w-24 font-mono font-bold" 
-                                                                value={Math.round(slab.amount / 6)} 
-                                                                title="Monthly EMI (Calculated as Deduction / 6)" 
-                                                                aria-label="Monthly EMI" 
+                                                            <input
+                                                                type="number"
+                                                                readOnly
+                                                                className="bg-slate-800/50 border border-slate-800 rounded px-2 py-1 text-xs text-slate-400 w-24 font-mono font-bold"
+                                                                value={Math.round(slab.amount / 6)}
+                                                                title="Monthly EMI (Calculated as Deduction / 6)"
+                                                                aria-label="Monthly EMI"
                                                             />
                                                         </td>
                                                     )}
@@ -3148,10 +3160,11 @@ const Settings: React.FC<SettingsProps> = ({
                                             <input
                                                 id="profile-db-pass"
                                                 type={showPin ? "text" : "password"}
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-blue-500 font-bold placeholder:text-slate-700"
+                                                className={`w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-blue-500 font-bold placeholder:text-slate-700 ${companyProfile?.isReadOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                 placeholder="Leave blank for open access"
                                                 value={profileData.dashboardPassword || ''}
                                                 onChange={e => setProfileData({ ...profileData, dashboardPassword: e.target.value })}
+                                                disabled={companyProfile?.isReadOnly}
                                                 title="Optional password required to open this company from dashboard"
                                             />
                                             <button
@@ -3186,8 +3199,8 @@ const Settings: React.FC<SettingsProps> = ({
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Registration Codes</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label htmlFor="profile-pf-code" className="text-[10px] font-bold text-slate-400 uppercase">PF Code<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-pf-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PF Code" value={profileData.pfCode} onChange={e => setProfileData({ ...profileData, pfCode: e.target.value })} title="PF Code Number" aria-label="PF Code Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-esi-code" className="text-[10px] font-bold text-slate-400 uppercase">ESI Code<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-esi-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="ESI Code" value={profileData.esiCode} onChange={e => setProfileData({ ...profileData, esiCode: e.target.value })} title="ESI Code Number" aria-label="ESI Code Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-pf-code" className="text-[10px] font-bold text-slate-400 uppercase">PF Code{profileData.epfApplicabilityTriggered && <span className="text-red-500 text-sm ml-0.5">*</span>}</label><input id="profile-pf-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PF Code" value={profileData.pfCode} onChange={e => setProfileData({ ...profileData, pfCode: e.target.value })} title="PF Code Number" aria-label="PF Code Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-esi-code" className="text-[10px] font-bold text-slate-400 uppercase">ESI Code{profileData.esiApplicabilityTriggered && <span className="text-red-500 text-sm ml-0.5">*</span>}</label><input id="profile-esi-code" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="ESI Code" value={profileData.esiCode} onChange={e => setProfileData({ ...profileData, esiCode: e.target.value })} title="ESI Code Number" aria-label="ESI Code Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-gst-no" className="text-[10px] font-bold text-slate-400 uppercase">GST No</label><input id="profile-gst-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="GST Number" value={profileData.gstNo} onChange={e => setProfileData({ ...profileData, gstNo: e.target.value })} title="GST Number" aria-label="GST Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-lin" className="text-[10px] font-bold text-slate-400 uppercase">LIN No (Labour ID)</label><input id="profile-lin" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" value={profileData.lin} onChange={e => setProfileData({ ...profileData, lin: e.target.value })} placeholder="L0000000000" title="Labour Identification Number" aria-label="Labour Identification Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-pt-no" className="text-[10px] font-bold text-slate-400 uppercase">PT Registration No</label><input id="profile-pt-no" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="PT Registration" value={profileData.ptNo || ''} onChange={e => setProfileData({ ...profileData, ptNo: e.target.value })} title="PT Registration Number" aria-label="PT Registration Number" /></div>
@@ -3284,10 +3297,10 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
             )}
 
-            
 
 
-              {activeTab === 'DEVELOPER' && userRole === 'Developer' && (
+
+            {activeTab === 'DEVELOPER' && userRole === 'Developer' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 p-8 shadow-xl">
                         <div className="flex items-center justify-between border-b border-slate-800 pb-6 mb-6">
@@ -3664,11 +3677,11 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Permanently <span className="text-pink-500 font-bold underline underline-offset-2">REMOVE</span> an organization. Click <span className="text-pink-500 font-black">Initiate Purge</span> to choose between removing the company from the registry list only or completely deleting its physical data folder from disk.</p>
                                 </div>
                                 <button
-                                    onClick={() => requireAuth(() => { 
-                                        setShowResetModal(true); 
-                                        setResetMode('DEEP'); 
-                                        setResetPassword(''); 
-                                        setResetError(''); 
+                                    onClick={() => requireAuth(() => {
+                                        setShowResetModal(true);
+                                        setResetMode('DEEP');
+                                        setResetPassword('');
+                                        setResetError('');
                                         const otherCompanies = JSON.parse(localStorage.getItem('app_companies') || '[]').filter((c: any) => c.id !== activeCompanyId);
                                         if (otherCompanies.length > 0) {
                                             setTargetPurgeCompanyId(otherCompanies[0].id);
@@ -3784,7 +3797,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 <h3 className="text-xl font-black text-white text-center">{resetMode === 'DEEP' ? 'PURG COMPANY' : 'FACTORY RESET'}</h3>
                                 <p className={`text-xs text-center leading-relaxed ${resetMode === 'DEEP' ? 'text-pink-300' : 'text-red-300'}`}>
                                     {resetMode === 'DEEP'
-                                        ? (purgeScope === 'COMPLETE' 
+                                        ? (purgeScope === 'COMPLETE'
                                             ? `CRITICAL WARNING: This action is IRREVERSIBLE and will permanently delete ${profileData?.establishmentName || companyProfile.establishmentName} and completely wipe its physical folders from disk.`
                                             : `WARNING: This action will remove ${profileData?.establishmentName || companyProfile.establishmentName} from the list of active companies. Its physical database folder will remain intact.`)
                                         : 'CRITICAL WARNING: This action is IRREVERSIBLE and will wipe ALL company data.'}
@@ -4120,6 +4133,12 @@ const Settings: React.FC<SettingsProps> = ({
                                                 </span>
                                             </div>
                                             <div className="flex justify-between items-center py-1.5 border-t border-white/5">
+                                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Companies Registered</span>
+                                                <span className={`text-sm font-black font-mono px-4 py-1 rounded-lg border ${registeredSiloCount != null && registeredSiloCount >= (licenseInfo?.companyLimit || 1) ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'}`}>
+                                                    {registeredSiloCount !== null ? `${registeredSiloCount} / ${licenseInfo?.companyLimit || 1}` : '...'}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between items-center py-1.5 border-t border-white/5">
                                                 <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Expiry Date</span>
                                                 <span className="text-xs font-bold text-pink-400 italic">
                                                     {formatExpiryDate(licenseInfo?.expiryDate)}
@@ -4279,8 +4298,8 @@ const Settings: React.FC<SettingsProps> = ({
                                                 showAlert?.('danger', bypassKeyCheck ? 'Sync Failed' : 'Activation Failed', result.message);
                                             }
                                         }}
-                                        disabled={isActivating || licenseInfo?.status === 'LICENSE ACTIVE'}
-                                        className={`mt-4 w-full py-4 text-white font-black uppercase text-sm rounded-xl shadow-xl transition-all flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50 ${licenseInfo?.status === 'LICENSE ACTIVE' ? 'bg-slate-700 shadow-none' : 'bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 shadow-pink-900/20'}`}
+                                        disabled={isActivating || licenseInfo?.status === 'LICENSE ACTIVE' || licenseInfo?.status === 'DEVELOPER ACTIVE' || licenseInfo?.status === 'TRIAL ACTIVE'}
+                                        className={`mt-4 w-full py-4 text-white font-black uppercase text-sm rounded-xl shadow-xl transition-all flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50 ${(licenseInfo?.status === 'LICENSE ACTIVE' || licenseInfo?.status === 'DEVELOPER ACTIVE' || licenseInfo?.status === 'TRIAL ACTIVE') ? 'bg-slate-700 shadow-none' : 'bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 shadow-pink-900/20'}`}
                                     >
                                         {isActivating ? <Loader2 size={20} className="animate-spin" /> : <Shield size={20} />}
                                         {isActivating ? 'Activating...' : 'Re-Activate System'}
@@ -4337,9 +4356,30 @@ const Settings: React.FC<SettingsProps> = ({
                                     </div>
 
                                     <p className="mt-4 text-[10px] text-slate-500 leading-relaxed text-center">
-                                        For a patch to trigger, <strong className="text-slate-300">Cloud Live Timestamp</strong> must be strictly newer than <strong className="text-slate-300">Local Active Timestamp</strong>.<br/>
+                                        For a patch to trigger, <strong className="text-slate-300">Cloud Live Timestamp</strong> must be strictly newer than <strong className="text-slate-300">Local Active Timestamp</strong>.<br />
                                         Additionally, <strong className="text-slate-300">Compiled Executable Version</strong> must not be higher than <strong className="text-slate-300">Cloud App_Config Version</strong>.
                                     </p>
+
+                                    {(() => {
+                                        const cloudTs = latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || '';
+                                        const localTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
+                                        if (cloudTs && localTs && cloudTs > localTs) {
+                                            return (
+                                                <div className="mt-4 flex justify-center">
+                                                    <button
+                                                        onClick={() => {
+                                                            sessionStorage.setItem('force_patch_update', 'true');
+                                                            window.location.reload();
+                                                        }}
+                                                        className="w-full max-w-sm bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-xs tracking-widest py-2.5 rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2"
+                                                    >
+                                                        <Download size={16} /> Force Patch Update Now
+                                                    </button>
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
                                 </div>
                             </div>
                         </div>
@@ -4785,7 +4825,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 <div className="p-4 bg-pink-900/20 text-pink-500 rounded-full border border-pink-900/50 mb-2"><ShieldAlert size={32} /></div>
                                 <h3 className="text-xl font-black text-white text-center italic uppercase tracking-tighter">PURGE COMPANY</h3>
                                 <p className="text-xs text-pink-300 text-center leading-relaxed font-medium">
-                                    {purgeScope === 'COMPLETE' 
+                                    {purgeScope === 'COMPLETE'
                                         ? `CRITICAL WARNING: This action is IRREVERSIBLE and will permanently delete the selected company and completely wipe its physical folders from disk.`
                                         : `WARNING: This action will remove the selected company from the list of active companies. Its physical database folder will remain intact.`}
                                 </p>
@@ -4802,10 +4842,10 @@ const Settings: React.FC<SettingsProps> = ({
                                     {(JSON.parse(localStorage.getItem('app_companies') || '[]'))
                                         .filter((c: any) => c.id !== activeCompanyId)
                                         .map((c: any) => (
-                                        <option key={c.id} value={c.id}>
-                                            {c.establishmentName} ({c.id})
-                                        </option>
-                                    ))}
+                                            <option key={c.id} value={c.id}>
+                                                {c.establishmentName} ({c.id})
+                                            </option>
+                                        ))}
                                 </select>
                             </div>
 

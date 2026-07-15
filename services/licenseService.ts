@@ -4,7 +4,7 @@ import { LicenseData } from '../types';
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzE10qkCCczPH-_eCQ_cJBRGpu28viV8zhNRCw2iD0Rha3y_1HIuWNPGAjHBrqsHeEB/exec";
 export const APP_VERSION = "06.01.10";
-export const APP_PATCH_TIMESTAMP = "10-07-2026 20:11:29"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_PATCH_TIMESTAMP = "15-07-2026 12:11:23"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -188,7 +188,8 @@ export const trackActivityTime = () => {
   if (secureTime) {
     try {
       const lastKnown = Number(unscramble(secureTime));
-      if (now < lastKnown) {
+      const gracePeriod = 24 * 60 * 60 * 1000; // 24 hours in ms to prevent NTP sync false positives
+      if (now < (lastKnown - gracePeriod)) {
         console.error("🛑 SECURITY VIOLATION: System clock tampering detected.");
         return { tampered: true };
       }
@@ -308,13 +309,22 @@ export const getStoredLicense = (): LicenseData | null => {
       data.expiryDate = '31-12-2026';
       data.splDynamic = true;
       data.splMIS = true;
-      data.companyLimit = 10; // For local multi-company testing
+      // Removed: data.companyLimit = 10; // Allow Dev environment to use actual Cloud limit for testing
     }
 
     return data;
   } catch (e) {
     console.error("Exception in getStoredLicense:", e);
     return null;
+  }
+};
+
+export const updateStoredLicenseLocally = async (licenseData: LicenseData): Promise<void> => {
+  licenseData.checksum = generateChecksum(licenseData);
+  const scrambled = scramble(JSON.stringify(licenseData));
+  localStorage.setItem('app_license_secure', scrambled);
+  if ((window as any).electronAPI) {
+    await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
   }
 };
 
@@ -622,9 +632,9 @@ export const activateFullLicense = async (
 
       // --- V02.02.18: DOUBLE-SYNC FORCE REPAIR ---
       // Backend ACTIVATE_LICENSE omits contact details, so we force-sync immediately
-      // with the typed EMAIL and MOBILE to ensure the cloud validates and repairs local storage.
+      // with the typed EMAIL, MOBILE, and PASSWORD to ensure the cloud validates and repairs local storage.
       console.log("🔄 [SYNC] Forcing full identity repair after activation...");
-      const syncResult = await validateLicenseStartup(true, userID, email, mobile);
+      const syncResult = await validateLicenseStartup(true, userID, email, mobile, password);
 
       if (!syncResult.valid) {
         // --- ROLLBACK INCONSISTENT IDENTITY ---
@@ -667,18 +677,7 @@ export const activateFullLicense = async (
         });
 
         // Rollback
-        if (prevLicense) {
-          localStorage.setItem('app_license_secure', prevLicense);
-          if ((window as any).electronAPI) await (window as any).electronAPI.dbSet('app_license_secure', prevLicense);
-        } else {
-          localStorage.removeItem('app_license_secure');
-          if ((window as any).electronAPI) await (window as any).electronAPI.dbDelete('app_license_secure');
-        }
-
-        return {
-          success: false,
-          message: `Identity Mismatch: The details you entered do not exactly match our cloud records. Please double-check for typos, missing letters (like .com vs .co), or incorrect mobile digits.`
-        };
+        console.warn(`⚠️ [SYNC] Minor Identity Variation Detected: [Cloud E: '${cloudEmail}', Typed E: '${typedEmail}'] [Cloud M: '${cloudMobile}', Typed M: '${typedMobile}']. Proceeding because backend validated successfully.`);
       }
     }
     return result;
@@ -860,6 +859,81 @@ export const validateLicenseStartup = async (
         const users = usersRaw ? JSON.parse(usersRaw) : [];
         const adminUser = users.find((u: any) => u.role === 'Administrator') || users[0];
 
+        // --- SIGNATURE MIGRATION SCRIPT ---
+        // V06.01.10: Disabled signature migration logic to prevent duplicate signatures
+        // from being generated and mixed between uppercase and lowercase formats.
+        /*
+        let migratedSilos: string[] = [];
+        try {
+          const savedCompaniesRaw = localStorage.getItem('app_companies');
+          if (savedCompaniesRaw) {
+            const companies = JSON.parse(savedCompaniesRaw);
+            let companiesUpdated = false;
+            for (let i = 0; i < companies.length; i++) {
+              const comp = companies[i];
+              if (comp.id && comp.companySignature) {
+                const safeName = comp.establishmentName ? comp.establishmentName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 8).toUpperCase() : 'UNKNOWN';
+                
+                if (!comp.companySignature.includes(safeName)) {
+                  // Found an old signature format, migrate it
+                  const oldSig = comp.companySignature;
+                  const newIdPart = comp.id.includes('-') ? comp.id.split('-')[1] : comp.id;
+                  const newSig = `SIG-${safeName}_${newIdPart}-${(Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6))}`;
+                
+                migratedSilos.push(oldSig);
+                comp.companySignature = newSig;
+                companiesUpdated = true;
+                
+                // Swap in dual-storage sys_limit.bin
+                if ((window as any).electronAPI && (window as any).electronAPI.removeActivatedSilo && (window as any).electronAPI.registerActivatedSilo) {
+                  await (window as any).electronAPI.removeActivatedSilo(oldSig);
+                  await (window as any).electronAPI.registerActivatedSilo(newSig);
+                }
+                
+                // Update active profile if it matches
+                const activeProfileRaw = localStorage.getItem('app_company_profile');
+                if (activeProfileRaw) {
+                  const activeProfile = JSON.parse(activeProfileRaw);
+                  if (activeProfile.id === comp.id) {
+                    activeProfile.companySignature = newSig;
+                    localStorage.setItem('app_company_profile', JSON.stringify(activeProfile));
+                  }
+                }
+                } 
+              }
+            }
+            if (companiesUpdated) {
+              localStorage.setItem('app_companies', JSON.stringify(companies));
+              if ((window as any).electronAPI) {
+                await (window as any).electronAPI.dbSet('app_companies', JSON.stringify(companies));
+              }
+              console.log(`Migrated ${migratedSilos.length} legacy signatures to new Silo-ID format.`);
+            }
+          }
+        } catch (e) {
+          console.warn("Failed during signature migration", e);
+        }
+        */
+        // ----------------------------------
+
+        // Fetch activated silos from dual-storage tracker for cloud tamper verification
+        let localSilos: string[] = [];
+        try {
+          if ((window as any).electronAPI && (window as any).electronAPI.getActivatedSilos) {
+            const res = await (window as any).electronAPI.getActivatedSilos();
+            if (res && res.success && Array.isArray(res.silos)) {
+              localSilos = res.silos;
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to fetch activated silos for sync", e);
+        }
+
+        // Note: We MUST always send localSilos. The previous hack of sending undefined to prevent
+        // repopulation caused false-positive tamper flags because the GAS script sees [] and thinks
+        // the client is missing signatures that are present in the cloud.
+        const silosToSync = localSilos;
+
         const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
           method: 'POST',
           body: JSON.stringify({
@@ -869,7 +943,9 @@ export const validateLicenseStartup = async (
             mobile: overrideMobile || (stored?.registeredMobile || 'RESCUE'),
             machineId: currentMachineId,
             userID: attemptedID || (stored?.userID || 'RESCUE'),
-            appPassword: appPassword || adminUser?.password
+            appPassword: appPassword || adminUser?.password,
+            activatedSilos: silosToSync,
+            migratedSilos: [] // V06.01.10: Migration disabled, pass empty array
           })
         });
 
@@ -907,7 +983,7 @@ export const validateLicenseStartup = async (
           console.log("✅ Developer access synced from cloud (Hardware Locked).");
         }
 
-        if (!result.success) {
+        if (!result.success || result.message === "IDENTITY_RESTORE_REQUIRED") {
           // --- V03.01.01: ID Format Migration (Add Underscore to 12-char IDs) ---
           if (result.status === 'BLOCK_LEGACY' || result.message?.includes('VERSION_STUCK')) {
             return {
@@ -915,6 +991,47 @@ export const validateLicenseStartup = async (
               message: result.message || 'Application Version no longer supported.',
               status: 'BLOCK_LEGACY',
               launcherUrl: result.launcherUrl
+            };
+          }
+
+          // --- CLOUD TAMPER & LIMIT DETECTION ---
+          if (result.status === 'SECURITY_TAMPERED') {
+            return {
+              valid: false,
+              message: result.message,
+              status: result.status,
+              data: result.data
+            };
+          }
+
+          if (result.status === 'LIMIT_EXCEEDED') {
+            // V06.01.10 FIX: Update local company limit and all other fields to match cloud limit even on exceed
+            if (result.data && stored) {
+                if (result.data.companyLimit) stored.companyLimit = Number(result.data.companyLimit);
+                if (result.data.dataSize) {
+                    stored.dataSize = Number(result.data.dataSize);
+                    localStorage.setItem('app_data_size', String(stored.dataSize));
+                    if ((window as any).electronAPI) {
+                        (window as any).electronAPI.dbSet('app_data_size', String(stored.dataSize)).catch(() => {});
+                    }
+                }
+                if (result.data.expiryDate) stored.expiryDate = result.data.expiryDate;
+                if (result.data.password) stored.password = result.data.password;
+                if (result.data.splDynamic !== undefined) stored.splDynamic = result.data.splDynamic;
+                if (result.data.splMIS !== undefined) stored.splMIS = result.data.splMIS;
+
+                stored.checksum = generateChecksum(stored);
+                const scrambled = scramble(JSON.stringify(stored));
+                localStorage.setItem('app_license_secure', scrambled);
+                if ((window as any).electronAPI) {
+                    (window as any).electronAPI.dbSet('app_license_secure', scrambled).catch(() => {});
+                }
+            }
+            return {
+              valid: true, // Allow read-only access to existing companies
+              message: result.message,
+              status: result.status,
+              data: { ...result.data, isLimitExceeded: true }
             };
           }
 
@@ -1158,6 +1275,123 @@ export const validateLicenseStartup = async (
                 console.log(`🏢 Company Limit Sync: ${activeLicense.companyLimit} -> ${incomingCompanyLimit}`);
                 activeLicense.companyLimit = incomingCompanyLimit;
                 storageUpdated = true;
+              }
+            }
+
+            // --- CLOUD RECONCILIATION FOR SIG LIMIT ---
+            if (cloudData.activeSignatures && Array.isArray(cloudData.activeSignatures)) {
+              try {
+                const cloudSigs = cloudData.activeSignatures as string[];
+                const currentCloudSigs = activeLicense.cloudSignatures || [];
+                
+                // Check if there's any change in cloud signatures
+                if (JSON.stringify(cloudSigs.sort()) !== JSON.stringify(currentCloudSigs.sort())) {
+                  activeLicense.cloudSignatures = cloudSigs;
+                  storageUpdated = true;
+                }
+
+                // --- HARD RESET LOGIC ---
+                // If cloud array is completely empty, it means Column R was cleared by admin.
+                // We must wipe all local signatures so they can be regenerated.
+                if (cloudSigs.length === 0) {
+                  console.log("🧹 [HARD RESET] Cloud returned empty signatures. Wiping all local company signatures!");
+                  try {
+                    const savedCompsRaw = localStorage.getItem('app_companies');
+                    if (savedCompsRaw) {
+                      const comps = JSON.parse(savedCompsRaw);
+                      let compsUpdated = false;
+                      for (const c of comps) {
+                        if (c.companySignature) {
+                          // Unconditionally wipe signatures for LOCAL companies.
+                          // Preserve signatures for FOREIGN/rescued companies (isReadOnly === true).
+                          if (!c.isReadOnly) {
+                            c.companySignature = "";
+                            c.isReadOnly = true;
+                            compsUpdated = true;
+                            
+                            // Wipe signature from IndexedDB profile
+                            if ((window as any).electronAPI && (window as any).electronAPI.dbGetGlobal && (window as any).electronAPI.dbSetGlobal) {
+                              try {
+                                 const res = await (window as any).electronAPI.dbGetGlobal(`app_company_profile_${c.id}`);
+                                 if (res && res.success && res.data) {
+                                    const prof = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                                    if (prof.companySignature) {
+                                       prof.companySignature = "";
+                                       prof.isReadOnly = true;
+                                       await (window as any).electronAPI.dbSetGlobal(`app_company_profile_${c.id}`, prof);
+                                    }
+                                 }
+                              } catch (e) {
+                                 console.warn("Failed to wipe profile signature for", c.id, e);
+                              }
+                            }
+                          }
+                        }
+                      }
+                      if (compsUpdated) {
+                        localStorage.setItem('app_companies', JSON.stringify(comps));
+                        if ((window as any).electronAPI && (window as any).electronAPI.dbSetGlobal) {
+                          await (window as any).electronAPI.dbSetGlobal('app_companies', JSON.stringify(comps));
+                        }
+                      }
+                      
+                      // CRITICAL: Always wipe sys_limit.bin during Hard Reset regardless of app_companies state!
+                      if ((window as any).electronAPI && (window as any).electronAPI.wipeActivatedSilos) {
+                        try {
+                           await (window as any).electronAPI.wipeActivatedSilos();
+                        } catch (e) {
+                           console.warn("Failed to wipe sys_limit.bin during hard reset", e);
+                        }
+                      } else if ((window as any).electronAPI && (window as any).electronAPI.getActivatedSilos && (window as any).electronAPI.removeActivatedSilo) {
+                        try {
+                           const localRes = await (window as any).electronAPI.getActivatedSilos();
+                           if (localRes && localRes.success && Array.isArray(localRes.silos)) {
+                             const localSigs = localRes.silos as string[];
+                             for (const lSig of localSigs) {
+                               await (window as any).electronAPI.removeActivatedSilo(lSig);
+                             }
+                           }
+                        } catch (e) {
+                           console.warn("Failed to wipe sys_limit.bin during hard reset via fallback", e);
+                        }
+                      }
+                      
+                      // Force a reload so React state is not stale
+                      setTimeout(() => {
+                         window.location.reload();
+                      }, 500);
+                    }
+                    const savedProfRaw = localStorage.getItem('app_company_profile');
+                    if (savedProfRaw) {
+                      const prof = JSON.parse(savedProfRaw);
+                      if (prof.companySignature) {
+                        if (!prof.isReadOnly) {
+                          prof.companySignature = "";
+                          localStorage.setItem('app_company_profile', JSON.stringify(prof));
+                        }
+                      }
+                    }
+                  } catch (err) {
+                    console.warn("Failed to wipe local company signatures during hard reset", err);
+                  }
+                }
+
+                const api = (window as any).electronAPI;
+                if (api && api.getActivatedSilos && api.removeActivatedSilo) {
+                  const localRes = await api.getActivatedSilos();
+                  if (localRes && localRes.success && Array.isArray(localRes.silos)) {
+                    const localSigs = localRes.silos as string[];
+                    
+                    for (const lSig of localSigs) {
+                      if (!cloudSigs.includes(lSig)) {
+                        console.log(`🗑️ [RECONCILIATION] Cloud revoked signature: ${lSig}. Removing locally.`);
+                        await api.removeActivatedSilo(lSig);
+                      }
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn("Failed to reconcile signatures with cloud", e);
               }
             }
 
@@ -1813,3 +2047,4 @@ export const verifyRestoreOTP = async (userID: string, email: string, otp: strin
     return { success: false, message: `Verification Error: ${error.message || "Unknown Failure"}` };
   }
 };
+

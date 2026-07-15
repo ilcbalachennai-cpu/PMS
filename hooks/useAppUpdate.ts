@@ -502,24 +502,25 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
     console.log(`[PatchSync] Cloud: ${latestPatchTimestamp} (${latestTs}) | Local X: ${activePatchTs} (${activeTs}) | Startup: ${appStartupTime} | Now: ${now} | Grace Ends: ${graceStartTime + delayMs}`);
 
     const isDismissed = sessionStorage.getItem('patch_session_suppressed') === 'true';
+    const isForced = sessionStorage.getItem('force_patch_update') === 'true';
 
     (window as any).__updateVars = {
        latestTs, activeTs, delayMs, appStartupTime, actualStartTime, now, isDismissed, patchSkipCount, isDeveloper,
        cond1: latestTs > activeTs,
-       cond2: (!isDismissed || patchSkipCount >= 3),
-       cond3: isPostLogin && (now >= (actualStartTime + delayMs))
+       cond2: (!isDismissed || patchSkipCount >= 3 || isForced),
+       cond3: isPostLogin && (now >= (actualStartTime + delayMs) || isForced)
     };
 
     // Check if patch is newer AND if the 5-minute grace period has passed post-login
-    if (latestTs > activeTs && (!isDismissed || patchSkipCount >= 3)) {
+    if (latestTs > activeTs && (!isDismissed || patchSkipCount >= 3 || isForced)) {
        if (!isPostLogin) {
          // Pause patch updates on the pre-login screen
          setIsPatchNotice(false);
          setShowUpdateNotice(false);
-       } else if (now >= (actualStartTime + delayMs)) {
-         console.log(" [PatchSync] Post-login grace period expired. Triggering update notice.");
+       } else if (now >= (actualStartTime + delayMs) || isForced) {
+         console.log(" [PatchSync] Grace period expired or patch update forced. Triggering update notice.");
          setIsPatchNotice(true);
-         setIsPatchMandatory(patchSkipCount >= 3);
+         setIsPatchMandatory(patchSkipCount >= 3 || isForced);
          setShowUpdateNotice(true);
        } else {
          const remainingSecs = Math.ceil(((actualStartTime + delayMs) - now) / 1000);

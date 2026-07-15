@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Save, RefreshCw, Lock, FileText, Eye, AlertCircle, AlertTriangle, X, CheckCircle, Download, Scale, HandCoins, Users, Calculator, Settings, Search } from 'lucide-react';
 import * as XLSX from 'xlsx-js-style';
@@ -8,6 +7,7 @@ import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileNam
 import { formatIndianNumber, didConfigCalculationFieldsChange, didEmployeePayFieldsChange } from '../utils/formatters';
 import { ModalType } from './Shared/CustomModal';
 import { getActivePaySheetColumns } from '../constants';
+import { validateLicenseStartup } from '../services/licenseService';
 
 interface PayrollProcessorProps {
     employees: Employee[];
@@ -95,10 +95,13 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
     const [modalState, setModalState] = useState<{
         isOpen: boolean;
-        type: 'confirm' | 'success' | 'error';
+        type: 'confirm' | 'success' | 'error' | 'warning';
         title: string;
         message: string | React.ReactNode;
         onConfirm?: () => void;
+        onSecondaryConfirm?: () => void;
+        confirmLabel?: string;
+        secondaryConfirmLabel?: string;
     }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -131,6 +134,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     // Load Data Effect (Priority: Temp Storage > Saved Records)
     useEffect(() => {
         const tempKey = `app_temp_payroll_${companyProfile.id}_${month}_${year}`;
+
         const savedTemp = localStorage.getItem(tempKey);
         let loadedFromTemp = false;
 
@@ -387,7 +391,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                         isOpen: true,
                         type: 'success',
                         title: isRecalc ? 'Recalculation Applied Successfully' : 'Payroll Calculation Completed',
-                        message: isRecalc 
+                        message: isRecalc
                             ? `Pay data for ${month} ${year} has been updated with the latest inputs and statutory configurations.`
                             : `Payroll calculation for ${month} ${year} completed successfully.`
                     });
@@ -448,6 +452,52 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             });
             return;
         }
+
+        // --- STATUTORY DECLARATION VALIDATION ---
+        const missingEsi = companyProfile.esiApplicabilityTriggered && !companyProfile.esiCode?.trim();
+        const missingEpf = companyProfile.epfApplicabilityTriggered && !companyProfile.pfCode?.trim();
+        const declarationKey = `bypass_epf_esi_${companyProfile.id}_${month}_${year}`;
+        const hasAcceptedDeclaration = localStorage.getItem(declarationKey) === 'true';
+
+        if ((missingEsi || missingEpf) && !hasAcceptedDeclaration) {
+            setModalState({
+                isOpen: true,
+                type: 'warning',
+                title: 'Statutory Registration Pending',
+                message: (
+                    <div className="text-left space-y-3">
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                            Based on your employee strength, your company has triggered mandatory statutory registrations, but the codes are missing in the Company Profile:
+                        </p>
+                        <ul className="list-disc pl-5 text-amber-400 font-bold text-xs space-y-1">
+                            {missingEsi && <li>ESI Code Registration is mandatory.</li>}
+                            {missingEpf && <li>EPF Code Registration is mandatory.</li>}
+                        </ul>
+                        <div className="bg-slate-900/60 border border-amber-900/50 p-3 rounded text-[10px] text-slate-400 mt-2">
+                            <p className="font-bold text-amber-500 mb-1">Declaration:</p>
+                            I accept to proceed without {missingEsi && missingEpf ? 'ESI and EPF' : (missingEsi ? 'ESI' : 'EPF')} registration for this pay month. I understand the liability of non-compliance.
+                        </div>
+                    </div>
+                ),
+                onConfirm: () => {
+                    localStorage.setItem(declarationKey, 'true');
+                    setModalState(prev => ({ ...prev, isOpen: false }));
+                    // Using setTimeout to allow modal to close before showing loading or calculating
+                    setTimeout(() => {
+                        handleCalculate(); // Re-trigger calculation
+                    }, 300);
+                },
+                confirmLabel: 'I Accept & Proceed',
+                onSecondaryConfirm: () => {
+                    setModalState(prev => ({ ...prev, isOpen: false }));
+                    // If available, they can navigate to settings from main navigation, or we could dispatch it if we had access to safeNavigate here.
+                    // (onSwitchTab isn't quite right since it's for sub-tabs of PayProcess, but we leave it as close for now)
+                },
+                secondaryConfirmLabel: 'Cancel'
+            });
+            return;
+        }
+        // --- END STATUTORY DECLARATION VALIDATION ---
 
         // --- SEQUENTIAL PROCESSING CHECK REMOVED AS PER USER REQUEST ---
         // (Previously added sequence enforcement was too restrictive)
@@ -577,8 +627,13 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 if (companyProfile.companySignature && (window as any).electronAPI?.getActivatedSilos && (window as any).electronAPI?.registerActivatedSilo) {
                     (window as any).electronAPI.getActivatedSilos().then((res: any) => {
                         if (res?.success && !res.silos.includes(companyProfile.companySignature!)) {
-                            (window as any).electronAPI.registerActivatedSilo(companyProfile.companySignature!);
-                            console.log(`[Activation] Registered silo signature: ${companyProfile.companySignature}`);
+                            (window as any).electronAPI.registerActivatedSilo(companyProfile.companySignature!).then(() => {
+                                console.log(`[Activation] Registered silo signature locally: ${companyProfile.companySignature}`);
+                                // Force cloud sync after 3 seconds to stabilize the app
+                                setTimeout(() => {
+                                    validateLicenseStartup(true).catch(e => console.warn("Failed to sync silo limit to cloud:", e));
+                                }, 3000);
+                            });
                         }
                     });
                 }
@@ -602,7 +657,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                     isOpen: true,
                     type: 'success',
                     title: isRecalc ? 'Recalculation Applied Successfully' : 'Payroll Calculation Completed',
-                    message: isRecalc 
+                    message: isRecalc
                         ? `Pay data for ${month} ${year} has been updated with the latest inputs and statutory configurations.`
                         : `Payroll calculation for ${month} ${year} completed successfully.`
                 });
@@ -680,12 +735,12 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         // Filter out blank columns (where all employees have 0 or '')
         const keys = Object.keys(data[0] || {});
         const alwaysKeep = ['Employee ID', 'Name', 'Designation', 'Department', 'Total Days', 'Paid Days', 'Basic Pay', 'Gross Earnings', 'Total Deductions', 'Net Pay'];
-        
+
         keys.forEach(key => {
             if (alwaysKeep.includes(key)) return;
-            
+
             const hasData = data.some(row => row[key as keyof typeof row] !== 0 && row[key as keyof typeof row] !== '' && row[key as keyof typeof row] !== null && row[key as keyof typeof row] !== undefined);
-            
+
             if (!hasData) {
                 data.forEach(row => {
                     delete (row as any)[key];
@@ -770,9 +825,9 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         washing: { label: 'Wash', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.washing || 0) },
         attire: { label: 'Attire', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.attire || 0) },
         special1: { label: companyProfile?.specialAllowance1Name || 'Spl 1', className: 'text-right text-slate-100', value: (r: PayrollResult) => Math.round(r?.earnings?.special1 || 0) },
-        others: { 
-            label: 'Others', 
-            className: 'text-right text-slate-300', 
+        others: {
+            label: 'Others',
+            className: 'text-right text-slate-300',
             value: (r: PayrollResult) => {
                 const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'bonus', 'leaveEncashment', 'otAmount', 'arrears'];
                 const displayedEarningsKeys = earningsKeys.filter(k => activeColumns.includes(k));
@@ -799,9 +854,9 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         it: { label: 'IT', className: 'text-right text-amber-300', value: (r: PayrollResult) => Math.round(r?.deductions?.it || 0) },
         lwf: { label: 'LWF', className: 'text-right text-slate-400', value: (r: PayrollResult) => Math.round(r?.deductions?.lwf || 0) },
         fine: { label: 'Fine', className: 'text-right text-red-300', value: (r: PayrollResult) => Math.round(r?.deductions?.fine || 0) },
-        otherDeductions: { 
-            label: 'Others', 
-            className: 'text-right text-purple-300', 
+        otherDeductions: {
+            label: 'Others',
+            className: 'text-right text-purple-300',
             value: (r: PayrollResult) => {
                 const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
                 const displayedDeductionKeys = deductionKeys.filter(k => activeColumns.includes(k));
@@ -867,7 +922,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     const deductionCount = activeColumns.filter(c => deductionKeys.includes(c)).length;
 
     const beforeEarningsCount = (activeColumns.includes('days') ? 1 : 0) + 1; // +1 for Employee Identity
-    
+
     const afterCount = activeColumns.filter(c => c === 'netPay').length + 1; // +1 for View
 
     return (
@@ -1065,10 +1120,10 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                         if (!col) return null;
                                         // V03.01.07: Force Sky Blue for requested headers while maintaining alignment
                                         const isRequestedSkyBlue = ['days', 'basic', 'da', 'leaveEncashment'].includes(colId);
-                                        const headerClassName = isRequestedSkyBlue 
-                                            ? col.className.replace('text-slate-300', 'text-sky-400') 
+                                        const headerClassName = isRequestedSkyBlue
+                                            ? col.className.replace('text-slate-300', 'text-sky-400')
                                             : col.className;
-                                        
+
                                         return (
                                             <th key={colId} className={`px-1.5 py-3 bg-[#0f172a] whitespace-nowrap ${headerClassName}`}>
                                                 {col.label}
@@ -1200,14 +1255,27 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 relative">
                         <div className="flex flex-col items-center gap-2">
-                            <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>
-                                {modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle size={24} /> : <AlertCircle size={24} />}
+                            <div className={`p-3 rounded-full border ${modalState.type === 'error' ? 'bg-red-900/30 text-red-500 border-red-900/50' : modalState.type === 'warning' ? 'bg-amber-900/30 text-amber-500 border-amber-900/50' : modalState.type === 'success' ? 'bg-emerald-900/30 text-emerald-500 border-emerald-900/50' : 'bg-blue-900/30 text-blue-500 border-blue-900/50'}`}>
+                                {modalState.type === 'error' ? <AlertTriangle size={24} /> : modalState.type === 'warning' ? <AlertTriangle size={24} /> : modalState.type === 'success' ? <CheckCircle size={24} /> : <AlertCircle size={24} />}
                             </div>
                             <h3 className="text-lg font-bold text-white text-center">{modalState.title}</h3>
                             <div className="text-sm text-slate-400 text-center w-full">{modalState.message}</div>
                         </div>
                         <div className="flex gap-3 mt-4">
-                            <button onClick={() => setModalState({ ...modalState, isOpen: false })} title="Close" aria-label="Close" className="w-full py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">OK</button>
+                            {modalState.onSecondaryConfirm && (
+                                <button onClick={modalState.onSecondaryConfirm} title={modalState.secondaryConfirmLabel || 'Cancel'} aria-label={modalState.secondaryConfirmLabel || 'Cancel'} className="flex-1 py-2.5 rounded-lg border border-slate-600 text-slate-300 font-bold hover:bg-slate-700 transition-colors">
+                                    {modalState.secondaryConfirmLabel || 'Cancel'}
+                                </button>
+                            )}
+                            <button onClick={() => {
+                                if (modalState.onConfirm) {
+                                    modalState.onConfirm();
+                                } else {
+                                    setModalState({ ...modalState, isOpen: false });
+                                }
+                            }} title={modalState.confirmLabel || 'OK'} aria-label={modalState.confirmLabel || 'OK'} className="flex-1 py-2.5 rounded-lg bg-slate-700 text-white font-bold hover:bg-slate-600 transition-colors">
+                                {modalState.confirmLabel || 'OK'}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1226,13 +1294,13 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                 const special = (r?.earnings?.special1 || 0) + (r?.earnings?.special2 || 0) + (r?.earnings?.special3 || 0);
                                 // Calculate other as a residue to ensure the sum of earnings matches the Gross total
                                 const other = (r?.earnings?.total || 0) - (
-                                    (r?.earnings?.basic || 0) + 
-                                    (r?.earnings?.da || 0) + 
-                                    (r?.earnings?.retainingAllowance || 0) + 
-                                    (r?.earnings?.hra || 0) + 
-                                    (r?.earnings?.conveyance || 0) + 
-                                    (r?.earnings?.otAmount || 0) + 
-                                    special + 
+                                    (r?.earnings?.basic || 0) +
+                                    (r?.earnings?.da || 0) +
+                                    (r?.earnings?.retainingAllowance || 0) +
+                                    (r?.earnings?.hra || 0) +
+                                    (r?.earnings?.conveyance || 0) +
+                                    (r?.earnings?.otAmount || 0) +
+                                    special +
                                     (r?.earnings?.leaveEncashment || 0)
                                 );
                                 let isPropPFCapped = r.isProportionatePFCapped;

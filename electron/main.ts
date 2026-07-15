@@ -1122,7 +1122,7 @@ async function performAutoRescue(rootDb: Database.Database, appPaths: any) {
                 const siloPath = path.join(dataDir, name);
                 return fs.statSync(siloPath).isDirectory() && fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
             })
-            .filter(name => name !== '.icon-ico');
+            .filter(name => name !== '.icon-ico' && name !== 'default');
 
         // Clean up the existing list: remove missing, empty ID, or duplicate silos
         let updatedRegistry = false;
@@ -1609,6 +1609,20 @@ ipcMain.handle('register-activated-silo', async (_, signature: string) => {
     return { success: true, silos };
 });
 
+ipcMain.handle('remove-activated-silo', async (_, signature: string) => {
+    let silos = readActivatedSilos();
+    if (silos.includes(signature)) {
+        silos = silos.filter(s => s !== signature);
+        writeActivatedSilos(silos);
+    }
+    return { success: true, silos };
+});
+
+ipcMain.handle('wipe-activated-silos', async () => {
+    writeActivatedSilos([]);
+    return { success: true, silos: [] };
+});
+
 ipcMain.handle('list-silos', async () => {
     try {
         if (!appBasePath) throw new Error("App storage not initialized");
@@ -1624,7 +1638,7 @@ ipcMain.handle('list-silos', async () => {
                 // Only include silos that actually have an active database
                 return fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
             })
-            .filter(name => name !== '.icon-ico'); // Exclude known non-silo folders if any
+            .filter(name => name !== '.icon-ico' && name !== 'default'); // Exclude known non-silo folders if any
         
         return { success: true, silos };
     } catch (e: any) {

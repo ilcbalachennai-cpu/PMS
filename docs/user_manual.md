@@ -160,6 +160,7 @@ When onboarding or updating an employee, configuring their statutory profile cor
 
 **7.A: PF Exempted (Para 69)**
 *   **Purpose:** Marks the employee as completely excluded from EPF/EPS coverage. Both employee and employer contributions will be forced to strictly zero (0).
+*   **Reasoning:** Use this only for employees drawing wages above ₹15,000 who were not EPF members prior to joining, and who mutually opt out of PF deduction at the time of joining (under Para 69).
 *   **Logic:** Checking this option locks 7.D to "No" and disables 7.E. It cannot be checked if the employee is marked as an active EPS contributor (7.D = Yes).
 
 **7.B: Deferred Pension Option (Age 58 to 60)**
@@ -170,15 +171,29 @@ When onboarding or updating an employee, configuring their statutory profile cor
 
 **7.C: Employee Age Above 60 (Only PF Contribution Allowed)**
 *   **Purpose:** Enforces the mandate that EPS contributions must stop entirely when an employee reaches 60 years of age.
+*   **Reasoning:** EPS is not applicable to employees over 60. All 12% employer contribution automatically routes to the EPF corpus.
 *   **Logic:** This section activates automatically when the employee crosses 60. It routes 100% of the employer's contribution directly to EPF, disabling 7.A to enforce the age-based calculation override.
 
 **7.D: Employee Eligible for EPS**
 *   **Purpose:** Determines if the 8.33% employer share should be directed to the Pension Fund.
+*   **Reasoning:** An employee is generally eligible for EPS unless they joined the EPF scheme after Sept 1, 2014, with basic wages exceeding ₹15,000, in which case they are only eligible for EPF and not EPS. Set this to "Yes" for typical eligible employees.
 *   **Logic:** Explicitly setting this to "Yes" disables the PF Exemption (7.A). Setting it to "No" disables Higher Pension (7.E). This dropdown is forcefully taken over by the system if 7.A, 7.B(a), or 7.B(b) are toggled.
 
 **7.E: Enable Higher Pension Option (EPS 95)**
 *   **Purpose:** Calculates EPS contributions on actual uncapped gross wages instead of the standard ₹15,000 ceiling limit (Joint Option).
+*   **Reasoning:** Select this option if the employee and employer have submitted a joint declaration under paragraph 26(6) of the EPF Scheme to contribute on actual wages exceeding the statutory wage ceiling.
 *   **Logic:** This toggle acts as a strict dependent. It remains greyed out and completely locked unless 7.D is actively confirmed as "Yes".
+
+---
+
+### 5.3 Statutory Thresholds & Coverage Applicability
+
+The system actively monitors your workforce strength to ensure compliance with Indian labour laws. Mandatory coverage rules are strictly enforced across the application lifecycle:
+
+*   **ESI Threshold (10 Employees):** If the total employee strength reaches 10 on any day during the year, ESI Code Registration becomes mandatory. This must be obtained within 15 days of the 10th employee joining.
+*   **EPF Threshold (20 Employees):** If the total employee strength reaches 20 on any day during the year, EPF Code Registration becomes mandatory. This must be obtained within 15 days of the 20th employee joining.
+*   **Permanent Applicability:** Once a threshold is triggered, the mandatory coverage rule becomes permanently applicable to the company profile. It does not matter if the employee strength falls below the threshold in subsequent months.
+*   **Payroll Restrictions:** If statutory codes are missing from the Company Profile after a threshold is triggered, the **Run Payroll** feature will trigger a warning. The user must explicitly accept a one-time declaration per pay-month acknowledging the liability to process payroll without the mandatory registration codes.
 
 ---
 

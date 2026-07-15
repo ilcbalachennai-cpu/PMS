@@ -1,7 +1,7 @@
-    /**
- * BHARATPAY PRO - GOOGLE APPS SCRIPT (v06.01.08 FINAL)
+     /**
+ * BHARATPAY PRO - GOOGLE APPS SCRIPT (v06.01.10 FINAL)
  * -----------------------------------------------------------
- * - Updated: 17-June-2026 : 08.50 PM
+ * - Updated: 12-July-2026 : 06.01 PM
  * - SECURITY: SHA-256 HMAC Signature Verification active.
  * - FIX: Interface with Launcher URL (D2) for System Recovery path.
  * - FIX: handleStartupValidation — STRICT 4-FIELD SYNC (ID, Pass, Machine, Email).
@@ -491,37 +491,95 @@ function handleStartupValidation(ss, params) {
                     const cleanParamsKey = String(params.licenseKey || "").replace(/-/g,"").trim().toLowerCase();
                     const keyMatch = (cleanParamsKey === "rescue" || cleanParamsKey === rowKey || cleanParamsKey === "trial");
 
-                    // --- V02.02.40: CLOUD SIGNATURE SYNC (Column R / Index 17) ---
-                    let finalSignaturesArray = [];
-                    if (passMatch) {
-                        let companyLimit = parseInt(row[16]) || 1;
-                        let existingSignaturesStr = String(row[17] || "").trim();
-                        let existingSignatures = existingSignaturesStr ? existingSignaturesStr.split(',') : [];
-                        let incomingSignatures = Array.isArray(params.activatedSilos) ? params.activatedSilos : [];
-                        
-                        let finalSignatures = new Set(existingSignatures);
-                        for (let sig of incomingSignatures) {
-                            if (!finalSignatures.has(sig) && finalSignatures.size < companyLimit) {
-                                finalSignatures.add(sig);
-                            }
-                        }
-                        finalSignaturesArray = Array.from(finalSignatures);
-                        let finalSignaturesStr = finalSignaturesArray.join(',');
-                        
-                        if (finalSignaturesStr !== existingSignaturesStr) {
-                            licenseSheet.getRange(i+1, 18).setValue(finalSignaturesStr);
-                        }
-                    } else {
-                        let existingSignaturesStr = String(row[17] || "").trim();
-                        finalSignaturesArray = existingSignaturesStr ? existingSignaturesStr.split(',') : [];
-                    }
-                    // -------------------------------------------------------------
+                    // Extract signatures for both success and restore payload
+                    const cloudSilosStr = String(row[17] || "").trim();
+                    let existingCloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
 
                     if (idMatch && passMatch && emailMatch && keyMatch && !isRescueMode) {
                         const expired = isExpired(rowExpiry);
                         if (expired && String(row[9]).trim() !== 'LICENSE EXPIRED') {
                             licenseSheet.getRange(i+1, 10).setValue('LICENSE EXPIRED');
                         }
+
+                        // --- V06.01.09 CLOUD TAMPER VERIFICATION & LIMIT ENFORCEMENT ---
+                        // Column Q (Index 16) is Limit, Column R (Index 17) is Cloud Silos
+                        const clientSilos = params.activatedSilos || [];
+                        const migratedSilos = params.migratedSilos || [];
+                        let cloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { 
+                            return s && migratedSilos.indexOf(s) === -1; 
+                        }) : [];
+                        
+                        let newSilosFound = migratedSilos.length > 0; // Trigger a save if we migrated/dropped anything
+                        
+                        // 1. Detect if the client deleted their local limit tracker
+                        // And process REVOKED signatures
+                        let isTampered = false;
+                        let revokedSilos = [];
+                        let validCloudSilos = [];
+                        
+                        for (let s = 0; s < cloudSilos.length; s++) {
+                            const currentSilo = cloudSilos[s];
+                            if (currentSilo.startsWith("REVOKE:")) {
+                                revokedSilos.push(currentSilo.replace("REVOKE:", "").trim());
+                                // We keep the REVOKE tag in cloudSilos so it remains persistently revoked
+                                validCloudSilos.push(currentSilo);
+                            } else {
+                                validCloudSilos.push(currentSilo);
+                                if (clientSilos.indexOf(currentSilo) === -1) {
+                                    isTampered = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // We use validCloudSilos (which includes the REVOKE tags) for saving
+                        // But for Tamper checks we already ignored REVOKE tags above
+                        
+                        if (isTampered) {
+                            logSecurityAudit(ss, "TAMPER_DETECTED", "Client missing known silos. Possible bypass attempt.", "User: " + rowID_ColC, params);
+                            if (lock.hasLock()) lock.releaseLock();
+                            return jsonResponse({
+                                success: false, message: "SECURITY_TAMPERED: License verification failed due to missing silo signatures. Please contact Support.",
+                                status: "SECURITY_TAMPERED",
+                                data: { isTampered: true }
+                            });
+                        }
+
+                        // 2. Register any NEW silos the client generated
+                        for (let s = 0; s < clientSilos.length; s++) {
+                            const clientSilo = clientSilos[s];
+                            // Only register it if it's not already in the cloud AND it hasn't been revoked
+                            if (cloudSilos.indexOf(clientSilo) === -1 && revokedSilos.indexOf(clientSilo) === -1) {
+                                cloudSilos.push(clientSilo);
+                                newSilosFound = true;
+                            }
+                        }
+
+                        // Write back the updated silos to Column R BEFORE enforcing limit
+                        // so the cloud ALWAYS reflects what the client attempted to register.
+                        if (newSilosFound) {
+                            licenseSheet.getRange(i+1, 18).setValue(cloudSilos.join(","));
+                        }
+
+                        // 3. Enforce limit strictly from the cloud
+                        const limit = parseInt(row[16]) || 1;
+                        if (cloudSilos.length > limit) {
+                            logSecurityAudit(ss, "LIMIT_EXCEEDED", "Client attempted to sync more silos than limit allows.", "User: " + rowID_ColC, params);
+                            if (lock.hasLock()) lock.releaseLock();
+                            return jsonResponse({
+                                success: false, message: "Company Limit Exceeded (" + limit + "). Please upgrade your license.",
+                                status: "LIMIT_EXCEEDED",
+                                data: { companyLimit: limit }
+                            });
+                        }
+
+                        // Filter out the REVOKE tags before returning activeSignatures to the App
+                        // so the App knows exactly which ones are still valid and drops the rest.
+                        const activeSignaturesForApp = cloudSilos.filter(function(s) {
+                            return !s.startsWith("REVOKE:");
+                        });
+
+                        // ----------------------------------------------------------------
 
                         if (!expired) {
                             logSecurityAudit(ss, "STARTUP_VALIDATION", "SUCCESS", "License Match (4-Field) for " + rowID_ColC, params);
@@ -538,7 +596,7 @@ function handleStartupValidation(ss, params) {
                                     latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, launcherUrl: config.launcherUrl,
                                     adminUser: String(rowID_ColC).toUpperCase(), adminPass: row[3], 
                                     devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss),
-                                    activeSignatures: finalSignaturesArray 
+                                    activeSignatures: activeSignaturesForApp // RETURN TO APP FOR RECONCILIATION
                                 }
                             });
                         } else {
@@ -569,7 +627,7 @@ function handleStartupValidation(ss, params) {
                                 expiryDate: rowExpiry,
                                 splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
                                 splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
-                                activeSignatures: finalSignaturesArray
+                                activeSignatures: existingCloudSilos
                             }
                         });
                     }
@@ -606,31 +664,9 @@ function handleStartupValidation(ss, params) {
                         const passMatch = (rowPass === params.appPassword);
                         const emailMatch = rowEmail === cleanParamsEmail || cleanParamsEmail === "rescue";
 
-                        // --- V02.02.40: CLOUD SIGNATURE SYNC (Column R / Index 17) ---
-                        let finalSignaturesArray = [];
-                        if (passMatch) {
-                            let companyLimit = parseInt(row[16]) || 2;
-                            let existingSignaturesStr = String(row[17] || "").trim();
-                            let existingSignatures = existingSignaturesStr ? existingSignaturesStr.split(',') : [];
-                            let incomingSignatures = Array.isArray(params.activatedSilos) ? params.activatedSilos : [];
-                            
-                            let finalSignatures = new Set(existingSignatures);
-                            for (let sig of incomingSignatures) {
-                                if (!finalSignatures.has(sig) && finalSignatures.size < companyLimit) {
-                                    finalSignatures.add(sig);
-                                }
-                            }
-                            finalSignaturesArray = Array.from(finalSignatures);
-                            let finalSignaturesStr = finalSignaturesArray.join(',');
-                            
-                            if (finalSignaturesStr !== existingSignaturesStr) {
-                                trialSheet.getRange(i+1, 18).setValue(finalSignaturesStr);
-                            }
-                        } else {
-                            let existingSignaturesStr = String(row[17] || "").trim();
-                            finalSignaturesArray = existingSignaturesStr ? existingSignaturesStr.split(',') : [];
-                        }
-                        // -------------------------------------------------------------
+                        // Extract signatures for both success and restore payload
+                        const cloudSilosStr = String(row[17] || "").trim();
+                        let existingCloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
 
                         if (idMatch && passMatch && emailMatch && !isRescueMode) {
                             const expired = isExpired(rowExpiry);
@@ -639,6 +675,57 @@ function handleStartupValidation(ss, params) {
                             }
                             
                             logSecurityAudit(ss, "STARTUP_VALIDATION", "SUCCESS", "Trial Match (4-Field) for " + rowName, params);
+                            
+                            // --- V06.01.09 CLOUD TAMPER VERIFICATION & LIMIT ENFORCEMENT ---
+                            // Column Q (Index 16) is Limit, Column R (Index 17) is Cloud Silos
+                            const clientSilos = params.activatedSilos || [];
+                            let cloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
+                            
+                            let isTampered = false;
+                            for (let s = 0; s < cloudSilos.length; s++) {
+                                if (clientSilos.indexOf(cloudSilos[s]) === -1) {
+                                    isTampered = true;
+                                    break;
+                                }
+                            }
+
+                            if (isTampered) {
+                                logSecurityAudit(ss, "TAMPER_DETECTED", "Trial client missing known silos. Possible bypass attempt.", "User: " + rowID, params);
+                                if (lock.hasLock()) lock.releaseLock();
+                                return jsonResponse({
+                                    success: false, message: "SECURITY_TAMPERED: License verification failed due to missing silo signatures. Please contact Support.",
+                                    status: "SECURITY_TAMPERED",
+                                    data: { isTampered: true }
+                                });
+                            }
+
+                            let newSilosFound = false;
+                            for (let s = 0; s < clientSilos.length; s++) {
+                                if (cloudSilos.indexOf(clientSilos[s]) === -1) {
+                                    cloudSilos.push(clientSilos[s]);
+                                    newSilosFound = true;
+                                }
+                            }
+
+                            // Write back the updated silos to Column R BEFORE enforcing limit
+                            // so the cloud ALWAYS reflects what the client attempted to register.
+                            if (newSilosFound) {
+                                trialSheet.getRange(i+1, 18).setValue(cloudSilos.join(","));
+                            }
+
+                            const limit = parseInt(row[16]) || 2;
+                            if (cloudSilos.length > limit) {
+                                logSecurityAudit(ss, "LIMIT_EXCEEDED", "Trial client attempted to sync more silos than limit allows.", "User: " + rowID, params);
+                                if (lock.hasLock()) lock.releaseLock();
+                                return jsonResponse({
+                                    success: false, message: "Company Limit Exceeded (" + limit + "). Please upgrade your license.",
+                                    status: "LIMIT_EXCEEDED",
+                                    data: { companyLimit: limit }
+                                });
+                            }
+
+                            // ----------------------------------------------------------------
+
                             if (lock.hasLock()) lock.releaseLock();
                             
                             if (expired) {
@@ -660,8 +747,7 @@ function handleStartupValidation(ss, params) {
                                     companyLimit: parseInt(row[16]) || 2,
                                     latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, launcherUrl: config.launcherUrl,
                                     adminUser: rowID.toUpperCase(), adminPass: row[2], 
-                                    devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss),
-                                    activeSignatures: finalSignaturesArray 
+                                    devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss) 
                                 }
                             });
                         } else {
@@ -675,6 +761,7 @@ function handleStartupValidation(ss, params) {
                                     status: 'PENDING_RESTORE', 
                                     userName: rowName, 
                                     userID: rowID.toUpperCase(),
+                                    adminPass: row[2],
                                     isTrial: true,
                                     registeredTo: row[3],
                                     registeredMobile: row[4],
@@ -683,7 +770,8 @@ function handleStartupValidation(ss, params) {
                                     splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
                                     companyLimit: parseInt(row[16]) || 2,
                                     startDate: rowStart,
-                                    expiryDate: rowExpiry
+                                    expiryDate: rowExpiry,
+                                    activeSignatures: existingCloudSilos
                                 }
                             });
                         }
