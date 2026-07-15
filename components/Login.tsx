@@ -437,12 +437,18 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
 
         // --- V02.02.16: IDENTITY RESTORATION TRIGGER ---
         if (syncResult.status === 'PENDING_RESTORE') {
-          console.log("≡ƒ¢á∩╕Å Identity Restoration Required for:", syncResult.data?.userName);
-          setRestoreTargetName(syncResult.data?.userName || 'User');
-          setRestoreStep('INPUT');
-          setShowRestoreModal(true);
-          setIsLoading(false);
-          return;
+          // Verify if it's just a wrong password locally
+          const localUser = allUsers.find(u => String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase());
+          if (localUser && String(localUser.password).trim() !== cleanPassword) {
+            console.warn("Ignored PENDING_RESTORE because local password check failed (Wrong Password).");
+          } else {
+            console.log("🛠️ Identity Restoration Required for:", syncResult.data?.userName);
+            setRestoreTargetName(syncResult.data?.userName || 'User');
+            setRestoreStep('INPUT');
+            setShowRestoreModal(true);
+            setIsLoading(false);
+            return;
+          }
         }
 
         if (syncResult.valid) {

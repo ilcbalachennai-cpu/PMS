@@ -2041,6 +2041,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     return availableFinancialYears.some(fy => parseFY(fy) < currentVal);
   }, [activeFinancialYear, availableFinancialYears]);
 
+  const isDeveloper = currentUser?.role === 'Developer' || currentUser?.email === 'developer@bharatpay.com';
+  const visibleCompanies = isDeveloper 
+    ? companies 
+    : companies.filter(c => licenseInfo?.cloudSignatures?.includes(c.companySignature || ''));
+
   return (
     <div className={`flex h-[100dvh] overflow-hidden bg-[#020617] text-white ${isWin7 ? 'is-win7' : ''}`}>
       {exitingMessage && (
@@ -2276,7 +2281,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <AppSetup onComplete={() => window.location.reload()} />
           </div>
         </div>
-      ) : (showRegistrationManual || isRestorationForced || (companies.length === 0)) ? (
+      ) : (showRegistrationManual || isRestorationForced || (visibleCompanies.length === 0)) ? (
         <Registration
           onComplete={handleRegistrationComplete}
           onRestore={() => window.location.reload()}
@@ -2343,7 +2348,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
                 {!isPurgeMode ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 w-full">
-                    {companies.map(c => {
+                    {visibleCompanies.map(c => {
                       const isReadOnly = c.isReadOnly;
                       return (
                       <div 
@@ -2485,7 +2490,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                   </div>
                 ) : (
                   <div className="w-full max-w-2xl space-y-3 bg-slate-900/20 p-6 rounded-3xl border border-slate-800 shadow-2xl animate-in zoom-in-95 duration-300">
-                    {companies.map(c => {
+                    {visibleCompanies.map(c => {
                       const isReadOnly = c.isReadOnly;
                       return (
                       <div 
@@ -2821,7 +2826,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Select Organization</span>
                       </div>
                       <div className="max-h-64 overflow-y-auto custom-scrollbar">
-                        {companies.map(c => (
+                        {visibleCompanies.map(c => (
                           <button 
                             key={c.id}
                             onClick={() => {

@@ -2583,6 +2583,24 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
                 db = null;
             }
 
+            // A.5 Clean User Data Caches (sys_limit & Local Storage) for clean update
+            try {
+                const sysLimitPath = path.join(app.getPath('userData'), 'sys_limit.bin');
+                const localStoragePath = path.join(app.getPath('userData'), 'Local Storage');
+                
+                if (fs.existsSync(sysLimitPath)) {
+                    fs.unlinkSync(sysLimitPath);
+                    console.log('🧹 Deleted sys_limit.bin for clean update');
+                }
+                
+                if (fs.existsSync(localStoragePath)) {
+                    fs.rmSync(localStoragePath, { recursive: true, force: true });
+                    console.log('🧹 Deleted Local Storage for clean update');
+                }
+            } catch (cleanErr) {
+                console.warn('⚠️ Failed to clean user data for update:', cleanErr);
+            }
+
             // B. Snapshot/Backup
             try {
                 if (appBasePath) {
