@@ -2561,6 +2561,20 @@ ipcMain.handle('mark-patch-complete', async () => {
     }
 });
 
+ipcMain.handle('clear-patch-marker', async () => {
+    try {
+        const markerPath = path.join(app.getPath('userData'), 'signature_patch_applied.marker');
+        if (fs.existsSync(markerPath)) {
+            fs.unlinkSync(markerPath);
+            console.log('🗑️ Signature patch marker cleared. Next patch update will perform a cache wipe.');
+        }
+        return { success: true };
+    } catch (e) {
+        console.error('Failed to clear marker file:', e);
+        return { success: false };
+    }
+});
+
 ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchTimestamp?: string }) => {
     const isSilent = options?.silent ?? false;
     const installerPath = getInstallerPath();

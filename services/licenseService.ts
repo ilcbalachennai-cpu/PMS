@@ -4,7 +4,7 @@ import { LicenseData } from '../types';
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzE10qkCCczPH-_eCQ_cJBRGpu28viV8zhNRCw2iD0Rha3y_1HIuWNPGAjHBrqsHeEB/exec";
 export const APP_VERSION = "06.01.10";
-export const APP_PATCH_TIMESTAMP = "15-07-2026 20:22:17"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_PATCH_TIMESTAMP = "15-07-2026 20:31:47"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -1295,6 +1295,16 @@ export const validateLicenseStartup = async (
                 // We must wipe all local signatures so they can be regenerated.
                 if (cloudSigs.length === 0) {
                   console.log("🧹 [HARD RESET] Cloud returned empty signatures. Wiping all local company signatures!");
+                  
+                  // Also clear the patch marker so if they run a patch update, it wipes properly again
+                  if ((window as any).electronAPI && (window as any).electronAPI.clearPatchMarker) {
+                      try {
+                          await (window as any).electronAPI.clearPatchMarker();
+                      } catch (e) {
+                          console.warn("Failed to clear patch marker during hard reset", e);
+                      }
+                  }
+
                   try {
                     const savedCompsRaw = localStorage.getItem('app_companies');
                     if (savedCompsRaw) {

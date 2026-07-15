@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     prepareForInstall: () => ipcRenderer.invoke('prepare-for-install'),
     backupAndInstall: (options?: { silent?: boolean, username?: string, userEmail?: string, newPatchTimestamp?: string }) => ipcRenderer.invoke('backup-and-install', options),
     markPatchComplete: () => ipcRenderer.invoke('mark-patch-complete'),
+    clearPatchMarker: () => ipcRenderer.invoke('clear-patch-marker'),
     findBPPApp: () => ipcRenderer.invoke('find-bpp-app'),
     openItemLocation: (filePath: string) =>
         ipcRenderer.invoke('open-item-location', filePath),
