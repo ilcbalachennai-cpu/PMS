@@ -2526,12 +2526,26 @@ function dropUserSignature(identifier, signatureToDrop) {
             
             try {
                 if (userEmail && String(userEmail).indexOf('@') > 0) {
+                    // Clean up signature for user-facing email (remove the random hash at the end)
+                    // e.g. "USIG-ADMIN_123456-ABCD" becomes "USIG-ADMIN_123456"
+                    let displaySig = signatureToDrop;
+                    const sigParts = signatureToDrop.split('-');
+                    if (sigParts.length >= 2) {
+                        const hashPart = sigParts.pop();
+                        // Only drop the last part if it looks like the 8-char random hash
+                        if (hashPart.length >= 6) {
+                            displaySig = sigParts.join('-');
+                        } else {
+                            displaySig = signatureToDrop; // fallback
+                        }
+                    }
+
                     const htmlBody = `
                         <div style="font-family:sans-serif; padding:20px; max-width:600px; margin:0 auto; border:1px solid #e5e7eb; border-radius:8px;">
                             <h2 style="color:#2563eb;">BharatPay Pro - Slot Available</h2>
                             <p>Dear ${userName},</p>
                             <p>We are writing to confirm that a company slot has been successfully cleared on your account.</p>
-                            <p><strong>Signature Removed:</strong> ${signatureToDrop}</p>
+                            <p><strong>Company ID Dropped:</strong> ${displaySig}</p>
                             <p>You can now open your BharatPay Pro application. The old company will automatically disappear, and you will be able to register a new company in the available slot.</p>
                             <br>
                             <p>Regards,<br>BharatPay Pro Support Team</p>
