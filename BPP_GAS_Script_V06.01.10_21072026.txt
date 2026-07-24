@@ -1,7 +1,7 @@
      /**
  * BHARATPAY PRO - GOOGLE APPS SCRIPT (v06.01.10 FINAL)
  * -----------------------------------------------------------
- * - Updated: 14-July-2026 : 09.10 AM
+ * - Updated: 21-July-2026 : 08.10 PM
  * - SECURITY: SHA-256 HMAC Signature Verification active.
  * - FIX: Interface with Launcher URL (D2) for System Recovery path.
  * - FIX: handleStartupValidation — STRICT 4-FIELD SYNC (ID, Pass, Machine, Email).
@@ -116,6 +116,7 @@ function doPost(e) {
         if (action === 'VERIFY_RESTORE_OTP')    return handleVerifyRestoreOTP(ss, params);
         if (action === 'SEND_REG_OTP')          return handleSendRegOTP(ss, params);
         if (action === 'VERIFY_REG_OTP')        return handleVerifyRegOTP(ss, params);
+        if (action === 'SEND_POLICY_CONFIRMATION') return handleSendPolicyConfirmation(ss, params);
 
         return jsonResponse({ success: false, message: 'Unknown action: ' + action });
     } catch (err) {
@@ -545,20 +546,26 @@ function handleStartupValidation(ss, params) {
                             });
                         }
 
-                        // 2. Register any NEW silos the client generated
-                        for (let s = 0; s < clientSilos.length; s++) {
-                            const clientSilo = clientSilos[s];
-                            // Only register it if it's not already in the cloud AND it hasn't been revoked
-                            if (cloudSilos.indexOf(clientSilo) === -1 && revokedSilos.indexOf(clientSilo) === -1) {
-                                cloudSilos.push(clientSilo);
-                                newSilosFound = true;
+                        // 2. Register any NEW silos the client generated ONLY IF Column R was not cleared by Admin/Developer
+                        // If cloudSilosStr was completely empty (""), Column R was cleared to force a Signature Reset.
+                        // Do NOT auto-adopt old client silos during startup, BUT DO adopt when params.forceActivation is true.
+                        const isCloudReset = (!cloudSilosStr || String(cloudSilosStr).trim() === "") && !params.forceActivation;
+                        
+                        if (!isCloudReset) {
+                            for (let s = 0; s < clientSilos.length; s++) {
+                                const clientSilo = clientSilos[s];
+                                // Only register it if it's not already in the cloud AND it hasn't been revoked
+                                if (cloudSilos.indexOf(clientSilo) === -1 && revokedSilos.indexOf(clientSilo) === -1) {
+                                    cloudSilos.push(clientSilo);
+                                    newSilosFound = true;
+                                }
                             }
-                        }
 
-                        // Write back the updated silos to Column R BEFORE enforcing limit
-                        // so the cloud ALWAYS reflects what the client attempted to register.
-                        if (newSilosFound) {
-                            licenseSheet.getRange(i+1, 18).setValue(cloudSilos.join(","));
+                            // Write back the updated silos to Column R BEFORE enforcing limit
+                            // so the cloud ALWAYS reflects what the client attempted to register.
+                            if (newSilosFound) {
+                                licenseSheet.getRange(i+1, 18).setValue(cloudSilos.join(","));
+                            }
                         }
 
                         // 3. Enforce limit strictly from the cloud
@@ -1094,14 +1101,14 @@ function handleRequestOTPReset(ss, params) {
         for (let i = 1; i < data.length; i++) {
             if (String(data[i][eCol]).toLowerCase() === email && String(data[i][uCol]).toLowerCase() === userID) {
                 foundUser = email;
-                userName = String(data[i][nCol]);
+                userName = String(data[i][nCol]) + " (" + userID.toUpperCase() + ")";
                 break;
             }
         }
     });
-    if (email === "suganthibobby@gmail.com" || email === "ilcbala.bharatpayroll@gmail.com") {
+    if ((email === "suganthibobby@gmail.com" || email === "ilcbala.bharatpayroll@gmail.com") && (!foundUser || userName === "User")) {
         foundUser = email;
-        userName = "Developer";
+        userName = "Developer (" + userID.toUpperCase() + ")";
     }
     if (!foundUser) return jsonResponse({ success: false, message: "Identity not found in database." });
 
@@ -1287,8 +1294,17 @@ function sendEmailNotification(to, subject, type, data) {
         </div>`;
     } else if (type === "PASSWORD_RESET") {
         headColor = "#be123c"; 
+        let requestPurpose = "authorizing secure request";
+        if (data.companyName) {
+            const compLower = data.companyName.toLowerCase();
+            if (compLower.indexOf("policy") !== -1 || compLower.indexOf("wages") !== -1 || compLower.indexOf("calculat") !== -1 || compLower.indexOf("basis") !== -1) {
+                requestPurpose = data.companyName;
+            } else {
+                requestPurpose = "securely deleting the company: " + data.companyName;
+            }
+        }
         htmlContent = `
-        <p style="text-align:center; color:#475569; font-size:14px;">This OTP is requested for securely deleting the company: <strong style="color:#0f172a;">${data.companyName || "your company"}</strong>.</p>
+        <p style="text-align:center; color:#475569; font-size:14px;">This OTP is requested for <strong style="color:#0f172a;">${requestPurpose}</strong>.</p>
         <div style="background:#fff1f2;border:2px solid #fecdd3;padding:30px;text-align:center;border-radius:12px;margin:25px 0;">
           <span style="font-size:32px;font-weight:900;letter-spacing:12px;color:#be123c;font-family:monospace;">${data.tempCode}</span>
         </div>`;
@@ -2574,6 +2590,63 @@ function dropUserSignature(identifier, signatureToDrop) {
         }
     }
     return { success: false, message: "User not found." };
+}
+
+function handleSendPolicyConfirmation(ss, params) {
+    const email = String(params.email || "").trim().toLowerCase();
+    const userID = String(params.userID || "").trim().toUpperCase();
+    const companyName = String(params.companyName || "").trim();
+    const newPolicyText = String(params.newPolicyText || "").trim();
+
+    if (!email || !userID || !companyName || !newPolicyText) {
+        return jsonResponse({ success: false, message: "Missing confirmation parameters." });
+    }
+
+    const subject = "[POLICY CHANGE] Statutory Calculation Basis Modified - " + companyName;
+    
+    let adminName = "";
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(name => {
+        if (adminName) return;
+        const sheet = ss.getSheetByName(name);
+        if (!sheet) return;
+        const data = sheet.getDataRange().getValues();
+        const eCol = name.includes('Trial') ? 3 : 5;
+        const uCol = name.includes('Trial') ? 1 : 2;
+        const nCol = name.includes('Trial') ? 0 : 1;
+        
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][eCol]).toLowerCase() === email && String(data[i][uCol]).toLowerCase() === userID.toLowerCase()) {
+                adminName = String(data[i][nCol]);
+                break;
+            }
+        }
+    });
+
+    if (!adminName && (email === "suganthibobby@gmail.com" || email === "ilcbala.bharatpayroll@gmail.com")) {
+        adminName = "Developer";
+    }
+
+    const displayName = adminName ? (adminName + " (" + userID + ")") : ("Administrator (" + userID + ")");
+    const greeting = "Dear " + displayName.toUpperCase();
+    const htmlContent = `
+        <p>This is to confirm that the statutory calculation policy for <strong>${companyName}</strong> has been successfully modified.</p>
+        <div style="margin:25px 0; border:2px solid #be123c; border-radius:12px; overflow:hidden;">
+            <table style="width:100%; border-collapse:collapse; background:#ffffff;">
+                <tr><td style="padding:15px; background:#be123c; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; width:35%; letter-spacing:1px;">NEW POLICY</td><td style="padding:15px; background:#fff1f2; border-bottom:1px solid #fecdd3; color:#be123c; font-weight:700; font-size:14px;">${newPolicyText}</td></tr>
+                <tr><td style="padding:15px; background:#be123c; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">AUTHORIZED BY</td><td style="padding:15px; background:#f8fafc; border-bottom:1px solid #fecdd3; color:#0f172a; font-weight:700; font-size:13px;">${userID}</td></tr>
+                <tr><td style="padding:15px; background:#be123c; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">TIMESTAMP</td><td style="padding:15px; background:#f8fafc; color:#334155; font-size:13px;">${new Date().toLocaleString()}</td></tr>
+            </table>
+        </div>
+        <p style="font-size:12px; color:#475569;">If you did not authorize this policy change, please investigate immediately or contact support.</p>
+    `;
+
+    const fullHtml = buildProfessionalEmail("Security Notice", "Policy Modification", "#be123c", greeting, htmlContent);
+    try {
+        MailApp.sendEmail({ to: email, subject: subject, htmlBody: fullHtml });
+        return jsonResponse({ success: true, message: "Confirmation email sent." });
+    } catch (e) {
+        return jsonResponse({ success: false, message: "Apps Script Mail Error: " + e.toString() });
+    }
 }
 
 // END OF SCRIPT

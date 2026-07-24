@@ -5,7 +5,7 @@ import { formatDateInd } from '../../services/reportService';
 
 interface EmployeeDetailSidebarProps {
     selectedEmp: Employee | null;
-    onEdit: (emp: Employee) => void;
+    onEdit?: (emp: Employee) => void;
 }
 
 const EmployeeDetailSidebar: React.FC<EmployeeDetailSidebarProps> = ({
@@ -82,12 +82,14 @@ const EmployeeDetailSidebar: React.FC<EmployeeDetailSidebarProps> = ({
                     </div>
                 </div>
 
-                <button
-                    onClick={() => onEdit(selectedEmp)}
-                    className="w-full py-3 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 text-blue-400 font-bold rounded-xl transition-all flex items-center justify-center gap-2"
-                >
-                    <Edit2 size={16} /> Edit Profile Details
-                </button>
+                {onEdit && (
+                    <button
+                        onClick={() => onEdit(selectedEmp)}
+                        className="w-full py-3 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 text-blue-400 font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+                    >
+                        <Edit2 size={16} /> Edit Profile Details
+                    </button>
+                )}
             </div>
         </div>
     );

@@ -35,7 +35,10 @@ When you log into an installation with multiple companies, the **Organization Se
 To manage an additional company:
 1.  Go to the **Organization Gate** (via Logout or Switcher).
 2.  Click **"Add New Unit"**.
-3.  Complete the registration for the new establishment. It will be assigned a unique **Company ID** (e.g., CHEN01_102).
+3.  Complete the registration for the new establishment. It will be assigned a unique **Company ID** (e.g., CHEN01_102) and a unique **Company Signature** (`USIG-[USERNAME]_[COMPANY_ID]-[HASH]`).
+
+> [!WARNING]
+> **Exercise Caution with Company Limits:** The number of active, full-featured companies you can register is strictly tied to your active license limit. Users must exercise extreme caution when registering new establishments or dropping existing registered companies.
 
 ### 2.3 The Company Switcher
 While working in the Dashboard, you can quickly jump between organizations:
@@ -43,7 +46,25 @@ While working in the Dashboard, you can quickly jump between organizations:
 *   Note: For data integrity, switching is restricted while you have an active payroll process or report open. Return to the Dashboard to switch units.
 
 ![Live Switcher Popover UI](assets/multi_company_switcher.png)
-*Figure: Live Switcher Portal featuring mock isolated organizations (e.g., ABC LIMITED and XYZ COMPANY)*
+*Figure: Live Switcher Portal featuring mock isolated organizations (e.g., DEMO COMPANY 1 and DEMO COMPANY 2)*
+
+### 2.4 Unique Company Signatures, License Integrity, & Data Portability Policy
+
+#### 1. Unique Company Signatures (`USIG`)
+To ensure licensing security and prevent unauthorized duplication, every active full-featured company is generated with a **Unique Company Signature (`USIG-[USERNAME]_[COMPANY_ID]-[HASH]`)**. This signature is validated online against the master license registry.
+
+#### 2. Strict License Integrity & Company Slot Management
+*   Users **cannot arbitrarily add active companies beyond their licensed slot limit** or drop companies at will to swap active silos. This enforcement maintains strict license integrity.
+*   **If Company Limit is Reached and you wish to activate a Read-Only company into Full Mode**:
+    1.  **Option A (License Expansion)**: Upgrade your license limit to purchase additional active company slots.
+    2.  **Option B (Slot Release via Developer Approval)**: Dismount/purge an existing active company, and send an email request to the Developer to drop that specific company. Upon approval by the Developer, a slot is vacated, allowing you to convert a Read-Only company to Full Mode or add a new active unit.
+
+#### 3. Unlimited Read-Only Mode & Cross-User Data Portability
+*   **Unlimited Local Storage**: Users can add or import **any number of companies** into their BharatPay Pro installation.
+*   **Read-Only Operations**: Any company beyond the licensed active slot limit (or lacking an approved online signature match) operates in **Read-Only Mode**.
+    *   *No modifications, additions, or deletions* can be made to employees, attendance, salary structures, or settings within a Read-Only company.
+    *   *Full Viewing & Reporting*: Users can view all data, inspect master records, and generate statutory reports.
+*   **Data Portability Benefit**: Read-Only mode provides **100% data portability** between registered BharatPay Pro users. You can freely receive, open, audit, and generate reports for data silos or company backups created by another registered `BPP_APP` user without consuming active license slots or compromising data security.
 
 ---
 
@@ -87,8 +108,54 @@ Displays active product keys, registration details, allowed company silos, and l
 Protects sensitive wage data and administrative settings from unauthorized changes:
 *   **Granular User Roles**: Assign specific access rights to different team members:
     *   **Administrator / Developer**: Full root access to all data silos, database configurations, employee purges, settings modifications, and license syncs.
-    *   **Operator / Manager**: Permitted to update employee details, stage monthly attendance, log advances, and compile salaries. Blocked from factory resets or bulk personnel exports.
-    *   **Auditor / Viewer**: Read-only access to Pay Sheets, Leave Ledgers, and Statutory Registers. Blocked from modifying any database record.
+    *   **Operator / Manager / User**: Customized access. Standard Users can be limited strictly to selected modules, configuration tabs, and specific establishments.
+*   **Creating and Modifying User Accounts**:
+    *   Administrators can manage accounts in **Settings > User Management**.
+    *   Usernames/IDs are automatically normalized and stored in **ALL CAPITAL LETTERS** (e.g. `DEMO-USER`) for consistent credential auditing.
+
+    ![User Management Main Panel](assets/user_management_main.png)
+
+*   **Granular Access Permissions & Tab Controls**:
+    When creating or editing a user account with the role `User`, the Administrator can configure specific access policies:
+    *   **Module Access (Section 1)**: Toggle permission checkboxes for individual functional areas (e.g., enabling Employee Addition, Process Payroll, etc.):
+        1. *Employee Addition*
+        2. *Employee Edit*
+        3. *Process Payroll*
+        4. *Pay Reports*
+        5. *Statutory Reports*
+        6. *MIS Dashboard*
+        7. *Social Security Code*
+        8. *Utilities*
+
+    ![Module Access Permissions](assets/user_management_module_access.png)
+
+    *   **Configuration Tabs (Section 2)**: Control access to settings screens:
+        *   *a. Company Profile*
+        *   *b. Statutory Rules*
+        *   *c. Data Management*
+        *   *d. License Management*
+        *   *e. User Management*
+    *   **Data Management Sub-Functions (Section 3)**: If the main *c. Data Management* permission is checked, a third sub-permissions section unlocks. Administrators can selectively assign access to the 9 primary database actions:
+        *   *I. INITIATE LOCAL BACKUP* (Local database backup creation)
+        *   *II. SELECT & RESTORE* (Database restoration from `.enc`/	ext{`sqlite`} files)
+        *   *III. LEGACY MIGRATION* (Migration from single-company older data)
+        *   *IV. PARTIAL RESET* (Wiping monthly payroll runs without affecting employee lists)
+        *   *V. SCAN & RESCUE ORPHANS* (Scanning and recovering detached company folders)
+        *   *VI. PURGE COMPANY* (Deleting selected companies from active lists)
+        *   *VII. FACTORY RESET* (Total system reset and data purge)
+        *   *VIII. DIAGNOSTIC REPORT* (Exporting diagnostic log bundles)
+        *   *IX. SECURE CHANGE DIRECTORY* (Changing the application storage root path)
+
+    ![Configuration Tabs and Data Management Sub-Functions](assets/user_management_data_functions.png)
+
+*   **Establishment & Company Level Assignment (Section 4)**:
+    Administrators can restrict user accounts strictly to selected companies:
+    *   **Assigned Companies**: A list of active companies (e.g., `DEMO COMPANY 1` or `DEMO COMPANY 2`) is rendered with individual checkboxes. Check the specific companies that the user is authorized to open.
+    *   **Show Restricted Units in Selector Screen (as Inactive)**: If this checkbox is checked, unassigned companies remain visible on the **Organization Selector** screen but are greyed out, marked with a red **`RESTRICTED`** badge, and locked from selection. If unchecked, unassigned companies are completely hidden from the user's selector screen and header dropdown switcher.
+    *   **Selector Screen Bypass**: If a standard user is assigned to **exactly one company** (e.g., `DEMO COMPANY 1`), the system automatically loads that company upon login and skips the Organization Selector screen entirely to streamline operations.
+
+    ![Assigned Companies and Visibility Options Checkboxes](assets/user_management_assigned_companies.png)
+
 *   **Hardware Credential Locking (High-Level Security)**: Credentials are bound strictly to the machine's local database. Sensitive actions (like ex-employee deletion, legacy database migration, settings modification, or factory data resets) are protected by **forced Administrator Password Authentication** and safety modals, ensuring complete data security.
 
 ### 3.2 Default Wage Basis (Code Wages Compliance)
@@ -102,6 +169,8 @@ After selecting your Data Folder and successfully logging in, your very first ta
 
 1.  **Company Profile**: Navigate to Settings and fill in your establishment details. Fields marked with a red asterisk (`*`) are strictly mandatory.
 2.  **Statutory Configuration**: Click on the Statutory Rules tab. The system provides intelligent default values for EPF limits, ESI cutoffs, and tax slabs based on standard compliances. **Please scan through these defaults carefully.** You can modify or override these defaults to match the specific operational needs of your establishment. Ensure you click **Save** to apply the configuration. Once saved, your core modules will unlock.
+    > [!IMPORTANT]
+    > **Security Authorization required:** Changing the Global Statutory Calculation Policy (switching between *Labour Code Wages* and *Legacy Wages Basis*) requires a 6-digit verification OTP dispatched to the registered Administrator email address along with the Administrator login password. Once verified and applied, a post-change audit confirmation email is sent automatically to notify stakeholders of the policy change.
 
 ### 4.1 Policy Modules: Overtime & Arrear Salary
 

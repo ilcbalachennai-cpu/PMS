@@ -1304,6 +1304,15 @@ ipcMain.handle('db-set', async (_, { key, value }) => {
 });
 
 
+const safeParseValue = (val: string) => {
+    if (val === undefined || val === null) return null;
+    try {
+        return JSON.parse(val);
+    } catch (_err) {
+        return val;
+    }
+};
+
 ipcMain.handle('db-get', async (_, key) => {
     try {
         let row: { value: string } | undefined;
@@ -1332,7 +1341,7 @@ ipcMain.handle('db-get', async (_, key) => {
             }
         }
         
-        return { success: true, data: row ? JSON.parse(row.value) : null };
+        return { success: true, data: row ? safeParseValue(row.value) : null };
     } catch (e: any) {
         return { success: false, error: e.message };
     }
@@ -1344,7 +1353,7 @@ ipcMain.handle('db-delete', async (_, key) => {
         if (GLOBAL_KEYS.includes(key as string)) {
             if (appBasePath) {
                 const paths = getAppPaths(appBasePath);
-        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
+                const rootDbPath = path.join(paths.root, 'active_db.sqlite');
                 if (fs.existsSync(rootDbPath)) {
                     const rootDb = new Database(rootDbPath);
                     rootDb.prepare('DELETE FROM store WHERE key = ?').run(key);
@@ -1369,13 +1378,13 @@ ipcMain.handle('db-get-all', async () => {
         // 1. Get all silo keys
         if (db) {
             const rows = db.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
-            mergedData.push(...rows.map(r => ({ key: r.key, value: JSON.parse(r.value) })));
+            mergedData.push(...rows.map(r => ({ key: r.key, value: safeParseValue(r.value) })));
         }
         
         // 2. ── Strict Registry Merging ──
         if (appBasePath) {
             const paths = getAppPaths(appBasePath);
-        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
+            const rootDbPath = path.join(paths.root, 'active_db.sqlite');
             if (fs.existsSync(rootDbPath)) {
                 try {
                     const rootDb = new Database(rootDbPath, { readonly: true });
@@ -1385,7 +1394,7 @@ ipcMain.handle('db-get-all', async () => {
                         let finalValue: any = null;
                         
                         if (row && row.value && row.value !== '[]') {
-                            finalValue = JSON.parse(row.value);
+                            finalValue = safeParseValue(row.value);
                         } else if (key === 'app_companies') {
                             // --- V06.01.07: Call Auto Heal ---
                             finalValue = autoHealAppCompanies(rootDbPath, paths.data);
@@ -1619,8 +1628,142 @@ ipcMain.handle('remove-activated-silo', async (_, signature: string) => {
 });
 
 ipcMain.handle('wipe-activated-silos', async () => {
-    writeActivatedSilos([]);
+    const filePath = path.join(app.getPath('userData'), 'sys_limit.bin');
+    if (fs.existsSync(filePath)) {
+        try {
+            fs.unlinkSync(filePath);
+            console.log("Deleted sys_limit.bin physically in wipe-activated-silos");
+        } catch (e) {
+            console.error("Failed to delete sys_limit.bin physically in wipe-activated-silos", e);
+        }
+    }
     return { success: true, silos: [] };
+});
+
+ipcMain.handle('wipe-all-local-signatures', async () => {
+    try {
+        console.log("🧹 [IPC] Received wipe-all-local-signatures. Sweeping all local SQLite databases and sys_limit.bin...");
+        
+        // 1. Wipe sys_limit.bin physically
+        const filePath = path.join(app.getPath('userData'), 'sys_limit.bin');
+        if (fs.existsSync(filePath)) {
+            try {
+                fs.unlinkSync(filePath);
+                console.log("Deleted sys_limit.bin physically in wipe-all-local-signatures");
+            } catch (e) {
+                console.error("Failed to delete sys_limit.bin physically in wipe-all-local-signatures", e);
+            }
+        }
+        
+        if (!appBasePath) return { success: true };
+        const paths = getAppPaths(appBasePath);
+        
+        // 2. Wipe app_companies and app_company_profile in Global Root DB
+        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
+        if (fs.existsSync(rootDbPath)) {
+            const rootDb = new Database(rootDbPath);
+            rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+            
+            const compsRow = rootDb.prepare("SELECT value FROM store WHERE key = 'app_companies'").get() as any;
+            if (compsRow && compsRow.value) {
+                try {
+                    let comps = JSON.parse(compsRow.value);
+                    if (Array.isArray(comps)) {
+                        for (const c of comps) {
+                            c.companySignature = "";
+                            c.isReadOnly = true;
+                        }
+                        rootDb.prepare("INSERT OR REPLACE INTO store (key, value) VALUES ('app_companies', ?)").run(JSON.stringify(comps));
+                    }
+                } catch(e) {}
+            }
+            
+            const keysToWipe = rootDb.prepare("SELECT key, value FROM store WHERE key LIKE '%company_profile%'").all() as any[];
+            for (const row of keysToWipe) {
+                try {
+                    let prof = JSON.parse(row.value);
+                    prof.companySignature = "";
+                    prof.isReadOnly = true;
+                    rootDb.prepare("INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)").run(row.key, JSON.stringify(prof));
+                } catch(e) {}
+            }
+            
+            rootDb.close();
+        }
+        
+        // 3. Wipe companySignature in every silo active_db.sqlite (without deleting silos!)
+        const dataDir = paths.data;
+        if (fs.existsSync(dataDir)) {
+            const silos = fs.readdirSync(dataDir).filter(name => {
+                const siloPath = path.join(dataDir, name);
+                return fs.statSync(siloPath).isDirectory() && fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
+            });
+            
+            for (const siloId of silos) {
+                try {
+                    const siloDbPath = path.join(dataDir, siloId, 'active_db.sqlite');
+                    const siloDb = new Database(siloDbPath);
+                    siloDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+                    
+                    const rows = siloDb.prepare("SELECT key, value FROM store WHERE key LIKE '%company_profile%'").all() as any[];
+                    for (const r of rows) {
+                        try {
+                            let prof = JSON.parse(r.value);
+                            prof.companySignature = "";
+                            prof.isReadOnly = true;
+                            siloDb.prepare("INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)").run(r.key, JSON.stringify(prof));
+                        } catch(e) {}
+                    }
+                    siloDb.close();
+                } catch(e) {
+                    console.warn(`[IPC] Failed wiping signatures in silo ${siloId}:`, e);
+                }
+            }
+        }
+        
+        // 4. Clean up any temporary database or temporary cache files holding legacy signature state
+        const tempFilesToDelete = [
+            path.join(paths.root, 'temp_active_db.sqlite'),
+            path.join(paths.data, 'restore_temp.sqlite'),
+            path.join(paths.root, 'active_db.sqlite.tmp')
+        ];
+        
+        for (const tf of tempFilesToDelete) {
+            try {
+                if (fs.existsSync(tf)) {
+                    fs.unlinkSync(tf);
+                    console.log(`[IPC] Cleaned up temporary DB file: ${tf}`);
+                }
+            } catch(e) {}
+        }
+        
+        // Sweep temp files in Silo folders (.tmp, temp_*)
+        if (fs.existsSync(dataDir)) {
+            try {
+                const subDirs = fs.readdirSync(dataDir);
+                for (const sub of subDirs) {
+                    const subPath = path.join(dataDir, sub);
+                    if (fs.existsSync(subPath) && fs.statSync(subPath).isDirectory()) {
+                        const files = fs.readdirSync(subPath);
+                        for (const f of files) {
+                            if (f.endsWith('.tmp') || f.startsWith('temp_') || f.includes('restore_temp')) {
+                                try {
+                                    fs.unlinkSync(path.join(subPath, f));
+                                    console.log(`[IPC] Cleaned temporary file in silo ${sub}: ${f}`);
+                                } catch(e) {}
+                            }
+                        }
+                    }
+                }
+            } catch(e) {}
+        }
+        
+        console.log("✅ [IPC] Complete sweep finished for all local SQLite profiles, temp files & sys_limit.bin.");
+        return { success: true };
+    } catch (e: any) {
+        console.error('[IPC] wipe-all-local-signatures failed:', e);
+        return { success: false, error: e.message };
+    }
 });
 
 ipcMain.handle('list-silos', async () => {

@@ -11,10 +11,7 @@
     ],
     "strict": true,
     "skipLibCheck": true,
-    "types": [
-      "node",
-      "vite/client"
-    ],
+    "types": [],
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "moduleDetection": "force",
@@ -38,13 +35,17 @@
     "index.tsx",
     "constants.tsx",
     "types.ts",
+    "vite-env.d.ts",
     "components/**/*",
-    "services/**/*",
-    "electron/**/*"
+    "services/**/*"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "dist-electron"
+    "dist-electron",
+    "BPP_Source_Backup_V1.0.12/**/*",
+    "Old works/**/*",
+    "scratch/**/*",
+    "GAS/**/*"
   ]
 }

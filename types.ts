@@ -421,6 +421,33 @@ export interface ArrearBatch {
   createdAt?: string;
 }
 
+export interface UserPermissions {
+  employeeAdd?: boolean;
+  employeeEdit?: boolean;
+  processPayroll?: boolean;
+  payReports?: boolean;
+  statutoryReports?: boolean;
+  mis?: boolean;
+  ssCode?: boolean;
+  utilities?: boolean;
+  configCompanyProfile?: boolean;
+  configStatutoryRules?: boolean;
+  configDataManagement?: boolean;
+  configLicenseManagement?: boolean;
+  configUserManagement?: boolean;
+
+  // Data Management Sub-permissions
+  dmBackup?: boolean;
+  dmRestore?: boolean;
+  dmMigrate?: boolean;
+  dmPartialReset?: boolean;
+  dmRescue?: boolean;
+  dmPurge?: boolean;
+  dmFactoryReset?: boolean;
+  dmDiagnostics?: boolean;
+  dmStorageLocation?: boolean;
+}
+
 export interface User {
   username: string;
   password?: string;
@@ -428,6 +455,9 @@ export interface User {
   role: 'Developer' | 'Administrator' | 'User';
   email: string;
   mobile?: string; // Newly added for identity sync
+  permissions?: UserPermissions;
+  assignedCompanies?: string[];
+  showRestrictedUnits?: boolean;
 }
 
 export enum View {
@@ -489,4 +519,8 @@ export interface AppVersion {
   releaseDate: string;
   features: string[];
   statutoryUpdates?: string[];
+}
+
+declare global {
+  var electronAPI: any;
 }

@@ -196,6 +196,34 @@
             color: #991b1b;
             font-weight: 600;
         }
+
+        .user-mgmt-main-screenshot {
+            max-width: 600px;
+            width: 100%;
+            display: inline-block;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 15px;
+        }
+
+        .user-mgmt-sub-screenshot {
+            max-width: 320px;
+            width: 100%;
+            display: inline-block;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 15px;
+        }
+
+        .image-box-centered {
+            text-align: center;
+            margin-top: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .caption-spacing {
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -255,7 +283,7 @@
         <p>If you have multiple organizations registered, the system will present the <strong>Organization Selector</strong> immediately after login. Select the unit you wish to work on for the current session.</p>
         
         <img src="assets/multi_company.png" class="screenshot" alt="Multi-Company Selector UI">
-        <div class="image-caption">Figure 1: Organization Selection Portal featuring isolated silos (e.g., ABC COMPANY)</div>
+        <div class="image-caption">Figure 1: Organization Selection Portal featuring isolated silos (e.g., DEMO COMPANY 1)</div>
 
         <h4>How to Create a New Company Silo:</h4>
         <p>To register a brand new organization under your installation:</p>
@@ -270,7 +298,7 @@
         <ol start="3">
             <li><strong>Provide Details</strong>: 
                 <ul>
-                    <li><strong>Establishment Name</strong>: Enter the exact registered name (e.g., <code>ABC COMPANY</code>). The application strictly converts the establishment name to all capital letters automatically to ensure consistency and compliance.</li>
+                    <li><strong>Establishment Name</strong>: Enter the exact registered name (e.g., <code>DEMO COMPANY 1</code>). The application strictly converts the establishment name to all capital letters automatically to ensure consistency and compliance.</li>
                     <li><strong>PAN & Statutory Codes</strong>: Enter your establishment's PAN, EPF Code, and ESI Code.</li>
                     <li><strong>Automated Path Allocation</strong>: The system is designed for maximum simplicity. The user is <strong>never</strong> prompted to define raw database directory paths. The application strictly and securely handles database routing behind the scenes, automatically nesting the isolated sqlite data structure inside the application's root directory.</li>
                 </ul>
@@ -290,12 +318,36 @@
         <p>While working within the Dashboard, you can quickly jump between independent establishments or register a new company silo dynamically:</p>
         
         <img src="assets/multi_company_switcher.png" class="screenshot" alt="Multi-Company Switcher Popover UI">
-        <div class="image-caption">Figure 3: Live Switcher Portal featuring mock isolated organizations (e.g., ABC LIMITED and XYZ COMPANY)</div>
+        <div class="image-caption">Figure 3: Live Switcher Portal featuring mock isolated organizations (e.g., DEMO COMPANY 1 and DEMO COMPANY 2)</div>
 
         <ul>
             <li><strong>Add New Unit</strong>: Use the <strong>"Add New Company"</strong> button directly in the switcher panel to register an additional establishment silo.</li>
-            <li><strong>Live Switching</strong>: Click the active organization name in the top header to reveal the live selection dropdown, and click the target unit (e.g., <code>XYZ COMPANY</code> or <code>ABC LIMITED</code>) to immediately load its data context.</li>
+            <li><strong>Live Switching</strong>: Click the active organization name in the top header to reveal the live selection dropdown, and click the target unit (e.g., <code>DEMO COMPANY 2</code> or <code>DEMO COMPANY 1</code>) to immediately load its data context.</li>
         </ul>
+
+        <h3>2.4 Unique Company Signatures, License Integrity & Data Portability Policy</h3>
+        <p>BharatPay Pro V06 enforces advanced license security and cross-user portability features through **Unique Company Signatures**:</p>
+        
+        <div class="highlight-box">
+            <strong>1. Unique Company Signatures (USIG):</strong> Each active full-featured company is generated with a unique signature (<code>USIG-[USERNAME]_[COMPANY_ID]-[HASH]</code>) which is registered and validated online against the master license registry.
+        </div>
+
+        <div class="highlight-box warning">
+            <strong>2. Critical Company Limit & Caution Required:</strong> The active company limit is a strict licensing boundary. Users cannot arbitrarily add active companies or drop registered companies to swap active silos.
+            <br><br>
+            <strong>To activate a Read-Only company into Full Mode when the slot limit is reached:</strong>
+            <ul>
+                <li><strong>Option A (License Upgrade):</strong> Purchase additional company slots to expand your active limit.</li>
+                <li><strong>Option B (Dismount & Developer Approval):</strong> Dismount/purge an existing active company, then send an email request to the Developer to drop that specific company. Once approved by the Developer, a slot is vacated to convert a Read-Only company to Full Mode.</li>
+            </ul>
+        </div>
+
+        <div class="highlight-box">
+            <strong>3. Unlimited Read-Only Companies & 100% Data Portability:</strong> 
+            Users can add or import <strong>any number of companies</strong> into their installation. Any unit beyond the active license slot limit operates in <strong>Read-Only Mode</strong> (where no additions, modifications, or deletions can be made to employees, attendance, or payroll).
+            <br><br>
+            <strong>Portability Benefit:</strong> This allows seamless data portability between registered BharatPay Pro users. You can receive, view, audit, and generate statutory reports for data silos or company backups created by another registered <code>BPP_APP</code> user without consuming active license slots or compromising data integrity.
+        </div>
 
         <h3>2.3 Multi-Financial Year Architecture</h3>
         <p>V05 introduces a robust Multi-Financial Year engine, allowing you to maintain historical data seamlessly without creating multiple files.</p>
@@ -355,9 +407,79 @@
                     <li><em>Granular User Roles</em>: Assign specific access rights to different team members:
                         <ul>
                             <li><strong>Administrator / Developer</strong>: Full root access to all data silos, database configurations, employee purges, settings modifications, and license syncs.</li>
-                            <li><strong>Operator / Manager</strong>: Permitted to update employee details, stage monthly attendance, log advances, and compile salaries. Blocked from factory resets or bulk personnel exports.</li>
-                            <li><strong>Auditor / Viewer</strong>: Read-only access to Pay Sheets, Leave Ledgers, and Statutory Registers. Blocked from modifying any database record.</li>
+                            <li><strong>Operator / Manager / User</strong>: Customized access. Standard Users can be limited strictly to selected modules, configuration tabs, and specific establishments.</li>
                         </ul>
+                    </li>
+                    <li><em>Creating and Modifying User Accounts</em>:
+                        <ul>
+                            <li>Administrators can manage accounts in <strong>Settings > User Management</strong>.</li>
+                            <li>Usernames/IDs are automatically normalized and stored in <strong>ALL CAPITAL LETTERS</strong> (e.g. <code>DEMO-USER</code>) for consistent credential auditing.</li>
+                        </ul>
+                        <div class="image-box mt-medium mb-medium image-box-centered">
+                            <img src="assets/user_management_main.png" alt="User Management Main Panel" class="user-mgmt-main-screenshot">
+                            <div class="image-caption caption-spacing">Figure 4.1: User Management Panel and Account Creation Form</div>
+                        </div>
+                    </li>
+                    <li><em>Granular Access Permissions &amp; Tab Controls</em>:
+                        <br>When creating or editing a user account with the role <code>User</code>, the Administrator can configure specific access policies:
+                        <ul>
+                            <li><strong>Module Access (Section 1)</strong>: Toggle permission checkboxes for individual functional areas (e.g. enabling Employee Addition, Process Payroll, etc.):
+                                <ol>
+                                    <li><em>1. Employee Addition</em></li>
+                                    <li><em>2. Employee Edit</em></li>
+                                    <li><em>3. Process Payroll</em></li>
+                                    <li><em>4. Pay Reports</em></li>
+                                    <li><em>5. Statutory Reports</em></li>
+                                    <li><em>6. MIS Dashboard</em></li>
+                                    <li><em>7. Social Security Code</em></li>
+                                    <li><em>8. Utilities</em></li>
+                                </ol>
+                            </li>
+                        </ul>
+                        <div class="image-box mt-medium mb-medium image-box-centered">
+                            <img src="assets/user_management_module_access.png" alt="Module Access Permissions" class="user-mgmt-sub-screenshot">
+                            <div class="image-caption caption-spacing">Figure 4.2: Granular Module Access Selection Checklist</div>
+                        </div>
+                        <ul>
+                            <li><strong>Configuration Tabs (Section 2)</strong>: Control access to settings screens:
+                                <ul>
+                                    <li><em>a. Company Profile</em></li>
+                                    <li><em>b. Statutory Rules</em></li>
+                                    <li><em>c. Data Management</em></li>
+                                    <li><em>d. License Management</em></li>
+                                    <li><em>e. User Management</em></li>
+                                </ul>
+                            </li>
+                            <li><strong>Data Management Sub-Functions (Section 3)</strong>: If the main <em>c. Data Management</em> permission is checked, a third sub-permissions section unlocks. Administrators can selectively assign access to the 9 primary database actions:
+                                <ul>
+                                    <li><em>I. INITIATE LOCAL BACKUP</em> (Local database backup creation)</li>
+                                    <li><em>II. SELECT &amp; RESTORE</em> (Database restoration from <code>.enc</code>/<code>.sqlite</code> files)</li>
+                                    <li><em>III. LEGACY MIGRATION</em> (Migration from single-company older data)</li>
+                                    <li><em>IV. PARTIAL RESET</em> (Wiping monthly payroll runs without affecting employee lists)</li>
+                                    <li><em>V. SCAN &amp; RESCUE ORPHANS</em> (Scanning and recovering detached company folders)</li>
+                                    <li><em>VI. PURGE COMPANY</em> (Deleting selected companies from active lists)</li>
+                                    <li><em>VII. FACTORY RESET</em> (Total system reset and data purge)</li>
+                                    <li><em>VIII. DIAGNOSTIC REPORT</em> (Exporting diagnostic log bundles)</li>
+                                    <li><em>IX. SECURE CHANGE DIRECTORY</em> (Changing the application storage root path)</li>
+                                </ul>
+                            </li>
+                        </ul>
+                        <div class="image-box mt-medium mb-medium image-box-centered">
+                            <img src="assets/user_management_data_functions.png" alt="Configuration Tabs and Data Management Sub-Functions" class="user-mgmt-sub-screenshot">
+                            <div class="image-caption caption-spacing">Figure 4.3: Configuration Tab Access and Data Management Sub-Permissions</div>
+                        </div>
+                    </li>
+                    <li><em>Establishment &amp; Company Level Assignment (Section 4)</em>:
+                        <br>Administrators can restrict user accounts strictly to selected companies:
+                        <ul>
+                            <li><strong>Assigned Companies</strong>: A list of active companies (e.g., <code>DEMO COMPANY 1</code> or <code>DEMO COMPANY 2</code>) is rendered with individual checkboxes. Check the specific companies that the user is authorized to open.</li>
+                            <li><strong>Show Restricted Units in Selector Screen (as Inactive)</strong>: If this checkbox is checked, unassigned companies remain visible on the <strong>Organization Selector</strong> screen but are greyed out, marked with a red <strong><code>RESTRICTED</code></strong> badge, and locked from selection. If unchecked, unassigned companies are completely hidden from the user's selector screen and header dropdown switcher.</li>
+                            <li><strong>Selector Screen Bypass</strong>: If a standard user is assigned to <strong>exactly one company</strong> (e.g., <code>DEMO COMPANY 1</code>), the system automatically loads that company upon login and skips the Organization Selector screen entirely to streamline operations.</li>
+                        </ul>
+                        <div class="image-box mt-medium mb-medium image-box-centered">
+                            <img src="assets/user_management_assigned_companies.png" alt="Assigned Companies and Visibility Options Checkboxes" class="user-mgmt-sub-screenshot">
+                            <div class="image-caption caption-spacing">Figure 4.4: Active Company Mapping and Selector Display Toggles</div>
+                        </div>
                     </li>
                     <li><em>Hardware Credential Locking (High-Level Security)</em>: Credentials are bound strictly to the machine's local database. Sensitive actions (like ex-employee deletion, legacy database migration, settings modification, or factory data resets) are protected by <strong>forced Administrator Password Authentication</strong> and safety modals, ensuring complete data security.</li>
                 </ul>
@@ -373,7 +495,10 @@
         
         <ol>
             <li><strong>Company Profile</strong>: Navigate to Settings and fill in your establishment details. Fields marked with a red asterisk (<code>*</code>) are strictly mandatory.</li>
-            <li><strong>Statutory Configuration</strong>: Click on the Statutory Rules tab. The system provides intelligent default values for EPF limits, ESI cutoffs, and tax slabs based on standard compliances. <strong>Please scan through these defaults carefully.</strong> You can modify or override these defaults to match the specific operational needs of your establishment. Ensure you click <strong>Save</strong> to apply the configuration. Once saved, your core modules will unlock.</li>
+            <li><strong>Statutory Configuration</strong>: Click on the Statutory Rules tab. The system provides intelligent default values for EPF limits, ESI cutoffs, and tax slabs based on standard compliances. <strong>Please scan through these defaults carefully.</strong> You can modify or override these defaults to match the specific operational needs of your establishment. Ensure you click <strong>Save</strong> to apply the configuration. Once saved, your core modules will unlock.
+                <br>
+                <span class="warning-text"><strong>Security Authorization:</strong> Changing the Global Statutory Calculation Policy (switching between <em>Labour Code Wages</em> and <em>Legacy Wages Basis</em>) requires a 6-digit verification OTP dispatched to the registered Administrator email address along with the Administrator login password. Once verified and applied, a post-change audit confirmation email is sent automatically to the administrator.</span>
+            </li>
         </ol>
 
         <h3>4.1 Policy Modules: Overtime & Arrear Salary</h3>

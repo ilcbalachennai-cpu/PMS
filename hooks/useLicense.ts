@@ -15,8 +15,8 @@ export const useLicense = () => {
     return license?.dataSize || 50;
   });
 
-  const verifyLicense = useCallback(async (force: boolean = false) => {
-    const result = await validateLicenseStartup(force);
+  const verifyLicense = useCallback(async (force: boolean = false, forceActivation: boolean = false) => {
+    const result = await validateLicenseStartup(force, undefined, undefined, undefined, undefined, forceActivation);
     const license = getStoredLicense();
     setLicenseInfo(license);
     

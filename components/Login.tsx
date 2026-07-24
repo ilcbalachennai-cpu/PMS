@@ -294,10 +294,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
       if (savedUsersRaw) {
         try {
           const savedUsers: UserType[] = JSON.parse(savedUsersRaw);
+          savedUsers.forEach(u => {
+            if (u.username) u.username = u.username.toUpperCase();
+          });
           // Combine, allowing saved users to override mock users with same username (like 'admin')
           allUsers = [
             ...savedUsers,
-            ...allUsers.filter(au => !savedUsers.some(su => su.username === au.username))
+            ...allUsers.filter(au => !savedUsers.some(su => (su.username || '').toUpperCase() === (au.username || '').toUpperCase()))
           ];
         } catch (e) {
           console.error("Failed to parse app_users", e);
@@ -333,20 +336,22 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
         }
 
         try {
-          // V03.01.07: Developer bypass for specific machine
-          const mid = await getMachineId();
-          const isDevMachine = mid === '05D02810-8051-7C4A-B33D-19383C3F3A2F' || !import.meta.env.PROD;
-          
-          if (isDevMachine) {
-            console.log("✅ Dev Machine detected. Bypassing Developer OTP.");
-            onLogin(cloudDev || {
-              username: 'VRANGA',
-              password: 'Basupra@74',
-              role: 'Developer',
-              name: 'VRANGA (Developer)',
-              email: 'developer@bharatpay.com'
-            } as any);
-            return;
+          // V03.01.07: Developer bypass for specific machine (only in non-production builds)
+          if (!import.meta.env.PROD) {
+            const mid = await getMachineId();
+            const isDevMachine = mid === '05D02810-8051-7C4A-B33D-19383C3F3A2F';
+            
+            if (isDevMachine) {
+              console.log("✅ Dev Machine detected. Bypassing Developer OTP.");
+              onLogin(cloudDev || {
+                username: 'VRANGA',
+                password: 'Basupra@74',
+                role: 'Developer',
+                name: 'VRANGA (Developer)',
+                email: 'developer@bharatpay.com'
+              } as any);
+              return;
+            }
           }
 
           // Step 1: Request OTP (GAS will verify cleanPassword vs Master_Config sheet)
@@ -419,87 +424,94 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
         }
 
         // --- CLOUD FALLBACK ---
-        console.log("⚠️ Local login failed. Attempting cloud sync fallback...");
-        const syncResult = await validateLicenseStartup(true, cleanUsername, undefined, undefined, cleanPassword);
+        let syncResult: any = null;
+        const license = getStoredLicense();
+        const primaryUID = license?.userID || "";
+        const cleanUID = cleanUsername.toUpperCase();
 
-        // 1. ADVANCED DEVELOPER BYPASS (Check this FIRST before license validity)
-        let freshDev = getAppDeveloper();
-        if (freshDev) {
-          console.log("≡ƒ¢á∩╕Å Cloud Developer synced:", freshDev.username);
-          if (String(freshDev.username).trim() === cleanUsername &&
-            String(freshDev.password).trim() === cleanPassword) {
-            console.log("Γ£à Login successful via Cloud Sync (Developer Bypass) for:", cleanUsername);
-            setFailedAttempts(0);
-            onLogin(freshDev);
-            return;
-          }
-        }
+        const isDeveloperUser = cleanUID === 'VRANGA';
+        const isLicenseeAdmin = (primaryUID.toUpperCase() === cleanUID && primaryUID !== "");
 
-        // --- V02.02.16: IDENTITY RESTORATION TRIGGER ---
-        if (syncResult.status === 'PENDING_RESTORE') {
-          // Verify if it's just a wrong password locally
-          const localUser = allUsers.find(u => String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase());
-          if (localUser && String(localUser.password).trim() !== cleanPassword) {
-            console.warn("Ignored PENDING_RESTORE because local password check failed (Wrong Password).");
-          } else {
-            console.log("🛠️ Identity Restoration Required for:", syncResult.data?.userName);
-            setRestoreTargetName(syncResult.data?.userName || 'User');
-            setRestoreStep('INPUT');
-            setShowRestoreModal(true);
-            setIsLoading(false);
-            return;
-          }
-        }
+        if (isDeveloperUser || isLicenseeAdmin) {
+          console.log("⚠️ Local login failed for Admin/Developer. Attempting cloud sync fallback...");
+          syncResult = await validateLicenseStartup(true, cleanUsername, undefined, undefined, cleanPassword);
 
-        if (syncResult.valid) {
-          if (syncResult.data?.isLimitExceeded) {
-              alert(`⚠️ ${syncResult.message || "Company Limit Exceeded!"}\n\nYou can still access your existing companies, but creating new ones is disabled.`);
-          }
-          
-          setFailedAttempts(0);
-          // Re-read users after sync
-          const updatedUsersRaw = localStorage.getItem('app_users');
-          if (updatedUsersRaw) {
-            const updatedUsers: UserType[] = JSON.parse(updatedUsersRaw);
-
-            // CRITICAL: Update the parent allUsers reference
-            allUsers = [
-              ...updatedUsers,
-              ...(freshDev ? [freshDev] : []),
-              ...allUsers.filter(au => !updatedUsers.some(su => su.username === au.username) && au.username !== freshDev?.username)
-            ];
-
-            const syncedUser = updatedUsers.find(
-              (u) =>
-                String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
-                String(u.password).trim() === cleanPassword
-            );
-
-            if (syncedUser) {
-              console.log("Γ£à Login successful via Cloud Sync for:", cleanUsername);
-
-              // --- V01.0.11: CLOUD LOGIN TRACKING ---
-              try {
-                const machineId = localStorage.getItem('app_machine_id');
-                const license = getStoredLicense();
-                if (machineId && license?.registeredTo && syncedUser.role !== 'Developer') {
-                  trackCloudLogin(license.registeredTo, machineId);
-                }
-              } catch (e) {
-                console.warn("Could not fire cloud tracking on fallback:", e);
-              }
-
-              sessionStorage.setItem('session_login_time', Date.now().toString());
-              onLogin(syncedUser);
+          // 1. ADVANCED DEVELOPER BYPASS (Check this FIRST before license validity)
+          let freshDev = getAppDeveloper();
+          if (freshDev) {
+            console.log("🛠️ Cloud Developer synced:", freshDev.username);
+            if (String(freshDev.username).trim() === cleanUsername &&
+              String(freshDev.password).trim() === cleanPassword) {
+              console.log("✅ Login successful via Cloud Sync (Developer Bypass) for:", cleanUsername);
+              setFailedAttempts(0);
+              onLogin(freshDev);
               return;
+            }
+          }
+
+          // --- V02.02.16: IDENTITY RESTORATION TRIGGER ---
+          if (syncResult.status === 'PENDING_RESTORE') {
+            // Verify if it's just a wrong password locally
+            const localUser = allUsers.find(u => String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase());
+            if (localUser && String(localUser.password).trim() !== cleanPassword) {
+              console.warn("Ignored PENDING_RESTORE because local password check failed (Wrong Password).");
+            } else {
+              console.log("🛠️ Identity Restoration Required for:", syncResult.data?.userName);
+              setRestoreTargetName(syncResult.data?.userName || 'User');
+              setRestoreStep('INPUT');
+              setShowRestoreModal(true);
+              setIsLoading(false);
+              return;
+            }
+          }
+
+          if (syncResult.valid) {
+            if (syncResult.data?.isLimitExceeded) {
+                alert(`⚠️ ${syncResult.message || "Company Limit Exceeded!"}\n\nYou can still access your existing companies, but creating new ones is disabled.`);
+            }
+            
+            setFailedAttempts(0);
+            // Re-read users after sync
+            const updatedUsersRaw = localStorage.getItem('app_users');
+            if (updatedUsersRaw) {
+              const updatedUsers: UserType[] = JSON.parse(updatedUsersRaw);
+
+              // CRITICAL: Update the parent allUsers reference
+              allUsers = [
+                ...updatedUsers,
+                ...(freshDev ? [freshDev] : []),
+                ...allUsers.filter(au => !updatedUsers.some(su => su.username === au.username) && au.username !== freshDev?.username)
+              ];
+
+              const syncedUser = updatedUsers.find(
+                (u) =>
+                  String(u.username).trim().toLowerCase() === cleanUsername.toLowerCase() &&
+                  String(u.password).trim() === cleanPassword
+              );
+
+              if (syncedUser) {
+                console.log("✅ Login successful via Cloud Sync for:", cleanUsername);
+
+                // --- V01.0.11: CLOUD LOGIN TRACKING ---
+                try {
+                  const machineId = localStorage.getItem('app_machine_id');
+                  const license = getStoredLicense();
+                  if (machineId && license?.registeredTo && syncedUser.role !== 'Developer') {
+                    trackCloudLogin(license.registeredTo, machineId);
+                  }
+                } catch (e) {
+                  console.warn("Could not fire cloud tracking on fallback:", e);
+                }
+
+                sessionStorage.setItem('session_login_time', Date.now().toString());
+                onLogin(syncedUser);
+                return;
+              }
             }
           }
         }
 
         // Final failure message
-        const license = getStoredLicense();
-        const primaryUID = license?.userID || "";
-        const cleanUID = username.trim().toUpperCase();
 
         // Ground Truth: If we have a verified identity that matches (case-insensitive for sync repair)
         const isPerfectMatch = (primaryUID.toUpperCase() === cleanUID.toUpperCase() && primaryUID !== "");
@@ -997,7 +1009,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
 
                     const getBestID = (user: any) => {
                       if (!user) return '';
-                      if (license && license.userID && license.userID.toUpperCase() !== 'TRIAL' && license.userID.toUpperCase() !== 'RESCUE') {
+                      if (user.role === 'Administrator' && license && license.userID && license.userID.toUpperCase() !== 'TRIAL' && license.userID.toUpperCase() !== 'RESCUE') {
                         return license.userID;
                       }
                       return user.username;
@@ -1048,17 +1060,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
                         </span>
                       </button>,
                       // Developer Bypass Slot (Only in Local Dev or Authorized)
-                      <button
-                        key="dev"
-                        onClick={() => autofill('VRANGA')}
-                        type="button"
-                        disabled={isLocked}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30 ${!import.meta.env.DEV ? 'hidden' : ''} disabled:opacity-50`}
-                        title="Developer Quick Access"
-                      >
-                        <Lock className="text-amber-500 mb-1 group-hover:rotate-12 transition-transform" size={16} />
-                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-tighter">Developer</span>
-                      </button>
+                      ...(!import.meta.env.PROD ? [
+                        <button
+                          key="dev"
+                          onClick={() => autofill('VRANGA')}
+                          type="button"
+                          disabled={isLocked}
+                          className="flex flex-col items-center justify-center p-2 rounded-lg transition-all group bg-amber-900/10 hover:bg-amber-900/20 border border-amber-900/30 disabled:opacity-50"
+                          title="Developer Quick Access"
+                        >
+                          <Lock className="text-amber-500 mb-1 group-hover:rotate-12 transition-transform" size={16} />
+                          <span className="text-[10px] font-bold text-amber-500 uppercase tracking-tighter">Developer</span>
+                        </button>
+                      ] : [])
                     ];
 
                     return buttons;

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { Users } from 'lucide-react';
-import { Employee, User, CompanyProfile } from '../types';
+import { Employee, User, CompanyProfile, UserPermissions } from '../types';
 import { didEmployeePayFieldsChange } from '../utils/formatters';
 
 // Global OS Detection for UI refinement
@@ -117,6 +117,13 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     designations, divisions, branches, sites, currentUser, companyProfile, setCompanyProfile, dataSizeLimit, showAlert,
     globalMonth, globalYear, activeFinancialYear, isLicenseExpired, onNavigate
 }) => {
+    const getPermission = (key: keyof UserPermissions): boolean => {
+        if (!currentUser) return false;
+        if (currentUser.role === 'Developer' || currentUser.role === 'Administrator') return true;
+        if (!currentUser.permissions) return true; // Legacy fallback
+        return !!currentUser.permissions[key];
+    };
+
     // --- State Management ---
     const [filterByFY, setFilterByFY] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -770,6 +777,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     onToggleFYFilter={setFilterByFY}
                     activeFinancialYear={activeFinancialYear}
                     isLicenseExpired={isLicenseExpired}
+                    isAddRestricted={!getPermission('employeeAdd')}
+                    isEditRestricted={!getPermission('employeeEdit')}
                     isReadOnly={companyProfile?.isReadOnly}
                 />
             </div>
@@ -782,8 +791,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                             employees={filteredEmployees}
                             selectedEmp={selectedEmp}
                             onSelectEmp={setSelectedEmp}
-                            onEdit={isLicenseExpired ? undefined : handleEdit}
-                            onDelete={isLicenseExpired ? undefined : handleDeleteClick}
+                            onEdit={(isLicenseExpired || !getPermission('employeeEdit')) ? undefined : handleEdit}
+                            onDelete={(isLicenseExpired || !getPermission('employeeEdit')) ? undefined : handleDeleteClick}
                             calculateGrossWage={calculateGrossWage}
                             currentUser={currentUser}
                             frozenEmployeeIds={frozenEmployeeIds}
@@ -792,7 +801,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     <div className="xl:col-span-1 space-y-6">
                         <EmployeeDetailSidebar
                             selectedEmp={selectedEmp}
-                            onEdit={handleEdit}
+                            onEdit={(isLicenseExpired || !getPermission('employeeEdit')) ? undefined : handleEdit}
                         />
                     </div>
                 </div>

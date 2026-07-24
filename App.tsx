@@ -31,7 +31,7 @@ import { signalApplicationReady } from './components/Shared/GlobalRescueUI';
 
 import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount, requestResetOTP, verifyResetOTP } from './services/licenseService';
 import { parseExpiryDate, formatExpiryDate, generateCompanyId } from './utils/formatters';
-import { View, User, Employee, PayrollResult, CompanyProfile, StatutoryConfig, SettingsTab } from './types';
+import { View, User, UserPermissions, Employee, PayrollResult, CompanyProfile, StatutoryConfig, SettingsTab } from './types';
 import { BRAND_CONFIG, INITIAL_COMPANY_PROFILE, DEFAULT_LEAVE_POLICY } from './constants';
 
 // --- CUSTOM HOOKS ---
@@ -167,30 +167,39 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
   const [showActivationModal, setShowActivationModal] = useState(false);
 
-  // Trigger License Activation Modal if cloud signatures are completely blank (Hard Reset)
+  // Trigger License Activation Modal if cloud signatures are completely blank (Hard Reset / Signature Assignment)
   useEffect(() => {
     if (!currentUser || companies.length === 0) return;
     const license = getStoredLicense();
+    const isDev = license?.userID?.toUpperCase() === 'VRANGA';
+    if (isDev) return; // Exempt developer from automatic activation modal trigger
+    
     const usedSlots = license?.cloudSignatures?.length || 0;
     
     // If the license limit is > 0 but we have 0 activated slots in cloud,
-    // AND there are local companies without a signature, trigger modal automatically.
+    // trigger modal automatically so user assigns signatures.
     if (license && (license.companyLimit ?? 0) > 0 && usedSlots === 0) {
-      if (companies.some(c => !c.companySignature)) {
-        setShowActivationModal(true);
-      }
+      setShowActivationModal(true);
     }
-  }, [currentUser, companies.length]); // Only re-evaluate on login or company count change
+  }, [currentUser, companies.length]);
 
   const handleClaimCompany = async (company: CompanyProfile) => {
     const currentLimit = licenseInfo?.companyLimit || 3;
     const activeCompanies = companies.filter(c => !c.isReadOnly).length;
+    
     if (activeCompanies >= currentLimit) {
-      showAlert('error', 'Limit Reached', `You have reached your company limit of ${currentLimit}. Please contact the developer to enhance your limit or delete an existing company before claiming this one.`);
+      showAlert(
+        'info', 
+        'Company Slot Limit Reached', 
+        `Your active company limit of ${currentLimit} has been reached (${activeCompanies}/${currentLimit} active slots used).\n\n` +
+        `To convert "${company.establishmentName}" into Full Featured Mode, please choose one of the following options:\n\n` +
+        `1. Upgrade License: Purchase additional company slots to expand your limit.\n\n` +
+        `2. Dismount & Request Slot Release: Dismount an existing active company and email the Developer to drop that specific company to enable you to add or activate another company.`
+      );
       return;
     }
     
-    showAlert('confirm', 'Claim Organization', `Are you sure you want to claim ${company.establishmentName}? This will consume 1 company slot and permanently convert it to a native company for your user account.`, async () => {
+    showAlert('confirm', 'Convert to Full Mode', `Convert "${company.establishmentName}" to Full Featured Mode? This will consume 1 company slot (${activeCompanies + 1}/${currentLimit}), generate a new signature, and register it online.`, async () => {
       const hash = (Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6));
       const newIdPart = company.id.includes('-') ? company.id.split('-')[1] : company.id;
       const newSig = `USIG-${(currentUser?.username || 'setup').toUpperCase()}_${newIdPart}-${hash}`;
@@ -222,10 +231,17 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
            } catch (e) {}
         }
         
+        // Push updated signature to Cloud with forceActivation=true
+        try {
+          await verifyLicense(true, true);
+        } catch (e) {
+          console.warn("Failed to sync claimed signature to cloud:", e);
+        }
         checkSyncRequirement();
-        showAlert('success', 'Organization Claimed', `${company.establishmentName} has been fully unlocked and registered to your account.`);
+        
+        showAlert('success', 'Converted to Full Mode', `${company.establishmentName} has been converted to Full Featured Mode and registered online.`);
       }
-    }, () => {}, 'YES, CLAIM NOW', 'CANCEL');
+    }, () => {}, 'YES, CONVERT NOW', 'CANCEL');
   };
 
   const handleActivateCompanies = async (selectedCompanyIds: string[]) => {
@@ -265,7 +281,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         let estName = `Rescued: ${cid}`;
         let cin = '';
         let profToSave = null;
-        if (window.electronAPI?.dbGetGlobal && window.electronAPI?.dbSetGlobal) {
+        if (window.electronAPI && window.electronAPI.dbGetGlobal && window.electronAPI.dbSetGlobal) {
           try {
              const res = await window.electronAPI.dbGetGlobal(`app_company_profile_${cid}`);
              if (res.success && res.data) {
@@ -313,14 +329,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         await window.electronAPI.dbSetGlobal('app_companies', updatedCompanies);
       }
       
-      // Force a sync check to push to cloud
+      // Force sync with forceActivation=true to push newly generated signatures to Cloud Column R
+      try {
+        await verifyLicense(true, true);
+      } catch (e) {
+        console.warn("Failed to sync newly activated signatures to cloud:", e);
+      }
+      
       checkSyncRequirement();
-      showAlert('success', 'Activation Complete', `Successfully activated ${activatedCount} organizations.`);
+      showAlert('success', 'Activation Complete', `Successfully activated ${activatedCount} organization(s).`);
       setShowActivationModal(false);
       
       setTimeout(() => {
         window.location.reload();
-      }, 1500);
+      }, 1000);
     }
   };
 
@@ -331,7 +353,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       const res = await window.electronAPI.listSilos();
       if (res.success && res.silos) {
         const foundSilos = res.silos as string[];
-        const existingIds = companies.map(c => c.id);
+        const existingIds = companies.filter(c => !c.isReadOnly && c.companySignature).map(c => c.id);
         const missingSilos = foundSilos.filter(s => !existingIds.includes(s));
         
         if (missingSilos.length === 0) {
@@ -374,20 +396,37 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           const license = getStoredLicense();
           const limit = license?.companyLimit || 1;
           let newCompanies = [...companies];
-          let newSigs = license?.cloudSignatures ? [...license.cloudSignatures] : [];
+          const existingSigs = companies.filter(c => c.companySignature && !c.isReadOnly).map(c => c.companySignature!);
+          let newSigs = Array.from(new Set([...(license?.cloudSignatures || []), ...existingSigs]));
           let exceededCount = 0;
 
           for (const siloId of selectedSilos) {
             let sig = '';
+            let estName = `Rescued: ${siloId}`;
+            let cin = '';
+            let existingProf: CompanyProfile | null = null;
             try {
               if (window.electronAPI?.dbGetGlobal) {
                 const res = await window.electronAPI.dbGetGlobal(`app_company_profile_${siloId}`);
                 if (res.success && res.data) {
-                  const prof = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-                  if (prof && prof.companySignature) sig = prof.companySignature;
+                  existingProf = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                  if (existingProf) {
+                    if (existingProf.companySignature) sig = existingProf.companySignature;
+                    if (existingProf.establishmentName) estName = existingProf.establishmentName;
+                    if (existingProf.cin) cin = existingProf.cin;
+                  }
                 }
               }
             } catch (e) {}
+
+            // Try matching against cloud signatures first
+            const cloudSigs = license?.cloudSignatures || [];
+            if (!sig || !cloudSigs.includes(sig)) {
+              const matchingCloudSig = cloudSigs.find(s => s.includes(`_${siloId}-`));
+              if (matchingCloudSig) {
+                sig = matchingCloudSig;
+              }
+            }
 
             let willMountFull = true;
             // If it lacks a signature OR its signature is not in newSigs
@@ -408,20 +447,45 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
               }
             }
 
+            // Save back the updated profile parameters inside the silo database profile
+            if (window.electronAPI?.dbSetGlobal) {
+              const updatedProf = existingProf ? { ...existingProf } : { ...INITIAL_COMPANY_PROFILE, id: siloId, establishmentName: estName, cin: cin };
+              updatedProf.companySignature = sig;
+              updatedProf.isReadOnly = !willMountFull;
+              try {
+                await window.electronAPI.dbSetGlobal(`app_company_profile_${siloId}`, updatedProf);
+              } catch (e) {
+                console.warn(`Failed to update rescued company profile db profile for ${siloId}`, e);
+              }
+            }
+
             const existingIndex = newCompanies.findIndex(c => c.id === siloId);
             if (existingIndex >= 0) {
-               newCompanies[existingIndex] = { ...newCompanies[existingIndex], companySignature: sig, isReadOnly: !willMountFull };
+               newCompanies[existingIndex] = { ...newCompanies[existingIndex], establishmentName: estName, cin: cin, companySignature: sig, isReadOnly: !willMountFull };
             } else {
                const rescued: CompanyProfile = {
                  ...INITIAL_COMPANY_PROFILE,
                  id: siloId,
-                 establishmentName: `Rescued: ${siloId}`,
-                 cin: '',
+                 establishmentName: estName,
+                 cin: cin,
                  companySignature: sig,
                  isReadOnly: !willMountFull
                };
                newCompanies.push(rescued);
             }
+
+            // Clear from dismounted list
+            try {
+              const dismountedRaw = localStorage.getItem('app_dismounted_companies') || '[]';
+              let dismounted = JSON.parse(dismountedRaw);
+              if (dismounted.includes(siloId)) {
+                dismounted = dismounted.filter((d: string) => d !== siloId);
+                localStorage.setItem('app_dismounted_companies', JSON.stringify(dismounted));
+                if (window.electronAPI?.dbSetGlobal) {
+                  await window.electronAPI.dbSetGlobal('app_dismounted_companies', dismounted).catch(() => {});
+                }
+              }
+            } catch (e) {}
 
             if (willMountFull) {
               if (window.electronAPI?.registerActivatedSilo) {
@@ -433,7 +497,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           if (exceededCount > 0) {
             showAlert('warning', 'License Limit Reached', `Your license allows ${limit} organization(s). ${exceededCount} folder(s) were loaded locally in READ ONLY mode. Purge a company to free up slots.`);
           } else {
-            showAlert('success', 'Recovery Successful', `${selectedSilos.length} missing organizations have been re-linked to your system. Please update their names in Settings.`);
+            showAlert('success', 'Recovery Successful', `${selectedSilos.length} missing organizations have been re-linked to your system.`);
           }
 
           setCompanies(newCompanies);
@@ -442,7 +506,17 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             await window.electronAPI.dbSetGlobal('app_companies', newCompanies);
           }
           
-          showAlert('success', 'Recovery Successful', `${selectedSilos.length} missing organizations have been re-linked to your system. Please update their names in Settings.`);
+          // Push updated signature to Cloud with forceActivation=true
+          try {
+            await verifyLicense(true, true);
+          } catch (e) {
+            console.warn("Failed to sync rescued signature to cloud:", e);
+          }
+          checkSyncRequirement();
+
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
         });
       }
     } catch (e) {
@@ -465,7 +539,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     return isJanToMar ? globalYear !== endY : globalYear !== startY;
   }, [globalMonth, globalYear, activeFinancialYear]);
 
-  const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages } = useLicense();
+  const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages, setLicenseStatus } = useLicense();
   const [isRetryingSync, setIsRetryingSync] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const { isAppDirectoryConfigured, isBootSyncComplete } = useAppInitialization(verifyLicense);
@@ -529,15 +603,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   // --- V03.01.07: Hover Dropdown States ---
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
   const [showFyDropdown, setShowFyDropdown] = useState(false);
-
-  // --- V03.01.02: AUTO-SELECT SINGLE COMPANY (Safety Sync) ---
-  useEffect(() => {
-    if (currentUser && companies.length === 1 && isCompanyGateOpen) {
-      console.log("Auto-selecting single organization and closing gate...");
-      switchCompany(companies[0].id);
-      setIsCompanyGateOpen(false);
-    }
-  }, [currentUser, companies.length, isCompanyGateOpen, switchCompany]);
 
   // --- JIT FINANCIAL YEAR BALANCE CARRY-FORWARD & INITIALIZATION ---
   useEffect(() => {
@@ -954,6 +1019,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const [isSettingsDirty, setIsSettingsDirty] = useState(false);
   const [isRestorationForced, setIsRestorationForced] = useState(false);
   const [isStartupTimerActive, setIsStartupTimerActive] = useState(!isReloadingAfterReset);
+  const [showOfflineOption, setShowOfflineOption] = useState(false);
 
   // --- V03.01.01: ID Format Migration (Add Underscore to 12-char IDs) ---
   useEffect(() => {
@@ -1015,7 +1081,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   // --- V02.02.28: 5-Second Startup Branding Timer (Synchronized with Animation) ---
   useEffect(() => {
     const timer = setTimeout(() => setIsStartupTimerActive(false), 5000);
-    return () => clearTimeout(timer);
+    const offlineTimer = setTimeout(() => setShowOfflineOption(true), 10000);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(offlineTimer);
+    };
   }, []);
 
   // --- CONNECTIVITY MONITORING (Day 1/2/3 Logic) ---
@@ -1274,7 +1344,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   // Ensure 'admin' is permanently linked to Registered ID (e.g., SAIPRA12)
   useEffect(() => {
     const license = getStoredLicense();
-    if (license && license.userID && license.userID.toUpperCase() !== 'RESCUE' && license.userID.toUpperCase() !== 'TRIAL') {
+    if (license && license.userID && license.userID.toUpperCase() !== 'RESCUE' && license.userID.toUpperCase() !== 'TRIAL' && license.userID.toUpperCase() !== 'VRANGA') {
       const usersRaw = localStorage.getItem('app_users');
       let users: User[] = [];
       try {
@@ -1675,6 +1745,18 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
     handleLogin(user);
     setIsCompanyGateOpen(true);
+
+    // --- COMPANY ASSIGNMENT SWITCHING ---
+    // If the logged-in User has assigned companies, ensure the active company is one of them.
+    if (user.role === 'User' && user.assignedCompanies && user.assignedCompanies.length > 0) {
+      if (user.assignedCompanies.length === 1) {
+        // Only one company assigned! Switch to it and skip organization selection screen!
+        switchCompany(user.assignedCompanies[0]);
+        setIsCompanyGateOpen(false);
+      } else if (!user.assignedCompanies.includes(activeCompanyId)) {
+        switchCompany(user.assignedCompanies[0]);
+      }
+    }
     // Overwrite activity time on successful login to prevent stale idle logouts
     localStorage.setItem('app_last_activity_time', String(Date.now()));
 
@@ -1989,7 +2071,18 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
 
   const effectiveUser = (currentUser || { id: 'setup', name: 'Initial Setup', role: 'Administrator', username: 'setup', password: '', email: '' }) as User;
-  const isSettingsAccessible = effectiveUser.role === 'Developer' || effectiveUser.role === 'Administrator';
+  const getPermission = (key: keyof UserPermissions): boolean => {
+    if (effectiveUser.role === 'Developer' || effectiveUser.role === 'Administrator') return true;
+    if (!effectiveUser.permissions) return true; // Legacy fallback
+    return !!(effectiveUser.permissions as Record<string, boolean | undefined>)[key];
+  };
+  const isSettingsAccessible = effectiveUser.role === 'Developer' || 
+                               effectiveUser.role === 'Administrator' ||
+                               getPermission('configCompanyProfile') ||
+                               getPermission('configStatutoryRules') ||
+                               getPermission('configDataManagement') ||
+                               getPermission('configLicenseManagement') ||
+                               getPermission('configUserManagement');
   
   // --- V06.01.07: Mandatory Company Config Enforcement ---
   const isCompanyProfileComplete = !!(
@@ -2019,6 +2112,27 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       );
     }
   }, [isCompanyProfileComplete, activeView]);
+
+  // Enforce role-based access control and redirection
+  useEffect(() => {
+    if (activeView === View.Employees && !(getPermission('employeeAdd') || getPermission('employeeEdit'))) {
+      safeNavigate(View.Dashboard);
+    } else if (activeView === View.PayProcess && !getPermission('processPayroll')) {
+      safeNavigate(View.Dashboard);
+    } else if (activeView === View.Reports && !getPermission('payReports')) {
+      safeNavigate(View.Dashboard);
+    } else if (activeView === View.Statutory && !getPermission('statutoryReports')) {
+      safeNavigate(View.Dashboard);
+    } else if (activeView === View.MIS && !getPermission('mis')) {
+      safeNavigate(View.Dashboard);
+    } else if (activeView === View.SSCode && !getPermission('ssCode')) {
+      safeNavigate(View.Dashboard);
+    } else if (activeView === View.Utilities && !getPermission('utilities')) {
+      safeNavigate(View.Dashboard);
+    } else if (activeView === View.Settings && !isSettingsAccessible) {
+      safeNavigate(View.Dashboard);
+    }
+  }, [activeView, effectiveUser]);
   // ---------------------------------------------------------
 
   // --- V03.01.02: Normalizing Render Path to Prevent Hook Violations ---
@@ -2041,10 +2155,20 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     return availableFinancialYears.some(fy => parseFY(fy) < currentVal);
   }, [activeFinancialYear, availableFinancialYears]);
 
-  const isDeveloper = currentUser?.role === 'Developer' || currentUser?.email === 'developer@bharatpay.com';
+  const isDeveloper = currentUser?.role === 'Developer' || currentUser?.email === 'developer@bharatpay.com' || (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
   const visibleCompanies = isDeveloper 
     ? companies 
-    : companies.filter(c => licenseInfo?.cloudSignatures?.includes(c.companySignature || ''));
+    : companies.filter(c => {
+        const hasLicenseSig = licenseInfo?.cloudSignatures?.includes(c.companySignature || '');
+        if (!hasLicenseSig) return false;
+        // User assigned companies check
+        if (currentUser?.role === 'User' && currentUser?.assignedCompanies && currentUser.assignedCompanies.length > 0) {
+          if (!currentUser.showRestrictedUnits) {
+            return currentUser.assignedCompanies.includes(c.id);
+          }
+        }
+        return true;
+      });
 
   return (
     <div className={`flex h-[100dvh] overflow-hidden bg-[#020617] text-white ${isWin7 ? 'is-win7' : ''}`}>
@@ -2083,6 +2207,31 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           <div className="w-48 h-1 bg-slate-900 rounded-full overflow-hidden">
              <div className="h-full bg-blue-600 animate-loading-bar-5s rounded-full"></div>
           </div>
+          {showOfflineOption && (
+            <div className="flex flex-col sm:flex-row gap-4 mt-6 animate-in fade-in duration-300 z-50">
+              <button
+                onClick={() => {
+                  setLicenseStatus(prev => ({ ...prev, checked: true, valid: true }));
+                  setIsStartupTimerActive(false);
+                }}
+                className="px-6 py-3 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-900/30 hover:scale-[1.02]"
+              >
+                Work Offline
+              </button>
+              <button
+                onClick={() => {
+                  if ((window as any).electronAPI?.closeApp) {
+                    (window as any).electronAPI.closeApp();
+                  } else {
+                    window.close();
+                  }
+                }}
+                className="px-6 py-3 bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 font-bold text-xs uppercase tracking-widest rounded-xl transition-all border border-slate-700 hover:border-rose-500/30"
+              >
+                Exit Application
+              </button>
+            </div>
+          )}
         </div>
       ) : showLicenseGate ? (
         <div className="fixed inset-0 z-[9999] bg-slate-950 flex items-center justify-center p-6 text-center">
@@ -2281,7 +2430,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <AppSetup onComplete={() => window.location.reload()} />
           </div>
         </div>
-      ) : (showRegistrationManual || isRestorationForced || (visibleCompanies.length === 0)) ? (
+      ) : (showRegistrationManual || isRestorationForced || (companies.length === 0)) ? (
         <Registration
           onComplete={handleRegistrationComplete}
           onRestore={() => window.location.reload()}
@@ -2350,15 +2499,22 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 w-full">
                     {visibleCompanies.map(c => {
                       const isReadOnly = c.isReadOnly;
+                      const isAssigned = (() => {
+                        if (!currentUser) return true;
+                        if (currentUser.role !== 'User') return true;
+                        if (!currentUser.assignedCompanies || currentUser.assignedCompanies.length === 0) return true;
+                        return currentUser.assignedCompanies.includes(c.id);
+                      })();
                       return (
                       <div 
                         key={c.id}
-                        className={`group relative flex flex-col p-4 bg-slate-900/40 hover:bg-blue-600/5 border transition-all duration-300 rounded-2xl text-left overflow-hidden h-24 ${activeCompanyId === c.id ? 'border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.1)] bg-blue-600/5' : 'border-slate-800 hover:border-blue-500/30'} ${isReadOnly ? 'opacity-80' : ''}`}
+                        className={`group relative flex flex-col p-4 bg-slate-900/40 border transition-all duration-300 rounded-2xl text-left overflow-hidden h-24 ${activeCompanyId === c.id ? 'border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.1)] bg-blue-600/5' : 'border-slate-800'} ${isReadOnly ? 'opacity-80' : ''} ${!isAssigned ? 'opacity-35 grayscale select-none border-red-500/10' : 'hover:bg-blue-600/5 hover:border-blue-500/30'}`}
                       >
                         {/* Main Clickable Area */}
                         <button 
-                          className="absolute inset-0 z-0"
-                          title={`Load ${c.establishmentName}`}
+                          className={`absolute inset-0 z-0 ${!isAssigned ? 'cursor-not-allowed pointer-events-auto' : ''}`}
+                          title={!isAssigned ? `Access Denied: You are not assigned to ${c.establishmentName}` : `Load ${c.establishmentName}`}
+                          disabled={!isAssigned}
                           onClick={() => handleSwitchCompanyWithGate(c.id, true)}
                         ></button>
 
@@ -2400,6 +2556,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                                 colorClass = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
                                 tooltipText = 'Unregistered / blank in profile (Missing PAN details but has employees)';
                               }
+                              if (!isAssigned) {
+                                status = 'RESTRICTED';
+                                colorClass = 'bg-red-500/10 text-red-400 border-red-500/20';
+                                tooltipText = 'Access Restricted: This company has not been assigned to your user account.';
+                              }
                               
                               return (
                                 <span 
@@ -2418,7 +2579,15 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                                 <span 
                                   onClick={(e) => { e.stopPropagation(); handleClaimCompany(c); }}
                                   className="text-[9px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 shadow-sm flex items-center gap-1 pointer-events-auto cursor-pointer hover:bg-amber-500/20 hover:text-amber-400 transition-colors"
-                                  title="Click to claim this organization"
+                                  title={(() => {
+                                    const limit = licenseInfo?.companyLimit || 3;
+                                    const activeCount = companies.filter(item => !item.isReadOnly).length;
+                                    if (activeCount < limit) {
+                                      return `READ ONLY MODE (${activeCount}/${limit} slots used): Click to convert into Full Featured Mode.`;
+                                    } else {
+                                      return `READ ONLY MODE (Slot Limit Reached: ${activeCount}/${limit}): To convert to Full Mode: (1) Upgrade license limit, OR (2) Dismount an active company & email Developer to drop that specific company to enable adding another company.`;
+                                    }
+                                  })()}
                                 >
                                   <Lock size={10} />
                                   READ ONLY
@@ -2427,27 +2596,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                             </div>
                           </div>
                         </div>
-
-                        {/* Purge Button (Visible for all, protected for active) */}
-                        <button
-                          onClick={(e) => {
-                             e.stopPropagation();
-                             if (activeCompanyId === c.id) {
-                               showAlert?.('info', 'Action Prohibited', `Not possible to delete active company. Select another company (shut company) first, and then you can select this company to purge.`);
-                             } else {
-                               showAlert?.('danger', 'CRITICAL: PERMANENT DELETION', `You are about to PERMANENTLY DELETE "${c.establishmentName}" (ID: ${c.id}) and all its records. This cannot be undone. Are you absolutely sure?`, () => {
-                                   setPurgeTargetId(c.id);
-                                   setShowPurgeAuthModal(true);
-                                   setPurgePassword('');
-                                   setPurgeAuthError('');
-                               });
-                             }
-                          }}
-                          className={`absolute top-4 right-4 z-20 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity ${activeCompanyId === c.id ? 'bg-slate-800/50 text-slate-500' : 'bg-rose-900/20 text-rose-500 hover:bg-rose-600 hover:text-white'}`}
-                          title={activeCompanyId === c.id ? "Active Company Protected" : "Purge Company"}
-                        >
-                          <Trash2 size={16} />
-                        </button>
 
                         {isReadOnly && (
                           <div className="absolute top-5 right-5 pointer-events-none text-amber-500 opacity-50 group-hover:opacity-100 transition-opacity">
@@ -2513,7 +2661,15 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                                 <span 
                                   onClick={(e) => { e.stopPropagation(); handleClaimCompany(c); }}
                                   className="text-[9px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 flex items-center gap-1 pointer-events-auto cursor-pointer hover:bg-amber-500/20 hover:text-amber-400 transition-colors"
-                                  title="Click to claim this organization"
+                                  title={(() => {
+                                    const limit = licenseInfo?.companyLimit || 3;
+                                    const activeCount = companies.filter(item => !item.isReadOnly).length;
+                                    if (activeCount < limit) {
+                                      return `READ ONLY MODE (${activeCount}/${limit} slots used): Click to convert into Full Featured Mode.`;
+                                    } else {
+                                      return `READ ONLY MODE (Slot Limit Reached: ${activeCount}/${limit}): To convert to Full Mode: (1) Upgrade license limit, OR (2) Dismount an active company & email Developer to drop that specific company to enable adding another company.`;
+                                    }
+                                  })()}
                                 >
                                   <Lock size={10} />
                                   READ ONLY
@@ -2733,16 +2889,16 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             </div>
             <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
               <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isCompanyGateOpen && activeView !== View.Dashboard} />
-              <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} disabledTooltip={!isCompanyProfileComplete ? "Company Profile Mandatory fields to be updated and saved to activate this function" : undefined} />
-              <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} disabledTooltip={!isCompanyProfileComplete ? "Company Profile Mandatory fields to be updated and saved to activate this function" : undefined} />
-              <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
-              <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
-              <NavigationItem view={View.MIS} icon={IndianRupee} label="Management Info (MIS)" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} isLocked={!licenseInfo?.splMIS} onClickLocked={() => setShowPremiumModal(true)} />
-              <NavigationItem view={View.SSCode} icon={Scale} label="Social Security / Code Wages" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
+              <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !(getPermission('employeeAdd') || getPermission('employeeEdit'))} disabledTooltip={!(getPermission('employeeAdd') || getPermission('employeeEdit')) ? "Access Restricted: Contact Administrator" : (!isCompanyProfileComplete ? "Company Profile Mandatory fields to be updated and saved to activate this function" : undefined)} />
+              <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('processPayroll')} disabledTooltip={!getPermission('processPayroll') ? "Access Restricted: Contact Administrator" : (!isCompanyProfileComplete ? "Company Profile Mandatory fields to be updated and saved to activate this function" : undefined)} />
+              <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('payReports')} disabledTooltip={!getPermission('payReports') ? "Access Restricted: Contact Administrator" : undefined} />
+              <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('statutoryReports')} disabledTooltip={!getPermission('statutoryReports') ? "Access Restricted: Contact Administrator" : undefined} />
+              <NavigationItem view={View.MIS} icon={IndianRupee} label="Management Info (MIS)" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('mis')} disabledTooltip={!getPermission('mis') ? "Access Restricted: Contact Administrator" : undefined} isLocked={getPermission('mis') && !licenseInfo?.splMIS} onClickLocked={() => setShowPremiumModal(true)} />
+              <NavigationItem view={View.SSCode} icon={Scale} label="Social Security / Code Wages" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('ssCode')} disabledTooltip={!getPermission('ssCode') ? "Access Restricted: Contact Administrator" : undefined} />
               <NavigationItem view={View.PFCalculator} icon={Calculator} label="PF ECR Calculator" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
-              <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
+              <NavigationItem view={View.Utilities} icon={Wrench} label="Utilities" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('utilities')} disabledTooltip={!getPermission('utilities') ? "Access Restricted: Contact Administrator" : undefined} />
               <NavigationItem view={View.AI_Assistant} icon={Bot} label="Compliance AI" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen} />
-              <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={!isSettingsAccessible} />
+              <NavigationItem view={View.Settings} icon={SettingsIcon} label="Configuration" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={!isSettingsAccessible} disabledTooltip={!isSettingsAccessible ? "Access Restricted: Contact Administrator" : undefined} />
             </nav>
             <div className="p-4 border-t border-slate-800 bg-[#0b1120] space-y-1">
               <button onClick={executeDiagnosticExport} className={`w-full flex items-center ${isSidebarOpen ? 'justify-start gap-3 px-4' : 'justify-center'} py-2.5 rounded-lg text-blue-400 hover:bg-blue-900/20`} title="Export Diagnostics">
@@ -2792,21 +2948,27 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                             </span>
                           )}
                         </div>
-                        <div className={`flex items-center gap-1 transition-all duration-500 mt-0.5 ${
-                          connStatus.isOnline 
-                            ? 'text-emerald-400' 
-                            : (connStatus.offlineDay >= 3 ? 'text-rose-500 animate-pulse' : 'text-amber-500')
-                        }`}>
-                          {connStatus.isOnline ? (
-                            <div className="flex items-center gap-1 animate-pulse">
-                              <div className="w-1 h-1 bg-emerald-500 rounded-full shadow-[0_0_5px_#10b981]"></div>
-                              <span className="text-[8px] font-black uppercase tracking-widest">Live Connection</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                               <div className="w-1 h-1 bg-amber-500 rounded-full"></div>
-                               <span className="text-[8px] font-black uppercase tracking-widest">Offline Mode</span>
-                            </div>
+                        <div className="flex items-center gap-2 mt-0.5 whitespace-nowrap">
+                          <div className="flex items-center gap-1 transition-all duration-500">
+                            {connStatus.isOnline ? (
+                              <div className="flex items-center gap-1 animate-pulse">
+                                <div className="w-1 h-1 bg-emerald-500 rounded-full shadow-[0_0_5px_#10b981]"></div>
+                                <span className="text-[8px] font-black uppercase tracking-widest text-white">Live Connection</span>
+                              </div>
+                            ) : (
+                              <div className={`flex items-center gap-1 ${connStatus.offlineDay >= 3 ? 'animate-pulse' : ''}`}>
+                                 <div className={`w-1 h-1 rounded-full ${connStatus.offlineDay >= 3 ? 'bg-rose-500 shadow-[0_0_5px_#f43f5e]' : 'bg-amber-500 shadow-[0_0_5px_#f59e0b]'}`}></div>
+                                 <span className="text-[8px] font-black uppercase tracking-widest text-orange-500">Offline Mode</span>
+                              </div>
+                            )}
+                          </div>
+                          {currentUser?.username && (
+                            <>
+                              <span className="text-slate-600 text-[8px] font-black">|</span>
+                              <div className="text-white text-[8px] font-black uppercase tracking-[0.05em] whitespace-nowrap">
+                                USER: {currentUser.username}
+                              </div>
+                            </>
                           )}
                         </div>
                       </div>
@@ -2826,44 +2988,54 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Select Organization</span>
                       </div>
                       <div className="max-h-64 overflow-y-auto custom-scrollbar">
-                        {visibleCompanies.map(c => (
-                          <button 
-                            key={c.id}
-                            onClick={() => {
-                              handleSwitchCompanyWithGate(c.id);
-                              setShowCompanyDropdown(false);
-                            }}
-                            className={`w-full flex items-center gap-3 p-4 text-left hover:bg-blue-900/20 transition-all border-b border-slate-800/50 last:border-0 ${activeCompanyId === c.id ? 'bg-blue-900/40 border-l-4 border-l-blue-500' : ''}`}
-                          >
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${activeCompanyId === c.id ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                              {c.establishmentName?.substring(0, 2).toUpperCase() || 'CO'}
-                            </div>
-                            <div className="flex-1 flex flex-col overflow-hidden">
-                               <div className="flex items-center justify-between gap-2 mb-0.5">
-                                 <span className={`text-sm font-bold truncate ${activeCompanyId === c.id ? 'text-white' : 'text-slate-300'}`}>{c.establishmentName?.replace('Rescued: ', '')}</span>
+                        {visibleCompanies.map(c => {
+                          const isAssigned = (() => {
+                            if (!currentUser) return true;
+                            if (currentUser.role !== 'User') return true;
+                            if (!currentUser.assignedCompanies || currentUser.assignedCompanies.length === 0) return true;
+                            return currentUser.assignedCompanies.includes(c.id);
+                          })();
+                          return (
+                            <button 
+                              key={c.id}
+                              disabled={!isAssigned}
+                              title={!isAssigned ? `Access Denied: You are not assigned to ${c.establishmentName}` : `Switch to ${c.establishmentName}`}
+                              onClick={() => {
+                                handleSwitchCompanyWithGate(c.id);
+                                setShowCompanyDropdown(false);
+                              }}
+                              className={`w-full flex items-center gap-3 p-4 text-left transition-all border-b border-slate-800/50 last:border-0 ${activeCompanyId === c.id ? 'bg-blue-900/40 border-l-4 border-l-blue-500' : ''} ${!isAssigned ? 'opacity-40 grayscale cursor-not-allowed pointer-events-auto' : 'hover:bg-blue-900/20'}`}
+                            >
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${activeCompanyId === c.id ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                                {c.establishmentName?.substring(0, 2).toUpperCase() || 'CO'}
+                              </div>
+                              <div className="flex-1 flex flex-col overflow-hidden">
+                                 <div className="flex items-center justify-between gap-2 mb-0.5">
+                                   <span className={`text-sm font-bold truncate ${activeCompanyId === c.id ? 'text-white' : 'text-slate-300'}`}>{c.establishmentName?.replace('Rescued: ', '')}</span>
+                                   <div className="flex items-center gap-2">
+                                     {c.dashboardPassword && <Lock size={12} className="text-blue-400 shrink-0" />}
+                                     {isAssigned && activeCompanyId !== c.id && (
+                                       <button 
+                                         onClick={(e) => {
+                                           e.stopPropagation();
+                                           handleInitiateSecureDelete(c.id);
+                                         }}
+                                         className="p-1.5 hover:bg-rose-500/20 text-slate-500 hover:text-rose-500 rounded-md transition-all"
+                                         title="Delete Organization"
+                                       >
+                                         <Trash2 size={14} />
+                                       </button>
+                                     )}
+                                   </div>
+                                 </div>
                                  <div className="flex items-center gap-2">
-                                   {c.dashboardPassword && <Lock size={12} className="text-blue-400 shrink-0" />}
-                                   {activeCompanyId !== c.id && (
-                                     <button 
-                                       onClick={(e) => {
-                                         e.stopPropagation();
-                                         handleInitiateSecureDelete(c.id);
-                                       }}
-                                       className="p-1.5 hover:bg-rose-500/20 text-slate-500 hover:text-rose-500 rounded-md transition-all"
-                                       title="Delete Organization"
-                                     >
-                                       <Trash2 size={14} />
-                                     </button>
-                                   )}
+                                   <span className="text-[10px] text-slate-500 font-mono tracking-tighter truncate">{c.cin || 'No CIN'}</span>
+                                   <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-tighter border shrink-0 ${activeCompanyId === c.id ? 'bg-blue-600 text-white border-blue-400' : 'bg-slate-800 text-amber-500 border-slate-700'}`}>{c.id}</span>
                                  </div>
                                </div>
-                               <div className="flex items-center gap-2">
-                                 <span className="text-[10px] text-slate-500 font-mono tracking-tighter truncate">{c.cin || 'No CIN'}</span>
-                                 <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-tighter border shrink-0 ${activeCompanyId === c.id ? 'bg-blue-600 text-white border-blue-400' : 'bg-slate-800 text-amber-500 border-slate-700'}`}>{c.id}</span>
-                               </div>
-                             </div>
-                          </button>
-                        ))}
+                            </button>
+                          );
+                        })}
                       </div>
                       <div className="p-3 bg-[#0f172a] border-t border-slate-800">
                         <button 

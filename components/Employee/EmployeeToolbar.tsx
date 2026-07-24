@@ -20,6 +20,8 @@ interface EmployeeToolbarProps {
     activeFinancialYear?: string;
     isLicenseExpired?: boolean;
     isReadOnly?: boolean;
+    isAddRestricted?: boolean;
+    isEditRestricted?: boolean;
 }
 
 const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
@@ -40,47 +42,57 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
     onToggleFYFilter,
     activeFinancialYear,
     isLicenseExpired,
-    isReadOnly
+    isReadOnly,
+    isAddRestricted = false,
+    isEditRestricted = false
 }) => {
     return (
         <div className="space-y-2">
             {/* ACTION CARD */}
             <div className="bg-[#1e293b] p-2 rounded-2xl border border-slate-800/80 shadow-2xl flex flex-nowrap items-center justify-between gap-2 transition-all overflow-x-auto custom-scrollbar">
                 <div className="flex items-center flex-nowrap gap-1">
-                    {!isLicenseExpired && !isReadOnly && (
+                    {!isLicenseExpired && !isReadOnly && (!isAddRestricted || !isEditRestricted) && (
                         <div className="flex items-center gap-2 bg-[#0f172a] p-1 rounded-xl border border-slate-800">
-                            <button
-                                onClick={onDownloadTemplate}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
-                                title="Download blank template for new employees"
-                            >
-                                <FileSpreadsheet size={16} /> Template
-                            </button>
-                            <button
-                                onClick={onDownloadUpdateTemplate}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
-                                title="Download template with existing employees to update details"
-                            >
-                                <FileSpreadsheet size={16} className="text-amber-500" /> Update Template
-                            </button>
-                            <button
-                                onClick={onImportClick}
-                                disabled={isImporting}
-                                title="Import new employee records from an Excel template"
-                                className={`flex items-center gap-1.5 px-3 py-1.5 ${isImporting ? 'bg-blue-600/50 text-blue-300 cursor-wait' : 'bg-blue-600 text-white hover:bg-blue-500 hover:shadow-[0_0_15px_rgba(59,130,246,0.5)]'} rounded-lg transition-all font-black text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed`}
-                            >
-                                {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} 
-                                Import New
-                            </button>
-                            <button
-                                onClick={onImportUpdateClick}
-                                disabled={isImporting}
-                                title="Update existing employee records using the downloaded Update Template"
-                                className={`flex items-center gap-1.5 px-3 py-1.5 ${isImporting ? 'bg-amber-600/50 text-amber-300 cursor-wait' : 'bg-amber-600 text-white hover:bg-amber-500 hover:shadow-[0_0_15px_rgba(245,158,11,0.5)]'} rounded-lg transition-all font-black text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed`}
-                            >
-                                {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} 
-                                Import Updates
-                            </button>
+                            {!isAddRestricted && (
+                                <>
+                                    <button
+                                        onClick={onDownloadTemplate}
+                                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
+                                        title="Download blank template for new employees"
+                                    >
+                                        <FileSpreadsheet size={16} /> Template
+                                    </button>
+                                    <button
+                                        onClick={onImportClick}
+                                        disabled={isImporting}
+                                        title="Import new employee records from an Excel template"
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 ${isImporting ? 'bg-blue-600/50 text-blue-300 cursor-wait' : 'bg-blue-600 text-white hover:bg-blue-500 hover:shadow-[0_0_15px_rgba(59,130,246,0.5)]'} rounded-lg transition-all font-black text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed`}
+                                    >
+                                        {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} 
+                                        Import New
+                                    </button>
+                                </>
+                            )}
+                            {!isEditRestricted && (
+                                <>
+                                    <button
+                                        onClick={onDownloadUpdateTemplate}
+                                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-black text-[10px] uppercase tracking-wider"
+                                        title="Download template with existing employees to update details"
+                                    >
+                                        <FileSpreadsheet size={16} className="text-amber-500" /> Update Template
+                                    </button>
+                                    <button
+                                        onClick={onImportUpdateClick}
+                                        disabled={isImporting}
+                                        title="Update existing employee records using the downloaded Update Template"
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 ${isImporting ? 'bg-amber-600/50 text-amber-300 cursor-wait' : 'bg-amber-600 text-white hover:bg-amber-500 hover:shadow-[0_0_15px_rgba(245,158,11,0.5)]'} rounded-lg transition-all font-black text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed`}
+                                    >
+                                        {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} 
+                                        Import Updates
+                                    </button>
+                                </>
+                            )}
                         </div>
                     )}
 
@@ -95,7 +107,7 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
                 </div>
 
                 <div className="flex items-center flex-nowrap gap-2">
-                    {!isLicenseExpired && (
+                    {!isLicenseExpired && !isAddRestricted && (
                         <button
                             onClick={onShowRejoin}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 rounded-xl transition-all font-black text-[11px] uppercase tracking-wider border border-slate-700"
@@ -106,13 +118,16 @@ const EmployeeToolbar: React.FC<EmployeeToolbarProps> = ({
                     )}
                     
                     {!isLicenseExpired && isReadOnly && (
-                         <div className="px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-950/20 text-red-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                         <div 
+                           className="px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-950/20 text-red-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 cursor-help"
+                           title="READ ONLY MODE: Company signature not active. To convert to Full Mode: (1) Upgrade license limit, OR (2) Dismount an active company & email Developer to drop that specific company to enable adding another company."
+                         >
                              <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
-                             READ-ONLY MODE (LIMIT EXCEEDED)
+                             READ-ONLY MODE
                          </div>
                     )}
 
-                    {!isLicenseExpired && !isReadOnly && (
+                    {!isLicenseExpired && !isReadOnly && !isAddRestricted && (
                         <button
                             onClick={onAddNew}
                             disabled={totalActive >= limit}

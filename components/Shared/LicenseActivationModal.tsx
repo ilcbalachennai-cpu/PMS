@@ -85,7 +85,7 @@ const LicenseActivationModal: React.FC<LicenseActivationModalProps> = ({ compani
                 </span>
               </h2>
               <p className="text-sm text-blue-200/70 mt-1">
-                Select the organizations you want to activate and link to your cloud license.
+                Select the organizations you want to activate into Full Mode and link to your license.
               </p>
             </div>
           </div>
@@ -93,6 +93,21 @@ const LicenseActivationModal: React.FC<LicenseActivationModalProps> = ({ compani
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Policy & Guidance Notice */}
+          <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-xs text-amber-200/90 leading-relaxed space-y-2">
+            <p className="font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+              ⚠️ Important Company Limit & Signature Policy
+            </p>
+            <p>
+              • <strong>Company Limit Caution</strong>: Active full-featured companies consume 1 slot and generate a Unique Signature. Exercise caution when activating or dropping companies.
+            </p>
+            <p>
+              • <strong>Slot Management</strong>: If your limit is reached, you cannot add or convert active companies without either (1) Upgrading your license, OR (2) Dismounting an active company & requesting Developer approval via email to drop that specific company.
+            </p>
+            <p>
+              • <strong>Data Portability</strong>: You can add <em>any number of companies</em> in <strong>Read-Only Mode</strong>. Read-Only companies allow viewing and statutory reporting without modifications, enabling 100% data portability across registered BPP users.
+            </p>
+          </div>
           <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-xl border border-slate-700/50">
             <div>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">License Capacity</p>

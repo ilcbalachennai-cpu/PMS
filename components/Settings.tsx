@@ -8,24 +8,18 @@ import {
     ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
     FolderOpen, FileText
 } from 'lucide-react';
-import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, LicenseData, SettingsTab } from '../types';
+import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, UserPermissions, LicenseData, SettingsTab } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
 import CryptoJS from 'crypto-js';
 import {
     fetchLatestMessages, updateDeveloperMessages, activateFullLicense,
     getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
-    requestResetOTP, getAppDeveloper, APP_VERSION, APP_PATCH_TIMESTAMP
+    requestResetOTP, verifyResetOTP, sendPolicyConfirmationEmailGAS, getAppDeveloper, APP_VERSION, APP_PATCH_TIMESTAMP
 } from '../services/licenseService';
 import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, generateBackupFilename, getCompanyBackupFolder, didConfigCalculationFieldsChange } from '../utils/formatters';
 import { getMonthAbbr } from '../services/reportService';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 import { executeDiagnosticExport } from '../utils/diagnostics';
-
-declare global {
-    interface Window {
-        electronAPI: any;
-    }
-}
 
 interface SettingsProps {
     config: StatutoryConfig;
@@ -86,6 +80,12 @@ const Settings: React.FC<SettingsProps> = ({
     latestPatchTimestamp, onNavigate
 }) => {
     const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${key}_${activeCompanyId}`;
+    const getPermission = (key: keyof UserPermissions): boolean => {
+        if (!currentUser) return false;
+        if (currentUser.role === 'Developer' || currentUser.role === 'Administrator') return true;
+        if (!currentUser.permissions) return true; // Legacy fallback
+        return !!currentUser.permissions[key];
+    };
     const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
         const saved = localStorage.getItem('settings_initial_tab') || sessionStorage.getItem('settings_initial_tab');
         if (saved) {
@@ -216,6 +216,34 @@ const Settings: React.FC<SettingsProps> = ({
         setActiveTab(initialTab);
     }, [initialTab]);
 
+    useEffect(() => {
+        const isPermitted = (tab: SettingsTab): boolean => {
+            if (tab === SettingsTab.Developer) return userRole === 'Developer';
+            if (tab === SettingsTab.Company) return getPermission('configCompanyProfile');
+            if (tab === SettingsTab.Statutory) return getPermission('configStatutoryRules');
+            if (tab === SettingsTab.Data) return getPermission('configDataManagement');
+            if (tab === SettingsTab.License) return getPermission('configLicenseManagement');
+            if (tab === SettingsTab.Users) return getPermission('configUserManagement');
+            return true;
+        };
+
+        if (!isPermitted(activeTab)) {
+            const tabsOrder = [
+                SettingsTab.Company,
+                SettingsTab.Statutory,
+                SettingsTab.Data,
+                SettingsTab.License,
+                SettingsTab.Users,
+                SettingsTab.Developer
+            ];
+            const firstPermitted = tabsOrder.find(t => isPermitted(t));
+            if (firstPermitted) {
+                setActiveTab(firstPermitted);
+                setSettingsTab?.(firstPermitted);
+            }
+        }
+    }, [activeTab, currentUser]);
+
     const [showBackupModal, setShowBackupModal] = useState(false);
     const [encryptionKey, setEncryptionKey] = useState('');
     const [selectedBackupFile, setSelectedBackupFile] = useState<File | null>(null);
@@ -277,7 +305,7 @@ const Settings: React.FC<SettingsProps> = ({
     const [resetPassword, setResetPassword] = useState('');
     const [resetError, setResetError] = useState('');
     const [resetMode, setResetMode] = useState<'DEEP' | 'FACTORY'>('FACTORY');
-    const [purgeScope, setPurgeScope] = useState<'LIST_ONLY' | 'COMPLETE'>('COMPLETE');
+    const [purgeScope, setPurgeScope] = useState<'LIST_ONLY' | 'COMPLETE'>('LIST_ONLY');
     const [isActivating, setIsActivating] = useState(false);
 
     const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT' | 'MIGRATE'>('EXPORT');
@@ -291,6 +319,14 @@ const Settings: React.FC<SettingsProps> = ({
     const [resetStep, setResetStep] = useState<'IDENTIFY' | 'OTP'>('IDENTIFY');
     const [resetOTP, setResetOTP] = useState('');
     const [appDirectory, setAppDirectory] = useState<string>('');
+    const [showPolicyOtpModal, setShowPolicyOtpModal] = useState(false);
+    const [pendingBasisChange, setPendingBasisChange] = useState<'LabourCode' | 'OriginalWages' | null>(null);
+    const [policyOtp, setPolicyOtp] = useState('');
+    const [policyPassword, setPolicyPassword] = useState('');
+    const [policyOtpStep, setPolicyOtpStep] = useState<'IDENTIFY' | 'OTP'>('IDENTIFY');
+    const [policyError, setPolicyError] = useState('');
+    const [isRequestingPolicyOtp, setIsRequestingPolicyOtp] = useState(false);
+    const [isVerifyingPolicyChange, setIsVerifyingPolicyChange] = useState(false);
     const backupFileRef = useRef<HTMLInputElement>(null);
 
     const progressRef = useRef<HTMLDivElement>(null);
@@ -338,10 +374,44 @@ const Settings: React.FC<SettingsProps> = ({
     };
 
 
+    const defaultPermissions: UserPermissions = {
+        employeeAdd: false,
+        employeeEdit: false,
+        processPayroll: false,
+        payReports: false,
+        statutoryReports: false,
+        mis: false,
+        ssCode: false,
+        utilities: false,
+        configCompanyProfile: false,
+        configStatutoryRules: false,
+        configDataManagement: false,
+        configLicenseManagement: false,
+        configUserManagement: false,
+        dmBackup: false,
+        dmRestore: false,
+        dmMigrate: false,
+        dmPartialReset: false,
+        dmRescue: false,
+        dmPurge: false,
+        dmFactoryReset: false,
+        dmDiagnostics: false,
+        dmStorageLocation: false,
+    };
+
     const [appUsers, setAppUsers] = useState<User[]>(() => {
         try { return JSON.parse(localStorage.getItem('app_users') || '[]'); } catch { return []; }
     });
-    const [umForm, setUmForm] = useState({ name: '', username: '', password: '', role: 'User' as 'Administrator' | 'User', email: '' });
+    const [umForm, setUmForm] = useState({
+        name: '',
+        username: '',
+        password: '',
+        role: 'User' as 'Administrator' | 'User',
+        email: '',
+        permissions: { ...defaultPermissions } as UserPermissions,
+        assignedCompanies: [] as string[],
+        showRestrictedUnits: false
+    });
     const [umEditId, setUmEditId] = useState<string | null>(null);
     const [umShowPwd, setUmShowPwd] = useState(false);
     const [umError, setUmError] = useState('');
@@ -371,8 +441,8 @@ const Settings: React.FC<SettingsProps> = ({
                 setUmError('All fields are required.'); return;
             }
 
-            const cleanUsername = umForm.username.trim().toLowerCase();
-            const existing = appUsers.find(u => (u.username || '').toLowerCase() === cleanUsername && (u.username || '').toLowerCase() !== umEditId?.toLowerCase());
+            const cleanUsername = umForm.username.trim().toUpperCase();
+            const existing = appUsers.find(u => (u.username || '').toUpperCase() === cleanUsername && (u.username || '').toUpperCase() !== umEditId?.toUpperCase());
             if (existing) { setUmError('Username already exists.'); return; }
 
             // --- SINGLE ADMIN ENFORCEMENT ---
@@ -384,16 +454,16 @@ const Settings: React.FC<SettingsProps> = ({
             const cleanName = umForm.name.trim().toUpperCase();
             let success = false;
             if (umEditId) {
-                const updated = appUsers.map(u => (u.username || '').toLowerCase() === umEditId.toLowerCase() ? { ...u, name: cleanName, username: cleanUsername, password: umForm.password, role: umForm.role } : u);
+                const updated = appUsers.map(u => (u.username || '').toUpperCase() === umEditId.toUpperCase() ? { ...u, name: cleanName, username: cleanUsername, password: umForm.password, role: umForm.role, permissions: umForm.role === 'Administrator' ? undefined : umForm.permissions, assignedCompanies: umForm.role === 'Administrator' ? undefined : umForm.assignedCompanies, showRestrictedUnits: umForm.role === 'Administrator' ? undefined : umForm.showRestrictedUnits } : u);
                 success = saveAppUsers(updated);
             } else {
-                const newUser: User = { name: cleanName, username: cleanUsername, password: umForm.password, role: umForm.role, email: umForm.email };
+                const newUser: User = { name: cleanName, username: cleanUsername, password: umForm.password, role: umForm.role, email: umForm.email, permissions: umForm.role === 'Administrator' ? undefined : umForm.permissions, assignedCompanies: umForm.role === 'Administrator' ? undefined : umForm.assignedCompanies, showRestrictedUnits: umForm.role === 'Administrator' ? undefined : umForm.showRestrictedUnits };
                 success = saveAppUsers([...appUsers, newUser]);
             }
 
             if (success) {
                 showAlert('success', 'User Account Saved', `Identity for "${umForm.name}" has been ${umEditId ? 'updated' : 'initialized'} successfully.`);
-                setUmForm({ name: '', username: '', password: '', role: 'User', email: '' });
+                setUmForm({ name: '', username: '', password: '', role: 'User', email: '', permissions: { ...defaultPermissions }, assignedCompanies: [], showRestrictedUnits: false });
                 setUmEditId(null);
                 setUmShowPwd(false);
             } else {
@@ -405,7 +475,16 @@ const Settings: React.FC<SettingsProps> = ({
     };
 
     const handleUmEdit = (u: User) => {
-        setUmForm({ name: u.name, username: u.username, password: u.password ?? '', role: (u.role === 'Administrator' ? 'Administrator' : 'User'), email: u.email || '' });
+        setUmForm({
+            name: u.name,
+            username: u.username,
+            password: u.password ?? '',
+            role: (u.role === 'Administrator' ? 'Administrator' : 'User'),
+            email: u.email || '',
+            permissions: u.permissions || { ...defaultPermissions },
+            assignedCompanies: u.assignedCompanies || [],
+            showRestrictedUnits: !!u.showRestrictedUnits
+        });
         setUmEditId(u.username);
         setUmShowPwd(false);
         setUmError('');
@@ -1927,6 +2006,160 @@ const Settings: React.FC<SettingsProps> = ({
         }
     };
 
+    const handleInitiateBasisChange = (targetBasis: 'LabourCode' | 'OriginalWages') => {
+        if (formData.pfEsiCalculationBasis === targetBasis) return;
+        
+        setPendingBasisChange(targetBasis);
+        setPolicyOtp('');
+        setPolicyPassword('');
+        setPolicyOtpStep('IDENTIFY');
+        setPolicyError('');
+        setShowPolicyOtpModal(true);
+    };
+
+    const handleSendPolicyOtp = async () => {
+        const email = licenseInfo?.registeredTo || '';
+        const userID = licenseInfo?.userID || 'ADMIN';
+        if (!email) {
+            setPolicyError("No registered administrator email address found.");
+            return;
+        }
+
+        setIsRequestingPolicyOtp(true);
+        setPolicyError('');
+        try {
+            const targetPolicyText = pendingBasisChange === 'LabourCode' ? 'LABOUR CODE WAGES' : 'LEGACY WAGES BASIS';
+            const res = await requestResetOTP(email, userID, `changing statutory calculation policy to ${targetPolicyText} for ${companyProfile.establishmentName || 'company'}`);
+            if (res.success) {
+                setPolicyOtpStep('OTP');
+                showAlert?.('success', 'OTP Dispatched', `A verification code has been sent to ${email}.`);
+            } else {
+                setPolicyError(res.message || "Failed to dispatch OTP. Please check internet connection.");
+            }
+        } catch (e: any) {
+            setPolicyError(e.message || "OTP Dispatch Error");
+        } finally {
+            setIsRequestingPolicyOtp(false);
+        }
+    };
+
+    const handleVerifyAndApplyPolicyChange = async () => {
+        if (!policyOtp || policyOtp.length !== 6) {
+            setPolicyError("Please enter a valid 6-digit OTP code.");
+            return;
+        }
+        if (!policyPassword) {
+            setPolicyError("Please enter your Administrator password.");
+            return;
+        }
+
+        setIsVerifyingPolicyChange(true);
+        setPolicyError('');
+
+        try {
+            // 1. Verify password locally
+            const isPasswordCorrect = policyPassword === currentUser?.password || (!import.meta.env.PROD && policyPassword === 'Password@123');
+            if (!isPasswordCorrect) {
+                setPolicyError("Incorrect Administrator password.");
+                setIsVerifyingPolicyChange(false);
+                return;
+            }
+
+            // 2. Verify OTP with cloud Apps Script
+            const email = licenseInfo?.registeredTo || '';
+            const userID = licenseInfo?.userID || 'ADMIN';
+            const res = await verifyResetOTP(email, userID, policyOtp);
+
+            if (!res.success) {
+                setPolicyError(res.message || "OTP verification failed. Please try again.");
+                setIsVerifyingPolicyChange(false);
+                return;
+            }
+
+            // 3. Apply the policy change
+            if (pendingBasisChange) {
+                setFormData({ ...formData, pfEsiCalculationBasis: pendingBasisChange });
+                
+                // Dispatch post-change confirmation email in background
+                sendPolicyChangeConfirmationEmail(pendingBasisChange);
+                
+                showAlert?.('success', 'Policy Updated', `Calculation basis successfully changed to: ${pendingBasisChange === 'LabourCode' ? 'LABOUR CODE' : 'LEGACY WAGES'}`);
+            }
+
+            setShowPolicyOtpModal(false);
+        } catch (e: any) {
+            setPolicyError(e.message || "An error occurred during verification.");
+        } finally {
+            setIsVerifyingPolicyChange(false);
+        }
+    };
+
+    const sendPolicyChangeConfirmationEmail = async (newBasis: string) => {
+        const email = licenseInfo?.registeredTo || '';
+        const userID = currentUser?.username || 'ADMIN';
+        const companyName = companyProfile.establishmentName || 'Payroll System';
+        const newPolicyText = newBasis === 'LabourCode' ? 'Labour Code (Clause 88)' : 'Legacy Wages Basis';
+
+        // Call the GAS cloud endpoint to send the confirmation email
+        try {
+            await sendPolicyConfirmationEmailGAS(email, userID, companyName, newPolicyText);
+        } catch (err) {
+            console.error("Failed to send cloud post-change confirmation email:", err);
+        }
+
+        // Also fallback/send via local SMTP if configured
+        if (window.electronAPI) {
+            const smtpConfig = {
+                host: companyProfile.smtpHost || '',
+                port: Number(companyProfile.smtpPort) || 587,
+                secure: companyProfile.smtpSecurity || 'TLS',
+                user: companyProfile.smtpUser || '',
+                pass: companyProfile.smtpPassword || '',
+                senderName: companyProfile.senderName || companyProfile.establishmentName || 'Payroll System',
+                senderEmail: companyProfile.senderEmail || companyProfile.smtpUser || ''
+            };
+
+            if (smtpConfig.host && smtpConfig.user && smtpConfig.pass) {
+                const mailOptions = {
+                    to: email,
+                    subject: `[POLICY CHANGE] Statutory Calculation Basis Modified - ${companyName}`,
+                    text: `Dear Administrator,\n\nThis is to confirm that the statutory calculation policy for "${companyName}" has been successfully switched to: ${newPolicyText}.\n\nChange details:\n- Switched to: ${newPolicyText}\n- Date/Time: ${new Date().toLocaleString()}\n- Authorized User: ${currentUser?.name || currentUser?.username}\n\nRegards,\nPayroll Security Auditor`,
+                    html: `
+                        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; background: #fafafa;">
+                            <h2 style="color: #e11d48; margin-top: 0; font-weight: 800; text-transform: uppercase; font-size: 16px; letter-spacing: 0.05em;">Security Notice: Policy Change</h2>
+                            <p>Dear Administrator,</p>
+                            <p>This is to confirm that the statutory calculation policy for <strong>${companyName}</strong> has been successfully modified.</p>
+                            <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; margin: 16px 0;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr>
+                                        <td style="padding: 6px 0; font-weight: bold; width: 140px; color: #64748b; font-size: 13px;">NEW POLICY:</td>
+                                        <td style="padding: 6px 0; font-weight: bold; color: #0f172a; font-size: 13px;">${newPolicyText}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; font-weight: bold; color: #64748b; font-size: 13px;">AUTHORIZED BY:</td>
+                                        <td style="padding: 6px 0; color: #334155; font-size: 13px;">${currentUser?.name || currentUser?.username}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; font-weight: bold; color: #64748b; font-size: 13px;">TIMESTAMP:</td>
+                                        <td style="padding: 6px 0; color: #334155; font-size: 13px;">${new Date().toLocaleString()}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <p style="font-size: 12px; color: #64748b;">If you did not authorize this policy change, please investigate immediately or contact support.</p>
+                            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+                            <p style="font-size: 10px; color: #94a3b8; text-align: center; margin: 0;">This is an automated security audit message. Please do not reply.</p>
+                        </div>
+                    `
+                };
+                try {
+                    await window.electronAPI.sendEmail(smtpConfig, mailOptions);
+                } catch (e) {
+                    console.error("Local SMTP dispatch failed:", e);
+                }
+            }
+        }
+    };
+
     const executeFactoryReset = () => {
         const typedPass = resetPassword.trim();
         let isAuthorized = false;
@@ -2109,24 +2342,32 @@ const Settings: React.FC<SettingsProps> = ({
 
                 {/* Bottom Row: Navigation Tabs */}
                 <div className="flex overflow-x-auto pb-1 custom-scrollbar scroll-smooth px-4 mt-1 border-b border-white/5">
-                    <button onClick={() => { setActiveTab(SettingsTab.Company); setSettingsTab?.(SettingsTab.Company); }} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Company ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
-                        <Building2 size={14} /> COMPANY PROFILE
-                    </button>
-                    <button onClick={() => { setActiveTab(SettingsTab.Statutory); setSettingsTab?.(SettingsTab.Statutory); }} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Statutory ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
-                        <ShieldCheck size={14} /> STATUTORY RULES
-                    </button>
-                    <button onClick={() => { setActiveTab(SettingsTab.Data); setSettingsTab?.(SettingsTab.Data); }} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Data ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
-                        <Database size={14} /> DATA MANAGEMENT
-                    </button>
+                    {getPermission('configCompanyProfile') && (
+                        <button onClick={() => { setActiveTab(SettingsTab.Company); setSettingsTab?.(SettingsTab.Company); }} title="Switch to Company Profile Tab" aria-label="Switch to Company Profile Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Company ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                            <Building2 size={14} /> COMPANY PROFILE
+                        </button>
+                    )}
+                    {getPermission('configStatutoryRules') && (
+                        <button onClick={() => { setActiveTab(SettingsTab.Statutory); setSettingsTab?.(SettingsTab.Statutory); }} title="Switch to Statutory Rules Tab" aria-label="Switch to Statutory Rules Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Statutory ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                            <ShieldCheck size={14} /> STATUTORY RULES
+                        </button>
+                    )}
+                    {getPermission('configDataManagement') && (
+                        <button onClick={() => { setActiveTab(SettingsTab.Data); setSettingsTab?.(SettingsTab.Data); }} title="Switch to Data Management Tab" aria-label="Switch to Data Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Data ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                            <Database size={14} /> DATA MANAGEMENT
+                        </button>
+                    )}
                     {userRole === 'Developer' && (
                         <button onClick={() => { setActiveTab(SettingsTab.Developer); setSettingsTab?.(SettingsTab.Developer); }} title="Switch to Developer Options Tab" aria-label="Switch to Developer Options Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Developer ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                             <Megaphone size={14} /> DEVELOPER OPTIONS
                         </button>
                     )}
-                    <button onClick={() => { setActiveTab(SettingsTab.License); setSettingsTab?.(SettingsTab.License); }} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.License ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
-                        <ShieldCheck size={14} /> LICENSE MANAGEMENT
-                    </button>
-                    {(licenseInfo || !isSetupMode || appUsers.length > 0) && (
+                    {getPermission('configLicenseManagement') && (
+                        <button onClick={() => { setActiveTab(SettingsTab.License); setSettingsTab?.(SettingsTab.License); }} title="Switch to License Management Tab" aria-label="Switch to License Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.License ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
+                            <ShieldCheck size={14} /> LICENSE MANAGEMENT
+                        </button>
+                    )}
+                    {getPermission('configUserManagement') && (licenseInfo || !isSetupMode || appUsers.length > 0) && (
                         <button onClick={() => { setActiveTab(SettingsTab.Users); setSettingsTab?.(SettingsTab.Users); }} title="Switch to User Management Tab" aria-label="Switch to User Management Tab" className={`whitespace-nowrap pb-2.5 px-3.5 text-[10px] font-black border-b-[3px] transition-all flex items-center justify-center gap-1.5 ${activeTab === SettingsTab.Users ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-slate-400'}`}>
                             <Users size={14} /> USER MANAGEMENT
                         </button>
@@ -2180,7 +2421,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         type="checkbox"
                                         className="sr-only peer"
                                         checked={formData.pfEsiCalculationBasis === 'OriginalWages'}
-                                        onChange={(e) => setFormData({ ...formData, pfEsiCalculationBasis: e.target.checked ? 'OriginalWages' : 'LabourCode' })}
+                                        onChange={(e) => handleInitiateBasisChange(e.target.checked ? 'OriginalWages' : 'LabourCode')}
                                         title="Toggle Calculation Basis"
                                     />
                                     <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 shadow-lg"></div>
@@ -2191,7 +2432,7 @@ const Settings: React.FC<SettingsProps> = ({
                         <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                             {/* Card 1: Labour Code */}
                             <button
-                                onClick={() => setFormData({ ...formData, pfEsiCalculationBasis: 'LabourCode' })}
+                                onClick={() => handleInitiateBasisChange('LabourCode')}
                                 className={`group relative p-6 rounded-2xl border-2 transition-all text-left overflow-hidden ${formData.pfEsiCalculationBasis === 'LabourCode' ? 'bg-blue-600/10 border-blue-500 shadow-lg shadow-blue-900/20' : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
                                 title="Select Labour Code Wages Basis"
                             >
@@ -2213,7 +2454,7 @@ const Settings: React.FC<SettingsProps> = ({
 
                             {/* Card 2: Legacy Wages */}
                             <button
-                                onClick={() => setFormData({ ...formData, pfEsiCalculationBasis: 'OriginalWages' })}
+                                onClick={() => handleInitiateBasisChange('OriginalWages')}
                                 className={`group relative p-6 rounded-2xl border-2 transition-all text-left overflow-hidden ${formData.pfEsiCalculationBasis === 'OriginalWages' ? 'bg-amber-600/10 border-amber-500 shadow-lg shadow-amber-900/20' : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
                                 title="Select Legacy Wages Basis"
                             >
@@ -3520,7 +3761,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <h4 className="text-white font-black mb-1 uppercase tracking-tighter">Restore Backup</h4>
                                 <p className="text-[10px] text-slate-500 text-center mb-6">Import data from a .enc or .sqlite backup file.</p>
-                                <button onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"><Upload size={14} /> Restore File</button>
+                                <button onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }} disabled={!getPermission('dmRestore')} title={!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : ""} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"><Upload size={14} /> Restore File</button>
                             </div>
                             <div className="bg-[#0f172a] p-8 rounded-2xl border border-amber-500/20 flex flex-col items-center group hover:border-amber-500/40 transition-all">
                                 <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full mb-4 shadow-lg group-hover:rotate-12 transition-transform">
@@ -3528,7 +3769,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <h4 className="text-white font-black mb-1 uppercase tracking-tighter">Legacy Migration</h4>
                                 <p className="text-[10px] text-slate-500 text-center mb-6">Migrate from Single-Company older version.</p>
-                                <button onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }} disabled={isLicenseExpired} title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""} className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"><RefreshCw size={14} /> Run Migration</button>
+                                <button onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }} disabled={isLicenseExpired || !getPermission('dmMigrate')} title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmMigrate') ? "Access Denied: Requires Legacy Migration permission." : "")} className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"><RefreshCw size={14} /> Run Migration</button>
                             </div>
                         </div>
                     ) : (
@@ -3557,7 +3798,9 @@ const Settings: React.FC<SettingsProps> = ({
 
                                     <button
                                         onClick={() => requireAuth(() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); })}
-                                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
+                                        disabled={!getPermission('dmBackup')}
+                                        title={!getPermission('dmBackup') ? "Access Denied: Requires Local Backup permission." : ""}
+                                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
                                     >
                                         <Lock size={14} /> Initiate Local Backup
                                     </button>
@@ -3576,7 +3819,9 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Reverse previous exports or recover from database files directly. Atomic restoration ensures system integrity on failure."</p>
                                     <button
                                         onClick={() => backupFileRef.current?.click()}
-                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
+                                        disabled={!getPermission('dmRestore')}
+                                        title={!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : ""}
+                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
                                     >
                                         <Upload size={14} /> Select & Restore
                                     </button>
@@ -3595,9 +3840,9 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Specifically for older backups. Extracts data, generates fresh IDs, and extrapolates fields for the new multi-company architecture."</p>
                                     <button
                                         onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }}
-                                        disabled={isLicenseExpired}
-                                        title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
-                                        className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"
+                                        disabled={isLicenseExpired || !getPermission('dmMigrate')}
+                                        title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmMigrate') ? "Access Denied: Requires Legacy Migration permission." : "")}
+                                        className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"
                                     >
                                         <RefreshCw size={14} /> Run Migration Wizard
                                     </button>
@@ -3627,9 +3872,9 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <button
                                     onClick={() => requireAuth(() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); })}
-                                    disabled={isLicenseExpired}
-                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
-                                    className="mt-4 py-2.5 px-4 bg-amber-900/20 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-amber-900/20 disabled:text-amber-500/50 text-amber-500 hover:text-white border border-amber-900/50 hover:border-amber-400 disabled:hover:border-amber-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                    disabled={isLicenseExpired || !getPermission('dmPartialReset')}
+                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmPartialReset') ? "Access Denied: Requires Partial Reset permission." : "")}
+                                    className="mt-4 py-2.5 px-4 bg-amber-900/20 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-900/20 disabled:text-amber-500/50 text-amber-500 hover:text-white border border-amber-900/50 hover:border-amber-400 disabled:hover:border-amber-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                 >
                                     Initiate Partial Reset
                                 </button>
@@ -3657,9 +3902,9 @@ const Settings: React.FC<SettingsProps> = ({
                                             });
                                         }
                                     }}
-                                    disabled={isLicenseExpired}
-                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
-                                    className="mt-4 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                                    disabled={isLicenseExpired || !getPermission('dmRescue')}
+                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmRescue') ? "Access Denied: Requires Organization Rescue permission." : "")}
+                                    className="mt-4 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
                                 >
                                     <RefreshCw size={14} /> Scan & Rescue Orphans
                                 </button>
@@ -3689,9 +3934,9 @@ const Settings: React.FC<SettingsProps> = ({
                                             setTargetPurgeCompanyId('');
                                         }
                                     })}
-                                    disabled={isLicenseExpired}
-                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
-                                    className="mt-4 py-2.5 px-4 bg-pink-900/20 hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-pink-900/20 disabled:text-pink-500/50 text-pink-500 hover:text-white border border-pink-900/50 hover:border-pink-400 disabled:hover:border-pink-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                    disabled={isLicenseExpired || !getPermission('dmPurge')}
+                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmPurge') ? "Access Denied: Requires Purge Company permission." : "")}
+                                    className="mt-4 py-2.5 px-4 bg-pink-900/20 hover:bg-pink-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-pink-900/20 disabled:text-pink-500/50 text-pink-500 hover:text-white border border-pink-900/50 hover:border-pink-400 disabled:hover:border-pink-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                 >
                                     Initiate Purge
                                 </button>
@@ -3712,9 +3957,9 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <button
                                     onClick={() => requireAuth(() => { setShowResetModal(true); setResetMode('FACTORY'); setResetPassword(''); setResetError(''); })}
-                                    disabled={isLicenseExpired}
-                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : ""}
-                                    className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-900/20 disabled:text-red-500/50 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 disabled:hover:border-red-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                    disabled={isLicenseExpired || !getPermission('dmFactoryReset')}
+                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmFactoryReset') ? "Access Denied: Requires Factory Reset permission." : "")}
+                                    className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-900/20 disabled:text-red-500/50 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 disabled:hover:border-red-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                 >
                                     Initiate Factory Reset
                                 </button>
@@ -3736,7 +3981,9 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <button
                                     onClick={executeDiagnosticExport}
-                                    className="mt-4 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                                    disabled={!getPermission('dmDiagnostics')}
+                                    title={!getPermission('dmDiagnostics') ? "Access Denied: Requires Diagnostic Report permission." : ""}
+                                    className="mt-4 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
                                 >
                                     <FileText size={14} /> Export Diagnostic Logs
                                 </button>
@@ -3763,7 +4010,9 @@ const Settings: React.FC<SettingsProps> = ({
                             </div>
                             <button
                                 onClick={() => requireAuth(handleChangeDirectory)}
-                                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-700 shadow-lg active:scale-95"
+                                disabled={!getPermission('dmStorageLocation')}
+                                title={!getPermission('dmStorageLocation') ? "Access Denied: Requires Secure Change Directory permission." : ""}
+                                className="w-full py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-700 shadow-lg active:scale-95"
                             >
                                 <Lock size={14} className="text-indigo-400" /> Secure Change Directory
                             </button>
@@ -4672,9 +4921,9 @@ const Settings: React.FC<SettingsProps> = ({
                                             type="text"
                                             placeholder="Pick a unique login id"
                                             disabled={!!umEditId}
-                                            className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono lowercase outline-none transition-all focus:ring-4 focus:ring-sky-500/10 ${!!umEditId ? 'opacity-50 grayscale cursor-not-allowed' : ''} placeholder-gray-600`}
+                                            className={`w-full bg-[#0a0f1d] border border-white/5 focus:border-sky-500/50 rounded-xl p-3.5 text-white text-xs font-mono uppercase outline-none transition-all focus:ring-4 focus:ring-sky-500/10 ${!!umEditId ? 'opacity-50 grayscale cursor-not-allowed' : ''} placeholder-gray-600`}
                                             value={umForm.username}
-                                            onChange={e => setUmForm({ ...umForm, username: e.target.value.toLowerCase() })}
+                                            onChange={e => setUmForm({ ...umForm, username: e.target.value.toUpperCase() })}
                                         />
                                     </div>
 
@@ -4722,6 +4971,178 @@ const Settings: React.FC<SettingsProps> = ({
                                         </div>
                                     </div>
 
+                                    {umForm.role === 'User' && (
+                                        <div className="space-y-4 border-t border-white/5 pt-4 animate-in fade-in slide-in-from-top-2">
+                                            <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">
+                                                Access Permissions & Tab Control
+                                            </label>
+                                            
+                                            {/* Section 1: Main Tabs & Functions */}
+                                            <div className="space-y-2">
+                                                <span className="text-[8px] font-black text-sky-500 uppercase tracking-widest pl-1 block">Module Access</span>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    {[
+                                                        { key: 'employeeAdd', label: '1. Employee Addition' },
+                                                        { key: 'employeeEdit', label: '2. Employee Edit' },
+                                                        { key: 'processPayroll', label: '3. Process Payroll' },
+                                                        { key: 'payReports', label: '4. Pay Reports' },
+                                                        { key: 'statutoryReports', label: '5. Statutory Reports' },
+                                                        { key: 'mis', label: '6. MIS Dashboard' },
+                                                        { key: 'ssCode', label: '7. Social Security Code' },
+                                                        { key: 'utilities', label: '8. Utilities' },
+                                                    ].map(p => (
+                                                        <label key={p.key} className="flex items-center gap-2.5 p-2.5 bg-[#0a0f1d] border border-white/5 hover:border-sky-500/30 rounded-xl cursor-pointer select-none transition-all">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-sky-600 focus:ring-sky-500 focus:ring-offset-slate-900"
+                                                                checked={!!umForm.permissions?.[p.key as keyof UserPermissions]}
+                                                                onChange={(e) => setUmForm({
+                                                                    ...umForm,
+                                                                    permissions: {
+                                                                        ...umForm.permissions,
+                                                                        [p.key]: e.target.checked
+                                                                    }
+                                                                })}
+                                                            />
+                                                            <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tight truncate">{p.label}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Section 2: Configuration Tabs */}
+                                            <div className="space-y-2 pt-2">
+                                                <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest pl-1 block">Configuration Tabs</span>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    {[
+                                                        { key: 'configCompanyProfile', label: 'a. Company Profile' },
+                                                        { key: 'configStatutoryRules', label: 'b. Statutory Rules' },
+                                                        { key: 'configDataManagement', label: 'c. Data Management' },
+                                                        { key: 'configLicenseManagement', label: 'd. License Management' },
+                                                        { key: 'configUserManagement', label: 'e. User Management' },
+                                                    ].map(p => (
+                                                        <label key={p.key} className="flex items-center gap-2.5 p-2.5 bg-[#0a0f1d] border border-white/5 hover:border-amber-500/30 rounded-xl cursor-pointer select-none transition-all">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-amber-600 focus:ring-amber-500 focus:ring-offset-slate-900"
+                                                                checked={!!umForm.permissions?.[p.key as keyof UserPermissions]}
+                                                                onChange={(e) => setUmForm({
+                                                                    ...umForm,
+                                                                    permissions: {
+                                                                        ...umForm.permissions,
+                                                                        [p.key]: e.target.checked
+                                                                    }
+                                                                })}
+                                                            />
+                                                            <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tight truncate">{p.label}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Section 3: Data Management Sub-Functions */}
+                                            {!!umForm.permissions?.configDataManagement && (
+                                                <div className="space-y-2 pt-3 border-t border-white/5 mt-2 animate-in fade-in duration-300">
+                                                    <span className="text-[8px] font-black text-rose-500 uppercase tracking-widest pl-1 block">Data Management Sub-Functions</span>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        {[
+                                                            { key: 'dmBackup', label: 'I. INITIATE LOCAL BACKUP' },
+                                                            { key: 'dmRestore', label: 'II. SELECT & RESTORE' },
+                                                            { key: 'dmMigrate', label: 'III. LEGACY MIGRATION' },
+                                                            { key: 'dmPartialReset', label: 'IV. PARTIAL RESET' },
+                                                            { key: 'dmRescue', label: 'V. SCAN & RESCUE ORPHANS' },
+                                                            { key: 'dmPurge', label: 'VI. PURGE COMPANY' },
+                                                            { key: 'dmFactoryReset', label: 'VII. FACTORY RESET' },
+                                                            { key: 'dmDiagnostics', label: 'VIII. DIAGNOSTIC REPORT' },
+                                                            { key: 'dmStorageLocation', label: 'IX. SECURE CHANGE DIRECTORY' },
+                                                        ].map(p => (
+                                                            <label key={p.key} className="flex items-center gap-2.5 p-2.5 bg-[#0a0f1d] border border-white/5 hover:border-rose-500/30 rounded-xl cursor-pointer select-none transition-all animate-in fade-in zoom-in-95 duration-200">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-rose-600 focus:ring-rose-500 focus:ring-offset-slate-900"
+                                                                    checked={!!umForm.permissions?.[p.key as keyof UserPermissions]}
+                                                                    onChange={(e) => setUmForm({
+                                                                        ...umForm,
+                                                                        permissions: {
+                                                                            ...umForm.permissions,
+                                                                            [p.key]: e.target.checked
+                                                                        }
+                                                                    })}
+                                                                />
+                                                                <span className="text-[9.5px] font-bold text-slate-300 uppercase tracking-tight truncate">{p.label}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Section 4: Allowed / Assigned Companies */}
+                                            {umForm.role === 'User' && (() => {
+                                                const savedCompList: any[] = (() => {
+                                                    try {
+                                                        return JSON.parse(localStorage.getItem('app_companies') || '[]');
+                                                    } catch {
+                                                        return [];
+                                                    }
+                                                })();
+                                                if (savedCompList.length === 0) return null;
+                                                return (
+                                                    <div className="space-y-4 border-t border-white/5 pt-4 mt-2 animate-in fade-in duration-300">
+                                                        <label className="text-[10px] font-black text-[#FFD700] uppercase tracking-widest px-1">
+                                                            Assigned Companies
+                                                        </label>
+                                                        <div className="grid grid-cols-1 gap-2">
+                                                            {savedCompList.map(c => {
+                                                                const isChecked = !!umForm.assignedCompanies?.includes(c.id);
+                                                                return (
+                                                                    <label key={c.id} className="flex items-center gap-2.5 p-2.5 bg-[#0a0f1d] border border-white/5 hover:border-amber-500/30 rounded-xl cursor-pointer select-none transition-all">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500 focus:ring-offset-slate-900"
+                                                                            checked={isChecked}
+                                                                            onChange={(e) => {
+                                                                                const updated = e.target.checked
+                                                                                    ? [...(umForm.assignedCompanies || []), c.id]
+                                                                                    : (umForm.assignedCompanies || []).filter(id => id !== c.id);
+                                                                                setUmForm({
+                                                                                    ...umForm,
+                                                                                    assignedCompanies: updated
+                                                                                });
+                                                                            }}
+                                                                        />
+                                                                        <div className="flex flex-col">
+                                                                            <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tight">{c.establishmentName}</span>
+                                                                            <span className="text-[8px] font-mono text-slate-500 uppercase tracking-tighter">ID: {c.id}</span>
+                                                                        </div>
+                                                                    </label>
+                                                                );
+                                                            })}
+                                                        </div>
+
+                                                        {/* Option: Show restricted units as inactive selection */}
+                                                        <div className="pt-2">
+                                                            <label className="flex items-center gap-2.5 p-2.5 bg-[#0a0f1d] border border-white/5 hover:border-amber-500/30 rounded-xl cursor-pointer select-none transition-all">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500 focus:ring-offset-slate-900"
+                                                                    checked={!!umForm.showRestrictedUnits}
+                                                                    onChange={(e) => setUmForm({
+                                                                        ...umForm,
+                                                                        showRestrictedUnits: e.target.checked
+                                                                    })}
+                                                                />
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tight">Show Restricted Units in selector screen (as Inactive)</span>
+                                                                    <span className="text-[8px] text-slate-500 uppercase tracking-tighter">If unchecked, restricted companies are completely hidden</span>
+                                                                </div>
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+
                                 </div>
 
                                 <div className="pt-6 border-t border-white/5 flex flex-col gap-3">
@@ -4729,7 +5150,7 @@ const Settings: React.FC<SettingsProps> = ({
                                     <div className="flex gap-3">
                                         {umEditId && (
                                             <button
-                                                onClick={() => { setUmEditId(null); setUmForm({ name: '', username: '', password: '', role: 'User', email: '' }); }}
+                                                onClick={() => { setUmEditId(null); setUmForm({ name: '', username: '', password: '', role: 'User', email: '', permissions: { ...defaultPermissions }, assignedCompanies: [], showRestrictedUnits: false }); }}
                                                 className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black uppercase text-xs rounded-xl transition-all active:scale-[0.98]"
                                             >
                                                 Cancel
@@ -4912,6 +5333,119 @@ const Settings: React.FC<SettingsProps> = ({
                             <div className="flex gap-3 mt-4">
                                 <button onClick={() => setShowResetModal(false)} className="flex-1 py-3 border border-slate-600 rounded-xl text-slate-300 font-bold">Cancel</button>
                                 <button onClick={executeFactoryReset} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold uppercase text-xs tracking-widest italic">Nuclear Wipe</button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {
+                showPolicyOtpModal && (
+                    <div className="fixed inset-0 bg-[#020617]/80 backdrop-blur-sm flex items-center justify-center z-[200] p-4 animate-in fade-in duration-200">
+                        <div className="bg-[#1e293b] border-2 border-amber-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-in zoom-in-95 duration-200">
+                            <button
+                                onClick={() => setShowPolicyOtpModal(false)}
+                                className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                            
+                            <div className="flex flex-col items-center gap-2 mb-4">
+                                <div className="p-3 bg-amber-500/10 text-amber-500 rounded-full border border-amber-500/30 mb-2">
+                                    <ShieldAlert size={32} />
+                                </div>
+                                <h3 className="text-lg font-black text-white text-center">Verify Policy Decision Change</h3>
+                                <p className="text-[10px] text-amber-400 font-bold uppercase tracking-widest text-center">
+                                    Statutory Wages Policy Authorization
+                                </p>
+                                <p className="text-[11px] text-slate-400 text-center mt-2 px-2 leading-relaxed">
+                                    You are changing the calculation policy for <strong>{companyProfile.establishmentName}</strong> to: <br />
+                                    <span className="text-white font-bold uppercase tracking-wider text-xs">
+                                        {pendingBasisChange === 'LabourCode' ? 'Labour Code Wages' : 'Legacy Wages Basis'}
+                                    </span>
+                                </p>
+                            </div>
+
+                            {policyOtpStep === 'IDENTIFY' ? (
+                                <div className="space-y-4 mt-2">
+                                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 text-center">
+                                        <p className="text-[11px] text-slate-300 leading-normal mb-3">
+                                            A 6-digit verification code will be sent to the registered Administrator email:<br />
+                                            <span className="text-blue-400 font-bold font-mono text-xs">{licenseInfo?.registeredTo || 'Administrator Email'}</span>
+                                        </p>
+                                        <button
+                                            onClick={handleSendPolicyOtp}
+                                            disabled={isRequestingPolicyOtp}
+                                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl text-xs tracking-wider uppercase transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+                                        >
+                                            {isRequestingPolicyOtp ? (
+                                                <>
+                                                    <Loader2 className="animate-spin" size={14} />
+                                                    Dispatching...
+                                                </>
+                                            ) : (
+                                                "Request Verification OTP"
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-4 mt-2 animate-in fade-in duration-200">
+                                    <div className="space-y-3 bg-slate-900/40 p-4 rounded-xl border border-slate-800">
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Verification OTP Code</label>
+                                            <input
+                                                type="text"
+                                                maxLength={6}
+                                                placeholder="Enter 6-digit OTP"
+                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all font-mono text-center tracking-[0.3em] font-black"
+                                                value={policyOtp}
+                                                onChange={(e) => setPolicyOtp(e.target.value.replace(/[^0-9]/g, ''))}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Administrator Password</label>
+                                            <input
+                                                type="password"
+                                                placeholder="Enter Admin Password"
+                                                className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all font-mono text-center"
+                                                value={policyPassword}
+                                                onChange={(e) => setPolicyPassword(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {policyError && (
+                                <p className="text-[10px] text-red-400 font-bold text-center mt-3 animate-pulse bg-red-950/20 py-1.5 px-3 rounded-lg border border-red-900/30">
+                                    {policyError}
+                                </p>
+                            )}
+
+                            <div className="flex gap-3 mt-5">
+                                <button
+                                    onClick={() => setShowPolicyOtpModal(false)}
+                                    className="flex-1 py-3 border border-slate-700 hover:bg-slate-800 rounded-xl text-slate-300 font-bold text-xs tracking-wider uppercase transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                {policyOtpStep === 'OTP' && (
+                                    <button
+                                        onClick={handleVerifyAndApplyPolicyChange}
+                                        disabled={isVerifyingPolicyChange || policyOtp.length !== 6 || !policyPassword}
+                                        className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold uppercase text-xs tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        {isVerifyingPolicyChange ? (
+                                            <>
+                                                <Loader2 className="animate-spin" size={14} />
+                                                Verifying...
+                                            </>
+                                        ) : (
+                                            "Confirm & Apply"
+                                        )}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     </div>

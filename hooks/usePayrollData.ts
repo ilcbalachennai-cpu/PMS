@@ -233,6 +233,7 @@ export const usePayrollData = (showAlert: any) => {
     }, 5000); // 5s absolute limit
 
     const performSync = async () => {
+      let loadedProfile: any = null;
       try {
         setIsHydrating(true);
         console.log(`[usePayrollData] Notifying backend of company switch: ${activeCompanyId}`);
@@ -665,7 +666,9 @@ export const usePayrollData = (showAlert: any) => {
                   const parsed = JSON.parse(value);
                   if (fKey === 'app_employees') setEmployees(parsed);
                   if (fKey === 'app_config') setConfig(parsed);
-                  if (fKey === 'app_company_profile') setCompanyProfile(parsed);
+                  if (fKey === 'app_company_profile') {
+                    loadedProfile = parsed;
+                  }
                   if (fKey === 'app_attendance') setAttendances(parsed);
                   if (fKey === 'app_payroll_history') setPayrollHistory(parsed);
                   if (fKey === 'app_leave_ledgers') setLeaveLedgers(parsed);
@@ -682,10 +685,69 @@ export const usePayrollData = (showAlert: any) => {
 
             // V03.01.07: Fallback for company profile and config if not found in DB
             // This prevents a new company from inheriting data from the previous company state.
-            if (!siloData['app_company_profile']) {
+            if (!loadedProfile) {
               const currentComp = companies.find(c => c.id === activeCompanyId);
-              setCompanyProfile(currentComp || INITIAL_COMPANY_PROFILE);
+              loadedProfile = currentComp ? { ...currentComp } : { ...INITIAL_COMPANY_PROFILE };
             }
+            
+            // Signature / Rescue Merging
+            const foundRegistry = companies.find(c => c.id === activeCompanyId);
+            if (foundRegistry) {
+              if (foundRegistry.companySignature && !loadedProfile.companySignature) {
+                loadedProfile.companySignature = foundRegistry.companySignature;
+              }
+            }
+
+            // Asynchronously resolve read-only state using license & activated silos
+            const license = getStoredLicense();
+            const cloudSigs = license?.cloudSignatures || [];
+            const sig = loadedProfile.companySignature;
+
+            if (sig && window.electronAPI?.registerActivatedSilo) {
+              try {
+                await window.electronAPI.registerActivatedSilo(sig);
+              } catch (e) {}
+            }
+
+            let activeSilos: string[] = [];
+            if (window.electronAPI?.getActivatedSilos) {
+              try {
+                const res = await window.electronAPI.getActivatedSilos();
+                if (res?.success && Array.isArray(res.silos)) {
+                  activeSilos = res.silos;
+                }
+              } catch (e) {}
+            }
+
+            const isDev = license?.userID?.toUpperCase() === 'VRANGA';
+            let shouldBeReadOnly = isDev ? false : true;
+            if (!isDev && sig) {
+              if (Array.isArray(cloudSigs) && cloudSigs.length > 0) {
+                shouldBeReadOnly = !cloudSigs.includes(sig);
+              } else {
+                shouldBeReadOnly = !activeSilos.includes(sig);
+              }
+            }
+
+            loadedProfile.isReadOnly = shouldBeReadOnly;
+
+            // Batch updates to avoid React race conditions/loops
+            setCompanyProfile(loadedProfile);
+
+            setCompanies(prev => {
+              const idx = prev.findIndex(c => c.id === activeCompanyId);
+              if (idx !== -1) {
+                const updated = [...prev];
+                updated[idx] = { ...updated[idx], ...loadedProfile, isReadOnly: shouldBeReadOnly };
+                localStorage.setItem('app_companies', JSON.stringify(updated));
+                if (window.electronAPI?.dbSetGlobal) {
+                  window.electronAPI.dbSetGlobal('app_companies', updated).catch(() => {});
+                }
+                return updated;
+              }
+              return prev;
+            });
+
             if (!siloData['app_config']) {
               setConfig(INITIAL_STATUTORY_CONFIG);
             }
@@ -729,6 +791,27 @@ export const usePayrollData = (showAlert: any) => {
     }
   }, [companyProfile, activeCompanyId]);
 
+  // Sync active company profile's read-only state with the registry
+  useEffect(() => {
+    const found = companies.find(c => c.id === activeCompanyId);
+    if (found && companyProfile.id === activeCompanyId) {
+      if (companyProfile.isReadOnly !== found.isReadOnly) {
+        setCompanyProfile(prev => {
+          if (prev.isReadOnly !== found.isReadOnly) {
+             const updated = { ...prev, isReadOnly: found.isReadOnly };
+             // Scoped persistence
+             localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(updated));
+             if (window.electronAPI?.dbSet) {
+                window.electronAPI.dbSet(getCKey('app_company_profile'), updated).catch(() => {});
+             }
+             return updated;
+          }
+          return prev;
+        });
+      }
+    }
+  }, [companies, activeCompanyId, companyProfile.id, companyProfile.isReadOnly, getCKey]);
+
   // V04.03.02: JIT Hydration for app_companies in LocalStorage on startup
   useEffect(() => {
     if (window.electronAPI?.dbGetGlobal) {
@@ -737,8 +820,34 @@ export const usePayrollData = (showAlert: any) => {
           try {
             const parsed = typeof res === 'string' ? JSON.parse(res) : res;
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setCompanies(parsed);
-              localStorage.setItem('app_companies', JSON.stringify(parsed));
+              const license = getStoredLicense();
+              const cloudSigs = license?.cloudSignatures || [];
+              let updated = [...parsed];
+              let modified = false;
+
+              // Full mode ONLY if signature matches cloud Column R (when cloudSigs exist). Otherwise read-only even if under limit.
+              updated = updated.map(c => {
+                let targetReadOnly = false;
+                if (!c.companySignature) {
+                  targetReadOnly = true;
+                } else if (Array.isArray(cloudSigs) && cloudSigs.length > 0) {
+                  targetReadOnly = !cloudSigs.includes(c.companySignature);
+                } else {
+                  targetReadOnly = false;
+                }
+
+                if (c.isReadOnly !== targetReadOnly) {
+                  modified = true;
+                  return { ...c, isReadOnly: targetReadOnly };
+                }
+                return c;
+              });
+
+              setCompanies(updated);
+              localStorage.setItem('app_companies', JSON.stringify(updated));
+              if (modified && window.electronAPI?.dbSetGlobal) {
+                window.electronAPI.dbSetGlobal('app_companies', updated);
+              }
               
               if (localStorage.getItem('app_is_reset_mode') === 'true') {
                  localStorage.removeItem('app_is_reset_mode');
@@ -783,6 +892,10 @@ export const usePayrollData = (showAlert: any) => {
         ? { ...storedProfile } 
         : (found ? { ...found } : { ...INITIAL_COMPANY_PROFILE });
 
+    if (found) {
+        profileToLoad.isReadOnly = !!found.isReadOnly;
+    }
+
     // V06.01.12 FIX: Rescue Integrity & Signature Merging
     let needsRegistryUpdate = false;
 
@@ -825,13 +938,38 @@ export const usePayrollData = (showAlert: any) => {
         window.electronAPI.getActivatedSilos().then((res: any) => {
             if (res?.success) {
                 const license = getStoredLicense();
-                const limit = license?.companyLimit || 1;
+                const cloudSigs = license?.cloudSignatures || [];
                 const sig = profileToLoad.companySignature;
-                const isActivated = sig ? res.silos.includes(sig) : false;
-                const shouldBeReadOnly = !isActivated && res.silos.length >= limit;
+                
+                // If profileToLoad HAS a valid company signature, ensure it is registered in sys_limit.bin
+                if (sig && !res.silos.includes(sig)) {
+                    if ((window as any).electronAPI?.registerActivatedSilo) {
+                        (window as any).electronAPI.registerActivatedSilo(sig).catch(() => {});
+                    }
+                }
+                
+                // Full mode ONLY if companySignature is present AND matches cloud Column R (when cloudSigs exist)
+                const isDev = license?.userID?.toUpperCase() === 'VRANGA';
+                let shouldBeReadOnly = isDev ? false : true;
+                if (!isDev && sig) {
+                    if (Array.isArray(cloudSigs) && cloudSigs.length > 0) {
+                        shouldBeReadOnly = !cloudSigs.includes(sig);
+                    } else {
+                        shouldBeReadOnly = !res.silos.includes(sig);
+                    }
+                }
                 
                 if (profileToLoad.isReadOnly !== shouldBeReadOnly) {
                     setCompanyProfile((prev: any) => ({ ...prev, isReadOnly: shouldBeReadOnly }));
+                    setCompanies(prev => {
+                        const updated = prev.map(c => c.id === profileToLoad.id ? { ...c, isReadOnly: shouldBeReadOnly } : c);
+                        localStorage.setItem('app_companies', JSON.stringify(updated));
+                        if (window.electronAPI?.dbSetGlobal) {
+                            // @ts-ignore
+                            window.electronAPI.dbSetGlobal('app_companies', updated);
+                        }
+                        return updated;
+                    });
                 }
             }
         });
@@ -1005,6 +1143,20 @@ export const usePayrollData = (showAlert: any) => {
     localStorage.setItem('app_companies', JSON.stringify(updated));
     if (window.electronAPI?.dbSetGlobal) {
       window.electronAPI.dbSetGlobal('app_companies', updated);
+    }
+
+    try {
+      const dismountedRaw = localStorage.getItem('app_dismounted_companies') || '[]';
+      const dismounted = JSON.parse(dismountedRaw);
+      if (!dismounted.includes(id)) {
+        dismounted.push(id);
+        localStorage.setItem('app_dismounted_companies', JSON.stringify(dismounted));
+        if (window.electronAPI?.dbSetGlobal) {
+          window.electronAPI.dbSetGlobal('app_dismounted_companies', dismounted).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to store dismounted tag:", e);
     }
 
     // V03.01.04: Physical cleanup
