@@ -7,7 +7,7 @@ import {
   ArrowRight, RefreshCw, Database,
   ChevronLeft, ChevronRight, X, Eye, EyeOff,
   ShieldAlert, CalendarX, WifiOff, Wifi, Scale, Building2, Plus, Trash2,
-  Mail, AlertTriangle
+  Mail, AlertTriangle, Sparkles
 } from 'lucide-react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
@@ -30,7 +30,7 @@ import SocialSecurityCode from './components/SocialSecurityCode';
 import { signalApplicationReady } from './components/Shared/GlobalRescueUI';
 
 import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount, requestResetOTP, verifyResetOTP } from './services/licenseService';
-import { parseExpiryDate, formatExpiryDate, generateCompanyId } from './utils/formatters';
+import { parseExpiryDate, formatExpiryDate, generateCompanyId, getCleanCompanyIdPart } from './utils/formatters';
 import { View, User, UserPermissions, Employee, PayrollResult, CompanyProfile, StatutoryConfig, SettingsTab } from './types';
 import { BRAND_CONFIG, INITIAL_COMPANY_PROFILE, DEFAULT_LEAVE_POLICY } from './constants';
 
@@ -171,12 +171,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   useEffect(() => {
     if (!currentUser || companies.length === 0) return;
     const license = getStoredLicense();
-    const isDev = license?.userID?.toUpperCase() === 'VRANGA';
-    if (isDev) return; // Exempt developer from automatic activation modal trigger
     
     const usedSlots = license?.cloudSignatures?.length || 0;
     
-    // If the license limit is > 0 but we have 0 activated slots in cloud,
+    // Condition (1): If the license limit is > 0 but we have 0 activated slots in cloud,
     // trigger modal automatically so user assigns signatures.
     if (license && (license.companyLimit ?? 0) > 0 && usedSlots === 0) {
       setShowActivationModal(true);
@@ -198,10 +196,16 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       );
       return;
     }
+
+    const estName = company.establishmentName?.trim();
+    if (!estName || estName.toLowerCase() === 'default' || estName.toLowerCase().startsWith('rescued:')) {
+      showAlert('error', 'Establishment Name Mandatory', `Cannot allot signature: Company "${company.id}" does not have a valid Establishment Name. Please open the company profile and enter the official Establishment Name first.`);
+      return;
+    }
     
     showAlert('confirm', 'Convert to Full Mode', `Convert "${company.establishmentName}" to Full Featured Mode? This will consume 1 company slot (${activeCompanies + 1}/${currentLimit}), generate a new signature, and register it online.`, async () => {
       const hash = (Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6));
-      const newIdPart = company.id.includes('-') ? company.id.split('-')[1] : company.id;
+      const newIdPart = getCleanCompanyIdPart(company.establishmentName, company.id);
       const newSig = `USIG-${(currentUser?.username || 'setup').toUpperCase()}_${newIdPart}-${hash}`;
       
       let updatedCompanies = [...companies];
@@ -250,25 +254,53 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     
     for (const cid of selectedCompanyIds) {
       const hash = (Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6));
-      const newIdPart = cid.includes('-') ? cid.split('-')[1] : cid;
       
+      let estName = '';
       const idx = updatedCompanies.findIndex(c => c.id === cid);
       if (idx !== -1) {
-        const newSig = `USIG-${(currentUser?.username || 'setup').toUpperCase()}_${newIdPart}-${hash}`;
+        estName = updatedCompanies[idx].establishmentName || '';
+      }
+
+      let profToSave: any = null;
+      if (window.electronAPI?.dbGetGlobal) {
+        try {
+           const res = await window.electronAPI.dbGetGlobal(`app_company_profile_${cid}`);
+           if (res && res.success && res.data) {
+             const prof = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+             if (prof.establishmentName) estName = prof.establishmentName;
+             profToSave = prof;
+           }
+        } catch (e) {}
+      }
+
+      if (!estName || estName.toLowerCase() === 'default' || estName.toLowerCase().startsWith('rescued:')) {
+        const inputName = window.prompt(`Establishment Name is mandatory before allotting a signature for company ID "${cid}". Please enter the official Establishment Name:`);
+        if (!inputName || !inputName.trim()) {
+          showAlert('error', 'Activation Skipped', `Company "${cid}" was skipped because no Establishment Name was provided.`);
+          continue;
+        }
+        estName = inputName.trim().toUpperCase();
+        if (idx !== -1) {
+          updatedCompanies[idx].establishmentName = estName;
+        }
+      }
+
+      const newIdPart = getCleanCompanyIdPart(estName, cid);
+      const newSig = `USIG-${(currentUser?.username || 'setup').toUpperCase()}_${newIdPart}-${hash}`;
+
+      if (idx !== -1) {
+        updatedCompanies[idx] = { ...updatedCompanies[idx], establishmentName: estName, companySignature: newSig, isReadOnly: false };
         
-        updatedCompanies[idx] = { ...updatedCompanies[idx], companySignature: newSig, isReadOnly: false };
-        
-        // Register in sys_limit.bin
         if (window.electronAPI?.registerActivatedSilo) {
           await window.electronAPI.registerActivatedSilo(newSig);
         }
         
-        // Update inside the individual profile silo
         if (window.electronAPI?.dbGetGlobal && window.electronAPI?.dbSetGlobal) {
           try {
              const res = await window.electronAPI.dbGetGlobal(`app_company_profile_${cid}`);
              if (res.success && res.data) {
                const prof = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+               prof.establishmentName = estName;
                prof.companySignature = newSig;
                prof.isReadOnly = false;
                await window.electronAPI.dbSetGlobal(`app_company_profile_${cid}`, prof);
@@ -278,24 +310,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         activatedCount++;
       } else {
         // It's an orphaned/rescued silo from the Data folder
-        let estName = `Rescued: ${cid}`;
-        let cin = '';
-        let profToSave = null;
-        if (window.electronAPI && window.electronAPI.dbGetGlobal && window.electronAPI.dbSetGlobal) {
-          try {
-             const res = await window.electronAPI.dbGetGlobal(`app_company_profile_${cid}`);
-             if (res.success && res.data) {
-               const prof = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-               if (prof.establishmentName) estName = prof.establishmentName;
-               if (prof.cin) cin = prof.cin;
-               profToSave = prof;
-             }
-          } catch (e) {}
-        }
+        let cin = profToSave?.cin || '';
         
-        const newSig = `USIG-${(currentUser?.username || 'setup').toUpperCase()}_${newIdPart}-${hash}`;
-
         if (profToSave && window.electronAPI?.dbSetGlobal) {
+           profToSave.establishmentName = estName;
            profToSave.companySignature = newSig;
            profToSave.isReadOnly = false;
            await window.electronAPI.dbSetGlobal(`app_company_profile_${cid}`, profToSave);
@@ -320,9 +338,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
     
     if (activatedCount > 0) {
-      // Remove any companies that were NOT selected and still don't have a signature
-      updatedCompanies = updatedCompanies.filter(c => c.companySignature || selectedCompanyIds.includes(c.id));
-      
       setCompanies(updatedCompanies);
       localStorage.setItem('app_companies', JSON.stringify(updatedCompanies));
       if (window.electronAPI?.dbSetGlobal) {
@@ -352,8 +367,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     try {
       const res = await window.electronAPI.listSilos();
       if (res.success && res.silos) {
-        const foundSilos = res.silos as string[];
-        const existingIds = companies.filter(c => !c.isReadOnly && c.companySignature).map(c => c.id);
+        const foundSilos = (res.silos as string[]).filter(s => s !== 'default');
+        const existingIds = companies.map(c => c.id);
         const missingSilos = foundSilos.filter(s => !existingIds.includes(s));
         
         if (missingSilos.length === 0) {
@@ -394,11 +409,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
           // --- Limit Check for Rescue ---
           const license = getStoredLicense();
-          const limit = license?.companyLimit || 1;
           let newCompanies = [...companies];
           const existingSigs = companies.filter(c => c.companySignature && !c.isReadOnly).map(c => c.companySignature!);
           let newSigs = Array.from(new Set([...(license?.cloudSignatures || []), ...existingSigs]));
-          let exceededCount = 0;
+          let readOnlyMountedCount = 0;
 
           for (const siloId of selectedSilos) {
             let sig = '';
@@ -421,30 +435,25 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
             // Try matching against cloud signatures first
             const cloudSigs = license?.cloudSignatures || [];
-            if (!sig || !cloudSigs.includes(sig)) {
+            let isValidSig = sig ? cloudSigs.includes(sig) : false;
+            if (!isValidSig) {
               const matchingCloudSig = cloudSigs.find(s => s.includes(`_${siloId}-`));
               if (matchingCloudSig) {
                 sig = matchingCloudSig;
+                isValidSig = true;
+              } else {
+                sig = '';
+                isValidSig = false;
               }
             }
 
-            let willMountFull = true;
-            // If it lacks a signature OR its signature is not in newSigs
-            if (!sig || !newSigs.includes(sig)) {
-              if (newSigs.length >= limit) {
-                willMountFull = false;
-                exceededCount++;
-                // Limit exhausted, do not generate a signature for this rescued company
-                if (!sig) sig = '';
-              } else {
-                // Limit allows mounting, generate signature if missing
-                if (!sig) {
-                  const hash = (Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6));
-                  const newIdPart = siloId.includes('-') ? siloId.split('-')[1] : siloId;
-                  sig = `USIG-${(currentUser?.username || 'setup').toUpperCase()}_${newIdPart}-${hash}`;
-                }
-                newSigs.push(sig);
-              }
+            // Mounted/Rescued existing companies MUST NOT auto-allot a new signature.
+            // They will load in Read-Only Mode until the user explicitly activates Full Access.
+            const willMountFull = isValidSig;
+            if (isValidSig && !newSigs.includes(sig)) {
+              newSigs.push(sig);
+            } else if (!isValidSig) {
+              readOnlyMountedCount++;
             }
 
             // Save back the updated profile parameters inside the silo database profile
@@ -494,10 +503,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             }
           }
 
-          if (exceededCount > 0) {
-            showAlert('warning', 'License Limit Reached', `Your license allows ${limit} organization(s). ${exceededCount} folder(s) were loaded locally in READ ONLY mode. Purge a company to free up slots.`);
+          if (readOnlyMountedCount > 0) {
+            showAlert('success', 'Recovery Successful', `${selectedSilos.length} organization(s) re-linked to your system in Read-Only Mode. You can activate Full Access Mode from System Configuration.`);
           } else {
-            showAlert('success', 'Recovery Successful', `${selectedSilos.length} missing organizations have been re-linked to your system.`);
+            showAlert('success', 'Recovery Successful', `${selectedSilos.length} organization(s) re-linked to your system.`);
           }
 
           setCompanies(newCompanies);
@@ -505,10 +514,21 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           if (window.electronAPI?.dbSetGlobal) {
             await window.electronAPI.dbSetGlobal('app_companies', newCompanies);
           }
+
+          if (currentUser) {
+            const currentAssigned = currentUser.assignedCompanies || [];
+            const updatedAssigned = Array.from(new Set([...currentAssigned, ...selectedSilos]));
+            const updatedUser = { ...currentUser, assignedCompanies: updatedAssigned };
+            setCurrentUser(updatedUser);
+            localStorage.setItem('app_current_user', JSON.stringify(updatedUser));
+            if (window.electronAPI?.dbSetGlobal) {
+              window.electronAPI.dbSetGlobal('app_current_user', updatedUser).catch(() => {});
+            }
+          }
           
-          // Push updated signature to Cloud with forceActivation=true
+          // Fetch updated cloud signatures from Cloud without forceActivation
           try {
-            await verifyLicense(true, true);
+            await verifyLicense(true, false);
           } catch (e) {
             console.warn("Failed to sync rescued signature to cloud:", e);
           }
@@ -858,7 +878,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
     const proceedWithSwitch = () => {
       const targetComp = companies.find(c => c.id === id);
-      if (targetComp?.dashboardPassword) {
+      const isPassProtected = !!targetComp?.dashboardPassword && targetComp.dashboardPassword.trim() !== '';
+      if (isPassProtected) {
         setDbGateTargetId(id);
         setDbGatePassword('');
         setDbGateError('');
@@ -1078,8 +1099,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     }
   }, []);
 
-  // --- V02.02.28: 5-Second Startup Branding Timer (Synchronized with Animation) ---
+  // --- V02.02.28: 5-Second Startup Branding Timer & Update Window Closure ---
   useEffect(() => {
+    if ((window as any).electronAPI?.closeUpdateMessage) {
+      (window as any).electronAPI.closeUpdateMessage().catch(() => {});
+    }
     const timer = setTimeout(() => setIsStartupTimerActive(false), 5000);
     const offlineTimer = setTimeout(() => setShowOfflineOption(true), 10000);
     return () => {
@@ -1141,6 +1165,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   }, [connStatus.isOnline, verifyLicense]);
 
   const safeNavigate = (view: View, tab?: string, bypassDirtyCheck = false) => {
+    if (view === View.PayProcess && companyProfile?.isReadOnly) {
+      showAlert(
+        'error',
+        'Process Payroll Inactive',
+        'Process Payroll is inactive because the active company is in Read-Only Mode. Attendance entry and payroll calculations are disabled.'
+      );
+      return;
+    }
     const latestYear = availableFinancialYears.length > 0 
       ? availableFinancialYears[availableFinancialYears.length - 1] 
       : activeFinancialYear;
@@ -1216,6 +1248,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       setIsRetryingSync(false);
     }
   };
+
+  // Signature reconciliation happens silently via usePayrollData and explicit user allotment in Organization Selector / Settings.
 
 
   // Trial Notice State
@@ -1852,7 +1886,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
     if (isAddingNew) {
       const newId = generateCompanyId(data.companyProfile.establishmentName);
-      const newSignature = `USIG-${(currentUser?.username || 'setup').toUpperCase()}_${newId.includes('-') ? newId.split('-')[1] : newId}-${(Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6))}`;
+      const userPrefix = (currentUser?.username || data.adminUser?.username || 'ADMIN').toUpperCase();
+      const newSignature = `USIG-${userPrefix}_${newId.includes('-') ? newId.split('-')[1] : newId}-${(Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6))}`;
       const newCompany = { ...data.companyProfile, id: newId, companySignature: newSignature };
       
       // CRITICAL: Update visibility flags BEFORE calling addCompany to prevent 
@@ -1870,12 +1905,19 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     
     if (profileToSave.id === 'default') {
       const firstId = generateCompanyId(profileToSave.establishmentName);
-      const firstSignature = `USIG-${(currentUser?.username || 'setup').toUpperCase()}_${firstId.includes('-') ? firstId.split('-')[1] : firstId}-${(Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6))}`;
+      const userPrefix = (currentUser?.username || data.adminUser?.username || 'ADMIN').toUpperCase();
+      const firstSignature = `USIG-${userPrefix}_${firstId.includes('-') ? firstId.split('-')[1] : firstId}-${(Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6))}`;
       
       profileToSave.id = firstId;
       profileToSave.companySignature = firstSignature;
       localStorage.setItem('app_active_company_id', firstId);
-      localStorage.setItem('app_companies', JSON.stringify([profileToSave]));
+      
+      let existingCos: CompanyProfile[] = [];
+      try { existingCos = JSON.parse(localStorage.getItem('app_companies') || '[]'); } catch(e) {}
+      existingCos = existingCos.filter(c => c.id !== 'default');
+      const cIdx = existingCos.findIndex(c => c.id === firstId);
+      if (cIdx >= 0) existingCos[cIdx] = profileToSave; else existingCos.push(profileToSave);
+      localStorage.setItem('app_companies', JSON.stringify(existingCos));
       
       // Extract admin user
       const savedUsersRaw = localStorage.getItem('app_users');
@@ -1887,11 +1929,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       if ((window as any).electronAPI) {
         // 1. Save global items first (Root DB)
         if ((window as any).electronAPI.dbSetGlobal) {
-          await (window as any).electronAPI.dbSetGlobal('app_companies', [profileToSave]);
+          await (window as any).electronAPI.dbSetGlobal('app_companies', existingCos);
           await (window as any).electronAPI.dbSetGlobal('app_active_company_id', firstId);
           await (window as any).electronAPI.dbSetGlobal('app_users', savedUsers);
         } else {
-          await (window as any).electronAPI.dbSet('app_companies', [profileToSave]);
+          await (window as any).electronAPI.dbSet('app_companies', existingCos);
           await (window as any).electronAPI.dbSet('app_active_company_id', firstId);
           await (window as any).electronAPI.dbSet('app_users', savedUsers);
         }
@@ -1902,8 +1944,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         }
 
         // 3. Save Silo-specific items (Silo DB)
-        await (window as any).electronAPI.dbSet('app_companies', [profileToSave]); // Backup copy inside Silo
-        await (window as any).electronAPI.dbSet('app_active_company_id', firstId); // Backup copy inside Silo
         await (window as any).electronAPI.dbSet('app_config', data.statutoryConfig);
         await (window as any).electronAPI.dbSet('app_company_profile', profileToSave);
         await (window as any).electronAPI.dbSet(`${firstId}_app_setup_complete`, 'true');
@@ -1985,7 +2025,10 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       try {
         const mid = await getMachineId();
         if (currentUser?.role !== 'Developer') {
-          await trackHeartbeat(currentUser?.email || licenseInfo?.registeredTo || "", mid, currentUser?.username || "UNKNOWN", getSessionStart(), 'LOGGED OUT');
+          await Promise.race([
+            trackHeartbeat(currentUser?.email || licenseInfo?.registeredTo || "", mid, currentUser?.username || "UNKNOWN", getSessionStart(), 'LOGGED OUT'),
+            new Promise(r => setTimeout(r, 1500))
+          ]).catch(() => {});
         }
       } catch (err) {
         console.error("Logout heartbeat failed:", err);
@@ -1998,13 +2041,21 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       try {
         const mid = await getMachineId();
         if (currentUser?.role !== 'Developer') {
-          await trackHeartbeat(currentUser?.email || licenseInfo?.registeredTo || "", mid, currentUser?.username || "UNKNOWN", getSessionStart(), 'LOGGED OUT');
+          await Promise.race([
+            trackHeartbeat(currentUser?.email || licenseInfo?.registeredTo || "", mid, currentUser?.username || "UNKNOWN", getSessionStart(), 'LOGGED OUT'),
+            new Promise(r => setTimeout(r, 1500))
+          ]).catch(() => {});
         }
       } catch (err) {
         console.error("Exit heartbeat failed:", err);
       } finally {
-        if ((window as any).electronAPI) (window as any).electronAPI.closeApp();
-        else { logout(); window.close(); window.location.reload(); }
+        if ((window as any).electronAPI?.closeApp) {
+          await (window as any).electronAPI.closeApp();
+        } else {
+          logout();
+          window.close();
+          window.location.reload();
+        }
       }
     }, 'Re-login', 'Quit Application', 'Cancel');
   };
@@ -2089,8 +2140,8 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     companyProfile.establishmentName?.trim() &&
     companyProfile.cin?.trim() &&
     companyProfile.pan?.trim() &&
-    companyProfile.pfCode?.trim() &&
-    companyProfile.esiCode?.trim() &&
+    (!companyProfile.epfApplicabilityTriggered || companyProfile.pfCode?.trim()) &&
+    (!companyProfile.esiApplicabilityTriggered || companyProfile.esiCode?.trim()) &&
     companyProfile.doorNo?.trim() &&
     companyProfile.street?.trim() &&
     companyProfile.city?.trim() &&
@@ -2159,12 +2210,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   const visibleCompanies = isDeveloper 
     ? companies 
     : companies.filter(c => {
-        const hasLicenseSig = licenseInfo?.cloudSignatures?.includes(c.companySignature || '');
-        if (!hasLicenseSig) return false;
-        // User assigned companies check
+        // User assigned companies check: Keep mounted companies visible
         if (currentUser?.role === 'User' && currentUser?.assignedCompanies && currentUser.assignedCompanies.length > 0) {
           if (!currentUser.showRestrictedUnits) {
-            return currentUser.assignedCompanies.includes(c.id);
+            const isAssigned = currentUser.assignedCompanies.includes(c.id);
+            if (!isAssigned && !c.isReadOnly) return false;
           }
         }
         return true;
@@ -2208,28 +2258,39 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
              <div className="h-full bg-blue-600 animate-loading-bar-5s rounded-full"></div>
           </div>
           {showOfflineOption && (
-            <div className="flex flex-col sm:flex-row gap-4 mt-6 animate-in fade-in duration-300 z-50">
-              <button
-                onClick={() => {
-                  setLicenseStatus(prev => ({ ...prev, checked: true, valid: true }));
-                  setIsStartupTimerActive(false);
-                }}
-                className="px-6 py-3 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-900/30 hover:scale-[1.02]"
-              >
-                Work Offline
-              </button>
-              <button
-                onClick={() => {
-                  if ((window as any).electronAPI?.closeApp) {
-                    (window as any).electronAPI.closeApp();
-                  } else {
-                    window.close();
-                  }
-                }}
-                className="px-6 py-3 bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 font-bold text-xs uppercase tracking-widest rounded-xl transition-all border border-slate-700 hover:border-rose-500/30"
-              >
-                Exit Application
-              </button>
+            <div className="flex flex-col items-center gap-4 mt-4 animate-in fade-in duration-300 z-50">
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl max-w-md text-center">
+                <WifiOff size={16} className="text-amber-400 shrink-0" />
+                <p className="text-[11px] text-amber-300 font-medium leading-normal">
+                  Cloud server response is delayed or network connection is unavailable. Select <strong>Work Offline</strong> to proceed locally or <strong>Exit Application</strong> to restart.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <button
+                  onClick={() => {
+                    setLicenseStatus(prev => ({ ...prev, checked: true, valid: true }));
+                    setIsStartupTimerActive(false);
+                  }}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-900/30 hover:scale-[1.02]"
+                >
+                  Work Offline
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      if ((window as any).electronAPI?.closeApp) {
+                        await (window as any).electronAPI.closeApp();
+                      }
+                    } catch(e) {}
+                    try {
+                      window.close();
+                    } catch(e) {}
+                  }}
+                  className="px-6 py-3 bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 font-bold text-xs uppercase tracking-widest rounded-xl transition-all border border-slate-700 hover:border-rose-500/30"
+                >
+                  Exit Application
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -2533,28 +2594,37 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                               const profile = (() => { try { return profileRaw ? JSON.parse(profileRaw) : null; } catch { return null; } })();
                               const panFromProfile = profile ? profile.pan : "";
                               
-                              const hasPAN = (c.pan && c.pan.trim() !== "") || (panFromProfile && panFromProfile.trim() !== "");
+                              const hasRegistrationInfo = !!(
+                                (c.pan && c.pan.trim() !== "") || 
+                                (c.cin && c.cin.trim() !== "") || 
+                                (c.gstNo && c.gstNo.trim() !== "") || 
+                                (c.pfCode && c.pfCode.trim() !== "") || 
+                                (c.esiCode && c.esiCode.trim() !== "") || 
+                                (c.companySignature && c.companySignature.trim() !== "") ||
+                                (panFromProfile && panFromProfile.trim() !== "") ||
+                                (profile && (profile.cin || profile.gstNo || profile.pfCode || profile.esiCode))
+                              );
                               
                               let status = 'INITIALIZED';
                               let colorClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
                               let tooltipText = '';
                               
-                              if (!hasPAN && !hasEmployees) {
+                              if (!hasRegistrationInfo && !hasEmployees) {
                                 status = 'INITIALIZED';
                                 colorClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
                                 tooltipText = 'New company initialized (Profile details and employees blank)';
-                              } else if (hasPAN && !hasEmployees) {
+                              } else if (hasRegistrationInfo && !hasEmployees) {
                                 status = 'REGISTERED';
                                 colorClass = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
-                                tooltipText = 'Profile partially filled (PAN exists but no employees enrolled)';
-                              } else if (hasPAN && hasEmployees) {
+                                tooltipText = 'Profile partially filled (Registration info exists but no employees enrolled)';
+                              } else if (hasRegistrationInfo && hasEmployees) {
                                 status = 'REGISTERED';
                                 colorClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
                                 tooltipText = 'Fully updated with all the info in company profile';
-                              } else if (!hasPAN && hasEmployees) {
+                              } else if (!hasRegistrationInfo && hasEmployees) {
                                 status = 'UNREGISTERED';
                                 colorClass = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-                                tooltipText = 'Unregistered / blank in profile (Missing PAN details but has employees)';
+                                tooltipText = 'Unregistered / blank in profile (Missing registration details but has employees)';
                               }
                               if (!isAssigned) {
                                 status = 'RESTRICTED';
@@ -2575,24 +2645,35 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                               <span className="text-[10px] text-amber-400 font-black font-mono tracking-widest opacity-80">
                                 ID: {c.id}
                               </span>
-                              {isReadOnly && (
-                                <span 
-                                  onClick={(e) => { e.stopPropagation(); handleClaimCompany(c); }}
-                                  className="text-[9px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 shadow-sm flex items-center gap-1 pointer-events-auto cursor-pointer hover:bg-amber-500/20 hover:text-amber-400 transition-colors"
-                                  title={(() => {
-                                    const limit = licenseInfo?.companyLimit || 3;
-                                    const activeCount = companies.filter(item => !item.isReadOnly).length;
-                                    if (activeCount < limit) {
-                                      return `READ ONLY MODE (${activeCount}/${limit} slots used): Click to convert into Full Featured Mode.`;
-                                    } else {
-                                      return `READ ONLY MODE (Slot Limit Reached: ${activeCount}/${limit}): To convert to Full Mode: (1) Upgrade license limit, OR (2) Dismount an active company & email Developer to drop that specific company to enable adding another company.`;
-                                    }
-                                  })()}
-                                >
-                                  <Lock size={10} />
-                                  READ ONLY
-                                </span>
-                              )}
+                              {isReadOnly && (() => {
+                                const limit = licenseInfo?.companyLimit || 3;
+                                const activeCount = companies.filter(item => !item.isReadOnly).length;
+                                const hasSlot = activeCount < limit;
+
+                                if (hasSlot) {
+                                  return (
+                                    <span 
+                                      onClick={(e) => { e.stopPropagation(); handleClaimCompany(c); }}
+                                      className="relative text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border shadow-md flex items-center gap-1.5 pointer-events-auto cursor-pointer transition-all animate-pulse bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/40 hover:scale-105"
+                                      title={`NEW LICENSE SLOT DETECTED (${activeCount}/${limit} slots used): Click to Allot Signature & Unlock Full Access for ${c.establishmentName}.`}
+                                    >
+                                      <Sparkles size={10} className="text-amber-400 animate-spin" style={{ animationDuration: '3s' }} />
+                                      <span className="font-mono text-amber-300 font-black">ALLOT SIGNATURE</span>
+                                      <span className="text-[7.5px] bg-rose-600 text-white px-1 py-0.2 rounded font-black">READ ONLY</span>
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span 
+                                    onClick={(e) => { e.stopPropagation(); handleClaimCompany(c); }}
+                                    className="text-[9px] font-black text-rose-400 uppercase tracking-widest bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20 shadow-sm flex items-center gap-1 pointer-events-auto cursor-pointer hover:bg-rose-500/20 hover:text-rose-300 transition-colors"
+                                    title={`READ ONLY MODE (Slot Limit Reached: ${activeCount}/${limit}): Upgrade license limit or dismount an existing active company.`}
+                                  >
+                                    <Lock size={10} />
+                                    READ ONLY
+                                  </span>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>
@@ -2657,24 +2738,35 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                               <span className="text-[13px] font-black text-[#FFD700] uppercase tracking-[0.2em] bg-slate-950/50 px-2 py-0.5 rounded border border-slate-800/50">
                                 ID: {c.id}
                               </span>
-                              {isReadOnly && (
-                                <span 
-                                  onClick={(e) => { e.stopPropagation(); handleClaimCompany(c); }}
-                                  className="text-[9px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 flex items-center gap-1 pointer-events-auto cursor-pointer hover:bg-amber-500/20 hover:text-amber-400 transition-colors"
-                                  title={(() => {
-                                    const limit = licenseInfo?.companyLimit || 3;
-                                    const activeCount = companies.filter(item => !item.isReadOnly).length;
-                                    if (activeCount < limit) {
-                                      return `READ ONLY MODE (${activeCount}/${limit} slots used): Click to convert into Full Featured Mode.`;
-                                    } else {
-                                      return `READ ONLY MODE (Slot Limit Reached: ${activeCount}/${limit}): To convert to Full Mode: (1) Upgrade license limit, OR (2) Dismount an active company & email Developer to drop that specific company to enable adding another company.`;
-                                    }
-                                  })()}
-                                >
-                                  <Lock size={10} />
-                                  READ ONLY
-                                </span>
-                              )}
+                              {isReadOnly && (() => {
+                                const limit = licenseInfo?.companyLimit || 3;
+                                const activeCount = companies.filter(item => !item.isReadOnly).length;
+                                const hasSlot = activeCount < limit;
+
+                                if (hasSlot) {
+                                  return (
+                                    <span 
+                                      onClick={(e) => { e.stopPropagation(); handleClaimCompany(c); }}
+                                      className="relative text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border shadow-md flex items-center gap-1.5 pointer-events-auto cursor-pointer transition-all animate-pulse bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/40 hover:scale-105"
+                                      title={`NEW LICENSE SLOT DETECTED (${activeCount}/${limit} slots used): Click to Allot Signature & Unlock Full Access for ${c.establishmentName}.`}
+                                    >
+                                      <Sparkles size={10} className="text-amber-400 animate-spin" style={{ animationDuration: '3s' }} />
+                                      <span className="font-mono text-amber-300 font-black">ALLOT SIGNATURE</span>
+                                      <span className="text-[7.5px] bg-rose-600 text-white px-1 py-0.2 rounded font-black">READ ONLY</span>
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span 
+                                    onClick={(e) => { e.stopPropagation(); handleClaimCompany(c); }}
+                                    className="text-[9px] font-black text-rose-400 uppercase tracking-widest bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20 shadow-sm flex items-center gap-1 pointer-events-auto cursor-pointer hover:bg-rose-500/20 hover:text-rose-300 transition-colors"
+                                    title={`READ ONLY MODE (Slot Limit Reached: ${activeCount}/${limit}): Upgrade license limit or dismount an existing active company.`}
+                                  >
+                                    <Lock size={10} />
+                                    READ ONLY
+                                  </span>
+                                );
+                              })()}
                               {activeCompanyId === c.id && <span className="text-[8px] font-black text-blue-400 uppercase tracking-tighter bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">Active Session</span>}
                             </div>
                           </div>
@@ -2890,7 +2982,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
               <NavigationItem view={View.Dashboard} icon={LayoutDashboard} label="Dashboard" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isCompanyGateOpen && activeView !== View.Dashboard} />
               <NavigationItem view={View.Employees} icon={Users} label="Employee Master" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !(getPermission('employeeAdd') || getPermission('employeeEdit'))} disabledTooltip={!(getPermission('employeeAdd') || getPermission('employeeEdit')) ? "Access Restricted: Contact Administrator" : (!isCompanyProfileComplete ? "Company Profile Mandatory fields to be updated and saved to activate this function" : undefined)} />
-              <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('processPayroll')} disabledTooltip={!getPermission('processPayroll') ? "Access Restricted: Contact Administrator" : (!isCompanyProfileComplete ? "Company Profile Mandatory fields to be updated and saved to activate this function" : undefined)} />
+              <NavigationItem view={View.PayProcess} icon={CalendarClock} label="Process Payroll" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('processPayroll') || !!companyProfile?.isReadOnly} disabledTooltip={companyProfile?.isReadOnly ? "Process Payroll Inactive: Company is in Read-Only Mode" : (!getPermission('processPayroll') ? "Access Restricted: Contact Administrator" : (!isCompanyProfileComplete ? "Company Profile Mandatory fields to be updated and saved to activate this function" : undefined))} />
               <NavigationItem view={View.Reports} icon={FileText} label="Pay Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('payReports')} disabledTooltip={!getPermission('payReports') ? "Access Restricted: Contact Administrator" : undefined} />
               <NavigationItem view={View.Statutory} icon={ShieldCheck} label="Statutory Reports" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('statutoryReports')} disabledTooltip={!getPermission('statutoryReports') ? "Access Restricted: Contact Administrator" : undefined} />
               <NavigationItem view={View.MIS} icon={IndianRupee} label="Management Info (MIS)" activeView={activeView} onNavigate={safeNavigate} isSidebarOpen={isSidebarOpen} disabled={isNavLocked || isCompanyGateOpen || !getPermission('mis')} disabledTooltip={!getPermission('mis') ? "Access Restricted: Contact Administrator" : undefined} isLocked={getPermission('mis') && !licenseInfo?.splMIS} onClickLocked={() => setShowPremiumModal(true)} />
@@ -3304,7 +3396,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                 {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} activeFinancialYear={activeFinancialYear} showAlert={showAlert} />}
-                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} onNavigate={safeNavigate} />}
+                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onClaimCompany={() => handleClaimCompany(companyProfile)} availableSlots={Math.max(0, (licenseInfo?.companyLimit || 3) - companies.filter(c => !c.isReadOnly).length)} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} onNavigate={safeNavigate} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
 

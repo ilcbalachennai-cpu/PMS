@@ -895,18 +895,41 @@
         <h3>10.1 Backup Data (LOCAL SECURE BACKUP)</h3>
         <p>Creates a high-security encrypted snapshot (<code>.enc</code>) of the active establishment's database. It is recommended to perform a backup before every payroll finalization.</p>
 
-        <h3>10.2 Restore Data (UNIVERSAL RESTORATION &amp; MACHINE PORTABILITY)</h3>
-        <p>Imports an existing backup into the current establishment silo. This will overwrite the current unit's data with the contents of the backup. Use this for data recovery or migration.</p>
+        <h3>10.2 Restore Data (DATA SWAPPING &amp; MACHINE PORTABILITY)</h3>
+        <p>Imports an existing backup into the active establishment silo. This selectively updates the unit's operational pay records while preserving local company profiles and system security signatures.</p>
 
         <div class="highlight-box success">
-            <strong>Porting Data Between Licensed Machines:</strong><br>
-            To move an establishment's data from Machine A to Machine B:
+            <strong>Data Swapping &amp; Porting Between Licensed Machines (Machine A to Machine B):</strong><br>
+            <strong>Under What Circumstances is it Allowed?</strong>
+            <p className="mt-small">Data swapping is allowed when transferring operational payroll records for an establishment from a source machine (Machine A) to a destination machine (Machine B).</p>
+            
+            <strong>Mandatory Profile Matching Rule:</strong>
+            <br>The destination company profile on Machine B (Establishment Name, Company ID, PAN/CIN) <strong>MUST MATCH EXACTLY</strong> with the source company profile from Machine A. If the company details do not match, the system will block the import to prevent data corruption or unauthorized overwrites.
+            
+            <br><br><strong>Selective Pay Data Import (BC / AC Model):</strong>
+            <ul class="mt-small">
+                <li><strong>What is Imported:</strong> The migration engine selectively imports <em>only</em> operational pay data — Employees, Monthly Attendance Sheets, Payroll History, Leave &amp; Advance Ledgers, Fines, OT Records, and Master Designations/Divisions/Branches/Sites.</li>
+                <li><strong>What is Protected:</strong> Machine B's existing Company Profile (<code>company_profile</code>), Statutory Compliance Rules (<code>config</code>), User Accounts (<code>users</code>), and System Security Signature (<code>companySignature</code>) are <strong>strictly preserved and never overwritten</strong>.</li>
+                <li><strong>Slot Count &amp; License Security:</strong> The import will <strong>never</strong> add duplicate companies or alter your registered company list (<code>app_companies</code>). Your registered company count remains locked at <code>3 / 3</code>, keeping your app in full-featured mode.</li>
+            </ul>
+
+            <strong>Step-by-Step Data Swapping Guide:</strong>
             <ol class="mt-small">
-                <li>Perform a <strong>Backup Data</strong> operation on Machine A to generate the <code>.enc</code> snapshot file.</li>
-                <li>Transfer the <code>.enc</code> file to Machine B (via USB or email).</li>
-                <li>On Machine B, register a new empty company profile (or open an existing one) to act as the destination silo. <em>Note: Machine B must have an active license with enough "Company Quota" and "Employee Quota" to hold the incoming data.</em></li>
-                <li>Run the <strong>Restore Data</strong> function inside the target silo on Machine B and select the <code>.enc</code> file. The establishment is now successfully ported!</li>
+                <li>Perform a <strong>Backup Data</strong> operation on Machine A to generate the <code>.enc</code> backup file.</li>
+                <li>Transfer the <code>.enc</code> file to Machine B (via USB or secure cloud drive).</li>
+                <li>On Machine B, log into the matching target establishment (ensuring Establishment Name and Company ID match Machine A).</li>
+                <li>Go to <strong>System Configuration &gt; Data Management &gt; Restore Data</strong> and select the <code>.enc</code> file. The operational pay data is now seamlessly ported!</li>
             </ol>
+        </div>
+
+        <div class="highlight-box warning">
+            <strong>Read-Only Mode System Restrictions:</strong><br>
+            When an establishment is flagged in <strong>Read-Only Mode</strong> (e.g. when license slot limits are exceeded or system signatures mismatch):
+            <ul class="mt-small">
+                <li><strong>"Process Payroll" Main Tab Deactivated:</strong> The <strong>Process Payroll</strong> sidebar navigation tab is set to <strong>INACTIVE / DISABLED</strong> with a warning tooltip (<em>"Process Payroll Inactive: Company is in Read-Only Mode"</em>).</li>
+                <li><strong>No Edit or Input Operations Allowed:</strong> All input fields across Attendance Entry, Overtime Records, Fine Registers, Leave/Advance Ledgers, Employee Master Edits, and Pay Calculations are strictly locked.</li>
+                <li><strong>View &amp; Export Only:</strong> You may view historical reports and export diagnostics, but no new data entry or calculation is permitted until the license/signature status is resolved.</li>
+            </ul>
         </div>
 
         <h3>10.3 Previous Version Data (LEGACY MIGRATION)</h3>

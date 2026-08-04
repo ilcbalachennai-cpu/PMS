@@ -6,7 +6,7 @@ import {
     ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator,
     ScrollText, HandCoins, Wallet, Scale, RotateCw, TrendingUp,
     ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
-    FolderOpen, FileText
+    FolderOpen, FileText, Sparkles
 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, UserPermissions, LicenseData, SettingsTab } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
@@ -47,6 +47,8 @@ interface SettingsProps {
     onOpenGate?: () => void;
     onRescueOrganizations?: () => Promise<void>;
     onInitiateSecureDelete?: (id: string) => void;
+    onClaimCompany?: () => void;
+    availableSlots?: number;
     globalMonth?: string;
     globalYear?: number;
     activeFinancialYear?: string;
@@ -75,10 +77,11 @@ const Settings: React.FC<SettingsProps> = ({
     leavePolicy, setLeavePolicy, onRestore, onNuclearReset, onPayrollReset, onDeepReset, initialTab = SettingsTab.Company,
     setSettingsTab,
     userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange,
-    showAlert, verifyLicense, activeCompanyId = 'default', onRescueOrganizations,
+    showAlert, verifyLicense, activeCompanyId = 'default', onRescueOrganizations, onClaimCompany, availableSlots,
     globalMonth = 'April', globalYear = 2025, activeFinancialYear, isLicenseExpired,
     latestPatchTimestamp, onNavigate
 }) => {
+    const isReadOnly = companyProfile?.isReadOnly === true;
     const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${key}_${activeCompanyId}`;
     const getPermission = (key: keyof UserPermissions): boolean => {
         if (!currentUser) return false;
@@ -2320,23 +2323,32 @@ const Settings: React.FC<SettingsProps> = ({
                                 <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Unsaved Changes</span>
                             </div>
                         )}
-                        <button
-                            onClick={handleSave}
-                            disabled={companyProfile?.isReadOnly}
-                            className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-[11px] font-black transition-all shadow-xl active:scale-95 ${companyProfile?.isReadOnly
-                                ? 'bg-red-500/10 text-red-500 border border-red-500/30 cursor-not-allowed'
-                                : saved
-                                    ? 'bg-emerald-600 text-white shadow-emerald-900/40 ring-2 ring-emerald-500/50'
-                                    : isDirty
-                                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/40 ring-2 ring-white/20'
-                                        : 'bg-slate-800 text-slate-400 cursor-default opacity-80'
-                                }`}
-                            title={companyProfile?.isReadOnly ? "Configuration is locked (Read-Only Mode or License Limit Reached)" : "Save Configuration"}
-                            aria-label="Save Configuration"
-                        >
-                            {companyProfile?.isReadOnly ? <AlertCircle size={14} /> : saved ? <CheckCircle2 size={14} /> : <Save size={14} />}
-                            {companyProfile?.isReadOnly ? 'READ ONLY MODE' : saved ? 'DATA SAVED' : isDirty ? 'SAVE CONFIGURATION' : 'SAVE CONFIGURATION'}
-                        </button>
+                        {companyProfile?.isReadOnly ? (
+                            <button
+                                onClick={onClaimCompany}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 rounded-xl font-black text-[11px] uppercase tracking-widest shadow-lg shadow-amber-500/20 hover:scale-105 active:scale-95 transition-all border border-amber-300 animate-pulse cursor-pointer pointer-events-auto"
+                                title="Click to Allot Signature & Unlock Full Access Mode for this company"
+                                aria-label="Unlock Full Access Mode"
+                            >
+                                <Sparkles size={14} className="text-slate-950 animate-spin" style={{ animationDuration: '3s' }} />
+                                UNLOCK FULL MODE {availableSlots !== undefined ? `(${availableSlots} SLOT${availableSlots === 1 ? '' : 'S'} AVAILABLE)` : ''}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleSave}
+                                className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-[11px] font-black transition-all shadow-xl active:scale-95 ${saved
+                                        ? 'bg-emerald-600 text-white shadow-emerald-900/40 ring-2 ring-emerald-500/50'
+                                        : isDirty
+                                            ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-900/40 ring-2 ring-white/20'
+                                            : 'bg-slate-800 text-slate-400 cursor-default opacity-80'
+                                    }`}
+                                title="Save Configuration"
+                                aria-label="Save Configuration"
+                            >
+                                {saved ? <CheckCircle2 size={14} /> : <Save size={14} />}
+                                {saved ? 'DATA SAVED' : isDirty ? 'SAVE CONFIGURATION' : 'SAVE CONFIGURATION'}
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -2377,6 +2389,16 @@ const Settings: React.FC<SettingsProps> = ({
 
             {activeTab === SettingsTab.Statutory && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-300">
+                    {isReadOnly && (
+                        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 text-amber-300 text-xs font-bold shadow-lg">
+                            <div className="flex items-center gap-2">
+                                <Lock size={16} className="text-amber-400" />
+                                <span>READ-ONLY MODE: Statutory Rules are INACTIVE and locked. Changes are not permitted.</span>
+                            </div>
+                            <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2.5 py-1 rounded-md font-mono uppercase font-black tracking-wider border border-rose-500/30">INACTIVE MODE</span>
+                        </div>
+                    )}
+                    <div className={isReadOnly ? 'pointer-events-none opacity-75 select-none space-y-8' : 'space-y-8'}>
                     <div className="bg-amber-900/20 border border-amber-700/50 p-6 rounded-2xl flex justify-between items-center text-amber-200">
                         <div className="flex gap-4">
                             <AlertCircle size={28} className="shrink-0 text-amber-400" />
@@ -3319,11 +3341,22 @@ const Settings: React.FC<SettingsProps> = ({
                             </div>
                         </div>
                     </div>
+                    </div>
                 </div>
             )}
 
             {activeTab === SettingsTab.Company && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                    {isReadOnly && (
+                        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 text-amber-300 text-xs font-bold shadow-lg">
+                            <div className="flex items-center gap-2">
+                                <Lock size={16} className="text-amber-400" />
+                                <span>READ-ONLY MODE: Establishment Profile is locked. All fields are non-editable.</span>
+                            </div>
+                            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2.5 py-1 rounded-md font-mono uppercase font-black tracking-wider border border-amber-500/30">READ-ONLY</span>
+                        </div>
+                    )}
+                    <div className={isReadOnly ? 'pointer-events-none opacity-75 select-none space-y-8' : 'space-y-8'}>
                     {/* ... Company Branding & Profile ... */}
                     <div className="bg-[#1e293b] rounded-2xl border border-slate-800 shadow-xl overflow-hidden p-8">
                         <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
@@ -3536,6 +3569,7 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
                     </div>
                 </div>
+                </div>
             )}
 
 
@@ -3722,6 +3756,15 @@ const Settings: React.FC<SettingsProps> = ({
 
             {activeTab === 'DATA' && (
                 <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-8 shadow-xl space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                    {isReadOnly && (
+                        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 text-amber-300 text-xs font-bold shadow-lg">
+                            <div className="flex items-center gap-2">
+                                <Lock size={16} className="text-amber-400" />
+                                <span>READ-ONLY MODE: Data Management operations are restricted. Only "PURGE COMPANY" is active.</span>
+                            </div>
+                            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2.5 py-1 rounded-md font-mono uppercase font-black tracking-wider border border-amber-500/30">PURGE ONLY</span>
+                        </div>
+                    )}
                     <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-indigo-900/30 text-indigo-400 rounded-lg border border-indigo-500/20">
@@ -3798,8 +3841,8 @@ const Settings: React.FC<SettingsProps> = ({
 
                                     <button
                                         onClick={() => requireAuth(() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); })}
-                                        disabled={!getPermission('dmBackup')}
-                                        title={!getPermission('dmBackup') ? "Access Denied: Requires Local Backup permission." : ""}
+                                        disabled={isReadOnly || !getPermission('dmBackup')}
+                                        title={isReadOnly ? "Read-Only Mode: Local Backup disabled" : (!getPermission('dmBackup') ? "Access Denied: Requires Local Backup permission." : "")}
                                         className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
                                     >
                                         <Lock size={14} /> Initiate Local Backup
@@ -3819,8 +3862,8 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Reverse previous exports or recover from database files directly. Atomic restoration ensures system integrity on failure."</p>
                                     <button
                                         onClick={() => backupFileRef.current?.click()}
-                                        disabled={!getPermission('dmRestore')}
-                                        title={!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : ""}
+                                        disabled={isReadOnly || !getPermission('dmRestore')}
+                                        title={isReadOnly ? "Read-Only Mode: Universal Restoration disabled" : (!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : "")}
                                         className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
                                     >
                                         <Upload size={14} /> Select & Restore
@@ -3840,8 +3883,8 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Specifically for older backups. Extracts data, generates fresh IDs, and extrapolates fields for the new multi-company architecture."</p>
                                     <button
                                         onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }}
-                                        disabled={isLicenseExpired || !getPermission('dmMigrate')}
-                                        title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmMigrate') ? "Access Denied: Requires Legacy Migration permission." : "")}
+                                        disabled={isReadOnly || isLicenseExpired || !getPermission('dmMigrate')}
+                                        title={isReadOnly ? "Read-Only Mode: Legacy Migration disabled" : (isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmMigrate') ? "Access Denied: Requires Legacy Migration permission." : ""))}
                                         className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"
                                     >
                                         <RefreshCw size={14} /> Run Migration Wizard
@@ -3872,8 +3915,8 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <button
                                     onClick={() => requireAuth(() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); })}
-                                    disabled={isLicenseExpired || !getPermission('dmPartialReset')}
-                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmPartialReset') ? "Access Denied: Requires Partial Reset permission." : "")}
+                                    disabled={isReadOnly || isLicenseExpired || !getPermission('dmPartialReset')}
+                                    title={isReadOnly ? "Read-Only Mode: Partial Reset disabled" : (isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmPartialReset') ? "Access Denied: Requires Partial Reset permission." : ""))}
                                     className="mt-4 py-2.5 px-4 bg-amber-900/20 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-900/20 disabled:text-amber-500/50 text-amber-500 hover:text-white border border-amber-900/50 hover:border-amber-400 disabled:hover:border-amber-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                 >
                                     Initiate Partial Reset
@@ -3902,8 +3945,8 @@ const Settings: React.FC<SettingsProps> = ({
                                             });
                                         }
                                     }}
-                                    disabled={isLicenseExpired || !getPermission('dmRescue')}
-                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmRescue') ? "Access Denied: Requires Organization Rescue permission." : "")}
+                                    disabled={isReadOnly || isLicenseExpired || !getPermission('dmRescue')}
+                                    title={isReadOnly ? "Read-Only Mode: Organization Rescue disabled" : (isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmRescue') ? "Access Denied: Requires Organization Rescue permission." : ""))}
                                     className="mt-4 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
                                 >
                                     <RefreshCw size={14} /> Scan & Rescue Orphans
@@ -3942,8 +3985,6 @@ const Settings: React.FC<SettingsProps> = ({
                                 </button>
                             </div>
 
-
-
                             {/* Factory Reset Card */}
                             <div className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-900/60 transition-colors flex flex-col justify-between group">
                                 <div>
@@ -3957,8 +3998,8 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <button
                                     onClick={() => requireAuth(() => { setShowResetModal(true); setResetMode('FACTORY'); setResetPassword(''); setResetError(''); })}
-                                    disabled={isLicenseExpired || !getPermission('dmFactoryReset')}
-                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmFactoryReset') ? "Access Denied: Requires Factory Reset permission." : "")}
+                                    disabled={isReadOnly || isLicenseExpired || !getPermission('dmFactoryReset')}
+                                    title={isReadOnly ? "Read-Only Mode: Factory Reset disabled" : (isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmFactoryReset') ? "Access Denied: Requires Factory Reset permission." : ""))}
                                     className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-900/20 disabled:text-red-500/50 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 disabled:hover:border-red-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                                 >
                                     Initiate Factory Reset
@@ -3981,8 +4022,8 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <button
                                     onClick={executeDiagnosticExport}
-                                    disabled={!getPermission('dmDiagnostics')}
-                                    title={!getPermission('dmDiagnostics') ? "Access Denied: Requires Diagnostic Report permission." : ""}
+                                    disabled={isReadOnly || !getPermission('dmDiagnostics')}
+                                    title={isReadOnly ? "Read-Only Mode: Diagnostic Export disabled" : (!getPermission('dmDiagnostics') ? "Access Denied: Requires Diagnostic Report permission." : "")}
                                     className="mt-4 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
                                 >
                                     <FileText size={14} /> Export Diagnostic Logs
@@ -3990,8 +4031,6 @@ const Settings: React.FC<SettingsProps> = ({
                             </div>
                         </div>
                     </div>
-
-
 
                     {/* Application Storage Section - SHIFTED TO BOTTOM */}
                     <div className="bg-[#0f172a] p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/30 transition-all group shadow-lg">
@@ -4010,8 +4049,8 @@ const Settings: React.FC<SettingsProps> = ({
                             </div>
                             <button
                                 onClick={() => requireAuth(handleChangeDirectory)}
-                                disabled={!getPermission('dmStorageLocation')}
-                                title={!getPermission('dmStorageLocation') ? "Access Denied: Requires Secure Change Directory permission." : ""}
+                                disabled={isReadOnly || !getPermission('dmStorageLocation')}
+                                title={isReadOnly ? "Read-Only Mode: Change Directory disabled" : (!getPermission('dmStorageLocation') ? "Access Denied: Requires Secure Change Directory permission." : "")}
                                 className="w-full py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-700 shadow-lg active:scale-95"
                             >
                                 <Lock size={14} className="text-indigo-400" /> Secure Change Directory

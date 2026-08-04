@@ -1,6 +1,32 @@
 /**
- * Centralized Date Utilities for License & Trial Management
+ * Generates a clean, readable ID part for Company Signature (never 'default')
  */
+export const getCleanCompanyIdPart = (estName?: string, fallbackId?: string): string => {
+  // 1. If fallbackId exists and is a valid non-default company ID, use it directly to guarantee 1:1 match with Silo ID!
+  if (fallbackId && fallbackId.trim() && fallbackId.toLowerCase() !== 'default' && fallbackId.toLowerCase() !== 'company_default') {
+    let cleaned = fallbackId.trim();
+    if (cleaned.includes('-')) {
+      cleaned = cleaned.split('-')[1];
+    }
+    if (cleaned.toLowerCase() !== 'default') {
+      return cleaned;
+    }
+  }
+
+  // 2. If fallbackId is default or missing, generate clean prefix from Establishment Name + 6 random digits
+  if (estName && estName.trim() && !estName.toLowerCase().startsWith('rescued:') && estName.toLowerCase() !== 'default') {
+    const letters = estName.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    if (letters.length >= 3) {
+      const prefix = letters.slice(0, 6);
+      const randDigits = Math.floor(100000 + Math.random() * 900000);
+      return `${prefix}_${randDigits}`;
+    }
+  }
+
+  // 3. Ultimate fallback
+  const randDigits = Math.floor(100000 + Math.random() * 900000);
+  return `COMP_${randDigits}`;
+};
 
 /**
  * Parses an expiry date string from various formats (DD-MM-YYYY, ISO, Locale String)

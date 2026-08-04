@@ -68,17 +68,29 @@ FunctionEnd
     CopyFiles /SILENT "$INSTDIR\resources\manual_assets\*.*" "$3\"
     RMDir /r "$INSTDIR\resources\manual_assets"
     
-    # If the installer is running silently (Patch Update), automatically launch the app after installing
-    # Otherwise, for interactive installs, launch the "launching app" overlay screen
-    IfSilent silent_run interactive_run
-    
-    silent_run:
-    ExecShell "" "$INSTDIR\BPP_APP.exe"
-    Goto end_install
-    
-    interactive_run:
-    ExecShell "" "$TEMP\bpp_launch_msg.hta"
-    
-    end_install:
+    # Set NSIS installer to automatically close upon progress completion
+    SetAutoClose true
 !macroend
+
+# Function .onGUIEnd is executed AFTER the NSIS setup window has CLOSED COMPLETELY
+Function .onGUIEnd
+    # 1. Ensure small HTA launch popup exists
+    IfFileExists "$TEMP\bpp_launch_msg.hta" hta_exists
+        FileOpen $0 "$TEMP\bpp_launch_msg.hta" w
+        FileWrite $0 '<HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal"/>$\r$\n'
+        FileWrite $0 '<title>BharatPay Pro Update</title>$\r$\n'
+        FileWrite $0 '<body style="background-color:#0f172a; color:#f8fafc; font-family:$\'Segoe UI$\', sans-serif; font-size:14px; margin:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; height:100%; border:1px solid #1e293b;">$\r$\n'
+        FileWrite $0 '  <p style="margin-bottom:12px; font-weight:bold; font-size:18px; color:#38bdf8;">Application Update Complete</p>$\r$\n'
+        FileWrite $0 '  <p style="margin:0; font-size:14px; opacity:0.85;">Launching BharatPay Pro... Please wait.</p>$\r$\n'
+        FileWrite $0 '  <script>window.resizeTo(550, 200); window.moveTo((screen.width - 550) / 2, (screen.height - 200) / 2); window.focus(); setTimeout(function() { window.close(); }, 60000);</script>$\r$\n'
+        FileWrite $0 '</body>'
+        FileClose $0
+    hta_exists:
+
+    # 2. Launch small HTA info popup (now that setup window is completely closed!)
+    ExecShell "" "mshta.exe" "$TEMP\bpp_launch_msg.hta"
+
+    # 3. Launch main application executable
+    ExecShell "" "$INSTDIR\BPP_APP.exe"
+FunctionEnd
 

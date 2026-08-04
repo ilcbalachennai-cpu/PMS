@@ -396,14 +396,35 @@ function createWindow() {
         closable: false,
         show: false, // Don't show until ready-to-show
     });
-    mainWindow.once('ready-to-show', () => {
-        if (mainWindow) mainWindow.show();
-        // Fallback: Kill mshta.exe after 15 seconds if the renderer doesn't call 'close-update-message'
+    const bringWindowToFront = (win: BrowserWindow) => {
+        if (!win || win.isDestroyed()) return;
+        win.show();
+        win.restore();
+        win.focus();
+        win.setAlwaysOnTop(true, 'screen-saver');
+        win.moveTop();
         setTimeout(() => {
-            try {
-                spawn('taskkill', ['/F', '/IM', 'mshta.exe'], { windowsHide: true });
-            } catch (e) {}
-        }, 15000);
+            if (win && !win.isDestroyed()) {
+                win.setAlwaysOnTop(false);
+                win.focus();
+            }
+        }, 1200);
+    };
+
+    mainWindow.once('ready-to-show', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            bringWindowToFront(mainWindow);
+        }
+        // Immediately kill mshta.exe (update HTA popup) as soon as initialization screen opens
+        try {
+            spawn('taskkill', ['/F', '/IM', 'mshta.exe'], { windowsHide: true });
+        } catch (e) {}
+    });
+
+    mainWindow.webContents.on('did-finish-load', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            bringWindowToFront(mainWindow);
+        }
     });
 
     mainWindow.on('close', (e) => {
@@ -602,7 +623,16 @@ if (!gotTheLock) {
   app.on('second-instance', () => {
     if (mainWindow && !isDev) {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
       mainWindow.focus();
+      mainWindow.setAlwaysOnTop(true, 'screen-saver');
+      mainWindow.moveTop();
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.setAlwaysOnTop(false);
+          mainWindow.focus();
+        }
+      }, 1200);
     }
   });
 }
@@ -1122,19 +1152,15 @@ async function performAutoRescue(rootDb: Database.Database, appPaths: any) {
                 const siloPath = path.join(dataDir, name);
                 return fs.statSync(siloPath).isDirectory() && fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
             })
-            .filter(name => name !== '.icon-ico' && name !== 'default');
+            .filter(name => name !== '.icon-ico');
 
-        // Clean up the existing list: remove missing, empty ID, or duplicate silos
+        // Clean up the existing list: remove empty ID or duplicate silos
         let updatedRegistry = false;
         const seen = new Set<string>();
         const cleanedComps: any[] = [];
 
         for (const c of existingComps) {
-            if (!c.id || c.id.trim() === '') {
-                updatedRegistry = true;
-                continue;
-            }
-            if (!silos.includes(c.id)) {
+            if (!c.id || c.id.trim() === '' || c.id === 'default') {
                 updatedRegistry = true;
                 continue;
             }
@@ -1375,10 +1401,11 @@ ipcMain.handle('db-get-all', async () => {
     try {
         const mergedData: any[] = [];
         
-        // 1. Get all silo keys
+        // 1. Get all silo keys (excluding global keys to prevent per-silo app_companies leakage)
         if (db) {
             const rows = db.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
-            mergedData.push(...rows.map(r => ({ key: r.key, value: safeParseValue(r.value) })));
+            const siloRowsOnly = rows.filter(r => !GLOBAL_KEYS.includes(r.key));
+            mergedData.push(...siloRowsOnly.map(r => ({ key: r.key, value: safeParseValue(r.value) })));
         }
         
         // 2. ── Strict Registry Merging ──
@@ -1438,7 +1465,7 @@ function autoHealAppCompanies(rootDbPath: string, dataDir: string): any[] | null
                 let profile = null;
                 
                 try {
-                    const profileRow = siloDb.prepare("SELECT value FROM store WHERE key = 'app_company_profile'").get() as any;
+                    const profileRow = siloDb.prepare("SELECT value FROM store WHERE key = 'app_company_profile' OR key LIKE 'app_company_profile_%'").get() as any;
                     if (profileRow && profileRow.value) profile = JSON.parse(profileRow.value);
                 } catch(e) {}
                 
@@ -1447,7 +1474,7 @@ function autoHealAppCompanies(rootDbPath: string, dataDir: string): any[] | null
                         const companyRow = siloDb.prepare("SELECT value FROM store WHERE key = 'app_companies'").get() as any;
                         if (companyRow && companyRow.value) {
                             const comps = JSON.parse(companyRow.value);
-                            profile = comps.find((c: any) => c.id === siloId) || comps[0];
+                            profile = comps.find((c: any) => c.id === siloId);
                         }
                     } catch(e) {}
                 }
@@ -1455,6 +1482,7 @@ function autoHealAppCompanies(rootDbPath: string, dataDir: string): any[] | null
                 siloDb.close();
                 
                 if (profile) {
+                    profile.id = siloId;
                     recoveredCompanies.push(profile);
                     console.log(`[db-get-global] Rescued profile for silo: ${siloId}`);
                 } else {
@@ -1507,6 +1535,51 @@ function siloHasEmployees(siloDataPath: string, siloId: string): boolean {
     return false;
 }
 
+// Strict Physical Silo Sanitizer: Ensures app_companies ONLY contains companies with active physical folders in Data/
+function sanitizeCompaniesWithPhysicalSilos(companies: any[], dataDir: string): any[] {
+    if (!fs.existsSync(dataDir) || !Array.isArray(companies)) return companies;
+
+    // Scan Data/ directory for all actual physical silo subfolders containing active_db.sqlite
+    const physicalSiloIds = fs.readdirSync(dataDir).filter(name => {
+        if (name === 'default') return false;
+        const siloPath = path.join(dataDir, name);
+        return fs.statSync(siloPath).isDirectory() && fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
+    });
+
+    const physicalSiloSet = new Set(physicalSiloIds);
+
+    // 1. Strict Filter: Keep ONLY companies whose ID corresponds to an actual physical folder in Data/ (never 'default')
+    let sanitized = companies.filter(c => c && c.id && c.id !== 'default' && physicalSiloSet.has(c.id));
+
+    // 2. Ensure every physical folder in Data/ is present in the registry (Auto-Rescue missing folders)
+    const existingIds = new Set(sanitized.map(c => c.id));
+    for (const siloId of physicalSiloIds) {
+        if (!existingIds.has(siloId)) {
+            try {
+                const siloDbPath = path.join(dataDir, siloId, 'active_db.sqlite');
+                const siloDb = new Database(siloDbPath, { readonly: true });
+                let profile = null;
+                try {
+                    const profileRow = siloDb.prepare("SELECT value FROM store WHERE key = 'app_company_profile' OR key LIKE 'app_company_profile_%'").get() as any;
+                    if (profileRow && profileRow.value) profile = JSON.parse(profileRow.value);
+                } catch (e) {}
+                siloDb.close();
+
+                if (profile) {
+                    profile.id = siloId;
+                    sanitized.push(profile);
+                } else {
+                    sanitized.push({ id: siloId, establishmentName: siloId, cin: '' });
+                }
+            } catch (e) {
+                sanitized.push({ id: siloId, establishmentName: siloId, cin: '' });
+            }
+        }
+    }
+
+    return sanitized;
+}
+
 ipcMain.handle('db-get-global', async (_, key) => {
     try {
         console.log(`[db-get-global] Requested key: ${key}. appBasePath: ${appBasePath}`);
@@ -1518,9 +1591,6 @@ ipcMain.handle('db-get-global', async (_, key) => {
         if (!fs.existsSync(rootDbPath)) return null;
         
         const rootDb = new Database(rootDbPath, { readonly: true });
-        // Use readonly connection to avoid locking issues just for a read!
-        // V03.00.00: It used to do CREATE TABLE IF NOT EXISTS store, but readonly DBs can't.
-        // Assuming store already exists.
         const stmt = rootDb.prepare('SELECT value FROM store WHERE key = ?');
         const row = stmt.get(key) as { value: string } | undefined;
         rootDb.close();
@@ -1542,6 +1612,7 @@ ipcMain.handle('db-get-global', async (_, key) => {
            try {
               let parsed = JSON.parse(row.value);
               if (key === 'app_companies' && Array.isArray(parsed)) {
+                  parsed = sanitizeCompaniesWithPhysicalSilos(parsed, paths.data);
                   parsed = parsed.map((c: any) => ({
                       ...c,
                       hasEmployees: siloHasEmployees(paths.data, c.id)
@@ -1561,8 +1632,11 @@ ipcMain.handle('db-get-global', async (_, key) => {
 
 ipcMain.handle('db-set-global', async (_, { key, value }) => {
     try {
-        // 1. Always write to the ROOT database (Registry) ONLY
         const paths = getAppPaths(appBasePath);
+        if (key === 'app_companies' && Array.isArray(value)) {
+            value = sanitizeCompaniesWithPhysicalSilos(value, paths.data);
+        }
+        // 1. Always write to the ROOT database (Registry) ONLY
         const rootDbPath = path.join(paths.root, 'active_db.sqlite');
         const rootDb = new Database(rootDbPath);
         rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
@@ -1579,9 +1653,14 @@ ipcMain.handle('db-set-global', async (_, { key, value }) => {
 const LIMIT_KEY = crypto.scryptSync('BPP_SECURE_COMPANY_LIMIT_KEY_2026', 'salt', 32);
 const LIMIT_IV = Buffer.alloc(16, 0); 
 
+function getSysLimitPath(): string {
+    const fileName = (!app.isPackaged || process.env.NODE_ENV === 'development') ? 'sys_limit_dev.bin' : 'sys_limit.bin';
+    return path.join(app.getPath('userData'), fileName);
+}
+
 function readActivatedSilos(): string[] {
     try {
-        const filePath = path.join(app.getPath('userData'), 'sys_limit.bin');
+        const filePath = getSysLimitPath();
         if (!fs.existsSync(filePath)) return [];
         const encrypted = fs.readFileSync(filePath, 'utf8');
         const decipher = crypto.createDecipheriv('aes-256-cbc', LIMIT_KEY as any, LIMIT_IV as any);
@@ -1595,7 +1674,7 @@ function readActivatedSilos(): string[] {
 
 function writeActivatedSilos(silos: string[]) {
     try {
-        const filePath = path.join(app.getPath('userData'), 'sys_limit.bin');
+        const filePath = getSysLimitPath();
         const cipher = crypto.createCipheriv('aes-256-cbc', LIMIT_KEY as any, LIMIT_IV as any);
         let encrypted = cipher.update(JSON.stringify(silos), 'utf8', 'hex');
         encrypted += cipher.final('hex');
@@ -1611,30 +1690,45 @@ ipcMain.handle('get-activated-silos', async () => {
 
 ipcMain.handle('register-activated-silo', async (_, signature: string) => {
     const silos = readActivatedSilos();
-    if (!silos.includes(signature)) {
+    if (signature && !silos.includes(signature)) {
         silos.push(signature);
         writeActivatedSilos(silos);
     }
     return { success: true, silos };
 });
 
-ipcMain.handle('remove-activated-silo', async (_, signature: string) => {
+ipcMain.handle('remove-activated-silo', async (_, target: string) => {
     let silos = readActivatedSilos();
-    if (silos.includes(signature)) {
-        silos = silos.filter(s => s !== signature);
-        writeActivatedSilos(silos);
+    if (!target) return { success: true, silos };
+    silos = silos.filter(s => {
+        if (s === target) return false;
+        if (target.length >= 3 && s.includes(`_${target}-`)) return false;
+        if (target.length >= 3 && s.includes(`_${target}_`)) return false;
+        if (target.length >= 3 && s.includes(target)) return false;
+        return true;
+    });
+    writeActivatedSilos(silos);
+    return { success: true, silos };
+});
+
+ipcMain.handle('sync-activated-silos', async (_, validCloudSigs: string[]) => {
+    let silos = readActivatedSilos();
+    if (Array.isArray(validCloudSigs)) {
+        const cleaned = silos.filter(s => validCloudSigs.includes(s));
+        writeActivatedSilos(cleaned);
+        return { success: true, silos: cleaned };
     }
     return { success: true, silos };
 });
 
 ipcMain.handle('wipe-activated-silos', async () => {
-    const filePath = path.join(app.getPath('userData'), 'sys_limit.bin');
+    const filePath = getSysLimitPath();
     if (fs.existsSync(filePath)) {
         try {
             fs.unlinkSync(filePath);
-            console.log("Deleted sys_limit.bin physically in wipe-activated-silos");
+            console.log("Deleted sys_limit.bin/sys_limit_dev.bin physically in wipe-activated-silos");
         } catch (e) {
-            console.error("Failed to delete sys_limit.bin physically in wipe-activated-silos", e);
+            console.error("Failed to delete sys_limit file physically in wipe-activated-silos", e);
         }
     }
     return { success: true, silos: [] };
@@ -1642,16 +1736,16 @@ ipcMain.handle('wipe-activated-silos', async () => {
 
 ipcMain.handle('wipe-all-local-signatures', async () => {
     try {
-        console.log("🧹 [IPC] Received wipe-all-local-signatures. Sweeping all local SQLite databases and sys_limit.bin...");
+        console.log("🧹 [IPC] Received wipe-all-local-signatures. Sweeping all local SQLite databases and sys_limit file...");
         
-        // 1. Wipe sys_limit.bin physically
-        const filePath = path.join(app.getPath('userData'), 'sys_limit.bin');
+        // 1. Wipe sys_limit file physically
+        const filePath = getSysLimitPath();
         if (fs.existsSync(filePath)) {
             try {
                 fs.unlinkSync(filePath);
-                console.log("Deleted sys_limit.bin physically in wipe-all-local-signatures");
+                console.log("Deleted sys_limit file physically in wipe-all-local-signatures");
             } catch (e) {
-                console.error("Failed to delete sys_limit.bin physically in wipe-all-local-signatures", e);
+                console.error("Failed to delete sys_limit file physically in wipe-all-local-signatures", e);
             }
         }
         
@@ -1747,10 +1841,6 @@ ipcMain.handle('wipe-all-local-signatures', async () => {
                         const files = fs.readdirSync(subPath);
                         for (const f of files) {
                             if (f.endsWith('.tmp') || f.startsWith('temp_') || f.includes('restore_temp')) {
-                                try {
-                                    fs.unlinkSync(path.join(subPath, f));
-                                    console.log(`[IPC] Cleaned temporary file in silo ${sub}: ${f}`);
-                                } catch(e) {}
                             }
                         }
                     }
@@ -1762,6 +1852,120 @@ ipcMain.handle('wipe-all-local-signatures', async () => {
         return { success: true };
     } catch (e: any) {
         console.error('[IPC] wipe-all-local-signatures failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('purge-unmatched-local-signatures', async (_, validCloudSignatures: string[]) => {
+    try {
+        const validSigs = Array.isArray(validCloudSignatures) ? validCloudSignatures : [];
+        console.log("🧹 [IPC] Reconciling 4-layer signatures against Cloud Column R:", validSigs);
+        
+        // 🚨 OFFLINE GUARD: If offline or no cloud signatures fetched, preserve local signatures!
+        if (validSigs.length === 0) {
+            console.log("📡 [IPC] Offline Mode / No Cloud Signatures. Preserving all local company signatures intact.");
+            return { success: true, silos: readActivatedSilos() };
+        }
+        
+        let updatedSilos = new Set<string>();
+
+        if (!appBasePath) return { success: true, silos: [] };
+        const paths = getAppPaths(appBasePath);
+
+        // 2. Sync root active_db.sqlite app_companies & app_company_profile
+        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
+        if (fs.existsSync(rootDbPath)) {
+            const rootDb = new Database(rootDbPath);
+            rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+
+            const compsRow = rootDb.prepare("SELECT value FROM store WHERE key = 'app_companies'").get() as any;
+            if (compsRow && compsRow.value) {
+                try {
+                    let comps = JSON.parse(compsRow.value);
+                    if (Array.isArray(comps)) {
+                        for (const c of comps) {
+                            if (c.id) {
+                                const matchingSig = validSigs.find(s => s.includes(`_${c.id}-`));
+                                if (matchingSig) {
+                                    c.companySignature = matchingSig;
+                                    c.isReadOnly = false;
+                                    updatedSilos.add(matchingSig);
+                                } else {
+                                    c.companySignature = "";
+                                    c.isReadOnly = true;
+                                }
+                            }
+                        }
+                        rootDb.prepare("INSERT OR REPLACE INTO store (key, value) VALUES ('app_companies', ?)").run(JSON.stringify(comps));
+                    }
+                } catch(e) {}
+            }
+
+            const keysToWipe = rootDb.prepare("SELECT key, value FROM store WHERE key LIKE '%company_profile%'").all() as any[];
+            for (const row of keysToWipe) {
+                try {
+                    let prof = JSON.parse(row.value);
+                    const siloId = prof.id || (row.key.replace('app_company_profile_', '').replace('app_company_profile', ''));
+                    if (siloId) {
+                        const matchingSig = validSigs.find(s => s.includes(`_${siloId}-`));
+                        if (matchingSig) {
+                            prof.companySignature = matchingSig;
+                            prof.isReadOnly = false;
+                            updatedSilos.add(matchingSig);
+                        } else {
+                            prof.companySignature = "";
+                            prof.isReadOnly = true;
+                        }
+                        rootDb.prepare("INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)").run(row.key, JSON.stringify(prof));
+                    }
+                } catch(e) {}
+            }
+
+            rootDb.close();
+        }
+
+        // 3. Sync every company silo DB (app_company_profile)
+        const dataDir = paths.data;
+        if (fs.existsSync(dataDir)) {
+            const siloDirs = fs.readdirSync(dataDir).filter(name => {
+                const siloPath = path.join(dataDir, name);
+                return fs.statSync(siloPath).isDirectory() && fs.existsSync(path.join(siloPath, 'active_db.sqlite'));
+            });
+
+            for (const siloId of siloDirs) {
+                try {
+                    const siloDbPath = path.join(dataDir, siloId, 'active_db.sqlite');
+                    const siloDb = new Database(siloDbPath);
+                    siloDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+
+                    const rows = siloDb.prepare("SELECT key, value FROM store WHERE key LIKE '%company_profile%'").all() as any[];
+                    for (const r of rows) {
+                        try {
+                            let prof = JSON.parse(r.value);
+                            const matchingSig = validSigs.find(s => s.includes(`_${siloId}-`));
+                            if (matchingSig) {
+                                prof.companySignature = matchingSig;
+                                prof.isReadOnly = false;
+                                updatedSilos.add(matchingSig);
+                            } else {
+                                prof.companySignature = "";
+                                prof.isReadOnly = true;
+                            }
+                            siloDb.prepare("INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)").run(r.key, JSON.stringify(prof));
+                        } catch(e) {}
+                    }
+                    siloDb.close();
+                } catch(e) {}
+            }
+        }
+
+        // 1. Sync sys_limit.bin
+        const finalSilos = Array.from(updatedSilos);
+        writeActivatedSilos(finalSilos);
+
+        return { success: true, silos: finalSilos };
+    } catch (e: any) {
+        console.error('[IPC] purge-unmatched-local-signatures failed:', e);
         return { success: false, error: e.message };
     }
 });
@@ -2147,15 +2351,33 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
             fs.appendFileSync(path.join(require('electron').app.getPath('userData'), 'restore_log.txt'), logMsg);
         } catch (e) {}
         
-        // 3. Define keys to exclude (License and User management)
-        const excludedKeys = [
+        // 3. Define keys to strictly exclude from overwriting on Target Machine B:
+        // Protect Machine B's Company Profile, companySignature, System Configuration, and License Identity.
+        const activeId = activeCompanyId;
+        const excludedBaseKeys = [
             'app_license_secure', 
             'app_license_data', 
             'app_users', 
             'app_machine_id', 
             'app_developer_secure',
-            'app_data_size'
+            'app_data_size',
+            'app_company_profile',
+            'company_profile',
+            'app_config',
+            'config'
         ];
+        if (activeId && activeId !== 'default') {
+            excludedBaseKeys.push(`app_company_profile_${activeId}`);
+            excludedBaseKeys.push(`app_config_${activeId}`);
+        }
+
+        const isExcludedKey = (key: string): boolean => {
+            if (excludedBaseKeys.includes(key)) return true;
+            if (key.startsWith('app_company_profile') || key.startsWith('company_profile')) return true;
+            if (key.startsWith('app_config_') || key === 'app_config') return true;
+            if (key.startsWith('app_license') || key.startsWith('app_user') || key.includes('sys_limit')) return true;
+            return false;
+        };
         
         // 4. Ensure active database is open
         console.log(`[IPC] Restoring into database path: ${DB_PATH}`);
@@ -2164,8 +2386,7 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
             db.pragma('journal_mode = WAL');
         }
         
-        // 4.5 Check for Company Name conflict (V04.01.02: Supports app_ prefixed & scoped keys, and case-insensitive check)
-        const activeId = activeCompanyId;
+        // 4.5 Mandatory Company Profile Matching Gate (V06.01.10)
         let backupProfileRow = null;
         if (activeId && activeId !== 'default') {
             backupProfileRow = rows.find(r => r.key === `app_company_profile_${activeId}`);
@@ -2184,6 +2405,8 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
             try {
                 const backupProfile = JSON.parse(backupProfileRow.value);
                 const backupName = backupProfile.establishmentName || backupProfile.tradeName;
+                const backupPan = backupProfile.pan || '';
+                const backupCin = backupProfile.cin || '';
                 
                 let activeProfileRow = null;
                 if (activeId && activeId !== 'default') {
@@ -2199,6 +2422,8 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
                 if (activeProfileRow) {
                     const activeProfile = JSON.parse(activeProfileRow.value);
                     const activeName = activeProfile.establishmentName || activeProfile.tradeName;
+                    const activePan = activeProfile.pan || '';
+                    const activeCin = activeProfile.cin || '';
                     
                     if (backupName && activeName) {
                         const bNameClean = backupName.trim().toUpperCase();
@@ -2206,23 +2431,45 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
                         if (bNameClean !== aNameClean) {
                             sourceDb.close();
                             fs.unlinkSync(tempRestorePath);
-                            return { success: false, error: `Data Restoration Failed: Company Name Mismatch. The backup belongs to '${bNameClean}', but your active importing company is '${aNameClean}'.` };
+                            return { 
+                                success: false, 
+                                error: `Data Import Blocked: Company Profile Mismatch. The backup belongs to '${bNameClean}', but the active company on this machine is '${aNameClean}'. Import cancelled.` 
+                            };
                         }
+                    }
+
+                    // Secondary match verification if PAN or CIN are present on both profiles
+                    if (backupPan && activePan && backupPan.trim().toUpperCase() !== activePan.trim().toUpperCase()) {
+                        sourceDb.close();
+                        fs.unlinkSync(tempRestorePath);
+                        return {
+                            success: false,
+                            error: `Data Import Blocked: PAN Mismatch. Backup PAN (${backupPan}) does not match active company PAN (${activePan}). Import cancelled.`
+                        };
                     }
                 }
             } catch (e) {
-                console.warn('[IPC] Failed to parse company profile for name check:', e);
+                console.warn('[IPC] Failed to parse company profile for validation gate:', e);
             }
         }
         
-        // 5. Merge rows into active database, skipping excluded keys
-        const deleteStmt = db.prepare(`DELETE FROM store WHERE key NOT IN (${excludedKeys.map(() => '?').join(',')})`);
-        const upsertStmt = db.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+        if (!db) throw new Error("Database not initialized");
+        const targetDb = db;
+
+        // 5. Merge Operational Pay Data into active database, strictly excluding Profile, Config & Security keys
+        // First delete non-excluded keys in active DB
+        const allKeysInDb = (targetDb.prepare('SELECT key FROM store').all() as { key: string }[]).map(r => r.key);
+        const keysToDelete = allKeysInDb.filter(k => !isExcludedKey(k));
         
-        db.transaction(() => {
-            deleteStmt.run(...excludedKeys);
+        const upsertStmt = targetDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+        
+        targetDb.transaction(() => {
+            if (keysToDelete.length > 0) {
+                const deleteStmt = targetDb.prepare(`DELETE FROM store WHERE key IN (${keysToDelete.map(() => '?').join(',')})`);
+                deleteStmt.run(...keysToDelete);
+            }
             for (const row of rows) {
-                if (!excludedKeys.includes(row.key)) {
+                if (!isExcludedKey(row.key)) {
                     upsertStmt.run(row.key, row.value);
                 }
             }
@@ -2258,13 +2505,21 @@ async function getInternalMachineId() {
 
 // 6. App Closing
 ipcMain.handle('close-app', async () => {
-    console.error("IPC 'close-app' WAS CALLED. STACK TRACE:");
-    console.trace();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.setClosable(true);
-        mainWindow.destroy();
-    }
-    app.quit();
+    console.log("[IPC] 'close-app' requested. Terminating application process.");
+    try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.setClosable(true);
+            mainWindow.removeAllListeners('close');
+            mainWindow.destroy();
+        }
+    } catch (e) {}
+    try {
+        app.exit(0);
+    } catch (e) {}
+    try {
+        app.quit();
+    } catch (e) {}
+    process.exit(0);
 });
 
 // 6. Machine ID Retrieval

@@ -682,7 +682,7 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
                 ...INITIAL_COMPANY_PROFILE, 
                 establishmentName: companyName.trim().toUpperCase(), 
                 pan: companyPan.trim().toUpperCase(),
-                dashboardPassword: companyPass 
+                dashboardPassword: '' 
             },
             statutoryConfig: INITIAL_STATUTORY_CONFIG,
 

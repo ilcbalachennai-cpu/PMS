@@ -465,16 +465,34 @@ BharatPay Pro provides advanced data maintenance tools to ensure your establishm
 ### 11.1 Backup Data (LOCAL SECURE BACKUP)
 Creates a high-security encrypted snapshot (`.enc`) of the active establishment's database. It is highly recommended to perform a backup before every payroll finalization.
 
-### 11.2 Restore Data (UNIVERSAL RESTORATION & MACHINE PORTABILITY)
-Imports an existing backup into the current establishment silo. This will overwrite the current unit's data with the contents of the backup. Use this for data recovery or migration.
+### 11.2 Restore Data (DATA SWAPPING & MACHINE PORTABILITY)
+Imports an existing backup into the active establishment silo. This selectively updates the unit's operational pay records while preserving local company profiles and system security signatures.
 
 > [!TIP]
-> **Porting Data Between Licensed Machines:**
-> To move an establishment's data from Machine A to Machine B:
-> 1. Perform a **Backup Data** operation on Machine A to generate the `.enc` snapshot file.
-> 2. Transfer the `.enc` file to Machine B (via USB or email).
-> 3. On Machine B, register a new empty company profile (or open an existing one) to act as the destination silo. Note: Machine B must have an active license with enough "Company Quota" and "Employee Quota" to hold the incoming data.
-> 4. Run the **Restore Data** function inside the target silo on Machine B and select the `.enc` file. The establishment is now successfully ported!
+> **Data Swapping & Porting Between Licensed Machines (Machine A to Machine B):**
+> **Under What Circumstances is it Allowed?**
+> Data swapping is allowed when transferring operational payroll records for an establishment from a source machine (Machine A) to a destination machine (Machine B).
+> 
+> **Mandatory Profile Matching Rule:**
+> The destination company profile on Machine B (Establishment Name, Company ID, PAN/CIN) **MUST MATCH EXACTLY** with the source company profile from Machine A. If company details do not match, the system will block the import to prevent data corruption or unauthorized overwrites.
+> 
+> **Selective Pay Data Import (BC / AC Model):**
+> *   **What is Imported:** The migration engine selectively imports *only* operational pay data — Employees, Monthly Attendance Sheets, Payroll History, Leave & Advance Ledgers, Fines, OT Records, and Master Designations/Divisions/Branches/Sites.
+> *   **What is Protected:** Machine B's existing Company Profile (`company_profile`), Statutory Compliance Rules (`config`), User Accounts (`users`), and System Security Signature (`companySignature`) are **strictly preserved and never overwritten**.
+> *   **Slot Count & License Security:** The import will **never** add duplicate companies or alter your registered company list (`app_companies`). Your registered company count remains locked at `3 / 3`, keeping your app in full-featured mode.
+> 
+> **Step-by-Step Data Swapping Guide:**
+> 1. Perform a **Backup Data** operation on Machine A to generate the `.enc` backup file.
+> 2. Transfer the `.enc` file to Machine B (via USB or secure cloud drive).
+> 3. On Machine B, log into the matching target establishment (ensuring Establishment Name and Company ID match Machine A).
+> 4. Go to **System Configuration > Data Management > Restore Data** and select the `.enc` file. The operational pay data is now seamlessly ported!
+
+> [!WARNING]
+> **Read-Only Mode System Restrictions:**
+> When an establishment is flagged in **Read-Only Mode** (e.g. when license slot limits are exceeded or system signatures mismatch):
+> *   **"Process Payroll" Main Tab Deactivated:** The **Process Payroll** sidebar navigation tab is set to **INACTIVE / DISABLED** with a warning tooltip (*"Process Payroll Inactive: Company is in Read-Only Mode"*).
+> *   **No Edit or Input Operations Allowed:** All input fields across Attendance Entry, Overtime Records, Fine Registers, Leave/Advance Ledgers, Employee Master Edits, and Pay Calculations are strictly locked.
+> *   **View & Export Only:** You may view historical reports and export diagnostics, but no new data entry or calculation is permitted until the license/signature status is resolved.
 
 ### 11.3 Previous Version Data (LEGACY MIGRATION)
 Provides a seamless import path for legacy databases, restoring structured employee and historical pay records from previous V3 or V4 major versions into the new multi-unit environment.

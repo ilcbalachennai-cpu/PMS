@@ -3,7 +3,6 @@ import { Upload, CheckCircle2, AlertCircle, Save, Lock, AlertTriangle, Users, Ed
 import * as XLSX from 'xlsx-js-style';
 import { Employee, Attendance, PayrollResult, LeaveLedger, CompanyProfile } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
-import { validateLicenseStartup } from '../services/licenseService';
 
 interface AttendanceManagerProps {
   employees: Employee[];
@@ -272,28 +271,6 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = (props) => {
       setTimeout(() => {
         setIsSaving(false);
         setJustSaved(true);
-
-        // V06.01.10: Also activate silo if attendance is processed (since attendance is valid processed data)
-        if (companyProfile.companySignature && (window as any).electronAPI?.getActivatedSilos && (window as any).electronAPI?.registerActivatedSilo) {
-          (window as any).electronAPI.getActivatedSilos().then((res: any) => {
-            if (res?.success && !res.silos.includes(companyProfile.companySignature!)) {
-              (window as any).electronAPI.registerActivatedSilo(companyProfile.companySignature!).then((regRes: any) => {
-                if (regRes?.success && regRes.silos) {
-                  // Force cloud sync after 3 seconds to stabilize the app
-                  setTimeout(() => {
-                      validateLicenseStartup(true).catch(e => console.warn("Failed to sync silo limit to cloud:", e));
-                  }, 3000);
-
-                  const license = JSON.parse(localStorage.getItem('app_license_secure') || '{}');
-                  const limit = license?.companyLimit || 1;
-                  if (regRes.silos.length >= limit) {
-                    // Re-check read-only status in background
-                  }
-                }
-              });
-            }
-          });
-        }
 
         setModalState({
           isOpen: true,

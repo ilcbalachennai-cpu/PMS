@@ -42,7 +42,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "runAfterFinish": true,
+      "runAfterFinish": false,
+      "warningsAsErrors": false,
       "createDesktopShortcut": true,
       "shortcutName": "BharatPayRoll",
       "artifactName": "BPP_APP_V06.01.10_Win10.exe",
@@ -108,7 +109,7 @@
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3",
     "inquirer": "^13.3.2",
-    "javascript-obfuscator": "^5.3.0",
+    "javascript-obfuscator": "^0.6.2",
     "postcss": "^8.5.6",
     "rollup-plugin-javascript-obfuscator": "^1.0.1",
     "tailwindcss": "^4.2.1",

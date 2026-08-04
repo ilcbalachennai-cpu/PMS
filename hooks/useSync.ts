@@ -109,12 +109,16 @@ export const useSync = (props: SyncProps) => {
           (window as any).electronAPI.dbSet(getCKey(item.k), item.v);
         }
         
-        // Also save the master companies list
+        // Save the master companies list to GLOBAL storage ONLY (never per-silo!)
         const companiesRaw = localStorage.getItem('app_companies');
         if (companiesRaw) {
-          (window as any).electronAPI.dbSet('app_companies', JSON.parse(companiesRaw));
+          if ((window as any).electronAPI?.dbSetGlobal) {
+            (window as any).electronAPI.dbSetGlobal('app_companies', JSON.parse(companiesRaw));
+          }
         }
-        (window as any).electronAPI.dbSet('app_active_company_id', activeCompanyId);
+        if ((window as any).electronAPI?.dbSetGlobal) {
+          (window as any).electronAPI.dbSetGlobal('app_active_company_id', activeCompanyId);
+        }
       }
     }, 1000); // Debounce database writes by 1 second
 

@@ -396,6 +396,15 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
     // MAIN WORKSPACE VIEW
     return (
         <div className="space-y-4 animate-in fade-in duration-500 relative">
+            {props.companyProfile?.isReadOnly && (
+                <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center gap-3 text-rose-400 font-bold animate-in fade-in">
+                    <Lock size={20} className="shrink-0 text-rose-400" />
+                    <div>
+                        <h4 className="text-xs font-black uppercase tracking-wider">READ ONLY MODE ACTIVE</h4>
+                        <p className="text-[11px] text-rose-300/80 font-medium">Payroll processing, attendance data entry, and master updates are inactive for this company.</p>
+                    </div>
+                </div>
+            )}
 
             {/* 1. Compact Header with Bulk Actions */}
             <div className="bg-[#1e293b] p-4 rounded-xl border border-slate-800 shadow-xl">

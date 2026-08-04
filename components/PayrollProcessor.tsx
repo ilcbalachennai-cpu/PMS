@@ -7,7 +7,6 @@ import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileNam
 import { formatIndianNumber, didConfigCalculationFieldsChange, didEmployeePayFieldsChange } from '../utils/formatters';
 import { ModalType } from './Shared/CustomModal';
 import { getActivePaySheetColumns } from '../constants';
-import { validateLicenseStartup } from '../services/licenseService';
 
 interface PayrollProcessorProps {
     employees: Employee[];
@@ -622,21 +621,6 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 setIsSaved(false);
                 setMasterDataChanged(false); // Clear the warning on successful calculation
                 setDataIsStale(false); // Reset stale state on successful calculation
-
-                // --- NEW: Trigger Activation if not already activated ---
-                if (companyProfile.companySignature && (window as any).electronAPI?.getActivatedSilos && (window as any).electronAPI?.registerActivatedSilo) {
-                    (window as any).electronAPI.getActivatedSilos().then((res: any) => {
-                        if (res?.success && !res.silos.includes(companyProfile.companySignature!)) {
-                            (window as any).electronAPI.registerActivatedSilo(companyProfile.companySignature!).then(() => {
-                                console.log(`[Activation] Registered silo signature locally: ${companyProfile.companySignature}`);
-                                // Force cloud sync after 3 seconds to stabilize the app
-                                setTimeout(() => {
-                                    validateLicenseStartup(true).catch(e => console.warn("Failed to sync silo limit to cloud:", e));
-                                }, 3000);
-                            });
-                        }
-                    });
-                }
 
                 const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
                 localStorage.setItem(configKey, JSON.stringify(config));

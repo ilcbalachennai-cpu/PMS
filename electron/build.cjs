@@ -57,7 +57,10 @@ async function build() {
         transformObjectKeys: false,
         unicodeEscapeSequence: false
     });
-    fs.writeFileSync(mainJsPath, obfuscationResult.getObfuscatedCode(), 'utf8');
+    const obfuscatedCode = typeof obfuscationResult.getObfuscatedCode === 'function' 
+        ? obfuscationResult.getObfuscatedCode() 
+        : String(obfuscationResult);
+    fs.writeFileSync(mainJsPath, obfuscatedCode, 'utf8');
 
     // 2.1 Obfuscate Preload
     const preloadJsPath = path.join(distPath, 'preload.js');
@@ -72,7 +75,10 @@ async function build() {
             stringArray: true,
             stringArrayEncoding: ['base64']
         });
-        fs.writeFileSync(preloadJsPath, preloadObfuscationResult.getObfuscatedCode(), 'utf8');
+        const preloadCode = typeof preloadObfuscationResult.getObfuscatedCode === 'function'
+            ? preloadObfuscationResult.getObfuscatedCode()
+            : String(preloadObfuscationResult);
+        fs.writeFileSync(preloadJsPath, preloadCode, 'utf8');
     }
 
     // 3. Compile to Bytecode (Bytenode) using exact Electron version
