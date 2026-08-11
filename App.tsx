@@ -29,7 +29,7 @@ import LicenseActivationModal from './components/Shared/LicenseActivationModal';
 import SocialSecurityCode from './components/SocialSecurityCode';
 import { signalApplicationReady } from './components/Shared/GlobalRescueUI';
 
-import { getStoredLicense, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount, requestResetOTP, verifyResetOTP } from './services/licenseService';
+import { getStoredLicense, findMatchingCloudSignature, APP_VERSION, trackHeartbeat, getMachineId, checkOnlineStatus, checkSyncRequirement, getOfflineActiveDaysCount, clearSyncRetryCount, requestResetOTP, verifyResetOTP } from './services/licenseService';
 import { parseExpiryDate, formatExpiryDate, generateCompanyId, getCleanCompanyIdPart } from './utils/formatters';
 import { View, User, UserPermissions, Employee, PayrollResult, CompanyProfile, StatutoryConfig, SettingsTab } from './types';
 import { BRAND_CONFIG, INITIAL_COMPANY_PROFILE, DEFAULT_LEAVE_POLICY } from './constants';
@@ -143,7 +143,7 @@ const renderFormattedMessage = (msg: string | undefined | null) => {
   });
 };
 
-const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
+const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
   const mainContentRef = useRef<HTMLElement>(null);
   const deleteProgressRef = useRef<HTMLDivElement>(null);
   const otpInputRef = useRef<HTMLInputElement>(null);
@@ -154,6 +154,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
   // --- Initialize Hooks ---
   const { alertConfig, showAlert, closeAlert } = useAlerts();
   const { currentUser, handleLogin, logout, setCurrentUser } = useAuth();
+  const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages, setLicenseStatus } = useLicense();
   
   const {
     employees, setEmployees, config, setConfig, companyProfile, setCompanyProfile,
@@ -162,24 +163,56 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     arrearHistory, setArrearHistory, otRecords, setOTRecords, designations, setDesignations, divisions, setDivisions,
     branches, setBranches, sites, setSites, logoUrl, setLogoUrl,
     safeSave, handleRollover, handlePayrollReset, handleDeepReset, handleNuclearReset,
-    companies, setCompanies, activeCompanyId, activeFinancialYear, availableFinancialYears, switchCompany, switchFinancialYear, addCompany, deleteCompany, isHydrating, isResetting, triggerReload: reloadData
+    companies, setCompanies, activeCompanyId, activeFinancialYear, availableFinancialYears, switchCompany, switchFinancialYear, addCompany, deleteCompany, isHydrating, isResetting
   } = usePayrollData(showAlert);
 
   const [showActivationModal, setShowActivationModal] = useState(false);
 
-  // Trigger License Activation Modal if cloud signatures are completely blank (Hard Reset / Signature Assignment)
+  // Listen for custom broadcast events when licenseService wipes or updates companies
+  useEffect(() => {
+    const handleCompaniesUpdated = () => {
+      try {
+        const raw = localStorage.getItem('app_companies');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setCompanies(parsed);
+          }
+        }
+      } catch (e) {}
+    };
+
+    window.addEventListener('app_companies_updated', handleCompaniesUpdated);
+
+    return () => {
+      window.removeEventListener('app_companies_updated', handleCompaniesUpdated);
+    };
+  }, [setCompanies]);
+
+  // Trigger License Activation Modal if cloud signatures are completely blank and no companies have active signatures
   useEffect(() => {
     if (!currentUser || companies.length === 0) return;
-    const license = getStoredLicense();
+    const license = licenseInfo || getStoredLicense();
+    const activeCompaniesWithSignature = companies.filter(c => c.companySignature && c.companySignature.trim() !== '' && !c.isReadOnly);
+    const hasAnyActiveSignature = activeCompaniesWithSignature.length > 0;
+    const cloudSigs = license?.cloudSignatures || [];
+    const usedSlots = cloudSigs.length;
     
-    const usedSlots = license?.cloudSignatures?.length || 0;
-    
-    // Condition (1): If the license limit is > 0 but we have 0 activated slots in cloud,
-    // trigger modal automatically so user assigns signatures.
-    if (license && (license.companyLimit ?? 0) > 0 && usedSlots === 0) {
+    console.log("🔍 [Activation Trigger Check]", {
+      hasLicense: !!license,
+      companyLimit: license?.companyLimit,
+      usedSlots,
+      hasAnyActiveSignature,
+      currentUser: currentUser?.username
+    });
+
+    // Condition: If the license limit is > 0 and no company has an active signature AND cloud usedSlots is 0,
+    // trigger modal automatically so user/developer allots signatures for the first time.
+    if (license && (license.companyLimit ?? 0) > 0 && !hasAnyActiveSignature && usedSlots === 0) {
+      console.log("🚀 [Activation Trigger] Conditions met! Opening LicenseActivationModal.");
       setShowActivationModal(true);
     }
-  }, [currentUser, companies.length]);
+  }, [currentUser, companies.length, companies, licenseInfo, licenseStatus]);
 
   const handleClaimCompany = async (company: CompanyProfile) => {
     const currentLimit = licenseInfo?.companyLimit || 3;
@@ -291,8 +324,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
       if (idx !== -1) {
         updatedCompanies[idx] = { ...updatedCompanies[idx], establishmentName: estName, companySignature: newSig, isReadOnly: false };
         
+        const isDev = currentUser?.role === 'Developer' || currentUser?.username === 'VRANGA';
         if (window.electronAPI?.registerActivatedSilo) {
-          await window.electronAPI.registerActivatedSilo(newSig);
+          await window.electronAPI.registerActivatedSilo(newSig, isDev);
         }
         
         if (window.electronAPI?.dbGetGlobal && window.electronAPI?.dbSetGlobal) {
@@ -330,8 +364,9 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
         };
         updatedCompanies.push(rescued as any);
         
+        const isDev = currentUser?.role === 'Developer' || currentUser?.username === 'VRANGA';
         if (window.electronAPI?.registerActivatedSilo) {
-          await window.electronAPI.registerActivatedSilo(newSig);
+          await window.electronAPI.registerActivatedSilo(newSig, isDev);
         }
         activatedCount++;
       }
@@ -435,16 +470,14 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 
             // Try matching against cloud signatures first
             const cloudSigs = license?.cloudSignatures || [];
-            let isValidSig = sig ? cloudSigs.includes(sig) : false;
-            if (!isValidSig) {
-              const matchingCloudSig = cloudSigs.find(s => s.includes(`_${siloId}-`));
-              if (matchingCloudSig) {
-                sig = matchingCloudSig;
-                isValidSig = true;
-              } else {
-                sig = '';
-                isValidSig = false;
-              }
+            const matchingCloudSig = findMatchingCloudSignature({ id: siloId, establishmentName: estName, companySignature: sig }, cloudSigs);
+            let isValidSig = false;
+            if (matchingCloudSig) {
+              sig = matchingCloudSig;
+              isValidSig = true;
+            } else {
+              sig = '';
+              isValidSig = false;
             }
 
             // Mounted/Rescued existing companies MUST NOT auto-allot a new signature.
@@ -559,7 +592,6 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     return isJanToMar ? globalYear !== endY : globalYear !== startY;
   }, [globalMonth, globalYear, activeFinancialYear]);
 
-  const { licenseStatus, licenseInfo, dataSizeLimit, verifyLicense, checkNewMessages, setLicenseStatus } = useLicense();
   const [isRetryingSync, setIsRetryingSync] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const { isAppDirectoryConfigured, isBootSyncComplete } = useAppInitialization(verifyLicense);
@@ -1809,7 +1841,15 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
     triggerLoginHeartbeat();
 
     // Refresh license verification and info to ensure states like licenseStatus are sync'd
-    verifyLicense(true).catch(() => {});
+    verifyLicense(true).then(() => {
+      const raw = localStorage.getItem('app_companies');
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) setCompanies(parsed);
+        } catch (e) {}
+      }
+    }).catch(() => {});
 
     // 1. Mandatory Security Check: Forced Reset Detection
     const isForcedReset = sessionStorage.getItem('app_forced_reset') === 'true';
@@ -2279,7 +2319,7 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                   onClick={async () => {
                     try {
                       if ((window as any).electronAPI?.closeApp) {
-                        await (window as any).electronAPI.closeApp();
+                        (window as any).electronAPI.closeApp().catch(() => {});
                       }
                     } catch(e) {}
                     try {
@@ -3396,18 +3436,11 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                 {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} activeFinancialYear={activeFinancialYear} showAlert={showAlert} />}
-                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { reloadData(); onRefresh(); safeNavigate(View.Dashboard); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onClaimCompany={() => handleClaimCompany(companyProfile)} availableSlots={Math.max(0, (licenseInfo?.companyLimit || 3) - companies.filter(c => !c.isReadOnly).length)} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} onNavigate={safeNavigate} />}
+                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { window.location.reload(); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onClaimCompany={() => handleClaimCompany(companyProfile)} availableSlots={Math.max(0, (licenseInfo?.companyLimit || 3) - companies.filter(c => !c.isReadOnly).length)} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} onNavigate={safeNavigate} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
 
-              {/* --- License Activation Modal --- */}
-              {showActivationModal && (
-                <LicenseActivationModal 
-                  companies={companies}
-                  onActivate={handleActivateCompanies}
-                  onClose={() => setShowActivationModal(false)}
-                />
-              )}
+
 
               {/* --- Database Password Gate Modal --- */}
           {showDbGateModal && (
@@ -3872,6 +3905,15 @@ const PayrollShell: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
             </button>
           </div>
         </div>
+      )}
+
+      {/* --- Global Top-Level License Activation Modal (V06.01.10) --- */}
+      {showActivationModal && (
+        <LicenseActivationModal 
+          companies={companies}
+          onActivate={handleActivateCompanies}
+          onClose={() => setShowActivationModal(false)}
+        />
       )}
     </>
   )}

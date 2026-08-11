@@ -111,8 +111,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
     const hasAnyAttendance = useMemo(() => {
         return attendances.some(a =>
-            a.month === month &&
-            a.year === year &&
+            String(a?.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() &&
+            Number(a?.year) === Number(year) &&
             ((a.presentDays || 0) + (a.earnedLeave || 0) + (a.sickLeave || 0) + (a.casualLeave || 0) + (a.lopDays || 0)) > 0
         );
     }, [attendances, month, year]);
@@ -354,7 +354,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         setTimeout(() => {
             try {
                 const calculatedResults = activeEmployees.map(emp => {
-                    const attendance = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { employeeId: emp.id, month, year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
+                    const attendance = attendances.find(a => a.employeeId === emp.id && String(a?.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(a?.year) === Number(year)) || { employeeId: emp.id, month, year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
                     const leave = leaveLedgers.find(l => l.employeeId === emp.id) || { employeeId: emp.id, el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 }, sl: { eligible: 0, availed: 0, balance: 0 }, cl: { availed: 0, accumulation: 0, balance: 0 } };
                     const advance = advanceLedgers.find(a => a.employeeId === emp.id) || { employeeId: emp.id, opening: 0, totalAdvance: 0, monthlyInstallment: 0, paidAmount: 0, balance: 0, emiCount: 0, manualPayment: 0, recovery: 0 };
 
@@ -506,7 +506,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         // VALIDATION: Check for "Total Days > Days in Month"
         const daysInMonthTotal = new Date(year, months.indexOf(month) + 1, 0).getDate();
         const attendanceErrors = activeEmployees.filter(emp => {
-            const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
+            const att = attendances.find(a => a.employeeId === emp.id && String(a?.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(a?.year) === Number(year)) || { presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
             const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0);
             return total > daysInMonthTotal;
         });
@@ -521,7 +521,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                         <p className="text-xs font-bold text-red-400 uppercase tracking-tight">Total accounted days for the following employees exceed {daysInMonthTotal} days for {month}:</p>
                         <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 max-h-48 overflow-y-auto custom-scrollbar shadow-inner">
                             {attendanceErrors.map(emp => {
-                                const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
+                                const att = attendances.find(a => a.employeeId === emp.id && String(a?.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(a?.year) === Number(year)) || { presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
                                 const total = (att.presentDays || 0) + (att.earnedLeave || 0) + (att.sickLeave || 0) + (att.casualLeave || 0) + (att.lopDays || 0);
                                 return (
                                     <div key={emp.id} className="flex justify-between items-center text-[10px] py-1.5 border-b border-slate-800 last:border-0 animate-in fade-in slide-in-from-left-2 transition-all">
@@ -551,7 +551,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             // Check for LOP employees who have returned to work (attendance > 0)
             const employeesToRestore = activeEmployees.filter(emp => {
                 if ((emp.leavingReason || '').trim().toUpperCase() === 'ON LOP') {
-                    const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year);
+                    const att = attendances.find(a => a.employeeId === emp.id && String(a?.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(a?.year) === Number(year));
                     if (att && ((att.presentDays || 0) + (att.earnedLeave || 0) + (att.casualLeave || 0) + (att.sickLeave || 0) > 0)) {
                         return true;
                     }
@@ -581,7 +581,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             });
 
             const initialResults = processedActiveEmployees.map(emp => {
-                const attendance = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { employeeId: emp.id, month, year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
+                const attendance = attendances.find(a => a.employeeId === emp.id && String(a?.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(a?.year) === Number(year)) || { employeeId: emp.id, month, year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
                 const leave = leaveLedgers.find(l => l.employeeId === emp.id) || { employeeId: emp.id, el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 }, sl: { eligible: 0, availed: 0, balance: 0 }, cl: { availed: 0, accumulation: 0, balance: 0 } };
                 const advance = advanceLedgers.find(a => a.employeeId === emp.id) || { employeeId: emp.id, opening: 0, totalAdvance: 0, monthlyInstallment: 0, paidAmount: 0, balance: 0, emiCount: 0, manualPayment: 0, recovery: 0 };
                 const otRecord = otRecords.find(r => r.employeeId === emp.id && r.month === month && r.year === year) || null;

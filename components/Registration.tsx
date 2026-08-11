@@ -732,7 +732,16 @@ const Registration: React.FC<RegistrationProps> = ({ onComplete, onRestore, show
             <div className="w-full max-w-6xl relative z-10 bg-[#1e293b] border border-slate-700 rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row md:h-[min(800px,90vh)]">
                 {/* Quit Application Button */}
                 <button
-                    onClick={() => (window as any).electronAPI?.closeApp()}
+                    onClick={async () => {
+                        try {
+                            if ((window as any).electronAPI?.closeApp) {
+                                (window as any).electronAPI.closeApp().catch(() => {});
+                            }
+                        } catch(e) {}
+                        try {
+                            window.close();
+                        } catch(e) {}
+                    }}
                     className="absolute top-6 right-6 z-20 p-2.5 bg-slate-800/50 hover:bg-red-600/10 text-red-500 hover:text-red-400 rounded-xl border border-slate-700 hover:border-red-500/50 transition-all flex items-center gap-2 group"
                     title="Quit Application"
                 >

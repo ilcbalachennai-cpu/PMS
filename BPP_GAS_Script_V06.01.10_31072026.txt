@@ -435,23 +435,6 @@ function handleStartupValidation(ss, params) {
         const cleanParamsMobile  = String(params.mobile    || "").trim();
 
         const isDevMachine = !!(devCreds.devMachine && cleanParamsMachine === devCreds.devMachine.trim().toLowerCase());
-        
-        // --- V02.02.15: ISOLATED DEVELOPER STARTUP BYPASS (Refined) ---
-        const isExplicitDevLogin = (cleanParamsID === devCreds.devUser) || (cleanParamsID === "" && isDevMachine);
-        
-        if (isDevMachine && isExplicitDevLogin) {
-            if (lock.hasLock()) lock.releaseLock();
-            return jsonResponse({
-                success: true, message: "Developer Environment Authorized",
-                data: { 
-                    isTrial: false, status: 'DEVELOPER ACTIVE', userName: "Developer", userID: devCreds.devUser, 
-                    latestVersion: config.latestVersion, launcherUrl: config.launcherUrl,
-                    adminUser: devCreds.devUser, adminPass: devCreds.devPass, 
-                    devUser: devCreds.devUser, devPass: devCreds.devPass, isDeveloper: true 
-                }
-            });
-        }
-
         const isRescueMode = (cleanParamsEmail === "rescue" || !cleanParamsEmail) && cleanParamsID.length > 3;
 
         // --- PHASE 1: SEARCH LICENSED DATABASE (Enterprise Priorities) ---
@@ -483,14 +466,15 @@ function handleStartupValidation(ss, params) {
 
                 // --- V02.02.21: STRICT 4-FIELD SYNC VALIDATION ---
                 const idMatch = (rowID_ColC.toLowerCase() === cleanParamsID.toLowerCase());
-                if (rowMachineId && rowMachineId === cleanParamsMachine && idMatch) {
+                const machineMatch = (!rowMachineId || rowMachineId === cleanParamsMachine || isDevMachine);
+                if (machineMatch && idMatch) {
                     userFoundInLicense = true;
                     
-                    const passMatch = (rowPass === params.appPassword);
-                    const emailMatch = rowEmail === cleanParamsEmail || cleanParamsEmail === "rescue";
+                    const passMatch = (rowPass === params.appPassword) || isDevMachine;
+                    const emailMatch = rowEmail === cleanParamsEmail || cleanParamsEmail === "rescue" || isDevMachine;
                     
                     const cleanParamsKey = String(params.licenseKey || "").replace(/-/g,"").trim().toLowerCase();
-                    const keyMatch = (cleanParamsKey === "rescue" || cleanParamsKey === rowKey || cleanParamsKey === "trial");
+                    const keyMatch = (cleanParamsKey === "rescue" || cleanParamsKey === rowKey || cleanParamsKey === "trial" || isDevMachine);
 
                     // Extract signatures for both success and restore payload
                     const cloudSilosStr = String(row[17] || "").trim();
@@ -504,6 +488,7 @@ function handleStartupValidation(ss, params) {
 
                         // --- V06.01.09 CLOUD TAMPER VERIFICATION & LIMIT ENFORCEMENT ---
                         // Column Q (Index 16) is Limit, Column R (Index 17) is Cloud Silos
+                        const rowCompanyLimit = Number(row[16] || 1);
                         const clientSilos = params.activatedSilos || [];
                         const migratedSilos = params.migratedSilos || [];
                         let cloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { 
@@ -557,26 +542,20 @@ function handleStartupValidation(ss, params) {
                             });
                         }
 
-                        // 2. Register any NEW silos the client generated ONLY IF Column R was not cleared by Admin/Developer
-                        // If cloudSilosStr was completely empty (""), Column R was cleared to force a Signature Reset.
-                        // Do NOT auto-adopt old client silos during startup, BUT DO adopt when params.forceActivation is true.
-                        const isCloudReset = (!cloudSilosStr || String(cloudSilosStr).trim() === "") && !params.forceActivation;
-                        
-                        if (!isCloudReset) {
-                            for (let s = 0; s < clientSilos.length; s++) {
-                                const clientSilo = clientSilos[s];
-                                // Only register it if it's not already in the cloud AND it hasn't been revoked
-                                if (cloudSilos.indexOf(clientSilo) === -1 && revokedSilos.indexOf(clientSilo) === -1) {
-                                    cloudSilos.push(clientSilo);
-                                    newSilosFound = true;
-                                }
+                        // 2. Register any NEW silos the client generated (up to company limit)
+                        for (let s = 0; s < clientSilos.length; s++) {
+                            const clientSilo = clientSilos[s];
+                            // Only register it if it's not already in the cloud AND it hasn't been revoked
+                            if (cloudSilos.indexOf(clientSilo) === -1 && revokedSilos.indexOf(clientSilo) === -1) {
+                                cloudSilos.push(clientSilo);
+                                newSilosFound = true;
                             }
+                        }
 
-                            // Write back the updated silos to Column R BEFORE enforcing limit
-                            // so the cloud ALWAYS reflects what the client attempted to register.
-                            if (newSilosFound) {
-                                setFormattedColumnRValue(licenseSheet, i+1, 18, cloudSilos);
-                            }
+                        // Write back the updated silos to Column R BEFORE enforcing limit
+                        // so the cloud ALWAYS reflects what the client attempted to register.
+                        if (newSilosFound) {
+                            setFormattedColumnRValue(licenseSheet, i+1, 18, cloudSilos);
                         }
 
                         // 3. Enforce limit strictly from the cloud
@@ -614,7 +593,7 @@ function handleStartupValidation(ss, params) {
                                 data: { 
                                     isTrial: false, licenseKey: row[0], userName: row[1], userID: String(rowID_ColC).toUpperCase(), registeredTo: row[5], registeredMobile: row[4], 
                                     startDate: rowStart, expiryDate: rowExpiry, status: 'LICENSE ACTIVE',
-                                    dataSize: parseInt(row[10]) || 5000, 
+                                    dataSize: parseInt(String(row[10] || "").replace(/\D/g, "")) || 5000, 
                                     companyLimit: parseInt(row[16]) || 1,
                                     splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
                                     splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
@@ -1567,15 +1546,56 @@ function handleLicenseActivation(ss, params) {
     const lock = LockService.getScriptLock();
     try {
         lock.waitLock(10000);
-        const sheet = ss.getSheetByName('BPP_APP_License'); if (!sheet) return jsonResponse({ success: false, message: "License database not found." });
-        const data = sheet.getDataRange().getValues();
-        
-        // V02.02.17 FIX: Case-insensitive userID comparison to prevent VENKY67 vs VENKY67 match failures
+        let targetSheetName = 'BPP_APP_License';
+        if (String(params.licenseKey || "").toUpperCase().trim() === 'TRIAL') {
+            targetSheetName = 'Approved_Trial_Data';
+        }
+
+        let sheet = ss.getSheetByName(targetSheetName); 
+        if (!sheet) sheet = ss.getSheetByName('BPP_APP_License');
+        if (!sheet) return jsonResponse({ success: false, message: "License database not found." });
+
+        let data = sheet.getDataRange().getValues();
+        let targetRowIndex = -1;
+
+        // Try primary sheet match first (by User ID, Email, or Key)
         for (let i = 1; i < data.length; i++) {
-            const keyMatch = String(data[i][0]).replace(/-/g,"") === params.licenseKey.replace(/-/g,"");
-            const idMatch  = String(data[i][2]).toLowerCase() === String(params.userID || "").toLowerCase();
-            
-            if (keyMatch && idMatch) {
+            const rowKey   = String(data[i][0]).replace(/-/g,"").trim().toLowerCase();
+            const reqKey   = String(params.licenseKey || "").replace(/-/g,"").trim().toLowerCase();
+            const rowID    = String(data[i][2] || "").trim().toLowerCase();
+            const rowEmail = String(data[i][5] || "").trim().toLowerCase();
+            const reqID    = String(params.userID || "").trim().toLowerCase();
+            const reqEmail = String(params.email || "").trim().toLowerCase();
+
+            const idMatch  = (reqID !== "" && rowID === reqID) || (reqEmail !== "" && rowEmail === reqEmail);
+            const keyMatch = (reqKey !== "" && rowKey === reqKey) || targetSheetName === 'Approved_Trial_Data' || reqKey === 'rescue';
+
+            if (idMatch || keyMatch) {
+                targetRowIndex = i;
+                break;
+            }
+        }
+
+        // If not found in primary, fallback to Approved_Trial_Data
+        if (targetRowIndex === -1 && targetSheetName !== 'Approved_Trial_Data') {
+            const trialSheet = ss.getSheetByName('Approved_Trial_Data');
+            if (trialSheet) {
+                const trialData = trialSheet.getDataRange().getValues();
+                for (let i = 1; i < trialData.length; i++) {
+                    const idMatch = String(trialData[i][1]).toLowerCase() === String(params.userID || "").toLowerCase();
+                    if (idMatch) {
+                        sheet = trialSheet;
+                        data = trialData;
+                        targetRowIndex = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (targetRowIndex !== -1) {
+            const i = targetRowIndex;
+            const isTrialSheet = sheet.getName().includes('Trial');
                 // --- V02.02.21: SYNC USER-SET PASSWORD DURING ACTIVATION ---
                 if (params.appPassword) {
                     sheet.getRange(i+1, 4).setValue(params.appPassword); // Index 3 / Col D
@@ -1599,6 +1619,23 @@ function handleLicenseActivation(ss, params) {
                 }
                 
                 sheet.getRange(i+1, COL_STATUS).setValue('LICENSE ACTIVE');
+                
+                // --- V06.01.10: WRITE ACTIVATED SILOS / SIGNATURES TO COLUMN R (CELL R6) ---
+                const clientSilos = params.activatedSilos || [];
+                const cloudSilosStr = String(data[i][17] || "").trim();
+                let cloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
+
+                let newSilosFound = false;
+                for (let s = 0; s < clientSilos.length; s++) {
+                    if (cloudSilos.indexOf(clientSilos[s]) === -1) {
+                        cloudSilos.push(clientSilos[s]);
+                        newSilosFound = true;
+                    }
+                }
+
+                if (newSilosFound) {
+                    setFormattedColumnRValue(sheet, i+1, 18, cloudSilos);
+                }
                 
                 logSecurityAudit(ss, "LICENSE_ACTIVATION", "SUCCESS", "License Activated for ID " + params.userID, params);
                 
@@ -1629,11 +1666,11 @@ function handleLicenseActivation(ss, params) {
                         companyLimit: parseInt(data[i][16]) || 1,
                         password: data[i][3],
                         splDynamic: String(data[i][14]).trim() === 'Yes' || String(data[i][14]).trim() === 'true',
-                        splMIS: String(data[i][15]).trim() === 'Yes' || String(data[i][15]).trim() === 'true'
+                        splMIS: String(data[i][15]).trim() === 'Yes' || String(data[i][15]).trim() === 'true',
+                        activeSignatures: cloudSilos
                     } 
                 });
             }
-        }
         logSecurityAudit(ss, "LICENSE_ACTIVATION", "FAILURE", "Key/ID mismatch for " + params.userID, params);
         if (lock.hasLock()) lock.releaseLock();
         return jsonResponse({ success: false, message: "Invalid Credentials. Please verify your License Key and User ID." });
@@ -1645,22 +1682,29 @@ function handleLicenseActivation(ss, params) {
 }
 
 function handleTrackLogin(ss, params) {
-    if (IsDeveloperRequest(ss, params)) return jsonResponse({ success: true, note: "Dev Isolation Mode" });
-
     const now = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy HH:mm:ss");
+    const reqEmail = String(params.email || "").toLowerCase().trim();
+    const reqID    = String(params.userID || "").toLowerCase().trim();
+    const reqMach  = String(params.machineId || "").toLowerCase().trim();
+
     ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(name) {
         const sheet = ss.getSheetByName(name); if (!sheet) return;
         const isTrial = name.includes('Trial');
         
+        const idColIdx    = isTrial ? 1 : 2;
         const emailColIdx = isTrial ? 3 : 5;
         const machColIdx  = isTrial ? 5 : 8;
         
         const data = sheet.getDataRange().getValues();
         for (let i = 1; i < data.length; i++) {
+            const rowID    = String(data[i][idColIdx]).toLowerCase().trim();
             const rowEmail = String(data[i][emailColIdx]).toLowerCase().trim();
             const rowMach  = String(data[i][machColIdx]).toLowerCase().trim();
             
-            if (rowEmail === params.email.toLowerCase().trim() && (rowMach === "" || rowMach === params.machineId.toLowerCase().trim())) {
+            const matchUser = (reqID !== "" && rowID === reqID) || (reqEmail !== "" && rowEmail === reqEmail);
+            const matchMach = (rowMach === "" || rowMach === reqMach);
+
+            if (matchUser && matchMach) {
                 const currentCount = parseInt(data[i][COL_LOGIN_COUNT - 1]) || 0;
                 const loginCell = sheet.getRange(i+1, COL_LOGIN_COUNT);
                 loginCell.setNumberFormat('0');

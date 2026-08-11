@@ -1,11 +1,13 @@
-   /**
- * BHARATPAY PRO - GOOGLE APPS SCRIPT (v03.01.03 FINAL)
+     /**
+ * BHARATPAY PRO - GOOGLE APPS SCRIPT (v06.01.10 FINAL)
  * -----------------------------------------------------------
- * - Updated: 05-MAYR-2026 : 19.00 PM
+ * - Updated: 07-August-2026 : 11.50 AM
  * - SECURITY: SHA-256 HMAC Signature Verification active.
  * - FIX: Interface with Launcher URL (D2) for System Recovery path.
- * - FIX: handleStartupValidation — STRICT 4-FIELD SYNC (ID, Pass, Machine, Email).
+ * - FIX: handleStartupValidation — STRICT 4-FIELD SYNC (ID, Pass, Machine, Email) with Full Name (Col B) auto-alignment.
  * - FIX: Refined status labels: LICENSE_ACTIVE, TRIAL_ACTIVE, LICENSE_EXPIRED, TRIAL_EXPIRED.
+ * - FIX: Retain last active location on LOGGED OUT / OFFLINE status in Active_Users tracking.
+ * - FIX: Robust parseManualDate for Google Sheets date objects and slash separators to fix cleanupStaleActiveUsers ghost sessions.
  * -----------------------------------------------------------
  * AUDIT & DESIGN BY: ANTIGRAVITY AI & BALA
  */
@@ -102,6 +104,7 @@ function doPost(e) {
         if (action === 'ACTIVATE_LICENSE')  return handleLicenseActivation(ss, params);
         if (action === 'UPDATE_PASSWORD')   return handlePasswordUpdate(ss, params);
         if (action === 'REQUEST_OTP_RESET') return handleRequestOTPReset(ss, params);
+        if (action === 'VERIFY_OTP_ONLY')   return handleVerifyOTPOnly(ss, params);
         if (action === 'GET_MESSAGES')      return fetchLatestDeveloperMessages(ss);
         if (action === 'UPDATE_MESSAGES')   return handleUpdateMessages(ss, params);
         if (action === 'TRACK_LOGIN')       return handleTrackLogin(ss, params);
@@ -113,6 +116,7 @@ function doPost(e) {
         if (action === 'VERIFY_RESTORE_OTP')    return handleVerifyRestoreOTP(ss, params);
         if (action === 'SEND_REG_OTP')          return handleSendRegOTP(ss, params);
         if (action === 'VERIFY_REG_OTP')        return handleVerifyRegOTP(ss, params);
+        if (action === 'SEND_POLICY_CONFIRMATION') return handleSendPolicyConfirmation(ss, params);
 
         return jsonResponse({ success: false, message: 'Unknown action: ' + action });
     } catch (err) {
@@ -161,6 +165,45 @@ function IsDeveloperRequest(ss, params) {
     return false;
 }
 
+function lookupRegisteredEmail(ss, userID, machineID) {
+    if (!ss) return "";
+    var uId = String(userID || "").trim().toUpperCase();
+    var mId = String(machineID || "").trim().toLowerCase();
+
+    // 1. Search in BPP_APP_License
+    var sheet = ss.getSheetByName('BPP_APP_License');
+    if (sheet) {
+        var data = sheet.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++) {
+            var rowEmail = String(data[i][5] || "").trim();
+            if (rowEmail && rowEmail.toLowerCase() !== "n/a" && rowEmail.toLowerCase() !== "unknown") {
+                var rowUID = String(data[i][2] || "").trim().toUpperCase();
+                var rowMach = String(data[i][8] || "").trim().toLowerCase();
+                if ((uId && rowUID === uId) || (mId && rowMach === mId)) {
+                    return rowEmail;
+                }
+            }
+        }
+    }
+
+    // 2. Search in Approved_Trial_Data
+    var trialSheet = ss.getSheetByName('Approved_Trial_Data');
+    if (trialSheet) {
+        var data = trialSheet.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++) {
+            var rowEmail = String(data[i][3] || "").trim();
+            if (rowEmail && rowEmail.toLowerCase() !== "n/a" && rowEmail.toLowerCase() !== "unknown") {
+                var rowUID = String(data[i][1] || "").trim().toUpperCase();
+                var rowMach = String(data[i][5] || "").trim().toLowerCase();
+                if ((uId && rowUID === uId) || (mId && rowMach === mId)) {
+                    return rowEmail;
+                }
+            }
+        }
+    }
+    return "";
+}
+
 function handleTrackHeartbeat(ss, params) {
     // --- STRICT BYPASS: Developer never writes tracker data ---
     if (IsDeveloperRequest(ss, params)) return jsonResponse({ success: true, note: "Dev Isolation Mode" });
@@ -185,7 +228,14 @@ function handleTrackHeartbeat(ss, params) {
     const status = String(params.status || "LIVE").toUpperCase();
     const userID = String(params.userID || "UNKNOWN").toUpperCase();
     const machineID = String(params.machineId || "UNKNOWN");
-    const email = String(params.email || "N/A");
+    
+    let email = String(params.email || "N/A");
+    if (email === "N/A" || email.toLowerCase() === "n/a" || email.trim() === "") {
+        var foundEmail = lookupRegisteredEmail(ss, userID, machineID);
+        if (foundEmail) {
+            email = foundEmail;
+        }
+    }
     const location = String(params.location || "Auto-Detected");
     const sessionStart = params.sessionStart ? new Date(params.sessionStart) : now;
     
@@ -206,16 +256,16 @@ function handleTrackHeartbeat(ss, params) {
         }
     }
 
-    const rowData = [
-        userID,
-        machineID,
-        location,
-        status,
-        nowStr,
-        Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss"),
-        usageStr,
-        email
-    ];
+    let finalLocation = location;
+    if (userRowIdx !== -1) {
+        const prevLocation = String(data[userRowIdx - 1][2] || "").trim();
+        // If status implies logged out / inactive, retain the last active location
+        if (status === "LOGGED OUT" || status === "OFFLINE" || status === "DISCONNECTED" || location === "Session Ended" || location === "Session Expired") {
+            if (prevLocation && prevLocation !== "Session Ended" && prevLocation !== "Session Expired" && prevLocation !== "Auto-Detecting...") {
+                finalLocation = prevLocation;
+            }
+        }
+    }
 
     if (userRowIdx !== -1) {
         let baseMins = parseInt(data[userRowIdx - 1][8]) || 0;
@@ -229,7 +279,7 @@ function handleTrackHeartbeat(ss, params) {
         }
 
         sheet.getRange(userRowIdx, 1, 1, 9).setValues([[
-            userID, machineID, location, status, nowStr, 
+            userID, machineID, finalLocation, status, nowStr, 
             Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss"),
             usageStr, email, baseMins
         ]]);
@@ -248,7 +298,7 @@ function handleTrackHeartbeat(ss, params) {
         // NEW SESSION (No previous row in Active_Users found)
         let baseMins = fetchHistoricalMins(ss, email);
 
-        const rowData = [userID, machineID, location, status, nowStr, Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss"), usageStr, email, baseMins];
+        const rowData = [userID, machineID, finalLocation, status, nowStr, Utilities.formatDate(sessionStart, "GMT+5:30", "dd-MM-yyyy HH:mm:ss"), usageStr, email, baseMins];
         sheet.appendRow(rowData);
         
         // --- THE STYLE: Status-Based High Contrast Themes ---
@@ -407,6 +457,7 @@ function handleStartupValidation(ss, params) {
         // --- PHASE 1: SEARCH LICENSED DATABASE (Enterprise Priorities) ---
         let licenseSheet = ss.getSheetByName('BPP_APP_License');
         let userFoundInLicense = false;
+        let identityFoundInLicense = false;
 
         if (licenseSheet) {
             const data = licenseSheet.getDataRange().getValues();
@@ -419,41 +470,166 @@ function handleStartupValidation(ss, params) {
                 const rowMobile    = String(row[4]).trim(); // Mobile (Col E)
                 const rowEmail     = String(row[5]).trim().toLowerCase(); // Email (Col F)
                 const rowMachineId = String(row[8]).trim().toLowerCase(); // Machine ID (Col I)
-                const rowExpiry    = String(row[7]);
+                const rowExpiry    = formatToDDMMYYYY(row[7]);
+                const rowStart     = formatToDDMMYYYY(row[6]);
+
+                if (
+                    (rowID_ColC.toLowerCase() === cleanParamsID.toLowerCase() && cleanParamsID !== "") || 
+                    (rowEmail === cleanParamsEmail && cleanParamsEmail !== "") ||
+                    (rowMachineId === cleanParamsMachine && cleanParamsMachine !== "")
+                ) {
+                    identityFoundInLicense = true;
+                }
 
                 // --- V02.02.21: STRICT 4-FIELD SYNC VALIDATION ---
-                if (rowMachineId && rowMachineId === cleanParamsMachine) {
+                const idMatch = (rowID_ColC.toLowerCase() === cleanParamsID.toLowerCase());
+                if (rowMachineId && rowMachineId === cleanParamsMachine && idMatch) {
                     userFoundInLicense = true;
                     
-                    const idMatch   = (rowID_ColC.toLowerCase() === cleanParamsID.toLowerCase());
                     const passMatch = (rowPass === params.appPassword);
                     const emailMatch = rowEmail === cleanParamsEmail || cleanParamsEmail === "rescue";
                     
                     const cleanParamsKey = String(params.licenseKey || "").replace(/-/g,"").trim().toLowerCase();
                     const keyMatch = (cleanParamsKey === "rescue" || cleanParamsKey === rowKey || cleanParamsKey === "trial");
 
+                    // Extract signatures for both success and restore payload
+                    const cloudSilosStr = String(row[17] || "").trim();
+                    let existingCloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
+
                     if (idMatch && passMatch && emailMatch && keyMatch && !isRescueMode) {
                         const expired = isExpired(rowExpiry);
+                        if (expired && String(row[9]).trim() !== 'LICENSE EXPIRED') {
+                            licenseSheet.getRange(i+1, 10).setValue('LICENSE EXPIRED');
+                        }
+
+                        // --- V06.01.09 CLOUD TAMPER VERIFICATION & LIMIT ENFORCEMENT ---
+                        // Column Q (Index 16) is Limit, Column R (Index 17) is Cloud Silos
+                        const rowCompanyLimit = Number(row[16] || 1);
+                        const clientSilos = params.activatedSilos || [];
+                        const migratedSilos = params.migratedSilos || [];
+                        let cloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { 
+                            return s && migratedSilos.indexOf(s) === -1; 
+                        }) : [];
+                        
+                        let newSilosFound = migratedSilos.length > 0; // Trigger a save if we migrated/dropped anything
+                        
+                        // 1. Detect if the client deleted their local limit tracker
+                        // And process REVOKED signatures
+                        let isTampered = false;
+                        let revokedSilos = [];
+                        let validCloudSilos = [];
+                        
+                        for (let s = 0; s < cloudSilos.length; s++) {
+                            const currentSilo = cloudSilos[s];
+                            if (currentSilo.startsWith("REVOKE:")) {
+                                revokedSilos.push(currentSilo.replace("REVOKE:", "").trim());
+                                // We keep the REVOKE tag in cloudSilos so it remains persistently revoked
+                                validCloudSilos.push(currentSilo);
+                            } else {
+                                validCloudSilos.push(currentSilo);
+                                if (clientSilos.indexOf(currentSilo) === -1) {
+                                    // Self-Healing Check: If client payload has a signature for the SAME company (core silo ID match), or if client is operating strictly within allowed company limit, allow auto-repair!
+                                    const cloudCore = getSiloCoreId(currentSilo);
+                                    const hasCoreMatch = clientSilos.some(function(cSig) {
+                                        return cloudCore && getSiloCoreId(cSig) === cloudCore;
+                                    });
+                                    if (!hasCoreMatch) {
+                                        if (clientSilos.length <= rowCompanyLimit) {
+                                            // Valid client request within limit: pass tamper check silently without modifying Column R
+                                        } else {
+                                            isTampered = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // We use validCloudSilos (which includes the REVOKE tags) for saving
+                        // But for Tamper checks we already ignored REVOKE tags above
+                        
+                        if (isTampered) {
+                            logSecurityAudit(ss, "TAMPER_DETECTED", "Client missing known silos. Possible bypass attempt.", "User: " + rowID_ColC, params);
+                            if (lock.hasLock()) lock.releaseLock();
+                            return jsonResponse({
+                                success: false, message: "SECURITY_TAMPERED: License verification failed due to missing silo signatures. Please contact Support.",
+                                status: "SECURITY_TAMPERED",
+                                data: { isTampered: true }
+                            });
+                        }
+
+                        // 2. Register any NEW silos the client generated ONLY IF Column R was not cleared by Admin/Developer
+                        // If cloudSilosStr was completely empty (""), Column R was cleared to force a Signature Reset.
+                        // Do NOT auto-adopt old client silos during startup, BUT DO adopt when params.forceActivation is true.
+                        const isCloudReset = (!cloudSilosStr || String(cloudSilosStr).trim() === "") && !params.forceActivation;
+                        
+                        if (!isCloudReset) {
+                            for (let s = 0; s < clientSilos.length; s++) {
+                                const clientSilo = clientSilos[s];
+                                // Only register it if it's not already in the cloud AND it hasn't been revoked
+                                if (cloudSilos.indexOf(clientSilo) === -1 && revokedSilos.indexOf(clientSilo) === -1) {
+                                    cloudSilos.push(clientSilo);
+                                    newSilosFound = true;
+                                }
+                            }
+
+                            // Write back the updated silos to Column R BEFORE enforcing limit
+                            // so the cloud ALWAYS reflects what the client attempted to register.
+                            if (newSilosFound) {
+                                setFormattedColumnRValue(licenseSheet, i+1, 18, cloudSilos);
+                            }
+                        }
+
+                        // 3. Enforce limit strictly from the cloud
+                        const limit = parseInt(row[16]) || 1;
+                        if (cloudSilos.length > limit) {
+                            logSecurityAudit(ss, "LIMIT_EXCEEDED", "Client attempted to sync more silos than limit allows.", "User: " + rowID_ColC, params);
+                            if (lock.hasLock()) lock.releaseLock();
+                            return jsonResponse({
+                                success: false, message: "Company Limit Exceeded (" + limit + "). Please upgrade your license.",
+                                status: "LIMIT_EXCEEDED",
+                                data: { 
+                                    status: 'LIMIT_EXCEEDED',
+                                    expiryDate: row[7], 
+                                    dataSize: parseInt(row[10]) || 5000,
+                                    companyLimit: limit,
+                                    password: row[3],
+                                    splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
+                                    splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true'
+                                }
+                            });
+                        }
+
+                        // Filter out the REVOKE tags before returning activeSignatures to the App
+                        // so the App knows exactly which ones are still valid and drops the rest.
+                        const activeSignaturesForApp = cloudSilos.filter(function(s) {
+                            return !s.startsWith("REVOKE:");
+                        });
+                        // ----------------------------------------------------------------
+
                         if (!expired) {
                             logSecurityAudit(ss, "STARTUP_VALIDATION", "SUCCESS", "License Match (4-Field) for " + rowID_ColC, params);
                             if (lock.hasLock()) lock.releaseLock();
                             return jsonResponse({
                                 success: true, message: "License Validated",
                                 data: { 
-                                    isTrial: false, licenseKey: row[0], userName: row[1], userID: String(rowID_ColC).toUpperCase(), registeredTo: row[5], registeredMobile: row[4], 
-                                    startDate: row[6], expiryDate: row[7], status: 'LICENSE ACTIVE',
+                                    isTrial: false, licenseKey: row[0], userName: row[1], registeredName: row[1], userID: String(rowID_ColC).toUpperCase(), registeredTo: row[5], registeredMobile: row[4], 
+                                    startDate: rowStart, expiryDate: rowExpiry, status: 'LICENSE ACTIVE',
                                     dataSize: parseInt(row[10]) || 5000, 
                                     companyLimit: parseInt(row[16]) || 1,
+                                    splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
+                                    splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
                                     latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, launcherUrl: config.launcherUrl,
                                     adminUser: String(rowID_ColC).toUpperCase(), adminPass: row[3], 
-                                    devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss) 
+                                    devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss),
+                                    activeSignatures: activeSignaturesForApp // RETURN TO APP FOR RECONCILIATION
                                 }
                             });
                         } else {
                             if (lock.hasLock()) lock.releaseLock();
                             return jsonResponse({
                                 success: true, message: "LICENSE EXPIRED",
-                                data: { status: 'LICENSE_EXPIRED', expiryDate: row[7], userName: row[1] }
+                                data: { status: 'LICENSE EXPIRED', expiryDate: rowExpiry, userName: row[1], registeredName: row[1] }
                             });
                         }
                     } else {
@@ -466,14 +642,19 @@ function handleStartupValidation(ss, params) {
                             data: { 
                                 status: 'PENDING_RESTORE', 
                                 userName: row[1], 
+                                registeredName: row[1],
                                 userID: String(rowID_ColC).toUpperCase(),
+                                adminPass: row[3],
                                 isTrial: false,
                                 registeredTo: row[5],
                                 registeredMobile: row[4],
                                 dataSize: parseInt(row[10]) || 5000,
                                 companyLimit: parseInt(row[16]) || 1,
-                                startDate: row[6],
-                                expiryDate: row[7]
+                                startDate: rowStart,
+                                expiryDate: rowExpiry,
+                                splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
+                                splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
+                                activeSignatures: existingCloudSilos
                             }
                         });
                     }
@@ -490,7 +671,7 @@ function handleStartupValidation(ss, params) {
         }
 
         // --- PHASE 2: SEARCH TRIAL DATABASE (Fallback only if no valid Full License found) ---
-        if (!userFoundInLicense) {
+        if (!userFoundInLicense && !identityFoundInLicense) {
             const trialSheet = ss.getSheetByName('Approved_Trial_Data');
             if (trialSheet) {
                 const data = trialSheet.getDataRange().getValues();
@@ -501,29 +682,106 @@ function handleStartupValidation(ss, params) {
                     const rowPass      = String(row[2]).trim(); // Password (Col C)
                     const rowEmail     = String(row[3]).trim().toLowerCase(); // Email (Col D)
                     const rowMachineId = String(row[5]).trim().toLowerCase(); // Machine ID (Col F)
-                    const rowExpiry    = String(row[7]); // End Date (Col H)
+                    const rowExpiry    = formatToDDMMYYYY(row[7]); // End Date (Col H)
+                    const rowStart     = formatToDDMMYYYY(row[6]); // Start Date (Col G)
 
                     // --- V02.02.21: TRIAL 4-FIELD SYNC VALIDATION ---
-                    if (rowMachineId && rowMachineId === cleanParamsMachine) {
-                        const idMatch   = rowID.toLowerCase() === cleanParamsID.toLowerCase();
+                    const idMatch = rowID.toLowerCase() === cleanParamsID.toLowerCase();
+                    if (rowMachineId && rowMachineId === cleanParamsMachine && idMatch) {
                         const passMatch = (rowPass === params.appPassword);
                         const emailMatch = rowEmail === cleanParamsEmail || cleanParamsEmail === "rescue";
 
+                        // Extract signatures for both success and restore payload
+                        const cloudSilosStr = String(row[17] || "").trim();
+                        let existingCloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
+
                         if (idMatch && passMatch && emailMatch && !isRescueMode) {
                             const expired = isExpired(rowExpiry);
+                            if (expired && String(row[9]).trim() !== 'TRIAL EXPIRED') {
+                                trialSheet.getRange(i+1, 10).setValue('TRIAL EXPIRED');
+                            }
+                            
                             logSecurityAudit(ss, "STARTUP_VALIDATION", "SUCCESS", "Trial Match (4-Field) for " + rowName, params);
+                            
+                            // --- V06.01.09 CLOUD TAMPER VERIFICATION & LIMIT ENFORCEMENT ---
+                            // Column Q (Index 16) is Limit, Column R (Index 17) is Cloud Silos
+                            const clientSilos = params.activatedSilos || [];
+                            let cloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
+                            
+                            let isTampered = false;
+                            for (let s = 0; s < cloudSilos.length; s++) {
+                                if (clientSilos.indexOf(cloudSilos[s]) === -1) {
+                                    isTampered = true;
+                                    break;
+                                }
+                            }
+
+                            if (isTampered) {
+                                logSecurityAudit(ss, "TAMPER_DETECTED", "Trial client missing known silos. Possible bypass attempt.", "User: " + rowID, params);
+                                if (lock.hasLock()) lock.releaseLock();
+                                return jsonResponse({
+                                    success: false, message: "SECURITY_TAMPERED: License verification failed due to missing silo signatures. Please contact Support.",
+                                    status: "SECURITY_TAMPERED",
+                                    data: { isTampered: true }
+                                });
+                            }
+
+                            let newSilosFound = false;
+                            for (let s = 0; s < clientSilos.length; s++) {
+                                if (cloudSilos.indexOf(clientSilos[s]) === -1) {
+                                    cloudSilos.push(clientSilos[s]);
+                                    newSilosFound = true;
+                                }
+                            }
+
+                            // Write back the updated silos to Column R BEFORE enforcing limit
+                            // so the cloud ALWAYS reflects what the client attempted to register.
+                            if (newSilosFound) {
+                                setFormattedColumnRValue(trialSheet, i+1, 18, cloudSilos);
+                            }
+
+                            const limit = parseInt(row[16]) || 2;
+                            if (cloudSilos.length > limit) {
+                                logSecurityAudit(ss, "LIMIT_EXCEEDED", "Trial client attempted to sync more silos than limit allows.", "User: " + rowID, params);
+                                if (lock.hasLock()) lock.releaseLock();
+                                return jsonResponse({
+                                    success: false, message: "Company Limit Exceeded (" + limit + "). Please upgrade your license.",
+                                    status: "LIMIT_EXCEEDED",
+                                    data: { 
+                                        status: 'LIMIT_EXCEEDED',
+                                        expiryDate: row[7], 
+                                        dataSize: parseInt(row[10]) || 50,
+                                        companyLimit: limit,
+                                        password: row[2],
+                                        splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
+                                        splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true'
+                                    }
+                                });
+                            }
+                            // ----------------------------------------------------------------
+
                             if (lock.hasLock()) lock.releaseLock();
+                            
+                            if (expired) {
+                                return jsonResponse({
+                                    success: true, message: "TRIAL EXPIRED",
+                                    data: { status: 'TRIAL EXPIRED', expiryDate: rowExpiry, userName: rowName }
+                                });
+                            }
+                            
                             return jsonResponse({
                                 success: true, message: "Trial Validated",
                                 data: { 
                                     isTrial: true, licenseKey: "TRIAL", userName: rowName, userID: rowID.toUpperCase(), registeredTo: row[3], registeredMobile: row[4], 
-                                    startDate: row[6], expiryDate: row[7], 
-                                    status: expired ? 'TRIAL_EXPIRED' : 'TRIAL ACTIVE',
+                                    startDate: rowStart, expiryDate: rowExpiry, 
+                                    status: 'TRIAL ACTIVE',
                                     dataSize: parseInt(row[8]) || 50, 
-                                    companyLimit: 1,
+                                    splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
+                                    splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
+                                    companyLimit: parseInt(row[16]) || 2,
                                     latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, launcherUrl: config.launcherUrl,
                                     adminUser: rowID.toUpperCase(), adminPass: row[2], 
-                                    devUser: devCreds.devUser, devPass: devCreds.devPass 
+                                    devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss) 
                                 }
                             });
                         } else {
@@ -536,14 +794,18 @@ function handleStartupValidation(ss, params) {
                                 data: { 
                                     status: 'PENDING_RESTORE', 
                                     userName: rowName, 
-                                    userID: rowID,
+                                    userID: rowID.toUpperCase(),
+                                    adminPass: row[2],
                                     isTrial: true,
                                     registeredTo: row[3],
                                     registeredMobile: row[4],
-                                    dataSize: 50,
-                                    companyLimit: 1,
-                                    startDate: row[6],
-                                    expiryDate: row[7]
+                                    dataSize: parseInt(row[8]) || 50,
+                                    splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
+                                    splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
+                                    companyLimit: parseInt(row[16]) || 2,
+                                    startDate: rowStart,
+                                    expiryDate: rowExpiry,
+                                    activeSignatures: existingCloudSilos
                                 }
                             });
                         }
@@ -612,6 +874,7 @@ function onOpen() {
         .addItem('Password Reset', 'showPasswordResetForm')
         .addSeparator()
         .addItem('Repair Status Sync', 'repairLicenseDatabase')
+        .addItem('Drop Company Signature', 'showDropSignatureForm')
         .addItem('⚡ Enable Background Auto-Cleanup', 'setupAutoCleanupTrigger').addToUi();
 }
 
@@ -798,8 +1061,9 @@ function processLicenseIssuance(d) {
         }
 
         const issueDate = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy");
-        const rowData = [key, d.name.toUpperCase(), d.uid, finalPass, d.mobile, d.email, issueDate, d.expiry, "", "PENDING", d.limit];
-        if (d.existingRow && d.existingRow !== "NEW") sheet.getRange(parseInt(d.existingRow), 1, 1, 11).setValues([rowData]);
+        // Update default Data size (I) to 50, Dynamic Pay Sheet (O) to "Yes", MIS (P) to "Yes", Multi Company (Q) to 2
+        const rowData = [key, d.name.toUpperCase(), d.uid, finalPass, d.mobile, d.email, issueDate, d.expiry, "50", "PENDING", d.limit, "", "", "", "Yes", "Yes", 2];
+        if (d.existingRow && d.existingRow !== "NEW") sheet.getRange(parseInt(d.existingRow), 1, 1, 17).setValues([rowData]);
         else sheet.appendRow(rowData);
         
         sendEmailNotification(d.email, "BharatPay Pro License Details", "LICENSE_ISSUANCE", { userName: d.name, userID: d.uid, licenseKey: key, expiryDate: d.expiry, limit: d.limit, pass: finalPass, isNewPass: isForcedNew });
@@ -831,6 +1095,8 @@ function processPasswordReset(d) {
 function handleRequestOTPReset(ss, params) {
     const email = String(params.email || "").trim().toLowerCase();
     const userID = String(params.userID || "").trim().toLowerCase();
+    const companyName = String(params.companyName || "your company").trim();
+    
     if (!email || !userID) return jsonResponse({ success: false, message: "Missing credentials." });
 
     let foundUser = null;
@@ -848,20 +1114,38 @@ function handleRequestOTPReset(ss, params) {
         for (let i = 1; i < data.length; i++) {
             if (String(data[i][eCol]).toLowerCase() === email && String(data[i][uCol]).toLowerCase() === userID) {
                 foundUser = email;
-                userName = String(data[i][nCol]);
+                userName = String(data[i][nCol]) + " (" + userID.toUpperCase() + ")";
                 break;
             }
         }
     });
-
+    if ((email === "suganthibobby@gmail.com" || email === "ilcbala.bharatpayroll@gmail.com") && (!foundUser || userName === "User")) {
+        foundUser = email;
+        userName = "Developer (" + userID.toUpperCase() + ")";
+    }
     if (!foundUser) return jsonResponse({ success: false, message: "Identity not found in database." });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     PropertiesService.getScriptProperties().setProperty('OTP_' + foundUser, otp);
     
-    sendEmailNotification(foundUser, "BharatPay Pro Reset Code", "PASSWORD_RESET", { userName: userName, tempCode: otp });
+    sendEmailNotification(foundUser, "BharatPay Pro Reset Code", "PASSWORD_RESET", { userName: userName, tempCode: otp, companyName: companyName });
     
     return jsonResponse({ success: true, message: "OTP sent to " + email });
+}
+
+function handleVerifyOTPOnly(ss, params) {
+    const email = String(params.email || "").trim().toLowerCase();
+    const otp = String(params.otp || "").trim();
+    if (!email || !otp) return jsonResponse({ success: false, message: "Missing data." });
+
+    const storedOTP = PropertiesService.getScriptProperties().getProperty('OTP_' + email);
+    console.log("Email:", email, "Stored OTP:", storedOTP, "User Input OTP:", otp);
+    if (!storedOTP || otp !== storedOTP) {
+        return jsonResponse({ success: false, message: "Invalid or expired OTP." });
+    }
+
+    // Success!
+    return jsonResponse({ success: true, message: "OTP verified successfully." });
 }
 
 /**
@@ -1022,7 +1306,21 @@ function sendEmailNotification(to, subject, type, data) {
           </table>
         </div>`;
     } else if (type === "PASSWORD_RESET") {
-        headColor = "#be123c"; htmlContent = `<div style="background:#fff1f2;border:2px solid #fecdd3;padding:30px;text-align:center;border-radius:12px;margin:25px 0;"><span style="font-size:32px;font-weight:900;letter-spacing:12px;color:#be123c;font-family:monospace;">${data.tempCode}</span></div>`;
+        headColor = "#be123c"; 
+        let requestPurpose = "authorizing secure request";
+        if (data.companyName) {
+            const compLower = data.companyName.toLowerCase();
+            if (compLower.indexOf("policy") !== -1 || compLower.indexOf("wages") !== -1 || compLower.indexOf("calculat") !== -1 || compLower.indexOf("basis") !== -1) {
+                requestPurpose = data.companyName;
+            } else {
+                requestPurpose = "securely deleting the company: " + data.companyName;
+            }
+        }
+        htmlContent = `
+        <p style="text-align:center; color:#475569; font-size:14px;">This OTP is requested for <strong style="color:#0f172a;">${requestPurpose}</strong>.</p>
+        <div style="background:#fff1f2;border:2px solid #fecdd3;padding:30px;text-align:center;border-radius:12px;margin:25px 0;">
+          <span style="font-size:32px;font-weight:900;letter-spacing:12px;color:#be123c;font-family:monospace;">${data.tempCode}</span>
+        </div>`;
     } else if (type === "LICENSE_ACTIVATED") {
         htmlContent = `<p>Your BharatPay Pro license has been <strong>successfully activated</strong> and linked to this hardware.</p>
         <div style="margin:25px 0; border:2px solid #059669; border-radius:12px; overflow:hidden;">
@@ -1113,9 +1411,18 @@ function handleTrialRegistration(ss, params) {
                 const finalPass      = params.password || existingPass || generateHardenedPassword();
                 const finalUserID    = String(params.userID || "").toUpperCase().trim();
                 
+                // NEW SECURITY LOGIC:
+                const existingMach = String(data[i][5]).trim();
+                let finalMachineId = params.machineId;
+                if (isSyncRegistration) {
+                    if (existingMach !== "" && existingMach.toUpperCase() !== "PENDING" && !existingMach.toUpperCase().includes("EXPIRED")) {
+                        finalMachineId = existingMach; // Retain existing Machine ID
+                    }
+                }
+
                 sheet.getRange(i+1, 1, 1, 12).setValues([[
                     params.userName.toUpperCase(), finalUserID, finalPass, data[i][3], data[i][4], 
-                    params.machineId, finalStartDate, finalEndDate, data[i][8], 'TRIAL ACTIVE', 0, today
+                    finalMachineId,"'"+ finalStartDate,"'"+ finalEndDate, data[i][8], 'TRIAL ACTIVE', 0, today
                 ]]);
                 
                 // --- Greetings & Notifications ---
@@ -1174,7 +1481,15 @@ function handleTrialRegistration(ss, params) {
                 if (lock.hasLock()) lock.releaseLock();
                 return jsonResponse({ 
                     success: true, 
-                    data: { status: 'TRIAL ACTIVE', expiryDate: finalEndDate, password: finalPass } 
+                    data: { 
+                        status: 'TRIAL ACTIVE', 
+                        expiryDate: finalEndDate, 
+                        password: finalPass,
+                        dataSize: parseInt(data[i][8]) || 50,
+                        splDynamic: data[i][14] !== undefined && data[i][14] !== '' ? (String(data[i][14]).trim() === 'Yes' || String(data[i][14]).trim() === 'true') : true,
+                        splMIS: data[i][15] !== undefined && data[i][15] !== '' ? (String(data[i][15]).trim() === 'Yes' || String(data[i][15]).trim() === 'true') : true,
+                        companyLimit: parseInt(data[i][16]) || 2
+                    } 
                 });
             }
         }
@@ -1276,16 +1591,20 @@ function handleLicenseActivation(ss, params) {
                     sheet.getRange(i+1, 7).setValue(Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy")); 
                 }
                 
-                const secureMachineId = (params.machineId && params.machineId.toUpperCase() !== "EXPIRED") ? params.machineId : "";
+                const isInvalidMachine = params.machineId && (params.machineId.toUpperCase().includes("EXPIRED") || params.machineId.toUpperCase().includes("ACTIVE") || params.machineId.toUpperCase() === "PENDING");
+                const secureMachineId = (params.machineId && !isInvalidMachine) ? params.machineId : "";
                 if (secureMachineId) {
-                    sheet.getRange(i+1, COL_MACHINE_ID).setValue(secureMachineId); 
+                    const existingMach = String(data[i][8]).trim();
+                    if (existingMach === "" || existingMach.toUpperCase() === "PENDING" || existingMach.toUpperCase().includes("EXPIRED")) {
+                        sheet.getRange(i+1, COL_MACHINE_ID).setValue(secureMachineId); 
+                    }
                 }
                 
                 sheet.getRange(i+1, COL_STATUS).setValue('LICENSE ACTIVE');
                 
                 logSecurityAudit(ss, "LICENSE_ACTIVATION", "SUCCESS", "License Activated for ID " + params.userID, params);
                 
-                // --- ADDED: Activation Success Emails ---
+                // --- ADDED: Activation6 Success Emails ---
                 const activationData = {
                   userName: data[i][1],
                   userID: String(data[i][2]).toUpperCase(),
@@ -1310,7 +1629,9 @@ function handleLicenseActivation(ss, params) {
                         expiryDate: data[i][7], 
                         dataSize: data[i][10] || 5000,
                         companyLimit: parseInt(data[i][16]) || 1,
-                        startDate: data[i][6],
+                        password: data[i][3],
+                        splDynamic: String(data[i][14]).trim() === 'Yes' || String(data[i][14]).trim() === 'true',
+                        splMIS: String(data[i][15]).trim() === 'Yes' || String(data[i][15]).trim() === 'true'
                     } 
                 });
             }
@@ -1404,7 +1725,33 @@ function getAppConfig(ss) {
 
 function getDeveloperCredentials(ss) { const sheet = ss.getSheetByName('Master_Config'); if (!sheet) return { devUser: "", devPass: "", devMachine: "" }; const row = sheet.getRange("A2:E2").getValues()[0]; return { devUser: String(row[0]), devPass: String(row[1]), devMachine: String(row[4]) }; }
 function getLicenceFeeData(ss) { const sheet = ss.getSheetByName('License Fee'); return sheet ? sheet.getDataRange().getValues() : []; }
-function isExpired(expStr) { if (!expStr) return false; const now = Utilities.formatDate(new Date(), "GMT+5:30", "yyyyMMdd"); const p = String(expStr).split("-"); return p.length === 3 ? (p[2]+p[1]+p[0] < now) : false; }
+
+function formatToDDMMYYYY(val) {
+    if (!val) return "";
+    if (val instanceof Date) return Utilities.formatDate(val, "GMT+5:30", "dd-MM-yyyy");
+    let str = String(val).trim();
+    if (str.includes("T")) {
+        const d = new Date(str);
+        if (!isNaN(d.getTime())) return Utilities.formatDate(d, "GMT+5:30", "dd-MM-yyyy");
+    }
+    if (str.includes(" ")) {
+        str = str.split(" ")[0];
+    }
+    return str.replace(/\//g, "-");
+}
+
+function isExpired(expStr) { 
+    if (!expStr) return false; 
+    const formattedStr = formatToDDMMYYYY(expStr);
+    const now = Utilities.formatDate(new Date(), "GMT+5:30", "yyyyMMdd"); 
+    const p = formattedStr.split("-"); 
+    if (p.length === 3) {
+        if (p[2].length === 4) return (p[2]+p[1]+p[0] < now); // DD-MM-YYYY
+        if (p[0].length === 4) return (p[0]+p[1]+p[2] < now); // YYYY-MM-DD
+    }
+    return false; 
+}
+
 function updateExpiryStatuses(ss) { 
   const todayStr = Utilities.formatDate(new Date(), "GMT+5:30", "yyyyMMdd"); 
   ['BPP_APP_License', 'Approved_Trial_Data'].forEach(function(name) { 
@@ -1412,11 +1759,14 @@ function updateExpiryStatuses(ss) {
     const data = sheet.getDataRange().getValues(); 
     const isTrial = name.includes('Trial');
     for (let i = 1; i < data.length; i++) { 
-      const expStr = String(data[i][7]); // Col H
+      const expStr = formatToDDMMYYYY(data[i][7]); // Col H
       const p = expStr.split("-"); 
-      if (p.length === 3 && (p[2]+p[1]+p[0] < todayStr)) {
-        const label = isTrial ? "TRIAL_EXPIRED" : "LICENSE_EXPIRED";
-        sheet.getRange(i+1, 10).setValue(label); 
+      if (p.length === 3) {
+          const expCmp = p[2].length === 4 ? p[2]+p[1]+p[0] : p[0]+p[1]+p[2];
+          if (expCmp < todayStr) {
+            const label = isTrial ? "TRIAL EXPIRED" : "LICENSE EXPIRED";
+            sheet.getRange(i+1, 10).setValue(label); 
+          }
       }
     } 
   }); 
@@ -1447,22 +1797,22 @@ function repairLicenseDatabase() {
     for (let i = 1; i < data.length; i++) {
         const rowData = data[i];
         const rawMachine = String(rowData[mColIdx]).trim();
-        const expStr = String(rowData[7]);
+        const expStr = formatToDDMMYYYY(rowData[7]);
         const p = expStr.split("-");
-        const isCurrentlyExpired = (p.length === 3 && (p[2]+p[1]+p[0] < todayStr));
+        const isCurrentlyExpired = (p.length === 3 && (p[2].length === 4 ? p[2]+p[1]+p[0] : p[0]+p[1]+p[2]) < todayStr);
 
         // 1. If Machine ID column mistakenly contains a status string, move it
         const upperMach = rawMachine.toUpperCase();
-        if (upperMach === "EXPIRED" || upperMach === "PENDING" || upperMach.includes("ACTIVE")) {
+        if (upperMach.includes("EXPIRED") || upperMach === "PENDING" || upperMach.includes("ACTIVE")) {
             sheet.getRange(i+1, mColIdx + 1).setValue(""); // Clear Machine ID Col
-            const finalStatus = isCurrentlyExpired ? (isTrial ? "TRIAL_EXPIRED" : "LICENSE_EXPIRED") : (isTrial ? "TRIAL ACTIVE" : "LICENSE ACTIVE");
+            const finalStatus = isCurrentlyExpired ? (isTrial ? "TRIAL EXPIRED" : "LICENSE EXPIRED") : (isTrial ? "TRIAL ACTIVE" : "LICENSE ACTIVE");
             sheet.getRange(i+1, sColNum).setValue(finalStatus);
             continue;
         }
 
         // 2. Refresh based on existing Machine ID and Date
         if (isCurrentlyExpired) {
-            sheet.getRange(i+1, sColNum).setValue(isTrial ? "TRIAL_EXPIRED" : "LICENSE_EXPIRED");
+            sheet.getRange(i+1, sColNum).setValue(isTrial ? "TRIAL EXPIRED" : "LICENSE EXPIRED");
         } else if (rawMachine === "" || rawMachine === "UNKNOWN-MACHINE-ID") {
             sheet.getRange(i+1, sColNum).setValue("PENDING");
         } else {
@@ -1533,10 +1883,20 @@ function handleSyncIdentityRepair(ss, params) {
                 sheet.getRange(i+1, pColIdx + 1).setValue(newPass);
                 
                 if (isTrial) {
-                   sheet.getRange(i+1, 6).setValue(machineId);
+                   if (machineId && !machineId.toUpperCase().includes("EXPIRED") && !machineId.toUpperCase().includes("ACTIVE") && machineId.toUpperCase() !== "PENDING") {
+                       const existingMach = String(data[i][5]).trim();
+                       if (existingMach === "" || existingMach.toUpperCase() === "PENDING" || existingMach.toUpperCase().includes("EXPIRED")) {
+                           sheet.getRange(i+1, 6).setValue(machineId);
+                       }
+                   }
                    sheet.getRange(i+1, 10).setValue('TRIAL ACTIVE');
                 } else {
-                   sheet.getRange(i+1, 9).setValue(machineId);
+                   if (machineId && !machineId.toUpperCase().includes("EXPIRED") && !machineId.toUpperCase().includes("ACTIVE") && machineId.toUpperCase() !== "PENDING") {
+                       const existingMach = String(data[i][8]).trim();
+                       if (existingMach === "" || existingMach.toUpperCase() === "PENDING" || existingMach.toUpperCase().includes("EXPIRED")) {
+                           sheet.getRange(i+1, 9).setValue(machineId);
+                       }
+                   }
                    sheet.getRange(i+1, 10).setValue('LICENSE ACTIVE');
                 }
                 updated = true;
@@ -1587,8 +1947,8 @@ function cleanupStaleActiveUsers(ss) {
     for (let i = 1; i < data.length; i++) {
         const status = String(data[i][3]).toUpperCase();
         if (status === 'LIVE') {
-            const lastActiveStr = String(data[i][4]);
-            const lastActiveDate = parseManualDate(lastActiveStr);
+            const lastActiveVal = data[i][4];
+            const lastActiveDate = parseManualDate(lastActiveVal);
             if (lastActiveDate && (now - lastActiveDate.getTime()) > threshold) {
                 sheet.getRange(i + 1, 4).setValue('DISCONNECTED')
                     .setBackground("#fee2e2")
@@ -1599,13 +1959,24 @@ function cleanupStaleActiveUsers(ss) {
     }
 }
 
-function parseManualDate(str) {
+function parseManualDate(val) {
+    if (!val) return null;
+    if (val instanceof Date) return val;
     try {
-        const p = str.match(/(\d+)-(\d+)-(\d+) (\d+):(\d+):(\d+)/);
-        if (!p) return null;
-        const iso = p[3] + "-" + p[2] + "-" + p[1] + "T" + p[4] + ":" + p[5] + ":" + p[6] + "+05:30";
-        return new Date(iso);
-    } catch (e) { return null; }
+        const str = String(val).trim();
+        const parsed = new Date(str);
+        if (!isNaN(parsed.getTime())) return parsed;
+    } catch (e) {}
+    try {
+        const str = String(val).trim();
+        const p = str.match(/(\d+)[-\/](\d+)[-\/](\d+) (\d+):(\d+):(\d+)/);
+        if (p) {
+            const iso = p[3] + "-" + p[2] + "-" + p[1] + "T" + p[4] + ":" + p[5] + ":" + p[6] + "+05:30";
+            const d = new Date(iso);
+            if (!isNaN(d.getTime())) return d;
+        }
+    } catch (e) {}
+    return null;
 }
 
 /**
@@ -1748,8 +2119,10 @@ function handleVerifyRestoreOTP(ss, params) {
                     email: isTrial ? data[i][3] : data[i][5],
                     startDate: data[i][6],
                     expiryDate: data[i][7],
-                    dataSize: isTrial ? data[i][8] : data[i][10],
-                    companyLimit: isTrial ? 1 : (parseInt(data[i][16]) || 1)
+                    dataSize: isTrial ? (parseInt(data[i][8]) || 50) : data[i][10],
+                    splDynamic: isTrial ? (data[i][14] !== undefined && data[i][14] !== '' ? (String(data[i][14]).trim() === 'Yes' || String(data[i][14]).trim() === 'true') : true) : (String(data[i][14]).trim() === 'Yes' || String(data[i][14]).trim() === 'true'),
+                    splMIS: isTrial ? (data[i][15] !== undefined && data[i][15] !== '' ? (String(data[i][15]).trim() === 'Yes' || String(data[i][15]).trim() === 'true') : true) : (String(data[i][15]).trim() === 'Yes' || String(data[i][15]).trim() === 'true'),
+                    companyLimit: isTrial ? (parseInt(data[i][16]) || 2) : (parseInt(data[i][16]) || 1)
                 };
                 break;
             }
@@ -1814,6 +2187,13 @@ function logSecurityAudit(ss, action, status, details, params) {
             statusCell.setBackground('#dcfce7').setFontColor('#166534');
         } else {
             statusCell.setBackground('#fee2e2').setFontColor('#991b1b');
+        }
+
+        // --- AUTO-TRIM SECURITY AUDIT LOG: Cap at 1000 rows max ---
+        const MAX_AUDIT_ROWS = 1000;
+        if (lastRow > MAX_AUDIT_ROWS + 1) {
+            const rowsToDelete = lastRow - (MAX_AUDIT_ROWS + 1);
+            sheet.deleteRows(2, rowsToDelete);
         }
     } catch (e) {
         console.warn("Audit Log Sync failed:", e.toString());
@@ -2016,11 +2396,329 @@ function onEdit(e) {
   
   if (row === 2 && criticalColumns.indexOf(col) !== -1) {
     const timestamp = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy HH:mm:ss");
-    sheet.getRange(2, 6).setValue(timestamp); // Update Column F
+    sheet.getRange(2, 6).setValue("'"+timestamp); // Update Column F
     console.log("🛠️ App_Config Timestamp Updated due to change in Column " + col + ": " + timestamp);
   }
 }
 
-// END OF SCRIPT
+// ==========================================
+// DROP COMPANY SIGNATURE ADMIN TOOL
+// ==========================================
+
+function showDropSignatureForm() {
+    var html = HtmlService.createHtmlOutput(`
+    <!DOCTYPE html><html><head><style>
+      body{font-family:"Segoe UI",sans-serif;padding:25px;background:#f8fafc;color:#1e293b;}
+      h3{margin-top:0;color:#0f172a;text-transform:uppercase;border-bottom:3px solid #3b82f6;padding-bottom:10px;margin-bottom:15px;font-size:18px;}
+      .form-label{display:block;font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:4px;}
+      input,select{width:100%;padding:10px;margin-bottom:12px;border:1.5px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-size:12px;}
+      button{width:100%;padding:12px;background:#3b82f6;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;margin-top:5px; transition:0.2s;}
+      button:hover{background:#2563eb;}
+      button:disabled{background:#94a3b8;cursor:not-allowed;}
+      .btn-danger{background:#ef4444;}
+      .btn-danger:hover{background:#dc2626;}
+      #status{display:none;padding:10px;border-radius:8px;margin-bottom:12px;font-size:11px;font-weight:bold;text-align:center;}
+      .err{background:#fee2e2;color:#991b1b;}.ok{background:#dcfce7;color:#166534;}
+    </style></head><body>
+      <h3>Drop Company Signature</h3>
+      
+      <label class="form-label">User's Machine ID or Email</label>
+      <input type="text" id="mId" placeholder="e.g. M-123456 or user@email.com">
+      
+      <button id="btnFetch" onclick="fetchSigs()">Fetch Signatures</button>
+
+      <div id="sigArea" style="display:none; margin-top:15px;">
+        <label class="form-label">Active Signatures in Column R</label>
+        <select id="sigSelect"></select>
+        <button id="btnDrop" class="btn-danger" onclick="dropSig()">Drop Selected Signature</button>
+      </div>
+
+      <div id="status"></div>
+
+      <script>
+        function showMsg(msg, isErr){
+          var el=document.getElementById('status');
+          el.textContent=msg; el.style.display='block';
+          el.className=isErr?'err':'ok';
+        }
+        function fetchSigs(){
+          var id = document.getElementById('mId').value.trim();
+          if(!id) return showMsg("Please enter Machine ID or Email.", true);
+          document.getElementById('btnFetch').disabled = true;
+          document.getElementById('btnFetch').innerText = "Fetching...";
+          showMsg("Searching database...", false);
+          
+          google.script.run.withSuccessHandler(function(res){
+            document.getElementById('btnFetch').disabled = false;
+            document.getElementById('btnFetch').innerText = "Fetch Signatures";
+            if(!res.success){
+               showMsg(res.message, true);
+               document.getElementById('sigArea').style.display='none';
+            }else{
+               showMsg("Found " + res.signatures.length + " signatures for " + res.name, false);
+               var sel = document.getElementById('sigSelect');
+               sel.innerHTML = '';
+               if(res.signatures.length === 0){
+                   var opt = document.createElement('option');
+                   opt.text = "No active signatures found";
+                   sel.add(opt);
+                   document.getElementById('btnDrop').disabled = true;
+               } else {
+                   res.signatures.forEach(function(s){
+                     var opt = document.createElement('option');
+                     opt.text = s; opt.value = s;
+                     sel.add(opt);
+                   });
+                   document.getElementById('btnDrop').disabled = false;
+               }
+               document.getElementById('sigArea').style.display='block';
+            }
+          }).fetchUserSignatures(id);
+        }
+
+        function dropSig(){
+          var id = document.getElementById('mId').value.trim();
+          var sig = document.getElementById('sigSelect').value;
+          if(!sig) return;
+          if(!confirm("Are you sure you want to permanently delete signature '" + sig + "' from Column R?\\n\\nThis will instantly free up a slot for the user.")) return;
+          
+          document.getElementById('btnDrop').disabled = true;
+          document.getElementById('btnDrop').innerText = "Dropping...";
+          
+          google.script.run.withSuccessHandler(function(res){
+             if(res.success){
+                showMsg(res.message, false);
+                document.getElementById('btnDrop').innerText = "Dropped Successfully";
+                setTimeout(fetchSigs, 1500); // refresh list
+             }else{
+                showMsg(res.message, true);
+                document.getElementById('btnDrop').disabled = false;
+                document.getElementById('btnDrop').innerText = "Drop Selected Signature";
+             }
+          }).dropUserSignature(id, sig);
+        }
+      </script>
+    </body></html>`)
+    .setWidth(350).setHeight(400);
+    SpreadsheetApp.getUi().showModalDialog(html, 'Admin Controls');
+}
+
+function fetchUserSignatures(identifier) {
+    identifier = String(identifier).trim().toLowerCase();
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName('BPP_APP_License');
+    if (!sheet) return { success: false, message: "License sheet not found." };
+    
+    const data = sheet.getDataRange().getValues();
+    // Search Machine ID (col 9 / index 8) or Email (col 6 / index 5)
+    for (let i = 1; i < data.length; i++) {
+        const mId = String(data[i][8]).trim().toLowerCase();
+        const email = String(data[i][5]).trim().toLowerCase();
+        
+        if (mId === identifier || email === identifier) {
+            const rawSigs = String(data[i][17] || "").trim(); // Column R is index 17
+            let sigArray = [];
+            if (rawSigs !== "") {
+                sigArray = rawSigs.split(',').map(s => s.trim()).filter(s => s !== "");
+            }
+            return {
+                success: true,
+                name: data[i][1],
+                signatures: sigArray
+            };
+        }
+    }
+    return { success: false, message: "User not found." };
+}
+
+function dropUserSignature(identifier, signatureToDrop) {
+    identifier = String(identifier).trim().toLowerCase();
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName('BPP_APP_License');
+    
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+        const mId = String(data[i][8]).trim().toLowerCase();
+        const email = String(data[i][5]).trim().toLowerCase();
+        
+        if (mId === identifier || email === identifier) {
+            const rawSigs = String(data[i][17] || "").trim(); // Column R
+            let sigArray = rawSigs !== "" ? rawSigs.split(',').map(s => s.trim()).filter(s => s !== "") : [];
+            
+            const initialLength = sigArray.length;
+            sigArray = sigArray.filter(s => s !== signatureToDrop);
+            
+            if (sigArray.length === initialLength) {
+                return { success: false, message: "Signature not found in user's record." };
+            }
+            
+            // Save back to Column R
+            setFormattedColumnRValue(sheet, i + 1, 18, sigArray);
+            
+            // Send Email Notification
+            const userName = data[i][1];
+            const userEmail = data[i][5];
+            
+            try {
+                if (userEmail && String(userEmail).indexOf('@') > 0) {
+                    // Clean up signature for user-facing email 
+                    // e.g. "USIG-ADMIN_123456-ABCD" becomes "ADMIN_123456"
+                    let displaySig = signatureToDrop;
+                    const sigParts = signatureToDrop.split('-');
+                    if (sigParts.length >= 2) {
+                        const hashPart = sigParts.pop();
+                        // Only drop the last part if it looks like the 8-char random hash
+                        if (hashPart.length >= 6) {
+                            displaySig = sigParts.join('-');
+                        } else {
+                            displaySig = signatureToDrop; // fallback
+                        }
+                    }
+                    
+                    // Remove "USIG-" or "SIG-" prefix so it matches their Data folder name
+                    if (displaySig.startsWith('USIG-')) {
+                        displaySig = displaySig.substring(5);
+                    } else if (displaySig.startsWith('SIG-')) {
+                        displaySig = displaySig.substring(4);
+                    }
+
+                    const htmlBody = `
+                        <div style="font-family:sans-serif; padding:20px; max-width:600px; margin:0 auto; border:1px solid #e5e7eb; border-radius:8px;">
+                            <h2 style="color:#2563eb;">BharatPay Pro - Slot Available</h2>
+                            <p>Dear ${userName},</p>
+                            <p>We are writing to confirm that a company slot has been successfully cleared on your account.</p>
+                            <p><strong>Company ID Dropped:</strong> ${displaySig}</p>
+                            <p>You can now open your BharatPay Pro application. The old company will automatically disappear, and you will be able to register a new company in the available slot.</p>
+                            <br>
+                            <p>Regards,<br>BharatPay Pro Support Team</p>
+                        </div>
+                    `;
+                    MailApp.sendEmail({
+                        to: userEmail,
+                        subject: "BharatPay Pro - Company Slot Freed",
+                        htmlBody: htmlBody
+                    });
+                }
+            } catch(e) {
+                console.error("Failed to send email", e);
+            }
+            
+            logSecurityAudit(ss, 'DROP_SIGNATURE', 'SUCCESS', `Signature ${signatureToDrop} dropped. Notified ${userEmail}`, {machineId: data[i][8], email: data[i][5]});
+            
+            return { success: true, message: "Signature dropped successfully!" };
+        }
+    }
+    return { success: false, message: "User not found." };
+}
+
+function handleSendPolicyConfirmation(ss, params) {
+    const email = String(params.email || "").trim().toLowerCase();
+    const userID = String(params.userID || "").trim().toUpperCase();
+    const companyName = String(params.companyName || "").trim();
+    const newPolicyText = String(params.newPolicyText || "").trim();
+
+    if (!email || !userID || !companyName || !newPolicyText) {
+        return jsonResponse({ success: false, message: "Missing confirmation parameters." });
+    }
+
+    const subject = "[POLICY CHANGE] Statutory Calculation Basis Modified - " + companyName;
+    
+    let adminName = "";
+    ['BPP_APP_License', 'Approved_Trial_Data'].forEach(name => {
+        if (adminName) return;
+        const sheet = ss.getSheetByName(name);
+        if (!sheet) return;
+        const data = sheet.getDataRange().getValues();
+        const eCol = name.includes('Trial') ? 3 : 5;
+        const uCol = name.includes('Trial') ? 1 : 2;
+        const nCol = name.includes('Trial') ? 0 : 1;
+        
+        for (let i = 1; i < data.length; i++) {
+            if (String(data[i][eCol]).toLowerCase() === email && String(data[i][uCol]).toLowerCase() === userID.toLowerCase()) {
+                adminName = String(data[i][nCol]);
+                break;
+            }
+        }
+    });
+
+    if (!adminName && (email === "suganthibobby@gmail.com" || email === "ilcbala.bharatpayroll@gmail.com")) {
+        adminName = "Developer";
+    }
+
+    const displayName = adminName ? (adminName + " (" + userID + ")") : ("Administrator (" + userID + ")");
+    const greeting = "Dear " + displayName.toUpperCase();
+    const htmlContent = `
+        <p>This is to confirm that the statutory calculation policy for <strong>${companyName}</strong> has been successfully modified.</p>
+        <div style="margin:25px 0; border:2px solid #be123c; border-radius:12px; overflow:hidden;">
+            <table style="width:100%; border-collapse:collapse; background:#ffffff;">
+                <tr><td style="padding:15px; background:#be123c; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; width:35%; letter-spacing:1px;">NEW POLICY</td><td style="padding:15px; background:#fff1f2; border-bottom:1px solid #fecdd3; color:#be123c; font-weight:700; font-size:14px;">${newPolicyText}</td></tr>
+                <tr><td style="padding:15px; background:#be123c; border-bottom:1px solid #ffffff; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">AUTHORIZED BY</td><td style="padding:15px; background:#f8fafc; border-bottom:1px solid #fecdd3; color:#0f172a; font-weight:700; font-size:13px;">${userID}</td></tr>
+                <tr><td style="padding:15px; background:#be123c; color:#ffffff; font-size:12px; font-weight:800; letter-spacing:1px;">TIMESTAMP</td><td style="padding:15px; background:#f8fafc; color:#334155; font-size:13px;">${new Date().toLocaleString()}</td></tr>
+            </table>
+        </div>
+        <p style="font-size:12px; color:#475569;">If you did not authorize this policy change, please investigate immediately or contact support.</p>
+    `;
+
+    const fullHtml = buildProfessionalEmail("Security Notice", "Policy Modification", "#be123c", greeting, htmlContent);
+    try {
+        MailApp.sendEmail({ to: email, subject: subject, htmlBody: fullHtml });
+        return jsonResponse({ success: true, message: "Confirmation email sent." });
+    } catch (e) {
+        return jsonResponse({ success: false, message: "Apps Script Mail Error: " + e.toString() });
+    }
+}
+
+// ============================================================
+// RICH TEXT FORMATTER FOR COLUMN R (BOLD COMPANY NAMES)
+// ============================================================
+function setFormattedColumnRValue(sheet, rowIndex, colIndex, silosArray) {
+    if (!silosArray || silosArray.length === 0) {
+        sheet.getRange(rowIndex, colIndex).setValue("");
+        return;
+    }
+    
+    var fullText = Array.isArray(silosArray) ? silosArray.join(",") : String(silosArray);
+    var builder = SpreadsheetApp.newRichTextValue().setText(fullText);
+    var boldStyle = SpreadsheetApp.newTextStyle().setBold(true).build();
+    
+    var items = fullText.split(",");
+    var currentOffset = 0;
+    
+    for (var k = 0; k < items.length; k++) {
+        var item = items[k].trim();
+        var parts = item.split("_");
+        if (parts.length >= 3) {
+            // parts[0] = "USIG-USERNAME" or "SIG-NAME"
+            // parts[1] = "LOESCH" (Company Short Code / Name)
+            var companyName = parts[1];
+            var companyStart = currentOffset + parts[0].length + 1; // position after first '_'
+            var companyEnd = companyStart + companyName.length;
+            
+            // Highlight/Bold the Company Name segment
+            builder.setTextStyle(companyStart, companyEnd, boldStyle);
+        }
+        currentOffset += items[k].length + 1; // +1 for comma
+    }
+    
+    sheet.getRange(rowIndex, colIndex).setRichTextValue(builder.build());
+}
+
+// ============================================================
+// SILO CORE ID HELPER (FOR SELF-HEALING AUTO-REPAIR)
+// ============================================================
+function getSiloCoreId(sig) {
+    if (!sig) return "";
+    var clean = String(sig).trim().replace(/^USIG-/, '').replace(/^SIG-/, '');
+    var parts = clean.split('_');
+    if (parts.length >= 2) {
+        // e.g. USERNAME_SAIPRA_343036-HASH -> drop USERNAME
+        parts.shift();
+        var rest = parts.join('_');
+        var dashIdx = rest.lastIndexOf('-');
+        return dashIdx > 0 ? rest.substring(0, dashIdx) : rest;
+    }
+    var dashIdx = clean.lastIndexOf('-');
+    return dashIdx > 0 ? clean.substring(0, dashIdx) : clean;
+}
 
 // END OF SCRIPT

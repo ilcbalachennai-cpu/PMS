@@ -514,6 +514,24 @@ export interface OTRecord {
   otAmount: number;
 }
 
+export interface BranchDetail {
+  name: string;
+  address?: string;
+  pfCode?: string;
+  esiCode?: string;
+  ptTaxCode?: string;
+  contactPerson?: string;
+  mobile?: string;
+  email?: string;
+}
+
+export const getBranchName = (b: any): string => {
+  if (!b) return '';
+  if (typeof b === 'string') return b;
+  if (typeof b === 'object' && b.name) return String(b.name);
+  return String(b);
+};
+
 export interface AppVersion {
   version: string;
   releaseDate: string;

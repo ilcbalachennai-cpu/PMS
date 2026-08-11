@@ -85,21 +85,51 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = (props) => {
 
       // If DOL is BEFORE the start of this period, they are Ex-Employees for this month
       // e.g., Left 31st Dec. Processing Jan 1st. 31 Dec < 1 Jan -> Exclude.
-      return dolDate >= periodStart;
     });
   }, [employees, month, year]);
 
+  const isAttMatch = (a: any, empId: string, m: string, y: number) => {
+    if (!a || a.employeeId !== empId || Number(a?.year || a?.Year) !== Number(y)) return false;
+    const rawM = String(a?.month || a?.Month || a?.payrollMonth || '').trim().toLowerCase();
+    const targetM = String(m || '').trim().toLowerCase();
+    if (!rawM || !targetM) return false;
+    if (rawM === targetM) return true;
+
+    const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+    const rawMonthIdx = monthNames.findIndex(mn => mn === rawM || mn.startsWith(rawM) || rawM.startsWith(mn));
+    const targetMonthIdx = monthNames.findIndex(mn => mn === targetM || mn.startsWith(targetM) || targetM.startsWith(mn));
+    if (rawMonthIdx !== -1 && targetMonthIdx !== -1) {
+      return rawMonthIdx === targetMonthIdx;
+    }
+    const numM = parseInt(rawM);
+    if (!isNaN(numM) && targetMonthIdx !== -1) {
+      return (numM - 1) === targetMonthIdx;
+    }
+    return false;
+  };
+
   const totalPresentDays = useMemo(() => {
     return activeEmployees.reduce((acc, emp) => {
-      const att = attendances.find(a => a.employeeId === emp.id && a.month === month && a.year === year) || { presentDays: 0 };
+      const att = attendances.find(a => isAttMatch(a, emp.id, month, year)) || { presentDays: 0 };
       return acc + (att.presentDays || 0);
     }, 0);
   }, [activeEmployees, attendances, month, year]);
 
-  // Helper to get or create attendance record for current view
+  // Helper to get or create attendance record for current view with alias normalization
   const getAttendance = (empId: string) => {
-    return attendances.find(a => a.employeeId === empId && a.month === month && a.year === year) ||
-      { employeeId: empId, month: month, year: year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0, encashedDays: 0 };
+    const att: any = attendances.find(a => isAttMatch(a, empId, month, year));
+    if (!att) {
+      return { employeeId: empId, month: month, year: year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0, encashedDays: 0 };
+    }
+    return {
+      ...att,
+      presentDays: Number(att.presentDays ?? att.present_days ?? att['Paid Days'] ?? att.paidDays ?? att.Present ?? att.present ?? 0),
+      lopDays: Number(att.lopDays ?? att.lop_days ?? att.LOP ?? att.lop ?? att['Loss of Pay'] ?? att.absent ?? 0),
+      earnedLeave: Number(att.earnedLeave ?? att.earned_leave ?? att.EL ?? att.el ?? 0),
+      sickLeave: Number(att.sickLeave ?? att.sick_leave ?? att.SL ?? att.sl ?? 0),
+      casualLeave: Number(att.casualLeave ?? att.casual_leave ?? att.CL ?? att.cl ?? 0),
+      encashedDays: Number(att.encashedDays ?? att.encashed_days ?? att.encashment ?? 0)
+    };
   };
 
   const handleUpdate = (empId: string, field: keyof Attendance, value: number) => {
@@ -109,7 +139,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = (props) => {
     if (justSaved) setJustSaved(false);
 
     // Check if record exists
-    const exists = attendances.some(a => a.employeeId === empId && a.month === month && a.year === year);
+    const exists = attendances.some(a => isAttMatch(a, empId, month, year));
 
     let newVal = Math.max(0, value);
     // Basic validation, strict validation happens on save/render
@@ -123,7 +153,7 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = (props) => {
 
     if (exists) {
       setAttendances(attendances.map(a => {
-        if (a.employeeId === empId && a.month === month && a.year === year) {
+        if (isAttMatch(a, empId, month, year)) {
           return { ...a, [field]: newVal };
         }
         return a;
@@ -368,20 +398,20 @@ const AttendanceManager: React.FC<AttendanceManagerProps> = (props) => {
           }
 
           // Update existing or create new for THIS MONTH/YEAR
-          const existingIdx = newAttendances.findIndex(a => a.employeeId === emp.id && a.month === month && a.year === year);
+          const existingIdx = newAttendances.findIndex(a => isAttMatch(a, emp.id, month, year));
 
           // Clean inputs
-          const present = Math.min(getVal(['Present Days', 'Present', 'Paid Days']) || 0, daysInMonth);
-          const el = getVal(['EL (Availed)', 'EL', 'Earned Leave', 'EL (Earned)']);
-          const encash = getVal(['EL Encash', 'Encashment', 'EL Encashed']);
-          const sl = getVal(['SL (Sick)', 'SL', 'Sick Leave']);
-          const cl = getVal(['CL (Casual)', 'CL', 'Casual Leave']);
-          const lop = getVal(['LOP', 'Loss of Pay', 'Absent']);
+          const present = Math.min(getVal(['Present Days', 'Present', 'Paid Days', 'present_days', 'paidDays', 'present', 'paid_days']) || 0, daysInMonth);
+          const el = getVal(['EL (Availed)', 'EL', 'Earned Leave', 'EL (Earned)', 'earned_leave']);
+          const encash = getVal(['EL Encash', 'Encashment', 'EL Encashed', 'encashed_days']);
+          const sl = getVal(['SL (Sick)', 'SL', 'Sick Leave', 'sick_leave']);
+          const cl = getVal(['CL (Casual)', 'CL', 'Casual Leave', 'casual_leave']);
+          const lop = getVal(['LOP', 'Loss of Pay', 'Absent', 'lop_days', 'absent', 'absentDays']);
 
           const attRecord: Attendance = {
             employeeId: emp.id,
             month,
-            year,
+            year: Number(year),
             presentDays: present,
             earnedLeave: el,
             sickLeave: sl,

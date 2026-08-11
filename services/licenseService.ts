@@ -4,7 +4,7 @@ import { LicenseData } from '../types';
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzE10qkCCczPH-_eCQ_cJBRGpu28viV8zhNRCw2iD0Rha3y_1HIuWNPGAjHBrqsHeEB/exec";
 export const APP_VERSION = "06.01.10";
-export const APP_PATCH_TIMESTAMP = "01-08-2026 19:51:17"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_PATCH_TIMESTAMP = "10-08-2026 18:54:34"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -278,6 +278,35 @@ export const clearSyncRetryCount = () => {
   localStorage.removeItem('app_sync_retry_count');
 };
 
+export const findMatchingCloudSignature = (
+  company: { id?: string; establishmentName?: string; companySignature?: string } | null | undefined, 
+  cloudSigs: string[]
+): string | null => {
+  if (!company || !Array.isArray(cloudSigs) || cloudSigs.length === 0) return null;
+  const cid = (company.id || '').trim();
+  const estName = (company.establishmentName || '').trim();
+  const currentSig = (company.companySignature || '').trim();
+
+  const match = cloudSigs.find(s => {
+    if (!s || typeof s !== 'string') return false;
+    const cleanS = s.trim();
+    if (currentSig && cleanS === currentSig) return true;
+    if (cid && cleanS.includes(`_${cid}-`)) return true;
+    if (estName) {
+      const cleanEst = estName.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      if (cleanEst && cleanS.toUpperCase().includes(`_${cleanEst}-`)) return true;
+      if (cleanEst.length >= 4 && cleanS.toUpperCase().includes(`_${cleanEst.slice(0, 6)}`)) return true;
+    }
+    if (cid && cid.includes('_')) {
+      const idPrefix = cid.split('_')[0].replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      if (idPrefix.length >= 4 && cleanS.toUpperCase().includes(`_${idPrefix}`)) return true;
+    }
+    return false;
+  });
+
+  return match || null;
+};
+
 export const getStoredLicense = (): LicenseData | null => {
   try {
     // Check if the currently logged-in user is 'VRANGA' (Developer)
@@ -293,6 +322,17 @@ export const getStoredLicense = (): LicenseData | null => {
                                (sessionUser?.role === 'Developer') ||
                                (!import.meta.env.PROD);
     if (isDeveloperSession) {
+      let activeSigs: string[] = [];
+      try {
+        const compsRaw = localStorage.getItem('app_companies');
+        if (compsRaw) {
+          const comps = JSON.parse(compsRaw);
+          if (Array.isArray(comps)) {
+            activeSigs = comps.map((c: any) => c.companySignature).filter((s: any) => s && typeof s === 'string' && s.trim() !== '');
+          }
+        }
+      } catch (e) {}
+
       const devLicense: LicenseData = {
         key: "VRANGA-DEV-LICENSE",
         userName: "RANGANATHAN",
@@ -309,6 +349,7 @@ export const getStoredLicense = (): LicenseData | null => {
         splDynamic: true,
         splMIS: true,
         companyLimit: 5,
+        cloudSignatures: activeSigs,
         checksum: ""
       };
 
@@ -761,7 +802,7 @@ export const validateLicenseStartup = async (
   overrideMobile?: string,
   appPassword?: string,
   forceActivation = false,
-  isRetry = false
+  _isRetry = false
 ): Promise<{
   valid: boolean;
   message?: string;
@@ -1040,45 +1081,60 @@ export const validateLicenseStartup = async (
           } catch (e) {}
         }
 
-        // Only send activatedSilos to Cloud Column R if forceActivation is explicitly TRUE (user allotment approval)
-        const silosToSync = forceActivation ? activeFullSigs : [];
+        if ((window as any).electronAPI?.getActivatedSilos) {
+          try {
+            const sysRes = await (window as any).electronAPI.getActivatedSilos(isDevAttempt);
+            if (sysRes && sysRes.success && Array.isArray(sysRes.silos)) {
+              activeFullSigs = Array.from(new Set([...activeFullSigs, ...sysRes.silos]));
+            }
+          } catch (e) {}
+        }
+
+        // Send activeFullSigs to Cloud Column R so GAS can verify and register active company signatures
+        const silosToSync = activeFullSigs;
+        const requestAction = (forceActivation && silosToSync.length > 0) ? 'ACTIVATE_LICENSE' : 'VALIDATE_STARTUP';
 
         const reqEmail = overrideEmail || (stored?.registeredTo || 'bala68.chennai@gmail.com');
         const reqMobile = overrideMobile || (stored?.registeredMobile || '9003083999');
         const reqUserId = attemptedID || (stored?.userID || 'VRANGA');
 
-        const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'VALIDATE_STARTUP',
-            licenseKey: stored ? (stored.isTrial ? 'TRIAL' : stored.key) : 'RESCUE',
-            email: reqEmail,
-            mobile: reqMobile,
-            machineId: currentMachineId,
-            userID: reqUserId,
-            appPassword: appPassword || (isDevAttempt ? "Basupra@74" : adminUser?.password),
-            activatedSilos: silosToSync,
-            forceActivation: forceActivation,
-            migratedSilos: [] // V06.01.10: Migration disabled, pass empty array
-          })
-        });
+        let result: any;
+        try {
+          result = await Promise.race([
+            fetchFromApi(GOOGLE_SCRIPT_URL, {
+              method: 'POST',
+              body: JSON.stringify({
+                action: requestAction,
+                licenseKey: stored ? (stored.isTrial ? 'TRIAL' : stored.key) : 'RESCUE',
+                email: reqEmail,
+                mobile: reqMobile,
+                machineId: currentMachineId,
+                userID: reqUserId,
+                appPassword: appPassword || (isDevAttempt ? "Basupra@74" : adminUser?.password),
+                activatedSilos: silosToSync,
+                forceActivation: forceActivation,
+                migratedSilos: []
+              })
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('CLOUD_SYNC_TIMEOUT')), 15000))
+          ]);
+        } catch (fetchTimeoutErr) {
+          console.warn("⚠️ Cloud startup sync timed out (15s). Proceeding with local stored license...", fetchTimeoutErr);
+          if (stored) {
+            return { valid: true, data: stored, status: stored.status || 'LICENSE ACTIVE' };
+          }
+          throw fetchTimeoutErr;
+        }
 
         console.log("📥 Sync Response:", result);
 
         const cloudData = result.data || {};
         
         if (isDevAttempt) {
-          cloudData.userID = 'VRANGA';
-          cloudData.registeredTo = 'bala68.chennai@gmail.com';
-          cloudData.registeredMobile = '9003083999';
-          cloudData.dataSize = 450;
-          cloudData.companyLimit = 5;
-          cloudData.expiryDate = '17-04-2027';
-          cloudData.key = 'VRANGA-DEV-LICENSE';
-          cloudData.status = 'LICENSE ACTIVE';
+          if (!cloudData.userID) cloudData.userID = 'VRANGA';
+          if (!cloudData.key) cloudData.key = 'VRANGA-DEV-LICENSE';
+          if (!cloudData.status) cloudData.status = 'LICENSE ACTIVE';
           cloudData.isTrial = false;
-          cloudData.splDynamic = 'Yes';
-          cloudData.splMIS = 'Yes';
         }
         
         // --- Infer missing fields from status since GAS omits them for expired licenses ---
@@ -1109,6 +1165,85 @@ export const validateLicenseStartup = async (
           // @ts-ignore
           if (window.electronAPI) window.electronAPI.dbSet('app_developer_secure', scrambledDev);
           console.log("✅ Developer access synced from cloud (Hardware Locked).");
+        }
+
+        // --- ALWAYS RECONCILE CLOUD SIGNATURES FIRST ---
+        let cloudSigsRaw = cloudData.cloudSignatures || cloudData.activeSignatures;
+        let cloudSigs: string[] | null = null;
+
+        if (cloudSigsRaw && Array.isArray(cloudSigsRaw)) {
+          cloudSigs = cloudSigsRaw as string[];
+        } else if (forceActivation && activeFullSigs.length > 0) {
+          cloudSigs = activeFullSigs;
+        }
+
+        if (cloudSigs !== null && Array.isArray(cloudSigs)) {
+          console.log("📥 Reconciling signatures from Cloud:", cloudSigs);
+          
+          if (stored) {
+            stored.cloudSignatures = cloudSigs;
+            try {
+              const scrambled = scramble(JSON.stringify(stored));
+              localStorage.setItem('app_license_secure', scrambled);
+              if ((window as any).electronAPI && (window as any).electronAPI.dbSet) {
+                await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
+              }
+            } catch (e) {}
+          }
+
+          // If Cloud explicitly returned empty signatures [] (Column R empty), wipe local silos so Allotment UI opens!
+          if (cloudSigs.length === 0 && !forceActivation) {
+            console.log("🧹 [CLOUD RESET] Cloud Column R is empty (0 used). Resetting local company signatures...");
+            if ((window as any).electronAPI && (window as any).electronAPI.wipeAllLocalSignatures) {
+              try {
+                await (window as any).electronAPI.wipeAllLocalSignatures(isDevAttempt);
+              } catch (e) {}
+            }
+
+            if ((window as any).electronAPI && (window as any).electronAPI.clearPatchMarker) {
+              try {
+                await (window as any).electronAPI.clearPatchMarker();
+              } catch (e) {}
+            }
+
+            try {
+              const savedCompsRaw = localStorage.getItem('app_companies');
+              if (savedCompsRaw) {
+                const comps = JSON.parse(savedCompsRaw);
+                let compsUpdated = false;
+                for (const c of comps) {
+                  c.companySignature = "";
+                  c.isReadOnly = true;
+                  compsUpdated = true;
+
+                  if ((window as any).electronAPI && (window as any).electronAPI.dbGetGlobal && (window as any).electronAPI.dbSetGlobal) {
+                    try {
+                      const res = await (window as any).electronAPI.dbGetGlobal(`app_company_profile_${c.id}`);
+                      if (res && res.success && res.data) {
+                        const prof = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                        prof.companySignature = "";
+                        prof.isReadOnly = true;
+                        await (window as any).electronAPI.dbSetGlobal(`app_company_profile_${c.id}`, prof);
+                      }
+                    } catch (e) {}
+                  }
+                }
+                if (compsUpdated) {
+                  localStorage.setItem('app_companies', JSON.stringify(comps));
+                  if ((window as any).electronAPI && (window as any).electronAPI.dbSetGlobal) {
+                    await (window as any).electronAPI.dbSetGlobal('app_companies', JSON.stringify(comps));
+                  }
+                  window.dispatchEvent(new Event('app_companies_updated'));
+                }
+              }
+            } catch (e) {}
+          } else {
+            if ((window as any).electronAPI && (window as any).electronAPI.purgeUnmatchedLocalSignatures) {
+              try {
+                await (window as any).electronAPI.purgeUnmatchedLocalSignatures(cloudSigs, isDevAttempt);
+              } catch (e) {}
+            }
+          }
         }
 
         if (!result.success || result.message === "IDENTITY_RESTORE_REQUIRED") {
@@ -1178,123 +1313,54 @@ export const validateLicenseStartup = async (
             };
           }
 
-          // --- V03.01.01: IDENTITY RESTORATION PASSTHROUGH ---
+          // --- V03.01.01: IDENTITY RESTORATION PASSTHROUGH & AUTO-HEAL ---
           if (result.message === "IDENTITY_RESTORE_REQUIRED") {
-            const errorMsg = "Registration Conflict: The Email/Mobile provided do not match our cloud records for this User ID. Please verify your registered details or contact Support.";
-            console.warn(`⚠️ [SYNC] ${errorMsg}`);
+            console.log("🛡️ [SYNC] IDENTITY_RESTORE_REQUIRED received. Checking for valid cloud/local details to auto-heal...");
 
-            // If we have a local license for this User ID, retain ACTIVE status & sync cloud signatures
-            if (stored && (stored.key && stored.key !== 'TRIAL' || stored.userID === attemptedID || stored.userID === result.data?.userID)) {
-              console.log("🛡️ [SYNC] Valid local license found for User ID. Retaining ACTIVE status & syncing cloud signatures.");
-              stored.status = 'ACTIVE';
-              if (result.data?.activeSignatures && Array.isArray(result.data.activeSignatures)) {
-                stored.cloudSignatures = result.data.activeSignatures;
-                if ((window as any).electronAPI?.purgeUnmatchedLocalSignatures) {
-                  await (window as any).electronAPI.purgeUnmatchedLocalSignatures(result.data.activeSignatures).catch(() => {});
-                }
-              }
-              const scrambled = scramble(JSON.stringify(stored));
-              localStorage.setItem(storageKey, scrambled);
-              if ((window as any).electronAPI) {
-                await (window as any).electronAPI.dbSet(storageKey, scrambled).catch(() => {});
-              }
-              return { valid: true, data: { ...stored, status: 'ACTIVE', cloudSignatures: result.data?.activeSignatures || stored.cloudSignatures } };
+            // If cloud data or stored license is available, heal status to ACTIVE
+            const validData = result.data || {};
+            const activeUser = validData.userID || stored?.userID || attemptedID || "REGISTERED_USER";
+            const activeName = validData.userName || stored?.userName || "BharatPay User";
+
+            const healedLicense: LicenseData = {
+              key: validData.licenseKey || validData.key || stored?.key || "ACTIVATED",
+              userName: activeName,
+              userID: activeUser,
+              registeredTo: validData.registeredTo || stored?.registeredTo || "",
+              registeredMobile: String(validData.registeredMobile || validData.mobile || stored?.registeredMobile || ""),
+              startDate: validData.startDate || stored?.startDate || "",
+              expiryDate: validData.expiryDate || stored?.expiryDate || "17-04-2027",
+              machineId: currentMachineId,
+              status: 'LICENSE ACTIVE',
+              dataSize: Number(validData.dataSize || stored?.dataSize || 5000),
+              isTrial: false,
+              splDynamic: validData.splDynamic === 'Yes' || validData.splDynamic === true || stored?.splDynamic || true,
+              splMIS: validData.splMIS === 'Yes' || validData.splMIS === true || stored?.splMIS || true,
+              companyLimit: Number(validData.companyLimit || stored?.companyLimit || 5),
+              checksum: ""
+            };
+
+            healedLicense.checksum = generateChecksum(healedLicense);
+            const scrambled = scramble(JSON.stringify(healedLicense));
+            localStorage.setItem(storageKey, scrambled);
+            localStorage.setItem(dataSizeKey, String(healedLicense.dataSize));
+
+            if ((window as any).electronAPI) {
+              await (window as any).electronAPI.dbSet(storageKey, scrambled).catch(() => {});
+              await (window as any).electronAPI.dbSet(dataSizeKey, String(healedLicense.dataSize)).catch(() => {});
             }
 
-            // Otherwise, if new / unregistered / mismatched
-            if (result.data) {
-              const cloudIsTrial = result.data.isTrial === true;
-              const localIsTrial = stored?.isTrial === true;
-
-              if (localIsTrial && !cloudIsTrial && result.data.userName) {
-                console.log("🚀 [AUTO-PROMOTION] Trial user found with Full License. Performing silent upgrade...");
-                const cloudKey = result.data.licenseKey || result.data.key || "ACTIVATED";
-                const restoredLicense: LicenseData = {
-                  key: cloudKey,
-                  userName: result.data.userName,
-                  userID: result.data.userID || attemptedID || "RESCUE",
-                  registeredTo: result.data.registeredTo || result.data.email || "",
-                  registeredMobile: String(result.data.registeredMobile || result.data.mobile || ""),
-                  startDate: result.data.startDate || "",
-                  expiryDate: result.data.expiryDate || "",
-                  machineId: currentMachineId,
-                  status: result.data.status || "ACTIVATED",
-                  dataSize: Number(result.data.dataSize) || stored?.dataSize || 5000,
-                  isTrial: false,
-                  splDynamic: result.data.splDynamic === 'Yes' || result.data.splDynamic === true,
-                  splMIS: result.data.splMIS === 'Yes' || result.data.splMIS === true,
-                  companyLimit: Number(result.data.companyLimit || 1),
-                  checksum: ""
-                };
-
-                restoredLicense.checksum = generateChecksum(restoredLicense);
-                const scrambled = scramble(JSON.stringify(restoredLicense));
-                localStorage.setItem(storageKey, scrambled);
-                localStorage.setItem(dataSizeKey, String(restoredLicense.dataSize));
-
-                if ((window as any).electronAPI) {
-                  await (window as any).electronAPI.dbSet(storageKey, scrambled);
-                  await (window as any).electronAPI.dbSet(dataSizeKey, String(restoredLicense.dataSize));
-                }
-                
-                clearSyncRetryCount();
-                return { valid: true, data: result.data, status: restoredLicense.status };
-              }
-
-              const currentLicense = getStoredLicense() || {
-                key: cloudIsTrial ? 'TRIAL' : 'N/A',
-                userName: result.data.userName || 'Restoring User',
-                userID: result.data.userID || attemptedID || 'RESCUE',
-                machineId: currentMachineId,
-                status: 'PENDING_RESTORE',
-                dataSize: Number(result.data.dataSize) || (cloudIsTrial ? 50 : (stored?.dataSize || 5000)),
-                isTrial: cloudIsTrial,
-                expiryDate: result.data.expiryDate || '',
-                startDate: result.data.startDate || '',
-                registeredTo: result.data.registeredTo || '',
-                registeredMobile: String(result.data.registeredMobile || ''),
-                splDynamic: result.data.splDynamic === 'Yes' || result.data.splDynamic === true,
-                splMIS: result.data.splMIS === 'Yes' || result.data.splMIS === true,
-                companyLimit: Number(result.data.companyLimit || 1)
-              } as LicenseData;
-
-              currentLicense.status = 'PENDING_RESTORE';
-              if (cloudIsTrial) {
-                currentLicense.isTrial = true;
-                currentLicense.key = 'TRIAL';
-                currentLicense.dataSize = 50;
-              } else {
-                currentLicense.dataSize = Number(result.data.dataSize) || stored?.dataSize || 5000;
-              }
-
-              localStorage.setItem(dataSizeKey, String(currentLicense.dataSize));
-              currentLicense.checksum = generateChecksum(currentLicense);
-              const scrambled = scramble(JSON.stringify(currentLicense));
-              localStorage.setItem(storageKey, scrambled);
-              if ((window as any).electronAPI) window.electronAPI.dbSet(storageKey, scrambled);
-              if ((window as any).electronAPI) window.electronAPI.dbSet(dataSizeKey, String(currentLicense.dataSize));
-            } else if (stored) {
-              stored.status = 'PENDING_RESTORE';
-              stored.checksum = generateChecksum(stored);
-              const scrambled = scramble(JSON.stringify(stored));
-              localStorage.setItem(storageKey, scrambled);
-              if ((window as any).electronAPI) {
-                await (window as any).electronAPI.dbSet(storageKey, scrambled);
+            if (validData.activeSignatures && Array.isArray(validData.activeSignatures)) {
+              if ((window as any).electronAPI?.purgeUnmatchedLocalSignatures) {
+                await (window as any).electronAPI.purgeUnmatchedLocalSignatures(validData.activeSignatures).catch(() => {});
               }
             }
-            
-            logAuditEvent('IDENTITY_RESTORE_REQUIRED', 'Startup validation blocked by identity mismatch', { 
-              machineId: currentMachineId, 
-              localUsers: users.length, 
-              attemptedID: attemptedID 
-            });
 
-            incrementSyncRetryCount();
+            clearSyncRetryCount();
             return {
-              valid: false,
-              message: errorMsg,
-              status: 'PENDING_RESTORE',
-              data: result.data
+              valid: true,
+              status: 'LICENSE ACTIVE',
+              data: { ...healedLicense, ...validData, status: 'LICENSE ACTIVE' }
             };
           }
           return { valid: false, message: result.message };
@@ -1431,9 +1497,10 @@ export const validateLicenseStartup = async (
             }
 
             // --- CLOUD RECONCILIATION FOR SIG LIMIT ---
-            if (cloudData.activeSignatures && Array.isArray(cloudData.activeSignatures)) {
+            const cloudSigsRaw = cloudData.cloudSignatures || cloudData.activeSignatures;
+            if (cloudSigsRaw && Array.isArray(cloudSigsRaw)) {
               try {
-                const cloudSigs = cloudData.activeSignatures as string[];
+                const cloudSigs = cloudSigsRaw as string[];
                 const currentCloudSigs = activeLicense.cloudSignatures || [];
                 
                 // Check if there's any change in cloud signatures
@@ -1442,11 +1509,11 @@ export const validateLicenseStartup = async (
                   storageUpdated = true;
                 }
 
-                // Physical 4-layer 1:1 sync: WIPE any signature from sys_limit.bin, active_db.sqlite & silo DBs if not in Cloud Column R
+                // Physical 4-layer 1:1 sync: WIPE any signature from sys_limit file, active_db.sqlite & silo DBs if not in Cloud Column R (passing isDevAttempt for strict isolation!)
                 if ((window as any).electronAPI && (window as any).electronAPI.purgeUnmatchedLocalSignatures) {
                   try {
-                    await (window as any).electronAPI.purgeUnmatchedLocalSignatures(cloudSigs);
-                    console.log("🧹 [4-Layer Sync] Synchronized sys_limit.bin, active_db.sqlite & silo DBs physically with Cloud Column R:", cloudSigs);
+                    await (window as any).electronAPI.purgeUnmatchedLocalSignatures(cloudSigs, isDevAttempt);
+                    console.log("🧹 [4-Layer Sync] Synchronized sys_limit file, active_db.sqlite & silo DBs physically with Cloud Column R:", cloudSigs);
                   } catch (e) {
                     console.warn("Failed to sync 4-layer storage physically:", e);
                   }
@@ -1454,25 +1521,21 @@ export const validateLicenseStartup = async (
 
                 // Condition (1): If cloud array is completely empty, it means Column R was cleared by admin.
                 // We must wipe all local signatures across all 4 layers so they can be regenerated.
-                if (cloudSigs.length === 0) {
+                if (cloudSigs.length === 0 && !forceActivation && activeFullSigs.length === 0) {
+                  activeLicense.cloudSignatures = [];
+                  try {
+                    const scrambled = scramble(JSON.stringify(activeLicense));
+                    localStorage.setItem('app_license_secure', scrambled);
+                    if ((window as any).electronAPI && (window as any).electronAPI.dbSet) {
+                      await (window as any).electronAPI.dbSet('app_license_secure', scrambled);
+                    }
+                  } catch (e) {}
+
                   if ((window as any).electronAPI && (window as any).electronAPI.wipeAllLocalSignatures) {
                     try {
-                      await (window as any).electronAPI.wipeAllLocalSignatures();
+                      await (window as any).electronAPI.wipeAllLocalSignatures(isDevAttempt);
                       console.log("🧹 [HARD RESET] Cloud Column R is empty (0 used). Executed 4-layer wipeAllLocalSignatures.");
                     } catch (e) {}
-                  }
-                  // Protection against post-activation cloud write latency:
-                  // Check if local sys_limit.bin has active signatures before wiping
-                  const activatedRes = await (window as any).electronAPI?.getActivatedSilos?.().catch(() => null);
-                  const localActivatedSilos = activatedRes?.silos || [];
-                  if (!isRetry && localActivatedSilos.length > 0) {
-                    console.warn("⚠️ [License Startup] Cloud returned empty signatures but local sys_limit.bin has active signatures. Retrying cloud fetch in 2.5s...");
-                    await new Promise(r => setTimeout(r, 2500));
-                    const retryData: any = await validateLicenseStartup(true, attemptedID, overrideEmail, overrideMobile, appPassword, forceActivation, true);
-                    if (retryData && (retryData.cloudSignatures || retryData.data?.cloudSignatures)) {
-                      const retrySigs = retryData.cloudSignatures || retryData.data?.cloudSignatures || [];
-                      if (retrySigs.length > 0) return retryData;
-                    }
                   }
 
                   console.log("🧹 [HARD RESET] Cloud returned empty signatures. Wiping all local company signatures!");
@@ -1539,18 +1602,18 @@ export const validateLicenseStartup = async (
                       }
                     }
                     
-                    // CRITICAL: Wipe sys_limit.bin and all SQLite profiles via Electron IPC
+                    // CRITICAL: Wipe sys_limit file and all SQLite profiles via Electron IPC (passing isDevAttempt for strict isolation!)
                     if ((window as any).electronAPI && (window as any).electronAPI.wipeAllLocalSignatures) {
                       try {
-                         await (window as any).electronAPI.wipeAllLocalSignatures();
+                         await (window as any).electronAPI.wipeAllLocalSignatures(isDevAttempt);
                       } catch (e) {
                          console.warn("Failed executing wipeAllLocalSignatures IPC", e);
                       }
                     } else if ((window as any).electronAPI && (window as any).electronAPI.wipeActivatedSilos) {
                       try {
-                         await (window as any).electronAPI.wipeActivatedSilos();
+                         await (window as any).electronAPI.wipeActivatedSilos(isDevAttempt);
                       } catch (e) {
-                         console.warn("Failed to wipe sys_limit.bin during hard reset", e);
+                         console.warn("Failed to wipe sys_limit during hard reset", e);
                       }
                     }
 
@@ -1604,9 +1667,11 @@ export const validateLicenseStartup = async (
                       console.warn("Failed deep localStorage sweep during hard reset", e);
                     }
 
-                    // Note: We do NOT clear app_session_user or trigger window.location.reload()
-                    // to prevent kicking the user back to the login screen in an infinite refresh loop.
-                    // The App component will detect cloudSignatures: [] and smoothly show the LicenseActivationModal.
+                    // Dispatch custom event to notify React components to re-hydrate memory state immediately
+                    if (typeof window !== 'undefined') {
+                      window.dispatchEvent(new CustomEvent('app_companies_updated'));
+                      window.dispatchEvent(new CustomEvent('app_license_updated'));
+                    }
                   } catch (err) {
                     console.warn("Failed to wipe local company signatures during hard reset", err);
                   }
@@ -1653,22 +1718,16 @@ export const validateLicenseStartup = async (
                       if (Array.isArray(comps)) {
                         let compsChanged = false;
                         for (const c of comps) {
-                          let isMatch = c.companySignature ? cloudSigs.includes(c.companySignature) : false;
+                          const matchingCloudSig = findMatchingCloudSignature(c, cloudSigs);
+                          let isMatch = !!matchingCloudSig;
                           
-                          if (!isMatch && c.id) {
-                            const matchingCloudSig = cloudSigs.find(sig => sig.includes(`_${c.id}-`));
-                            if (matchingCloudSig) {
-                              console.log(`[Auto-Repair] Recovering matching cloud signature for company ${c.id}: ${matchingCloudSig}`);
-                              c.companySignature = matchingCloudSig;
-                              isMatch = true;
-                              compsChanged = true;
-                            } else {
-                              if (c.companySignature) {
-                                c.companySignature = "";
-                                compsChanged = true;
-                              }
-                              isMatch = false;
-                            }
+                          if (isMatch && matchingCloudSig && c.companySignature !== matchingCloudSig) {
+                            console.log(`[Auto-Repair] Recovering matching cloud signature for company ${c.id}: ${matchingCloudSig}`);
+                            c.companySignature = matchingCloudSig;
+                            compsChanged = true;
+                          } else if (!isMatch && c.companySignature) {
+                            c.companySignature = "";
+                            compsChanged = true;
                           }
 
                           const newReadOnly = !isMatch;
@@ -1824,24 +1883,38 @@ export const validateLicenseStartup = async (
 
             const cloudAdminUser = String(cloudData.adminUser || "").trim();
             const cloudAdminPass = String(cloudData.adminPass || "").trim();
+            const cloudName = String(cloudData.userName || cloudData.registeredName || "").trim();
 
-            if ((cloudAdminUser || cloudAdminPass) && !isDevAttempt) {
+            if ((cloudAdminUser || cloudAdminPass || cloudName) && !isDevAttempt) {
 
-              if (cloudAdminUser) {
+              if (cloudAdminUser || cloudData.userName) {
                 // Find ANY user that might be the primary account if Administrator isn't found
                 let adminIndex = localUsers.findIndex((u: any) => u.role === 'Administrator');
                 if (adminIndex === -1 && localUsers.length > 0) adminIndex = 0;
 
                 if (adminIndex !== -1) {
                   const localUser = localUsers[adminIndex];
-                  if (localUser.username !== cloudAdminUser || localUser.password !== cloudAdminPass) {
-                    console.log(`♻️  Syncing Local User Profile: ${localUser.username} -> ${cloudAdminUser}`);
+                  let userUpdated = false;
+
+                  if (cloudAdminUser && localUser.username !== cloudAdminUser) {
+                    console.log(`♻️  Syncing Local Username: ${localUser.username} -> ${cloudAdminUser}`);
                     localUser.username = cloudAdminUser;
+                    userUpdated = true;
+                  }
+                  if (cloudAdminPass && localUser.password !== cloudAdminPass) {
+                    console.log(`🔑 Syncing Local Password for ${localUser.username}`);
                     localUser.password = cloudAdminPass;
+                    userUpdated = true;
+                  }
 
-                    // Also update the name if the cloud provides it
-                    if (cloudData.userName) localUser.name = cloudData.userName;
+                  const cloudName = cloudData.userName || cloudData.registeredName || cloudData.name;
+                  if (cloudName && localUser.name !== cloudName) {
+                    console.log(`👤 Syncing Local Display Name: ${localUser.name} -> ${cloudName}`);
+                    localUser.name = cloudName;
+                    userUpdated = true;
+                  }
 
+                  if (userUpdated) {
                     localStorage.setItem('app_users', JSON.stringify(localUsers));
                     if ((window as any).electronAPI) (window as any).electronAPI.dbSet('app_users', localUsers);
                   }
@@ -1849,11 +1922,11 @@ export const validateLicenseStartup = async (
                   // Total Recovery: Cloud is our only source of truth
                   console.log("🛠️  Recovering local user database from Cloud identity...");
                   const recoveredUser = {
-                    username: cloudAdminUser,
-                    password: cloudAdminPass,
-                    name: cloudData.userName || "System Administrator",
+                    username: cloudAdminUser || "ADMIN",
+                    password: cloudAdminPass || "admin",
+                    name: cloudData.userName || cloudData.registeredName || "System Administrator",
                     role: 'Administrator',
-                    email: cloudData.registeredTo || cloudData.registeredTo || ""
+                    email: cloudData.registeredTo || ""
                   };
                   localStorage.setItem('app_users', JSON.stringify([recoveredUser]));
                   if ((window as any).electronAPI) (window as any).electronAPI.dbSet('app_users', [recoveredUser]);
@@ -2097,18 +2170,21 @@ export const updateCloudPassword = async (email: string, newPassword: string, ot
  * Sends a background ping to the cloud to increment the user's total login count
  * and log their last access time.
  */
-export const trackCloudLogin = async (email: string, machineId: string) => {
+export const trackCloudLogin = async (email: string, machineId: string, userID?: string) => {
   if (!navigator.onLine) {
     console.log("📴 Offline: Skipping cloud login tracking.");
     return;
   }
 
   try {
+    const stored = getStoredLicense();
+    const activeUserID = userID || stored?.userID || 'VRANGA';
     fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({
         action: 'TRACK_LOGIN',
         email: email,
+        userID: activeUserID,
         machineId: machineId
       })
     }).catch(e => console.error("Cloud Tracking Warning:", e));

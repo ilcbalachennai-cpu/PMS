@@ -9,6 +9,30 @@ import { getActivePaySheetColumns } from '../constants';
 // UTILITIES
 // ==========================================
 
+export const resolveBranchCompanyProfile = (companyProfile: any, branchName?: string, branches?: any[]): any => {
+    if (!companyProfile) return companyProfile;
+    if (!branchName || !branches || !Array.isArray(branches) || branches.length === 0) return companyProfile;
+
+    const targetBranch = branches.find((b: any) => {
+        const name = typeof b === 'string' ? b : b?.name;
+        return String(name || '').trim().toLowerCase() === String(branchName).trim().toLowerCase();
+    });
+
+    if (!targetBranch || typeof targetBranch === 'string') return companyProfile;
+
+    return {
+        ...companyProfile,
+        address: targetBranch.address?.trim() || [companyProfile.doorNo, companyProfile.buildingName, companyProfile.street, companyProfile.area, companyProfile.city, companyProfile.state, companyProfile.pincode].filter(Boolean).join(', '),
+        pfCode: targetBranch.pfCode?.trim() || companyProfile.pfCode,
+        esiCode: targetBranch.esiCode?.trim() || companyProfile.esiCode,
+        ptTaxCode: targetBranch.ptTaxCode?.trim() || companyProfile.ptTaxCode,
+        contactPerson: targetBranch.contactPerson?.trim() || companyProfile.contactPerson,
+        mobile: targetBranch.mobile?.trim() || companyProfile.mobile,
+        officialEmail: targetBranch.email?.trim() || companyProfile.officialEmail || companyProfile.email,
+        email: targetBranch.email?.trim() || companyProfile.officialEmail || companyProfile.email
+    };
+};
+
 export const formatDateInd = (dateInput: string | Date | undefined): string => {
     if (!dateInput) return '';
     
@@ -62,7 +86,7 @@ export const getMonthAbbr = (month: string): string => {
 export const getStandardFileName = (baseName: string, company: CompanyProfile, month: string, year: number | string): string => {
     const firstWord = (company.establishmentName?.split(' ')[0] || 'Company').toUpperCase();
     const monthAbbr = getMonthAbbr(month);
-    const readableBase = baseName.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+    const readableBase = baseName.replace(/_/g, ' ').replace(/\s+/g, ' ').trim().replace(/\s/g, '_');
     return `${readableBase}_${firstWord}_${monthAbbr}_${year}`;
 };
 
@@ -881,6 +905,9 @@ export const generateStateAdvanceRegister = async (results: PayrollResult[], emp
 };
 
 export const generateSimplePaySheetPDF = async (results: PayrollResult[], employees: Employee[], month: string, year: number, companyProfile: CompanyProfile, subtitle?: string, customFilename?: string, config?: StatutoryConfig): Promise<string | null> => {
+    const spl1Label = companyProfile?.specialAllowance1Name || 'Spl 1';
+    const spl2Label = companyProfile?.specialAllowance2Name || 'Spl 2';
+    const spl3Label = companyProfile?.specialAllowance3Name || 'Spl 3';
     const activeCols = getActivePaySheetColumns(results, config || {});
 
     const allColumns = [
@@ -890,6 +917,15 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
         { key: 'retaining', label: 'Retn', getValue: (r: any) => Math.round(r.earnings?.retainingAllowance || 0) },
         { key: 'hra', label: 'HRA', getValue: (r: any) => Math.round(r.earnings?.hra || 0) },
         { key: 'conveyance', label: 'Conv', getValue: (r: any) => Math.round(r.earnings?.conveyance || 0) },
+        { key: 'washing', label: 'Wash', getValue: (r: any) => Math.round(r.earnings?.washing || 0) },
+        { key: 'attire', label: 'Attire', getValue: (r: any) => Math.round(r.earnings?.attire || 0) },
+        { key: 'special1', label: spl1Label, getValue: (r: any) => Math.round(r.earnings?.special1 || 0) },
+        { key: 'special2', label: spl2Label, getValue: (r: any) => Math.round(r.earnings?.special2 || 0) },
+        { key: 'special3', label: spl3Label, getValue: (r: any) => Math.round(r.earnings?.special3 || 0) },
+        { key: 'bonus', label: 'Bonus', getValue: (r: any) => Math.round(r.earnings?.bonus || 0) },
+        { key: 'leaveEncashment', label: 'Leave', getValue: (r: any) => Math.round(r.earnings?.leaveEncashment || 0) },
+        { key: 'otAmount', label: 'OT', getValue: (r: any) => Math.round(r.earnings?.otAmount || 0) },
+        { key: 'arrears', label: 'Arrear', getValue: (r: any) => Math.round(r.earnings?.arrears || 0) },
         { 
             key: 'others', 
             label: 'Others', 
@@ -901,10 +937,14 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
             }
         },
         { key: 'totalEarnings', label: 'GROSS', getValue: (r: any) => Math.round(r.earnings?.total || 0) },
-        { key: 'epf', label: 'PF', getValue: (r: any) => Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) },
+        { key: 'epf', label: 'PF', getValue: (r: any) => activeCols.includes('vpf') ? Math.round(r.deductions?.epf || 0) : Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) },
+        { key: 'vpf', label: 'VPF', getValue: (r: any) => Math.round(r.deductions?.vpf || 0) },
         { key: 'esi', label: 'ESI', getValue: (r: any) => Math.round(r.deductions?.esi || 0) },
         { key: 'advanceRecovery', label: 'Adv', getValue: (r: any) => Math.round(r.deductions?.advanceRecovery || 0) },
         { key: 'pt', label: 'PT', getValue: (r: any) => Math.round(r.deductions?.pt || 0) },
+        { key: 'lwf', label: 'LWF', getValue: (r: any) => Math.round(r.deductions?.lwf || 0) },
+        { key: 'it', label: 'IT', getValue: (r: any) => Math.round(r.deductions?.it || 0) },
+        { key: 'fine', label: 'Fine', getValue: (r: any) => Math.round(r.deductions?.fine || 0) },
         { 
             key: 'otherDeductions', 
             label: 'Others', 
@@ -915,8 +955,8 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
                 return Math.round((r.deductions?.total || 0) - sumOfDisplayed);
             }
         },
-        { key: 'totalDeductions', label: 'TOTAL DED', getValue: (r: any) => Math.round(r.deductions?.total || 0) },
-        { key: 'netPay', label: 'NET PAY', getValue: (r: any) => Math.round(r.netPay || 0) }
+        { key: 'totalDeductions', label: 'DEDN', getValue: (r: any) => Math.round(r.deductions?.total || 0) },
+        { key: 'netPay', label: 'Net Pay', getValue: (r: any) => Math.round(r.netPay || 0) }
     ];
 
     const headers: string[] = ['ID', 'Name'];
@@ -951,7 +991,7 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
     const colStyles: any = {};
     for (let i = 2; i < headers.length; i++) {
         colStyles[i] = { halign: 'right' };
-        if (headers[i] === 'GROSS' || headers[i] === 'NET PAY') {
+        if (headers[i] === 'GROSS' || headers[i] === 'Net Pay' || headers[i] === 'DEDN') {
             colStyles[i].fontStyle = 'bold';
         }
     }
@@ -1307,20 +1347,24 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
         const grossWages = isNonContributing ? 0 : Math.round(r.earnings.total || 0);
 
         // EPF Wages: ceiling-capped wages back-calculated from EE contribution (÷12%)
+        // Must never exceed Gross Wages
         const eeEPF = isNonContributing ? 0 : Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0));
-        const epfWages = isNonContributing ? 0 : (eeEPF > 0 ? Math.round(eeEPF / 0.12) : 0);
+        const epfWagesRaw = isNonContributing ? 0 : (eeEPF > 0 ? Math.round(eeEPF / 0.12) : 0);
+        const epfWages = Math.min(epfWagesRaw, grossWages);
         
-        // EDLI Wages: capped at 15000 max
-        const edliWages = isNonContributing ? 0 : Math.min(15000, epfWages);
+        // EDLI Wages: capped at 15000 max AND must not exceed Gross Wages
+        const edliWages = isNonContributing ? 0 : Math.min(15000, epfWages, grossWages);
         
         // EPS Wages: restricted to 15000 IF Joint Option is NOT exercised.
-        // If 7.E (isEPSEligible) is 'No', then epsWages = 0.
+        // If 7.E (isEPSEligible) is 'No', then epsWages = 0. Must never exceed Gross Wages.
         const isEPSEligible = emp?.isEPSEligible !== 'No';
         const isHigherPension = emp?.pfHigherPension?.isHigherPensionOpted === 'Yes';
         
         let epsWages = 0;
         if (!isNonContributing && isEPSEligible) {
-            epsWages = isHigherPension ? epfWages : Math.min(15000, epfWages);
+            epsWages = isHigherPension
+                ? Math.min(epfWages, grossWages)
+                : Math.min(15000, epfWages, grossWages);
         }
 
         // ER EPS is strictly 8.33% of EPS Wages

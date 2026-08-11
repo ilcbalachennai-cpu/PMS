@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, BookOpen, ScrollText, ReceiptText, Info } from 'lucide-react';
-import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch } from '../types';
+import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch, BranchDetail, getBranchName } from '../types';
 import { INDIAN_STATES } from '../constants';
 import {
     generatePFECR,
@@ -65,6 +65,7 @@ interface StatutoryReportsProps {
     latestFrozenPeriod: { month: string; year: number } | null;
     showAlert: any;
     activeFinancialYear?: string;
+    branches?: (string | BranchDetail)[];
 }
 
 const STATE_FORM_MAPPINGS: Record<string, { wage: string; slip: string; advance: string }> = {
@@ -91,7 +92,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     arrearHistory = [],
     showAlert: _showAlert,
     latestFrozenPeriod,
-    activeFinancialYear
+    activeFinancialYear,
+    branches = []
 }) => {
     const monthsArr = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
 
@@ -235,6 +237,34 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         setRangeModal({ isOpen: true, reportType, fromMonth: 'April', fromYear: startYear, toMonth: globalMonth, toYear: globalYear });
     };
 
+    // When a branch is selected, override company profile with branch-specific statutory details
+    // Only fields that appear in report headers/labels are applied (address, PF code, ESI code, PT code)
+    const effectiveCompanyProfile = useMemo((): CompanyProfile => {
+        if (statFilter !== 'branch' || !statFilterValue) return companyProfile;
+        const branchDetail = branches
+            .map(b => typeof b === 'string' ? null : b)
+            .find(b => b && getBranchName(b) === statFilterValue);
+        if (!branchDetail) return companyProfile;
+        return {
+            ...companyProfile,
+            // Conditionally override address fields only if base profile has address fields set
+            ...(branchDetail.address && (companyProfile.street || companyProfile.doorNo || companyProfile.buildingName || companyProfile.locality || companyProfile.area || companyProfile.city || companyProfile.pincode) ? {
+                // Preserve existing address structure but replace street with branch address
+                doorNo: companyProfile.doorNo,
+                buildingName: companyProfile.buildingName,
+                street: branchDetail.address,
+                locality: companyProfile.locality,
+                area: companyProfile.area,
+                city: companyProfile.city,
+                pincode: companyProfile.pincode,
+            } : {}),
+            // Conditionally override statutory registration codes only if they exist in base profile
+            ...(branchDetail.pfCode && companyProfile.pfCode ? { pfCode: branchDetail.pfCode } : {}),
+            ...(branchDetail.esiCode && companyProfile.esiCode ? { esiCode: branchDetail.esiCode } : {}),
+            ...(branchDetail.ptTaxCode && companyProfile.ptNo ? { ptNo: branchDetail.ptTaxCode } : {}),
+        };
+    }, [statFilter, statFilterValue, branches, companyProfile]);
+
     const handleDownload = async (reportName: string, format: 'PDF' | 'Excel' | 'Text') => {
         const employees = filteredEmployees;
         const payrollHistory = filteredHistory;
@@ -273,7 +303,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         }
 
         const currentData = payrollHistory.filter(r => r.month === globalMonth && r.year === globalYear);
-        const fileName = getStandardFileName(reportName, companyProfile, globalMonth, globalYear);
+        const fileName = getStandardFileName(reportName, effectiveCompanyProfile, globalMonth, globalYear);
         let savedPath: string | null = null;
 
         try {
@@ -281,19 +311,19 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                 if (reportName === 'PT Report') {
                     const hasPT = payrollHistory.some(r => (r.deductions?.pt || 0) > 0);
                     if (!hasPT) { _showAlert('error', 'No Data Available', 'There is no Professional Tax data for this period.'); return; }
-                    savedPath = await generateConsolidatedPTReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                    savedPath = await generateConsolidatedPTReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, effectiveCompanyProfile, format as any);
                 }
                 else if (reportName === 'TDS Report') {
                     const hasTDS = payrollHistory.some(r => (r.deductions?.it || 0) > 0);
                     if (!hasTDS) { _showAlert('error', 'No Data Available', 'There is no TDS data for this period.'); return; }
-                    savedPath = await generateConsolidatedTDSReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                    savedPath = await generateConsolidatedTDSReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, effectiveCompanyProfile, format as any);
                 }
-                else if (reportName === 'Bonus') savedPath = await generateConsolidatedBonusReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
-                else if (reportName === 'Gratuity') savedPath = await generateConsolidatedGratuityReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile);
+                else if (reportName === 'Bonus') savedPath = await generateConsolidatedBonusReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, effectiveCompanyProfile, format as any);
+                else if (reportName === 'Gratuity') savedPath = await generateConsolidatedGratuityReport(payrollHistory, employees, config, taxFromMonth, taxFromYear, taxToMonth, taxToYear, effectiveCompanyProfile);
                 else if (reportName === 'LWF Report') {
                     const hasLWF = payrollHistory.some(r => (r.deductions?.lwf || 0) > 0 || (r.employerContributions?.lwf || 0) > 0);
                     if (!hasLWF) { _showAlert('error', 'No Data Available', 'There is no LWF data for this period.'); return; }
-                    savedPath = await generateConsolidatedLWFReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, companyProfile, format as any);
+                    savedPath = await generateConsolidatedLWFReport(payrollHistory, employees, taxFromMonth, taxFromYear, taxToMonth, taxToYear, effectiveCompanyProfile, format as any);
                 }
             } else {
                 if (currentData.length === 0 && !['Employees Joined', 'Employees Left'].includes(reportName)) {
@@ -306,11 +336,11 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         _showAlert('error', 'No Data Available', `There is no PF Contribution data for ${globalMonth} ${globalYear}.`);
                         return;
                     }
-                    savedPath = await generatePFECR(currentData, employees, config, format as 'Excel' | 'Text', fileName, companyProfile);
+                    savedPath = await generatePFECR(currentData, employees, config, format as 'Excel' | 'Text', fileName, effectiveCompanyProfile);
                 } else if (reportName === 'PF ECR Arrears') {
                     const batch = arrearHistory?.find(b => b.month === globalMonth && b.year === globalYear);
                     if (!batch) throw new Error(`No arrears processed for ${globalMonth} ${globalYear}`);
-                    savedPath = format === 'Excel' ? await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName, companyProfile) : await generateArrearECRText(batch, payrollHistory, employees, config, fileName, companyProfile);
+                    savedPath = format === 'Excel' ? await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName, effectiveCompanyProfile) : await generateArrearECRText(batch, payrollHistory, employees, config, fileName, effectiveCompanyProfile);
                 } else if (reportName === 'ESI Monthly' || reportName === 'ESI Challan') {
                     const hasESIData = currentData.some(r => {
                         const emp = employees.find(e => e.id === r.employeeId);
@@ -321,12 +351,12 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         return;
                     }
                     if (reportName === 'ESI Monthly') {
-                        savedPath = await generateESIReturn(currentData, employees, 'Excel', fileName, companyProfile, config);
+                        savedPath = await generateESIReturn(currentData, employees, 'Excel', fileName, effectiveCompanyProfile, config);
                     } else {
-                        savedPath = await generateESIChallanPDF(currentData, employees, config, companyProfile, globalMonth, globalYear, fileName);
+                        savedPath = await generateESIChallanPDF(currentData, employees, config, effectiveCompanyProfile, globalMonth, globalYear, fileName);
                     }
                 } else if (reportName.includes('Form 12A')) {
-                    savedPath = await generatePFForm12A(currentData, employees, config, companyProfile, globalMonth, globalYear);
+                    savedPath = await generatePFForm12A(currentData, employees, config, effectiveCompanyProfile, globalMonth, globalYear);
                 } else if (reportName === 'Employees Joined') {
                     const monthIdx = CALENDAR_MONTHS.indexOf(globalMonth);
                     const hasData = employees.some(emp => emp.doj && new Date(emp.doj).getMonth() === monthIdx && new Date(emp.doj).getFullYear() === globalYear);
@@ -334,7 +364,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         setMsgModal({ isOpen: true, title: 'Info', message: `There are no Employees Joined During : ${globalMonth} , ${globalYear}`, type: 'info', onConfirm: null });
                         return;
                     }
-                    savedPath = format === 'PDF' ? await generateJoinedEmployeesPDF(employees, globalMonth, globalYear, companyProfile, payrollHistory) : await generateJoinedEmployeesReport(employees, globalMonth, globalYear, companyProfile, payrollHistory);
+                    savedPath = format === 'PDF' ? await generateJoinedEmployeesPDF(employees, globalMonth, globalYear, effectiveCompanyProfile, payrollHistory) : await generateJoinedEmployeesReport(employees, globalMonth, globalYear, effectiveCompanyProfile, payrollHistory);
                 } else if (reportName === 'Employees Left') {
                     const monthIdx = CALENDAR_MONTHS.indexOf(globalMonth);
                     const hasData = employees.some(emp => emp.dol && new Date(emp.dol).getMonth() === monthIdx && new Date(emp.dol).getFullYear() === globalYear);
@@ -342,48 +372,48 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         setMsgModal({ isOpen: true, title: 'Info', message: `There are no Employees Left During : ${globalMonth} , ${globalYear}`, type: 'info', onConfirm: null });
                         return;
                     }
-                    savedPath = format === 'PDF' ? await generateEmployeesLeftPDF(employees, globalMonth, globalYear, companyProfile) : await generateLeftEmployeesReport(employees, globalMonth, globalYear, companyProfile);
+                    savedPath = format === 'PDF' ? await generateEmployeesLeftPDF(employees, globalMonth, globalYear, effectiveCompanyProfile) : await generateLeftEmployeesReport(employees, globalMonth, globalYear, effectiveCompanyProfile);
                 } else if (reportName.includes('Gratuity')) {
-                    savedPath = await generateGratuityReport(employees, companyProfile, globalMonth, globalYear, format as 'PDF' | 'Excel');
+                    savedPath = await generateGratuityReport(employees, effectiveCompanyProfile, globalMonth, globalYear, format as 'PDF' | 'Excel');
                 } else if (reportName.includes('Bonus')) {
-                    savedPath = await generateBonusReport(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, companyProfile, format as 'PDF' | 'Excel');
+                    savedPath = await generateBonusReport(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, effectiveCompanyProfile, format as 'PDF' | 'Excel');
                 } else if (reportName.includes('PT Report')) {
                     const hasPTData = currentData.some(r => (r.deductions?.pt || 0) > 0);
                     if (!hasPTData) {
                         _showAlert('error', 'No Data Available', `There is no Professional Tax data for ${globalMonth} ${globalYear}.`);
                         return;
                     }
-                    savedPath = await generatePTReport(currentData, employees, fileName, companyProfile, globalMonth, globalYear, format as any);
+                    savedPath = await generatePTReport(currentData, employees, fileName, effectiveCompanyProfile, globalMonth, globalYear, format as any);
                 } else if (reportName.includes('TDS Report')) {
                     const hasTDSData = currentData.some(r => (r.deductions?.it || 0) > 0);
                     if (!hasTDSData) {
                         _showAlert('error', 'No Data Available', `There is no TDS data for ${globalMonth} ${globalYear}.`);
                         return;
                     }
-                    savedPath = await generateTDSReport(currentData, employees, fileName, companyProfile, globalMonth, globalYear, format as any);
+                    savedPath = await generateTDSReport(currentData, employees, fileName, effectiveCompanyProfile, globalMonth, globalYear, format as any);
                 } else if (reportName === 'LWF Report') {
                     const hasLWFData = currentData.some(r => (r.deductions?.lwf || 0) > 0 || (r.employerContributions?.lwf || 0) > 0);
                     if (!hasLWFData) {
                         _showAlert('error', 'No Data Available', `There is no LWF data for ${globalMonth} ${globalYear}.`);
                         return;
                     }
-                    savedPath = await generateLWFReport(currentData, employees, fileName, companyProfile, format as any);
+                    savedPath = await generateLWFReport(currentData, employees, fileName, effectiveCompanyProfile, format as any);
                 } else if (reportName.includes('ESI Exit')) {
-                    savedPath = await generateESIExitReport(currentData, employees, globalMonth, globalYear, companyProfile);
+                    savedPath = await generateESIExitReport(currentData, employees, globalMonth, globalYear, effectiveCompanyProfile);
                 } else if (reportName.includes('Form B')) {
-                    savedPath = await generateFormB(currentData, employees, globalMonth, globalYear, companyProfile);
+                    savedPath = await generateFormB(currentData, employees, globalMonth, globalYear, effectiveCompanyProfile);
                 } else if (reportName.includes('Form C')) {
-                    savedPath = await generateFormC(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
+                    savedPath = await generateFormC(currentData, employees, attendances, globalMonth, globalYear, effectiveCompanyProfile);
                 } else if (reportName === 'Form I') {
-                    savedPath = await generateFormI(currentData, employees, globalMonth, globalYear, companyProfile);
+                    savedPath = await generateFormI(currentData, employees, globalMonth, globalYear, effectiveCompanyProfile);
                 } else if (reportName === 'Form IV') {
-                    savedPath = await generateFormIV(currentData, employees, globalMonth, globalYear, companyProfile);
+                    savedPath = await generateFormIV(currentData, employees, globalMonth, globalYear, effectiveCompanyProfile);
                 } else if (reportName === 'Form IX') {
-                    savedPath = await generateFormIX(currentData, employees, attendances, globalMonth, globalYear, companyProfile);
+                    savedPath = await generateFormIX(currentData, employees, attendances, globalMonth, globalYear, effectiveCompanyProfile);
                 } else if (reportName === 'Wage Register') {
-                    savedPath = await generateStateWageRegister(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.wage);
+                    savedPath = await generateStateWageRegister(currentData, employees, globalMonth, globalYear, effectiveCompanyProfile, selectedState, currentForms.wage);
                 } else if (reportName === 'Wage Slip') {
-                    savedPath = await generateStatePaySlip(currentData, employees, globalMonth, globalYear, companyProfile, selectedState, currentForms.slip);
+                    savedPath = await generateStatePaySlip(currentData, employees, globalMonth, globalYear, effectiveCompanyProfile, selectedState, currentForms.slip);
                 } else if (reportName === 'Advance Register') {
                     let hasAdvanceData = false;
                     currentData.forEach(r => {
@@ -399,11 +429,11 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         return;
                     }
 
-                    savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers || [], globalMonth, globalYear, companyProfile, selectedState, currentForms.advance);
+                    savedPath = await generateStateAdvanceRegister(currentData, employees, advanceLedgers || [], globalMonth, globalYear, effectiveCompanyProfile, selectedState, currentForms.advance);
                 } else if (reportName === 'PF 3A') {
-                    savedPath = await generatePFForm3A(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, undefined, companyProfile);
+                    savedPath = await generatePFForm3A(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, undefined, effectiveCompanyProfile);
                 } else if (reportName === 'PF 6A') {
-                    savedPath = await generatePFForm6A(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, companyProfile);
+                    savedPath = await generatePFForm6A(payrollHistory, employees, config, globalMonth, globalYear, globalMonth, globalYear, effectiveCompanyProfile);
                 }
             }
 
@@ -444,11 +474,11 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         try {
             if (rangeModal.reportType === 'Form 5') {
                 const season = rangeModal.fromMonth === 'April' ? 'Apr-Sep' : 'Oct-Mar';
-                savedPath = await generateESIForm5(payrollHistory, employees, season as any, rangeModal.fromYear, companyProfile);
+                savedPath = await generateESIForm5(payrollHistory, employees, season as any, rangeModal.fromYear, effectiveCompanyProfile);
             } else if (rangeModal.reportType === 'Form 3A') {
-                savedPath = await generatePFForm3A(payrollHistory, employees, config, rangeModal.fromMonth, rangeModal.fromYear, rangeModal.toMonth, rangeModal.toYear, undefined, companyProfile);
+                savedPath = await generatePFForm3A(payrollHistory, employees, config, rangeModal.fromMonth, rangeModal.fromYear, rangeModal.toMonth, rangeModal.toYear, undefined, effectiveCompanyProfile);
             } else if (rangeModal.reportType === 'Form 6A') {
-                savedPath = await generatePFForm6A(payrollHistory, employees, config, rangeModal.fromMonth, rangeModal.fromYear, rangeModal.toMonth, rangeModal.toYear, companyProfile);
+                savedPath = await generatePFForm6A(payrollHistory, employees, config, rangeModal.fromMonth, rangeModal.fromYear, rangeModal.toMonth, rangeModal.toYear, effectiveCompanyProfile);
             }
             if (savedPath) {
                 _showAlert('success', 'Range Report Generated', 'Saved to your reports folder.', () => openSavedReport(savedPath));
@@ -488,27 +518,27 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
             let savedPath: string | null = null;
             if (mappingModal.type === 'Contractor') {
                 if (mappingModal.format === 'PDF') {
-                    savedPath = await generateContractorMappingPDF(currentData, employees, mappingModal.siteFilter, companyProfile, globalMonth, globalYear);
+                    savedPath = await generateContractorMappingPDF(currentData, employees, mappingModal.siteFilter, effectiveCompanyProfile, globalMonth, globalYear);
                 } else {
-                    savedPath = await generateContractorMappingText(currentData, employees, mappingModal.siteFilter, companyProfile, globalMonth, globalYear);
+                    savedPath = await generateContractorMappingText(currentData, employees, mappingModal.siteFilter, effectiveCompanyProfile, globalMonth, globalYear);
                 }
             } else if (mappingModal.type === 'ESI') {
                 if (mappingModal.format === 'PDF') {
-                    savedPath = await generateESIIPMappingPDF(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, companyProfile, globalMonth, globalYear);
+                    savedPath = await generateESIIPMappingPDF(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, effectiveCompanyProfile, globalMonth, globalYear);
                 } else {
-                    savedPath = await generateESIIPMappingText(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, companyProfile, globalMonth, globalYear);
+                    savedPath = await generateESIIPMappingText(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, effectiveCompanyProfile, globalMonth, globalYear);
                 }
             } else {
                 if (mappingModal.format === 'PDF') {
-                    savedPath = await generatePrincipalMappingPDF(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, companyProfile, globalMonth, globalYear);
+                    savedPath = await generatePrincipalMappingPDF(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, effectiveCompanyProfile, globalMonth, globalYear);
                 } else {
-                    savedPath = await generatePrincipalMappingText(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, companyProfile, globalMonth, globalYear);
+                    savedPath = await generatePrincipalMappingText(currentData, employees, mappingModal.siteFilter, mappingModal.estCode, mappingModal.empType, effectiveCompanyProfile, globalMonth, globalYear);
                 }
             }
             if (savedPath) {
                 const extension = mappingModal.format === 'PDF' ? 'pdf' : 'txt';
                 const fileLabel = mappingModal.type === 'ESI' ? 'ESI IP Mapping' : `${mappingModal.type} Mapping`;
-                const fileName = getStandardFileName(fileLabel.replace(/\s+/g, '_'), companyProfile, globalMonth, globalYear) + '.' + extension;
+                const fileName = getStandardFileName(fileLabel.replace(/\s+/g, '_'), effectiveCompanyProfile, globalMonth, globalYear) + '.' + extension;
                 _showAlert('success', `${mappingModal.type === 'ESI' ? 'ESI IP' : mappingModal.type} Mapping Generated`, `Saved as ${fileName}`, () => openSavedReport(savedPath), undefined, 'Open Report', undefined, undefined, 2);
                 
                 // Reset/clear modal fields and close

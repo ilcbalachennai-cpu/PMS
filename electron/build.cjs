@@ -62,23 +62,10 @@ async function build() {
         : String(obfuscationResult);
     fs.writeFileSync(mainJsPath, obfuscatedCode, 'utf8');
 
-    // 2.1 Obfuscate Preload
+    // 2.1 Copy Preload (Do NOT obfuscate preload to prevent breaking contextBridge IPC)
     const preloadJsPath = path.join(distPath, 'preload.js');
     if (fs.existsSync(preloadJsPath)) {
-        console.log('Step 2.1: Obfuscating Preload JavaScript...');
-        const preloadSource = fs.readFileSync(preloadJsPath, 'utf8');
-        const preloadObfuscationResult = JavaScriptObfuscator.obfuscate(preloadSource, {
-            compact: true,
-            controlFlowFlattening: true,
-            debugProtection: true,
-            identifierNamesGenerator: 'hexadecimal',
-            stringArray: true,
-            stringArrayEncoding: ['base64']
-        });
-        const preloadCode = typeof preloadObfuscationResult.getObfuscatedCode === 'function'
-            ? preloadObfuscationResult.getObfuscatedCode()
-            : String(preloadObfuscationResult);
-        fs.writeFileSync(preloadJsPath, preloadCode, 'utf8');
+        console.log('Step 2.1: Preload JavaScript ready.');
     }
 
     // 3. Compile to Bytecode (Bytenode) using exact Electron version

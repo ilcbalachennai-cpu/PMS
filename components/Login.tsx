@@ -400,10 +400,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
           trackActiveOfflineDay();
         }
 
+        // Ensure Administrator display name reflects registered Cloud License identity (e.g. SUGANTHI)
+        const license = getStoredLicense();
+        if (user.role === 'Administrator' && license?.userName && user.name !== license.userName) {
+          user.name = license.userName;
+        }
+
         // --- V01.0.11: CLOUD LOGIN TRACKING ---
         try {
           const machineId = localStorage.getItem('app_machine_id');
-          const license = getStoredLicense();
           if (machineId && license?.registeredTo && user.role !== 'Developer') {
             trackCloudLogin(license.registeredTo, machineId);
           }
@@ -434,7 +439,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
 
         if (isDeveloperUser || isLicenseeAdmin) {
           console.log("⚠️ Local login failed for Admin/Developer. Attempting cloud sync fallback...");
-          syncResult = await validateLicenseStartup(true, cleanUsername, undefined, undefined, cleanPassword);
+          if (navigator.onLine) {
+            try {
+              syncResult = await Promise.race([
+                validateLicenseStartup(true, cleanUsername, undefined, undefined, cleanPassword),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('LOGIN_SYNC_TIMEOUT')), 3000))
+              ]);
+            } catch(syncErr) {
+              console.warn("Cloud login fallback failed or timed out:", syncErr);
+              syncResult = { valid: false, message: "Invalid credentials." };
+            }
+          } else {
+            syncResult = { valid: false, message: "Device is offline. Credentials do not match." };
+          }
 
           // 1. ADVANCED DEVELOPER BYPASS (Check this FIRST before license validity)
           let freshDev = getAppDeveloper();
@@ -806,18 +823,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, currentLogo: _currentLogo, isLoc
       {/* Quit Application Button - Top Right per User Request */}
       <button
         onClick={async () => {
-          const api = (window as any).electronAPI;
-          if (api) {
-            try {
-              if (api.closeApp) api.closeApp();
-              else if (api.invoke) api.invoke('close-app');
-            } catch (err) {
-              console.error("LOGIN: Close failed", err);
+          try {
+            if ((window as any).electronAPI?.closeApp) {
+              (window as any).electronAPI.closeApp().catch(() => {});
             }
-          } else {
+          } catch (err) {}
+          try {
             window.close();
-            setTimeout(() => window.location.reload(), 100);
-          }
+          } catch (err) {}
         }}
         className="absolute top-4 right-16 z-50 p-2.5 bg-red-950/20 hover:bg-red-900/40 text-red-400 rounded-full border border-red-500/30 backdrop-blur-sm transition-all shadow-lg hover:scale-105 flex items-center gap-2 px-4 group"
         title="Quit Application"

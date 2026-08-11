@@ -31,7 +31,6 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
       }
       try {
         let history: any[] = [];
-        let attendance: any[] = [];
 
         if (payrollHistory && payrollHistory.length > 0) {
           history = payrollHistory;
@@ -46,17 +45,6 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
           history = historyData ? JSON.parse(historyData) : [];
         }
 
-        if (window.electronAPI) {
-          const attendanceRes = await window.electronAPI.dbGet(getCKey('app_attendance'));
-          if (attendanceRes.success && attendanceRes.data) {
-            attendance = typeof attendanceRes.data === 'string' ? JSON.parse(attendanceRes.data) : attendanceRes.data;
-          }
-        } else {
-          // Fallback to localStorage
-          const attendanceData = localStorage.getItem(getCKey('app_attendance'));
-          attendance = attendanceData ? JSON.parse(attendanceData) : [];
-        }
-
         const getMonthValue = (m: string | null | undefined, y: number | null | undefined) => {
           if (!m || !y) return 0;
           const idx = monthsArr.indexOf(String(m).trim());
@@ -69,25 +57,6 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
           history.filter((h: any) => h.status === 'Finalized').forEach((h: any) => {
             const val = getMonthValue(h.month, h.year);
             if (val > lastLockedVal) lastLockedVal = val;
-          });
-        }
-
-        let latestDraftVal = -1;
-        let latestDraftPeriod: any = null;
-
-        if (Array.isArray(attendance) && attendance.length > 0) {
-          attendance.forEach((a: any) => {
-            const val = getMonthValue(a.month, a.year);
-            if (val > lastLockedVal) {
-              const hasData = (a.presentDays || 0) > 0 || (a.earnedLeave || 0) > 0 || (a.sickLeave || 0) > 0 || (a.casualLeave || 0) > 0 || (a.lopDays || 0) > 0 || (a.encashedDays || 0) > 0;
-              const isFinalized = history.some((h: any) => h.month === a.month && h.year === a.year && h.status === 'Finalized');
-              if (hasData && !isFinalized) {
-                if (val > latestDraftVal) {
-                  latestDraftVal = val;
-                  latestDraftPeriod = { month: a.month, year: a.year };
-                }
-              }
-            }
           });
         }
 
@@ -112,13 +81,7 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
           setLatestFrozenPeriod(null);
         }
 
-        if (latestDraftPeriod) {
-          setGlobalMonth(latestDraftPeriod.month);
-          setGlobalYear(latestDraftPeriod.year);
-          return;
-        }
-
-        // V03.01.04: Default to last frozen month if available, else standard baseline
+        // Default to last frozen/confirmed month if available so confirmed data shows on load
         if (lastLockedVal > getMonthValue('March', baseYear)) {
           setGlobalMonth(monthsArr[lastLockedVal % 12]);
           setGlobalYear(Math.floor(lastLockedVal / 12));

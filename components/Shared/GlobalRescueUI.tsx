@@ -153,8 +153,10 @@ export default class GlobalRescueUI extends Component<Props, State> {
               {this.state.hasError && (
                 <div className="mt-8 pt-6 border-t border-white/5">
                   <span className="text-[9px] text-slate-600 font-bold uppercase tracking-widest block mb-2">Technical Insight</span>
-                  <div className="bg-black/40 rounded-xl p-3 max-h-24 overflow-auto scrollbar-hide text-[10px] font-mono text-rose-400/60 leading-tight">
-                    {this.state.error?.stack || this.state.error?.message}
+                  <div className="bg-black/40 rounded-xl p-3 max-h-32 overflow-auto scrollbar-hide text-[10px] font-mono text-rose-400/80 leading-tight">
+                    {this.state.error?.message?.includes('#185') 
+                      ? `[React Error #185] Maximum update depth exceeded. An infinite render loop was triggered during state hydration.` 
+                      : (this.state.error?.stack || this.state.error?.message)}
                   </div>
                 </div>
               )}

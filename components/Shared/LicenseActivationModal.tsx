@@ -72,7 +72,10 @@ const LicenseActivationModal: React.FC<LicenseActivationModalProps> = ({ compani
       <div className="bg-[#1e293b] w-full max-w-2xl rounded-3xl border border-blue-500/30 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
         
         {/* Header */}
-        <div className="p-6 bg-gradient-to-r from-blue-900/50 to-slate-900 border-b border-blue-500/20 shrink-0">
+        <div className="p-6 bg-gradient-to-r from-blue-900/50 to-slate-900 border-b border-blue-500/20 shrink-0 relative">
+          <button onClick={onClose} className="absolute top-6 right-6 text-slate-400 hover:text-white transition-colors" title="Close">
+            <Ban size={20} />
+          </button>
           <div className="flex items-center gap-4">
             <div className="p-4 bg-blue-500/20 rounded-2xl border border-blue-400/30 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.3)]">
               <ShieldCheck size={32} />

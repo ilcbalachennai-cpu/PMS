@@ -504,6 +504,7 @@ function handleStartupValidation(ss, params) {
 
                         // --- V06.01.09 CLOUD TAMPER VERIFICATION & LIMIT ENFORCEMENT ---
                         // Column Q (Index 16) is Limit, Column R (Index 17) is Cloud Silos
+                        const rowCompanyLimit = Number(row[16] || 1);
                         const clientSilos = params.activatedSilos || [];
                         const migratedSilos = params.migratedSilos || [];
                         let cloudSilos = cloudSilosStr ? cloudSilosStr.split(",").map(function(s) { return s.trim(); }).filter(function(s) { 

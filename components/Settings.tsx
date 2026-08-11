@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
     X, Save, RefreshCw, Loader2, Download, Upload, Trash2, AlertTriangle,
     Database, Users, KeyRound, ShieldCheck, Mail, Megaphone, Building2,
-    CalendarClock, Phone, Globe, CheckCircle2, AlertCircle, Lock, Plus,
+    CalendarClock, Calendar, Phone, Globe, CheckCircle2, AlertCircle, Lock, Plus,
     ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator,
     ScrollText, HandCoins, Wallet, Scale, RotateCw, TrendingUp,
     ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
@@ -311,7 +311,11 @@ const Settings: React.FC<SettingsProps> = ({
     const [purgeScope, setPurgeScope] = useState<'LIST_ONLY' | 'COMPLETE'>('LIST_ONLY');
     const [isActivating, setIsActivating] = useState(false);
 
-    const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT' | 'MIGRATE'>('EXPORT');
+    const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT' | 'MIGRATE' | 'DATAMIGRATE'>('EXPORT');
+    const [showPeriodModal, setShowPeriodModal] = useState(false);
+    const [migratePeriodType, setMigratePeriodType] = useState<'ALL' | 'PERIOD'>('ALL');
+    const [migrateMonth, setMigrateMonth] = useState('April');
+    const [migrateYear, setMigrateYear] = useState(new Date().getFullYear());
     const [currentPass, setCurrentPass] = useState('');
     const [newPass, setNewPass] = useState('');
     const [confirmPass, setConfirmPass] = useState('');
@@ -477,23 +481,6 @@ const Settings: React.FC<SettingsProps> = ({
         }
     };
 
-    const handleUmEdit = (u: User) => {
-        setUmForm({
-            name: u.name,
-            username: u.username,
-            password: u.password ?? '',
-            role: (u.role === 'Administrator' ? 'Administrator' : 'User'),
-            email: u.email || '',
-            permissions: u.permissions || { ...defaultPermissions },
-            assignedCompanies: u.assignedCompanies || [],
-            showRestrictedUnits: !!u.showRestrictedUnits
-        });
-        setUmEditId(u.username);
-        setUmShowPwd(false);
-        setUmError('');
-        setTimeout(() => umNameRef.current?.focus(), 100);
-    };
-
     const handleUmDelete = (username: string) => {
         if (username === currentUser?.username) { setUmError("You cannot delete your own account."); return; }
         requireAuth(() => {
@@ -572,9 +559,8 @@ const Settings: React.FC<SettingsProps> = ({
             const isSqlite = name.endsWith('.sqlite') || name.includes('_BC_') || name.includes('_AC_');
             setIsSqliteFile(isSqlite);
 
-            // If we are already in MIGRATE mode (from the Migration Wizard button), 
-            // keep it. Otherwise, default to standard IMPORT.
-            setBackupMode(prev => prev === 'MIGRATE' ? 'MIGRATE' : 'IMPORT');
+            // If we are in MIGRATE or DATAMIGRATE mode, keep it. Otherwise default to standard IMPORT.
+            setBackupMode(prev => (prev === 'MIGRATE' || prev === 'DATAMIGRATE') ? prev : 'IMPORT');
             setShowBackupModal(true);
         }
     };
@@ -725,12 +711,28 @@ const Settings: React.FC<SettingsProps> = ({
 
                 const res = await window.electronAPI.restoreSqliteBackup({
                     path: (file as unknown as { path: string }).path,
-                    encryptionKey: licenseKey
+                    encryptionKey: licenseKey,
+                    isMigration: backupMode === 'DATAMIGRATE'
                 });
 
                 if (res.success) {
-                    setProcessProgress(80);
-                    setProcessStatus('Synchronizing Local Storage...');
+                    const isExcludedRestoreKey = (k: string): boolean => {
+                        const excludedBase = [
+                            'app_license_secure', 
+                            'app_license_data', 
+                            'app_users', 
+                            'app_machine_id', 
+                            'app_developer_secure',
+                            'app_data_size',
+                            'app_companies',
+                            'app_active_company_id'
+                        ];
+                        if (excludedBase.includes(k)) return true;
+                        if (k.startsWith('app_company_profile') || k.startsWith('company_profile')) return true;
+                        if (k.startsWith('app_config_') || k === 'app_config') return true;
+                        if (k.startsWith('app_license') || k.startsWith('app_user') || k.includes('sys_limit')) return true;
+                        return false;
+                    };
 
                     // 1. Clear current local state for the ACTIVE company only
                     const protectedKeys = [
@@ -743,28 +745,112 @@ const Settings: React.FC<SettingsProps> = ({
                         'app_legal_agreed_date',
                         'app_is_reset_mode'
                     ];
+                    
+                    const isPeriodMigration = backupMode === 'DATAMIGRATE' && migratePeriodType === 'PERIOD';
+                    const transactionalPrefixes = [
+                        'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
+                        'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+                    ];
+
                     Object.keys(localStorage).forEach(key => {
                         const isGlobalAppData = key.startsWith('app_') && !key.includes('_company_');
                         const isThisCompanyData = key.endsWith(`_${activeCompanyId}`);
 
                         if ((isGlobalAppData || isThisCompanyData) && !protectedKeys.includes(key)) {
+                            // V06.01.13: DO NOT wipe local configuration, profile, and user settings!
+                            if (isExcludedRestoreKey(key)) {
+                                return; // Preserve this local key!
+                            }
+                            // V06.01.13: For period-specific migration, DO NOT wipe local transactional ledgers from localStorage!
+                            if (isPeriodMigration) {
+                                const isTxKey = transactionalPrefixes.some(pref => key.startsWith(pref));
+                                if (isTxKey) return; // Preserve this local ledger!
+                            }
                             localStorage.removeItem(key);
                         }
                     });
 
+
+
+                    const recordMatchesPeriod = (itm: any, tMonth: string, tYear: number): boolean => {
+                        if (!itm) return false;
+                        const m = itm.month || itm.Month;
+                        const y = parseInt(itm.year || itm.Year);
+                        if (m && !isNaN(y)) {
+                            return String(m).trim().toLowerCase() === tMonth.trim().toLowerCase() && y === tYear;
+                        }
+                        const dateStr = itm.date || itm.Date || itm.createdDate || itm.entryDate;
+                        if (dateStr && typeof dateStr === 'string') {
+                            try {
+                                if (dateStr.includes('-')) {
+                                    const parts = dateStr.split('-');
+                                    if (parts.length === 3) {
+                                        let dMonth = 0, dYear = 0;
+                                        if (parts[0].length === 4) { // yyyy-mm-dd
+                                            dYear = parseInt(parts[0]);
+                                            dMonth = parseInt(parts[1]) - 1;
+                                        } else { // dd-mm-yyyy
+                                            dYear = parseInt(parts[2]);
+                                            dMonth = parseInt(parts[1]) - 1;
+                                        }
+                                        const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                                        return months[dMonth]?.toLowerCase() === tMonth.toLowerCase() && dYear === tYear;
+                                    }
+                                }
+                            } catch (e) {}
+                        }
+                        return false;
+                    };
+
                     // 2. Fetch ALL data from the restored SQLite DB
                     const dbRes = await window.electronAPI.dbGetAll();
                     if (dbRes.success && Array.isArray(dbRes.data)) {
-                        dbRes.data.forEach((item: { key: string, value: any }) => {
-                            // V04.01.03: Restored keys are already fully-qualified with company suffixes inside the SQLite silo.
-                            // Do not double-append the suffix to prevent key pollution and blank data views.
+                        for (const item of dbRes.data) {
                             const storageKey = item.key;
-                            try {
-                                localStorage.setItem(storageKey, typeof item.value === 'string' ? item.value : JSON.stringify(item.value));
-                            } catch (quotaErr) {
-                                console.warn(`[RESTORE] LocalStorage write skipped for key ${storageKey} (likely due to quota size limit):`, quotaErr);
+                            
+                            // V06.01.13: For both Standard Restore and Data Migration, strictly protect local profile, config, user logins, and licenses
+                            if (isExcludedRestoreKey(storageKey)) {
+                                console.log(`[RESTORE] Preserved local configuration/license key: ${storageKey}`);
+                                continue;
                             }
-                        });
+                            
+                            let valToSet = item.value;
+                            
+                            // V06.01.13: Period-Specific Ledger Merging
+                            if (isPeriodMigration && Array.isArray(valToSet)) {
+                                const isTransactional = transactionalPrefixes.some(pref => storageKey.startsWith(pref));
+                                if (isTransactional && storageKey.endsWith(`_${activeCompanyId}`)) {
+                                    const localRaw = localStorage.getItem(storageKey);
+                                    let localArray: any[] = [];
+                                    try {
+                                        localArray = localRaw ? JSON.parse(localRaw) : [];
+                                    } catch (e) {}
+                                    if (!Array.isArray(localArray)) localArray = [];
+                                    
+                                    // Preserve local records for other months
+                                    const preservedLocal = localArray.filter(r => !recordMatchesPeriod(r, migrateMonth, migrateYear));
+                                    // Import only target month records from backup
+                                    const incomingMigrated = valToSet.filter(r => recordMatchesPeriod(r, migrateMonth, migrateYear));
+                                    
+                                    valToSet = [...preservedLocal, ...incomingMigrated];
+                                    
+                                    // Update combined data back into SQLite database so it matches localStorage!
+                                    if (window.electronAPI?.dbSet) {
+                                        try {
+                                            await window.electronAPI.dbSet(storageKey, valToSet);
+                                        } catch (dbErr) {
+                                            console.error(`Failed to update SQLite on period merge for ${storageKey}:`, dbErr);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            try {
+                                localStorage.setItem(storageKey, typeof valToSet === 'string' ? valToSet : JSON.stringify(valToSet));
+                            } catch (quotaErr) {
+                                console.warn(`[RESTORE] LocalStorage write skipped for key ${storageKey}:`, quotaErr);
+                            }
+                        }
                     }
 
                     // --- SMART MIGRATION BRIDGE: Legacy (Single-Company) to Multi-Company ---
@@ -905,29 +991,76 @@ const Settings: React.FC<SettingsProps> = ({
                 setProcessProgress(70);
 
                 // V03.01.07: Company ID Conflict Check
+                const isDataMigration = backupMode === 'DATAMIGRATE';
                 const rawProfile = data.company_profile || data.companyProfile || data.app_company_profile || {};
                 const backupCompanyId = rawProfile.id;
 
                 let targetId = activeCompanyId !== 'default' ? activeCompanyId : generateCompanyId(rawProfile.establishmentName || 'COMPANY');
                 let conflictMessage = "";
 
-                if (backupCompanyId && backupCompanyId !== activeCompanyId) {
+                if (isDataMigration) {
+                    targetId = (activeCompanyId && activeCompanyId !== 'default') ? activeCompanyId : (backupCompanyId || targetId);
+                    conflictMessage = `DATA MIGRATION ACTIVE: Machine B Target Company Profile (${targetId}), Password & Credentials Preserved 100%.`;
+                } else if (backupCompanyId && backupCompanyId !== activeCompanyId) {
                     console.log(`[RESTORE] Conflict detected: Backup ID ${backupCompanyId} !== Active ID ${activeCompanyId}`);
-                    conflictMessage = `Restoring CompanyID (${backupCompanyId}) and current CompanyID (${activeCompanyId}) are different, hence not allowed to overwrite. Proceeding to restore as a separate entity with its original CompanyID.`;
+                    conflictMessage = `Restoring CompanyID (${backupCompanyId}) and current CompanyID (${activeCompanyId}) are different. Proceeding to restore as a separate entity.`;
                     targetId = backupCompanyId;
                 } else {
                     console.log(`[RESTORE] No conflict or matching ID: ${backupCompanyId}`);
-                    conflictMessage = `Restoring from backup "${backupCompanyId || 'Unknown'}". No CompanyID Conflict Detected. Overwriting company.`;
-                    targetId = backupCompanyId || targetId; // Use backup ID if available, else fallback
+                    conflictMessage = `Restoring from backup "${backupCompanyId || 'Unknown'}". Full company entity overwrite for recovery.`;
+                    targetId = backupCompanyId || targetId;
                 }
                 const companiesListRaw = localStorage.getItem('app_companies');
                 let companiesList: any[] = [];
                 try { companiesList = companiesListRaw ? JSON.parse(companiesListRaw) : []; } catch (e) { }
 
+                const targetCompanyObj = {
+                    ...INITIAL_COMPANY_PROFILE,
+                    ...(companyProfile || {}),
+                    ...(profileData || {}),
+                    ...(companiesList.find((c: any) => c.id === targetId) || {})
+                };
+
                 const companyExists = companiesList.some((c: any) => c.id === targetId);
 
                 const proceedWithRestore = async () => {
                     setIsProcessing(true);
+
+                    // --- AUTOMATIC PRE-MIGRATION SAFETY SNAPSHOT ---
+                    setProcessStatus('Creating Pre-Migration Safety Snapshot...');
+                    try {
+                        const getMergedData = (baseKey: string) => {
+                            const fullKey = activeFinancialYear && [
+                                'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
+                                'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+                            ].includes(baseKey) ? `${baseKey}_${activeFinancialYear}_${targetId}` : `${baseKey}_${targetId}`;
+                            const raw = localStorage.getItem(fullKey);
+                            try { return raw ? JSON.parse(raw) : []; } catch { return []; }
+                        };
+
+                        const preMigrationSnapshot = {
+                            companyId: targetId,
+                            timestamp: new Date().toISOString(),
+                            profile: localStorage.getItem(`app_company_profile_${targetId}`),
+                            employees: getMergedData('app_employees'),
+                            attendance: getMergedData('app_attendance'),
+                            leave_ledgers: getMergedData('app_leave_ledgers'),
+                            advance_ledgers: getMergedData('app_advance_ledgers'),
+                            payroll_history: getMergedData('app_payroll_history'),
+                            fines: getMergedData('app_fines'),
+                            ot_records: getMergedData('app_ot_records')
+                        };
+
+                        const snapshotKey = `app_safety_snapshot_${targetId}`;
+                        localStorage.setItem(snapshotKey, JSON.stringify(preMigrationSnapshot));
+                        if (window.electronAPI?.dbSet) {
+                            await window.electronAPI.dbSet(snapshotKey, preMigrationSnapshot).catch(() => {});
+                        }
+                        console.log(`[SAFETY SNAPSHOT] Pre-migration snapshot saved successfully for ${targetId}`);
+                    } catch (snapErr) {
+                        console.warn(`[SAFETY SNAPSHOT] Failed to create pre-migration snapshot:`, snapErr);
+                    }
+
                     const getCKey = (key: string) => {
                         const transactionalKeys = [
                             'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
@@ -940,10 +1073,7 @@ const Settings: React.FC<SettingsProps> = ({
                     };
 
                     setProcessStatus('Sanitizing local databases...');
-                    // V04.01.07: Use single-shot in-place wipe to avoid Windows EBUSY hang.
-                    // wipeCompanyData executes a SQL DELETE directly on the open DB connection
-                    // without closing or recreating the database file — completely hang-proof.
-                    if (window.electronAPI && (window.electronAPI as any).wipeCompanyData) {
+                    if (!isDataMigration && window.electronAPI && (window.electronAPI as any).wipeCompanyData) {
                         try {
                             const wipeRes = await (window.electronAPI as any).wipeCompanyData(targetId);
                             console.log(`[RESTORE] SQLite wipe complete. Rows purged: ${wipeRes.changes ?? 'n/a'}`);
@@ -952,23 +1082,24 @@ const Settings: React.FC<SettingsProps> = ({
                         }
                     }
 
-                    // V04.01.07: Ensure backend is focused on the target silo before writing restored keys
                     if (window.electronAPI?.switchCompanyData) {
                         await window.electronAPI.switchCompanyData(targetId);
                     }
 
-                    // V04.01.04: Thoroughly clear all localStorage keys belonging to this target company (including other FY silos)
-                    const protectedKeys = ['app_companies', 'app_active_company_id', 'app_license_secure', 'app_users', 'app_developer_secure', 'app_machine_id', 'app_legal_agreed_date', 'app_is_reset_mode'];
-                    Object.keys(localStorage).forEach(key => {
-                        if (key.endsWith(`_${targetId}`) && !protectedKeys.includes(key)) {
-                            localStorage.removeItem(key);
-                        }
-                    });
+                    // Preserve Machine B target company profile for 100% safety during Data Migration
+                    const preservedTargetProfile = isDataMigration ? { ...(targetCompanyObj || profileData) } : null;
+
+                    if (!isDataMigration) {
+                        Object.keys(localStorage).forEach(key => {
+                            if (key.endsWith(`_${targetId}`)) {
+                                localStorage.removeItem(key);
+                            }
+                        });
+                    }
 
                     const keyMap: Record<string, string[]> = {
                         'employees': ['employees', 'app_employees', 'employee_master', 'employeeMaster'],
                         'config': ['config', 'app_config', 'statutory_config'],
-                        'company_profile': ['company_profile', 'companyProfile', 'app_company_profile'],
                         'attendance': ['attendance', 'app_attendance', 'attendance_master', 'attendanceMaster'],
                         'leave_ledgers': ['leave_ledgers', 'leaveLedgers', 'app_leave_ledgers', 'leave_ledger'],
                         'advance_ledgers': ['advance_ledgers', 'advanceLedgers', 'app_advance_ledgers', 'advance_ledger'],
@@ -981,9 +1112,12 @@ const Settings: React.FC<SettingsProps> = ({
                         'master_divisions': ['master_divisions', 'divisions', 'app_master_divisions'],
                         'master_branches': ['master_branches', 'branches', 'app_master_branches'],
                         'master_sites': ['master_sites', 'sites', 'app_master_sites'],
-                        'logo': ['logo', 'app_logo'],
-                        'users': ['users', 'app_users']
+                        'logo': ['logo', 'app_logo']
                     };
+
+                    if (!isDataMigration) {
+                        keyMap['company_profile'] = ['company_profile', 'companyProfile', 'app_company_profile'];
+                    }
 
                     let restoredCount = 0;
                     const restoredData: Record<string, any> = {};
@@ -1003,7 +1137,21 @@ const Settings: React.FC<SettingsProps> = ({
                         if (val !== null) {
                             try {
                                 if (storageKey === 'company_profile') {
-                                    const profileToSave = { ...INITIAL_COMPANY_PROFILE, ...val, id: targetId };
+                                    // Preserve local machine signature if present, but restore all establishment details (Name, Trade Name, PAN, TAN, Address, Statutory Rules)
+                                    const existingProfileRaw = localStorage.getItem(getCKey('app_company_profile'));
+                                    let localSignature = "";
+                                    if (existingProfileRaw) {
+                                        try {
+                                            const existingProfile = JSON.parse(existingProfileRaw);
+                                            localSignature = existingProfile.companySignature || "";
+                                        } catch(e) {}
+                                    }
+                                    const profileToSave = {
+                                        ...INITIAL_COMPANY_PROFILE,
+                                        ...val,
+                                        id: targetId,
+                                        companySignature: localSignature || val.companySignature || ""
+                                    };
                                     const existingIdx = companiesList.findIndex((c: any) => c.id === targetId);
                                     if (existingIdx !== -1) {
                                         companiesList[existingIdx] = profileToSave;
@@ -1011,13 +1159,59 @@ const Settings: React.FC<SettingsProps> = ({
                                         companiesList.push(profileToSave);
                                     }
                                     localStorage.setItem('app_companies', JSON.stringify(companiesList));
-                                    localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(val));
-                                } else if (storageKey === 'users') {
-                                    localStorage.setItem('app_users', JSON.stringify(val));
+                                    localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(profileToSave));
+                                    if (window.electronAPI?.dbSet) {
+                                        await window.electronAPI.dbSet(getCKey('app_company_profile'), profileToSave);
+                                    }
                                 } else {
                                     if (Array.isArray(val) && targetId !== 'default') {
                                         val = val.map((item: any) => ({ ...item, companyId: targetId }));
                                     }
+
+                                    const isPeriodMigration = isDataMigration && migratePeriodType === 'PERIOD';
+                                    const recordMatchesPeriod = (itm: any, tMonth: string, tYear: number): boolean => {
+                                        if (!itm) return false;
+                                        const targetY = Number(tYear);
+                                        const targetM = String(tMonth).trim().toLowerCase();
+                                        const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+                                        const targetMonthIdx = monthNames.findIndex(m => m === targetM || m.startsWith(targetM) || targetM.startsWith(m));
+
+                                        const rawM = String(itm.month || itm.Month || itm.payrollMonth || '').trim().toLowerCase();
+                                        const rawY = Number(itm.year || itm.Year || itm.payrollYear || 0);
+
+                                        if (rawM && rawY > 0) {
+                                            if (rawY === targetY) {
+                                                const rawMonthIdx = monthNames.findIndex(m => rawM.includes(m) || m.includes(rawM));
+                                                if (rawMonthIdx !== -1 && targetMonthIdx !== -1) {
+                                                    return rawMonthIdx === targetMonthIdx;
+                                                }
+                                                const numM = parseInt(rawM);
+                                                if (!isNaN(numM) && targetMonthIdx !== -1) {
+                                                    return (numM - 1) === targetMonthIdx;
+                                                }
+                                                if (rawM === targetM) return true;
+                                            }
+                                        }
+
+                                        const dateStr = String(itm.date || itm.Date || itm.entryDate || itm.createdDate || '').trim();
+                                        if (dateStr && dateStr.includes('-')) {
+                                            const parts = dateStr.split('-');
+                                            if (parts.length === 3) {
+                                                let dYear = 0, dMonthIdx = -1;
+                                                if (parts[0].length === 4) {
+                                                    dYear = parseInt(parts[0]);
+                                                    dMonthIdx = parseInt(parts[1]) - 1;
+                                                } else if (parts[2].length === 4) {
+                                                    dYear = parseInt(parts[2]);
+                                                    dMonthIdx = parseInt(parts[1]) - 1;
+                                                }
+                                                if (dYear === targetY && dMonthIdx === targetMonthIdx) {
+                                                    return true;
+                                                }
+                                            }
+                                        }
+                                        return false;
+                                    };
 
                                     const transactionalKeys = [
                                         'attendance', 'leave_ledgers', 'advance_ledgers',
@@ -1025,8 +1219,64 @@ const Settings: React.FC<SettingsProps> = ({
                                     ];
 
                                     if (transactionalKeys.includes(storageKey) && Array.isArray(val)) {
+                                        // Purge legacy un-scoped key for this transactional storageKey to prevent JIT Partitioning from overwriting migrated FY keys on reload
+                                        if (isDataMigration) {
+                                            const legacyUnscopedKey = `app_${storageKey}_${targetId}`;
+                                            const legacyFlatKey = `app_${storageKey}`;
+                                            localStorage.removeItem(legacyUnscopedKey);
+                                            localStorage.removeItem(legacyFlatKey);
+                                            if (window.electronAPI?.dbDelete) {
+                                                await window.electronAPI.dbDelete(legacyUnscopedKey).catch(() => {});
+                                                await window.electronAPI.dbDelete(legacyFlatKey).catch(() => {});
+                                            }
+                                        }
+
+                                        // 1. Data Normalization for incoming backup items
+                                        let itemsToMigrate = val.map((item: any) => {
+                                            const normalized = { ...item };
+                                            if (normalized.year !== undefined) normalized.year = Number(normalized.year);
+                                            if (normalized.month !== undefined) {
+                                                let mStr = String(normalized.month).trim();
+                                                const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                                                const mIdx = monthNames.findIndex(mn => mn.toLowerCase() === mStr.toLowerCase() || mn.toLowerCase().startsWith(mStr.toLowerCase()) || mStr.toLowerCase().startsWith(mn.toLowerCase()));
+                                                if (mIdx !== -1) {
+                                                    mStr = monthNames[mIdx];
+                                                } else {
+                                                    const numM = parseInt(mStr);
+                                                    if (!isNaN(numM) && numM >= 1 && numM <= 12) {
+                                                        mStr = monthNames[numM - 1];
+                                                    }
+                                                }
+                                                normalized.month = mStr;
+                                            }
+                                            
+                                            const rawPresent = normalized.presentDays ?? normalized.present_days ?? normalized['Paid Days'] ?? normalized.paidDays ?? normalized.Present ?? normalized.present ?? normalized.paid_days;
+                                            if (rawPresent !== undefined && rawPresent !== null && rawPresent !== '') {
+                                                normalized.presentDays = Number(rawPresent);
+                                            }
+                                            const rawLop = normalized.lopDays ?? normalized.lop_days ?? normalized.LOP ?? normalized.lop ?? normalized['Loss of Pay'] ?? normalized.absent ?? normalized.absentDays;
+                                            if (rawLop !== undefined && rawLop !== null && rawLop !== '') {
+                                                normalized.lopDays = Number(rawLop);
+                                            }
+                                            const rawEL = normalized.earnedLeave ?? normalized.earned_leave ?? normalized.EL ?? normalized.el ?? normalized['EL (Availed)'];
+                                            if (rawEL !== undefined && rawEL !== null && rawEL !== '') normalized.earnedLeave = Number(rawEL);
+
+                                            const rawSL = normalized.sickLeave ?? normalized.sick_leave ?? normalized.SL ?? normalized.sl ?? normalized['SL (Sick)'];
+                                            if (rawSL !== undefined && rawSL !== null && rawSL !== '') normalized.sickLeave = Number(rawSL);
+
+                                            const rawCL = normalized.casualLeave ?? normalized.casual_leave ?? normalized.CL ?? normalized.cl ?? normalized['CL (Casual)'];
+                                            if (rawCL !== undefined && rawCL !== null && rawCL !== '') normalized.casualLeave = Number(rawCL);
+
+                                            return normalized;
+                                        });
+
+                                        // 2. Filter for SPECIFIC PERIOD migration if selected
+                                        if (isPeriodMigration) {
+                                            itemsToMigrate = itemsToMigrate.filter(item => recordMatchesPeriod(item, migrateMonth, migrateYear));
+                                        }
+
                                         const partitions: Record<string, any[]> = {};
-                                        val.forEach((item: any) => {
+                                        itemsToMigrate.forEach((item: any) => {
                                             const fy = item.financialYear || item.fy;
                                             if (fy && typeof fy === 'string' && /^FY\d{2}-\d{2}$/.test(fy)) {
                                                 if (!partitions[fy]) partitions[fy] = [];
@@ -1044,9 +1294,9 @@ const Settings: React.FC<SettingsProps> = ({
                                             }
                                         });
 
-                                        // Safe Fallback: If no partitions were resolved, but val has elements and storageKey is a ledger key
-                                        if (Object.keys(partitions).length === 0 && val.length > 0 && activeFinancialYear && (storageKey === 'leave_ledgers' || storageKey === 'advance_ledgers')) {
-                                            partitions[activeFinancialYear] = val;
+                                        // Safe Fallback: If no partitions were resolved, but itemsToMigrate has elements and storageKey is a ledger key
+                                        if (Object.keys(partitions).length === 0 && itemsToMigrate.length > 0 && activeFinancialYear && (storageKey === 'leave_ledgers' || storageKey === 'advance_ledgers')) {
+                                            partitions[activeFinancialYear] = itemsToMigrate;
                                         }
 
                                         if (activeFinancialYear && !partitions[activeFinancialYear]) {
@@ -1055,14 +1305,46 @@ const Settings: React.FC<SettingsProps> = ({
 
                                         for (const [fy, partitionVal] of Object.entries(partitions)) {
                                             const targetKey = `app_${storageKey}_${fy}_${targetId}`;
+                                            const localRaw = localStorage.getItem(targetKey);
+                                            let localArray: any[] = [];
+                                            try { localArray = localRaw ? JSON.parse(localRaw) : []; } catch (e) {}
+                                            if (!Array.isArray(localArray)) localArray = [];
+
+                                            let finalPartitionVal: any[] = [];
+
+                                            if (isPeriodMigration) {
+                                                // Preserve Machine B local records for other months, replace target period records with incoming migrated records
+                                                const preservedLocal = localArray.filter(r => !recordMatchesPeriod(r, migrateMonth, migrateYear));
+                                                finalPartitionVal = [...preservedLocal, ...partitionVal];
+                                            } else {
+                                                // ALL HISTORY mode: Merge incoming backup records into local array by matching employeeId and month/year (or employeeId for ledgers)
+                                                finalPartitionVal = [...localArray];
+                                                partitionVal.forEach((incoming: any) => {
+                                                    const idx = finalPartitionVal.findIndex(existing => {
+                                                        if (incoming.employeeId) {
+                                                            if (incoming.month || incoming.Month || incoming.date) {
+                                                                return existing.employeeId === incoming.employeeId && recordMatchesPeriod(existing, incoming.month, incoming.year);
+                                                            }
+                                                            return existing.employeeId === incoming.employeeId;
+                                                        }
+                                                        return false;
+                                                    });
+                                                    if (idx !== -1) {
+                                                        finalPartitionVal[idx] = { ...finalPartitionVal[idx], ...incoming };
+                                                    } else {
+                                                        finalPartitionVal.push(incoming);
+                                                    }
+                                                });
+                                            }
+
                                             try {
-                                                localStorage.setItem(targetKey, JSON.stringify(partitionVal));
+                                                localStorage.setItem(targetKey, JSON.stringify(finalPartitionVal));
                                             } catch (e) {
                                                 console.warn(`[RESTORE] LocalStorage partition write failed for ${targetKey}`, e);
                                             }
                                             if (window.electronAPI?.dbSet) {
                                                 try {
-                                                    await window.electronAPI.dbSet(targetKey, partitionVal);
+                                                    await window.electronAPI.dbSet(targetKey, finalPartitionVal);
                                                 } catch (sqliteErr) {
                                                     console.error(`[RESTORE] Direct SQLite write failed for ${targetKey}:`, sqliteErr);
                                                 }
@@ -1119,6 +1401,24 @@ const Settings: React.FC<SettingsProps> = ({
                         }
                     }
 
+                    if (isDataMigration && preservedTargetProfile) {
+                        localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(preservedTargetProfile));
+                        setProfileData(preservedTargetProfile);
+                        setCompanyProfile(preservedTargetProfile);
+                        if (window.electronAPI?.dbSet) {
+                            await window.electronAPI.dbSet(getCKey('app_company_profile'), preservedTargetProfile).catch(() => {});
+                        }
+
+                        const updatedCompaniesList = companiesList.map((c: any) => c.id === targetId ? preservedTargetProfile : c);
+                        if (!updatedCompaniesList.some((c: any) => c.id === targetId)) {
+                            updatedCompaniesList.push(preservedTargetProfile);
+                        }
+                        localStorage.setItem('app_companies', JSON.stringify(updatedCompaniesList));
+                        if ((window as any).electronAPI?.dbSetGlobal) {
+                            await (window as any).electronAPI.dbSetGlobal('app_companies', updatedCompaniesList).catch(() => {});
+                        }
+                    }
+
                     // Persistence check: Sync to SQLite
                     if (window.electronAPI && window.electronAPI.dbSet) {
                         // V03.01.05: Ensure backend is focused on the target silo before writing
@@ -1156,33 +1456,48 @@ const Settings: React.FC<SettingsProps> = ({
                     setEncryptionKey('');
 
                     setTimeout(() => {
-                        showAlert?.('success', 'Data Import Successful', (
+                        showAlert?.('success', isDataMigration ? 'Payroll Data Migration Successful' : 'Universal Restoration Successful', (
                             <div className="space-y-3 text-left">
                                 <div className="flex items-center gap-3 mb-2">
-                                    <div className="p-2 bg-emerald-500/20 rounded-full border border-emerald-500/30">
-                                        <CheckCircle2 size={24} className="text-emerald-400" />
+                                    <div className={`p-2 rounded-full border ${isDataMigration ? 'bg-violet-500/20 border-violet-500/30' : 'bg-emerald-500/20 border-emerald-500/30'}`}>
+                                        <CheckCircle2 size={24} className={isDataMigration ? 'text-violet-400' : 'text-emerald-400'} />
                                     </div>
-                                    <h4 className="text-lg font-black text-white uppercase tracking-tighter">Import Complete</h4>
+                                    <h4 className="text-lg font-black text-white uppercase tracking-tighter">
+                                        {isDataMigration ? 'Payroll Data Migration Complete' : 'Full Company Restoration Complete'}
+                                    </h4>
                                 </div>
-                                <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl space-y-4">
+                                <div className={`p-4 ${isDataMigration ? 'bg-[#0a0514]/90 border-violet-900/60' : 'bg-slate-900/50 border-slate-800'} border rounded-xl space-y-4`}>
                                     <p className="text-xs text-slate-300 leading-relaxed font-medium italic">
-                                        {`Successfully migrated ${restoredCount} data silos from the provided .enc backup file into ${companiesList.find(c => c.id === targetId)?.establishmentName || targetId}.`}
+                                        {isDataMigration
+                                            ? `Successfully migrated ${restoredCount} payroll data silos from the provided .enc backup file into ${companiesList.find(c => c.id === targetId)?.establishmentName || targetId}.`
+                                            : `Successfully restored ${restoredCount} data silos from the provided .enc backup file into ${companiesList.find(c => c.id === targetId)?.establishmentName || targetId}.`
+                                        }
                                     </p>
-                                    <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                                        <AlertCircle size={14} className="text-blue-400 shrink-0" />
-                                        <p className="text-[10px] text-blue-400 font-bold uppercase tracking-widest">{conflictMessage}</p>
+                                    <div className={`flex items-center gap-2 px-3 py-2 ${isDataMigration ? 'bg-violet-500/10 border-violet-500/20' : 'bg-blue-500/10 border-blue-500/20'} border rounded-lg`}>
+                                        <AlertCircle size={14} className={isDataMigration ? 'text-violet-400 shrink-0' : 'text-blue-400 shrink-0'} />
+                                        <p className={`text-[10px] font-bold uppercase tracking-widest ${isDataMigration ? 'text-violet-300' : 'text-blue-400'}`}>{conflictMessage}</p>
                                     </div>
                                     <div className="h-px bg-slate-800/80 w-full" />
                                     <div className="space-y-1">
-                                        <span className="text-[9px] text-slate-500 uppercase font-black block mb-1">Restored Records Breakdown</span>
+                                        <span className="text-[9px] text-slate-500 uppercase font-black block mb-1">
+                                            {isDataMigration ? 'Migrated Records Breakdown' : 'Restored Records Breakdown'}
+                                        </span>
                                         <div className="grid grid-cols-2 gap-x-4 gap-y-1 max-h-32 overflow-y-auto custom-scrollbar pr-2 p-2 bg-slate-950/50 rounded-lg border border-slate-800/50">
+                                            <div className="flex justify-between items-center text-[10px]">
+                                                <span className="text-slate-400 capitalize">Company Profile</span>
+                                                <span className={isDataMigration ? "text-sky-400 font-bold" : "text-emerald-400 font-bold"}>
+                                                    {isDataMigration ? "Verified & Preserved (Protected)" : "OK"}
+                                                </span>
+                                            </div>
                                             {Object.entries(restoredData).map(([silo, details]: [string, any]) => (
-                                                <div key={silo} className="flex justify-between items-center text-[10px]">
-                                                    <span className="text-slate-400 capitalize">{silo.replace('_', ' ')}</span>
-                                                    <span className="text-emerald-400 font-bold">
-                                                        {Array.isArray(details) ? `${details.length} Recs` : 'OK'}
-                                                    </span>
-                                                </div>
+                                                silo !== 'company_profile' && (
+                                                    <div key={silo} className="flex justify-between items-center text-[10px]">
+                                                        <span className="text-slate-400 capitalize">{silo.replace('_', ' ')}</span>
+                                                        <span className="text-emerald-400 font-bold">
+                                                            {Array.isArray(details) ? `${details.length} Recs` : 'OK'}
+                                                        </span>
+                                                    </div>
+                                                )
                                             ))}
                                         </div>
                                     </div>
@@ -1193,13 +1508,130 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[10px] text-amber-500 font-bold uppercase tracking-widest">Session Reload Required to Finalize</p>
                                 </div>
                             </div>
-                        ), () => {
+                        ), async () => {
+                            if (window.electronAPI && window.electronAPI.switchCompanyData) {
+                                try {
+                                    await window.electronAPI.switchCompanyData(targetId);
+                                } catch(e) {}
+                            }
                             onRestore();
                         });
                     }, 100);
                 };
 
-                if (companyExists) {
+                // --- DATA MIGRATION: 5-FIELD IDENTITY PRE-CHECK ---
+                if (isDataMigration && targetCompanyObj) {
+                    const legalMismatches: string[] = [];
+                    const contactMismatches: string[] = [];
+                    const cleanStr = (val: any) => String(val || '').trim().toUpperCase();
+                    const getProfileEmail = (p: any) => String(p?.email || p?.officialEmail || p?.senderEmail || p?.smtpUser || p?.contactEmail || '').trim().toLowerCase();
+                    const getProfileMobile = (p: any) => String(p?.mobile || p?.contactMobile || p?.registeredMobile || p?.phone || '').trim();
+
+                    // 1. Company Silo ID Check (LEGAL - STRICT)
+                    const backupSiloCore = cleanStr(rawProfile.id).replace(/[^A-Z0-9]/g, '');
+                    const targetSiloCore = cleanStr(targetCompanyObj.id).replace(/[^A-Z0-9]/g, '');
+                    if (backupSiloCore && targetSiloCore && !backupSiloCore.includes(targetSiloCore) && !targetSiloCore.includes(backupSiloCore)) {
+                        legalMismatches.push(`Company Silo ID: Backup (${rawProfile.id || 'N/A'}) !== Machine B (${targetCompanyObj.id || 'N/A'})`);
+                    }
+
+                    // 2. Company Name Check (LEGAL - STRICT)
+                    if (cleanStr(rawProfile.establishmentName) !== cleanStr(targetCompanyObj.establishmentName)) {
+                        legalMismatches.push(`Company Name: Backup ("${rawProfile.establishmentName || 'N/A'}") !== Machine B ("${targetCompanyObj.establishmentName || 'N/A'}")`);
+                    }
+
+                    // 3. CIN Number Check (LEGAL - STRICT)
+                    if (cleanStr(rawProfile.cin) !== cleanStr(targetCompanyObj.cin)) {
+                        legalMismatches.push(`CIN Number: Backup (${rawProfile.cin || 'N/A'}) !== Machine B (${targetCompanyObj.cin || 'N/A'})`);
+                    }
+
+                    // 4. PAN Number Check (LEGAL - STRICT)
+                    if (cleanStr(rawProfile.pan) !== cleanStr(targetCompanyObj.pan)) {
+                        legalMismatches.push(`PAN Number: Backup (${rawProfile.pan || 'N/A'}) !== Machine B (${targetCompanyObj.pan || 'N/A'})`);
+                    }
+
+                    // 5. Official Mail ID Check (CONTACT - WARNING ONLY)
+                    const backupEmail = getProfileEmail(rawProfile);
+                    const targetEmail = getProfileEmail(targetCompanyObj);
+                    if (backupEmail && targetEmail && backupEmail !== targetEmail) {
+                        contactMismatches.push(`Official Mail ID: Backup (${backupEmail}) !== Machine B (${targetEmail})`);
+                    } else if (!backupEmail && targetEmail) {
+                        contactMismatches.push(`Official Mail ID: Backup (BLANK / MISSING) !== Machine B (${targetEmail})`);
+                    } else if (backupEmail && !targetEmail) {
+                        contactMismatches.push(`Official Mail ID: Backup (${backupEmail}) !== Machine B (BLANK / MISSING)`);
+                    }
+
+                    // 6. Mobile Number Check (CONTACT - WARNING ONLY)
+                    const backupMobile = getProfileMobile(rawProfile);
+                    const targetMobile = getProfileMobile(targetCompanyObj);
+                    if (backupMobile && targetMobile && backupMobile !== targetMobile) {
+                        contactMismatches.push(`Mobile Number: Backup (${backupMobile}) !== Machine B (${targetMobile})`);
+                    }
+
+                    // Optional Registration Codes Check (PF, ESI, LIN)
+                    if (cleanStr(rawProfile.pfCode) && cleanStr(targetCompanyObj.pfCode) && cleanStr(rawProfile.pfCode) !== cleanStr(targetCompanyObj.pfCode)) {
+                        contactMismatches.push(`PF Code: Backup (${rawProfile.pfCode}) !== Machine B (${targetCompanyObj.pfCode})`);
+                    }
+                    if (cleanStr(rawProfile.esiCode) && cleanStr(targetCompanyObj.esiCode) && cleanStr(rawProfile.esiCode) !== cleanStr(targetCompanyObj.esiCode)) {
+                        contactMismatches.push(`ESI Code: Backup (${rawProfile.esiCode}) !== Machine B (${targetCompanyObj.esiCode})`);
+                    }
+                    if (cleanStr(rawProfile.lin) && cleanStr(targetCompanyObj.lin) && cleanStr(rawProfile.lin) !== cleanStr(targetCompanyObj.lin)) {
+                        contactMismatches.push(`LIN Number: Backup (${rawProfile.lin}) !== Machine B (${targetCompanyObj.lin})`);
+                    }
+
+                    // HARD BLOCK FOR LEGAL IDENTITY MISMATCHES (Silo ID, Company Name, CIN, PAN)
+                    if (legalMismatches.length > 0) {
+                        setIsProcessing(false);
+                        setShowBackupModal(false);
+                        setSelectedBackupFile(null);
+                        setEncryptionKey('');
+                        showAlert?.('error', 'Data Migration Blocked: Legal Identity Mismatch', (
+                            <div className="space-y-3 text-left">
+                                <div className="p-3 bg-rose-950/60 border border-rose-500/30 rounded-xl space-y-2">
+                                    <p className="text-xs font-bold text-rose-300">Legal Company Credentials Mismatch (Company Silo ID, Name, CIN, or PAN):</p>
+                                    <ul className="list-disc pl-5 space-y-1 text-[11px] text-rose-200 font-mono">
+                                        {legalMismatches.map((m, idx) => <li key={idx}>{m}</li>)}
+                                    </ul>
+                                </div>
+                                <p className="text-[10px] text-slate-400 leading-relaxed italic">
+                                    Data Migration strictly requires Company Silo ID, Company Name, CIN Number, and PAN Number to match compulsorily between Machine A and Machine B.
+                                </p>
+                            </div>
+                        ));
+                        return;
+                    }
+
+                    // SOFT WARNING FOR CONTACT MISMATCHES (Mail ID / Mobile Number) WITH "PROCEED ANYWAY" OPTION
+                    if (contactMismatches.length > 0) {
+                        setIsProcessing(false);
+                        showAlert?.('confirm', 'Data Migration Warning: Contact Mismatch', (
+                            <div className="space-y-3 text-left">
+                                <div className="p-3 bg-amber-950/60 border border-amber-500/30 rounded-xl space-y-2">
+                                    <p className="text-xs font-bold text-amber-300">The following contact details differ between the backup file and Machine B:</p>
+                                    <ul className="list-disc pl-5 space-y-1 text-[11px] text-amber-200 font-mono">
+                                        {contactMismatches.map((m, idx) => <li key={idx}>{m}</li>)}
+                                    </ul>
+                                </div>
+                                <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg text-[11px] text-slate-300 leading-relaxed">
+                                    <strong className="text-sky-400 font-bold block mb-1">PROTECTION GUARANTEE:</strong>
+                                    Machine B's existing Official Mail ID, Mobile Number, Database Password, and Security PIN will be <strong className="text-emerald-400 font-bold">100% PRESERVED & UNTOUCHED</strong>.
+                                </div>
+                                <p className="text-[10px] text-slate-400 leading-relaxed italic font-bold">
+                                    Do you wish to proceed with migrating payroll ledgers anyway?
+                                </p>
+                            </div>
+                        ), () => {
+                            proceedWithRestore();
+                        }, () => {
+                            setIsProcessing(false);
+                            setShowBackupModal(false);
+                            setSelectedBackupFile(null);
+                            setEncryptionKey('');
+                        }, 'PROCEED ANYWAY (PRESERVE CONTACT)', undefined, 'CANCEL MIGRATION');
+                        return;
+                    }
+                }
+
+                if (!isDataMigration && companyExists) {
                     setIsProcessing(false);
                     showAlert?.('confirm', 'Confirm Overwrite', (
                         <div className="space-y-3 text-left">
@@ -1530,7 +1962,9 @@ const Settings: React.FC<SettingsProps> = ({
 
         // 2FA: Require Login Password to finalize the restore
         requireAuth(() => {
-            if (hasData) {
+            if (backupMode === 'DATAMIGRATE') {
+                setShowPeriodModal(true);
+            } else if (hasData) {
                 setShowOverwriteConfirm(true);
             } else {
                 executeImport();
@@ -1674,7 +2108,40 @@ const Settings: React.FC<SettingsProps> = ({
                 employees: getMergedSiloData('app_employees', []),
                 config: getMergedSiloData('app_config', {}),
                 company_profile: getMergedSiloData('app_company_profile', {}),
-                attendance: getMergedSiloData('app_attendance', []),
+                attendance: (() => {
+                    let baseAtt: any[] = getMergedSiloData('app_attendance', []);
+                    try {
+                        for (let i = 0; i < localStorage.length; i++) {
+                            const k = localStorage.key(i);
+                            if (k && k.startsWith(`app_temp_payroll_${activeCompanyId}_`)) {
+                                const val = localStorage.getItem(k);
+                                if (val) {
+                                    const draftObj = JSON.parse(val);
+                                    const draftAtt = draftObj.attendances || draftObj.attendance;
+                                    if (Array.isArray(draftAtt)) {
+                                        draftAtt.forEach((dItem: any) => {
+                                            const idx = baseAtt.findIndex(b => 
+                                                b.employeeId === dItem.employeeId && 
+                                                String(b.month).trim().toLowerCase() === String(dItem.month).trim().toLowerCase() && 
+                                                Number(b.year) === Number(dItem.year)
+                                            );
+                                            if (idx !== -1) {
+                                                const dHasData = (dItem.presentDays || 0) > 0 || (dItem.earnedLeave || 0) > 0 || (dItem.sickLeave || 0) > 0 || (dItem.casualLeave || 0) > 0 || (dItem.lopDays || 0) > 0;
+                                                const bHasData = (baseAtt[idx].presentDays || 0) > 0 || (baseAtt[idx].earnedLeave || 0) > 0 || (baseAtt[idx].sickLeave || 0) > 0 || (baseAtt[idx].casualLeave || 0) > 0 || (baseAtt[idx].lopDays || 0) > 0;
+                                                if (dHasData || !bHasData) {
+                                                    baseAtt[idx] = { ...baseAtt[idx], ...dItem };
+                                                }
+                                            } else {
+                                                baseAtt.push(dItem);
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    } catch(e) {}
+                    return baseAtt;
+                })(),
                 leave_ledgers: getMergedSiloData('app_leave_ledgers', []),
                 advance_ledgers: getMergedSiloData('app_advance_ledgers', []),
                 payroll_history: getMergedSiloData('app_payroll_history', []),
@@ -1721,7 +2188,7 @@ const Settings: React.FC<SettingsProps> = ({
                 if (res.success) {
                     setProcessProgress(100);
                     setProcessStatus('Backup Saved Successfully');
-                    showAlert?.('success', 'Backup Created', `Your data has been successfully saved to the default backup location as: ${res.fileName || fileName}`, () => {
+                    showAlert?.('success', 'Secure Backup Created & Auto-Saved', `Your active working data and full payroll snapshot have been automatically saved and packaged into your backup file:\n\n${res.fileName || fileName}\n\n* Note: You can continue to edit or correct working attendance on this machine at any time before final confirmation.`, () => {
                         // Open the folder location ONLY after clicking OK
                         if (res.filePath && window.electronAPI.openItemLocation) {
                             window.electronAPI.openItemLocation(res.filePath);
@@ -1897,6 +2364,15 @@ const Settings: React.FC<SettingsProps> = ({
             return;
         }
         // --- END DATA SIZE VALIDATION ---
+
+        if (!profileData.mobile || !String(profileData.mobile).trim()) {
+            showAlert?.('error', 'Validation Failed', 'Mobile Number is mandatory under Company Profile.');
+            return;
+        }
+        if (!profileData.email || !String(profileData.email).trim()) {
+            showAlert?.('error', 'Validation Failed', 'Official Email Address is mandatory under Company Profile.');
+            return;
+        }
 
         const sanitizedProfile = {
             ...profileData,
@@ -2269,7 +2745,7 @@ const Settings: React.FC<SettingsProps> = ({
                     const file = e.target.files?.[0];
                     if (file) {
                         setSelectedBackupFile(file);
-                        if (backupMode !== 'MIGRATE') {
+                        if (backupMode !== 'MIGRATE' && backupMode !== 'DATAMIGRATE') {
                             setBackupMode('IMPORT');
                         }
                         // Reset detections
@@ -3500,9 +3976,9 @@ const Settings: React.FC<SettingsProps> = ({
                             <div className="md:col-span-3">
                                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-1 mt-2">Contact & Online Presence</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="space-y-1"><label htmlFor="profile-mobile" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Mobile No</label><input id="profile-mobile" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="Mobile Number" value={profileData.mobile} onChange={e => setProfileData({ ...profileData, mobile: e.target.value })} title="Mobile Number" aria-label="Mobile Number" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-mobile" className="text-[10px] font-bold text-sky-400 uppercase flex items-center gap-1.5"><Phone size={10} /> Mobile No<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-mobile" type="text" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-sky-500 font-mono placeholder:text-slate-500" placeholder="Mobile Number" value={profileData.mobile} onChange={e => setProfileData({ ...profileData, mobile: e.target.value })} title="Mobile Number" aria-label="Mobile Number" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-telephone" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Phone size={10} /> Land Line (Telephone)</label><input id="profile-telephone" type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="Landline" value={profileData.telephone} onChange={e => setProfileData({ ...profileData, telephone: e.target.value })} title="Telephone Number" aria-label="Telephone Number" /></div>
-                                    <div className="space-y-1"><label htmlFor="profile-email" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Mail size={10} /> Official Email</label><input id="profile-email" type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500" placeholder="mail@example.com" value={profileData.email} onChange={e => setProfileData({ ...profileData, email: e.target.value })} title="Official Email Address" aria-label="Official Email Address" /></div>
+                                    <div className="space-y-1"><label htmlFor="profile-email" className="text-[10px] font-bold text-sky-400 uppercase flex items-center gap-1.5"><Mail size={10} /> Official Email<span className="text-red-500 text-sm ml-0.5">*</span></label><input id="profile-email" type="email" className="w-full bg-slate-900 border border-sky-900/50 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-sky-500 placeholder:text-slate-500" placeholder="mail@example.com" value={profileData.email} onChange={e => setProfileData({ ...profileData, email: e.target.value })} title="Official Email Address" aria-label="Official Email Address" /></div>
                                     <div className="space-y-1 md:col-span-2"><label htmlFor="profile-website" className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2"><Globe size={10} /> Corporate Website</label><input id="profile-website" type="url" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500 font-mono placeholder:text-slate-500" placeholder="https://www.example.com" value={profileData.website} onChange={e => setProfileData({ ...profileData, website: e.target.value })} title="Corporate Website URL" aria-label="Corporate Website URL" /></div>
                                     <div className="space-y-1"><label htmlFor="profile-business-nature" className="text-[10px] font-bold text-slate-400 uppercase">Nature of Business</label><select id="profile-business-nature" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:ring-1 focus:ring-indigo-500" value={profileData.natureOfBusiness} onChange={e => setProfileData({ ...profileData, natureOfBusiness: e.target.value })} title="Select Nature of Business" aria-label="Select Nature of Business">{NATURE_OF_BUSINESS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select></div>
                                 </div>
@@ -3861,7 +4337,7 @@ const Settings: React.FC<SettingsProps> = ({
                                     </div>
                                     <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Reverse previous exports or recover from database files directly. Atomic restoration ensures system integrity on failure."</p>
                                     <button
-                                        onClick={() => backupFileRef.current?.click()}
+                                        onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }}
                                         disabled={isReadOnly || !getPermission('dmRestore')}
                                         title={isReadOnly ? "Read-Only Mode: Universal Restoration disabled" : (!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : "")}
                                         className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
@@ -3870,17 +4346,47 @@ const Settings: React.FC<SettingsProps> = ({
                                     </button>
                                 </div>
 
-                                <div className="bg-[#0f172a] p-6 rounded-2xl border border-amber-500/10 hover:border-amber-500/30 transition-all group shadow-lg col-span-full">
-                                    <div className="flex items-center gap-4 mb-4">
-                                        <div className="p-3 bg-amber-900/20 text-amber-500 rounded-xl group-hover:rotate-12 transition-transform">
-                                            <RotateCw size={24} />
+                                <div className="bg-[#0f172a] p-6 rounded-2xl border border-slate-800 hover:border-violet-500/30 transition-all group shadow-lg flex flex-col justify-between">
+                                    <div>
+                                        <div className="flex items-center gap-4 mb-4">
+                                            <div className="p-3 bg-violet-900/20 text-violet-400 rounded-xl group-hover:scale-110 transition-transform">
+                                                <RefreshCw size={24} />
+                                            </div>
+                                            <div>
+                                                <h4 className="font-black text-white uppercase tracking-tighter">Data Migration</h4>
+                                                <span className="text-[9px] font-bold text-violet-400 uppercase tracking-widest px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 rounded">Payroll Ledgers Only</span>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <h4 className="font-black text-white uppercase tracking-tighter">Legacy Migration Wizard</h4>
-                                            <span className="text-[9px] font-bold text-amber-400 uppercase tracking-widest px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded">Single -&gt; Multi-Company Bridge</span>
-                                        </div>
+                                        <p className="text-[11px] text-slate-400 mb-4 leading-relaxed italic">"Import only transactional payroll registers, attendance logs, and employee ledgers from another machine's backup. Strictly preserves your local profiles, settings, PINs, and logins."</p>
                                     </div>
-                                    <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Specifically for older backups. Extracts data, generates fresh IDs, and extrapolates fields for the new multi-company architecture."</p>
+                                    <div className="space-y-4">
+                                        <div className="p-2 bg-violet-500/5 border border-violet-500/10 rounded text-[9px] text-violet-400/80 font-bold uppercase tracking-wider text-center">
+                                            Company {activeCompanyId} is copying only Payroll data ledgers
+                                        </div>
+                                        <button
+                                            onClick={() => { setBackupMode('DATAMIGRATE'); backupFileRef.current?.click(); }}
+                                            disabled={isReadOnly || !getPermission('dmRestore')}
+                                            title={isReadOnly ? "Read-Only Mode: Data Migration disabled" : (!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : "")}
+                                            className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-violet-900/30 transition-all flex items-center justify-center gap-2"
+                                        >
+                                            <RefreshCw size={14} /> Select & Migrate Ledgers
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="bg-[#0f172a] p-6 rounded-2xl border border-slate-800 hover:border-amber-500/30 transition-all group shadow-lg flex flex-col justify-between">
+                                    <div>
+                                        <div className="flex items-center gap-4 mb-4">
+                                            <div className="p-3 bg-amber-900/20 text-amber-500 rounded-xl group-hover:rotate-12 transition-transform">
+                                                <RotateCw size={24} />
+                                            </div>
+                                            <div>
+                                                <h4 className="font-black text-white uppercase tracking-tighter">Legacy Migration Wizard</h4>
+                                                <span className="text-[9px] font-bold text-amber-400 uppercase tracking-widest px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded">Single -&gt; Multi-Company Bridge</span>
+                                            </div>
+                                        </div>
+                                        <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Specifically for older backups. Extracts data, generates fresh IDs, and extrapolates fields for the new multi-company architecture."</p>
+                                    </div>
                                     <button
                                         onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }}
                                         disabled={isReadOnly || isLicenseExpired || !getPermission('dmMigrate')}
@@ -4163,15 +4669,32 @@ const Settings: React.FC<SettingsProps> = ({
             {
                 showBackupModal && (
                     <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div className="bg-[#052a16] w-full max-w-sm rounded-2xl border border-emerald-700/50 shadow-2xl shadow-emerald-900/20 p-6 flex flex-col gap-4 relative">
-                            {!isProcessing && <button onClick={() => setShowBackupModal(false)} className="absolute top-4 right-4 text-emerald-500/50 hover:text-emerald-300" title="Close" aria-label="Close Backup Modal"><X size={20} /></button>}
+                        <div className={`${backupMode === 'DATAMIGRATE' ? 'bg-[#180f2b] border-violet-700/50 shadow-violet-900/20' : 'bg-[#052a16] border-emerald-700/50 shadow-emerald-900/20'} w-full max-w-sm rounded-2xl border shadow-2xl p-6 flex flex-col gap-4 relative animate-in zoom-in-95 duration-200`}>
+                            {!isProcessing && (
+                                <button
+                                    onClick={() => setShowBackupModal(false)}
+                                    className={`absolute top-4 right-4 ${backupMode === 'DATAMIGRATE' ? 'text-violet-500/50 hover:text-violet-300' : 'text-emerald-500/50 hover:text-emerald-300'}`}
+                                    title="Close"
+                                    aria-label="Close Backup Modal"
+                                >
+                                    <X size={20} />
+                                </button>
+                            )}
                             <div className="flex flex-col items-center gap-2">
-                                <div className="p-4 bg-emerald-900/30 text-emerald-400 rounded-full border border-emerald-700/50 mb-2">{backupMode === 'EXPORT' ? <Lock size={32} /> : <Database size={32} />}</div>
-                                <h3 className="text-xl font-black text-emerald-50 text-center uppercase tracking-widest">{backupMode === 'EXPORT' ? 'SECURE EXPORT' : 'SECURE RESTORE'}</h3>
+                                <div className={`p-4 rounded-full border mb-2 ${
+                                    backupMode === 'DATAMIGRATE' 
+                                        ? 'bg-violet-900/30 text-violet-400 border-violet-700/50' 
+                                        : 'bg-emerald-900/30 text-emerald-400 border-emerald-700/50'
+                                }`}>
+                                    {backupMode === 'EXPORT' ? <Lock size={32} /> : <Database size={32} />}
+                                </div>
+                                <h3 className={`text-xl font-black text-center uppercase tracking-widest ${backupMode === 'DATAMIGRATE' ? 'text-violet-50' : 'text-emerald-50'}`}>
+                                    {backupMode === 'EXPORT' ? 'SECURE EXPORT' : backupMode === 'DATAMIGRATE' ? 'DATA MIGRATION' : 'SECURE RESTORE'}
+                                </h3>
                             </div>
 
                             <div className="space-y-4 mt-2">
-                                {(backupMode === 'IMPORT' || backupMode === 'MIGRATE') && (
+                                {(backupMode === 'IMPORT' || backupMode === 'MIGRATE' || backupMode === 'DATAMIGRATE') && (
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">SELECT BACKUP FILE</label>
                                         <div className="flex items-center gap-3 p-3 bg-slate-900/50 border border-slate-700 rounded-xl">
@@ -4198,35 +4721,51 @@ const Settings: React.FC<SettingsProps> = ({
                                         title="Password"
                                         autoFocus
                                         disabled={isMachineLocked && !isBCACFile}
-                                        className={`w-full bg-[#021109] border border-emerald-900/50 rounded-xl px-4 py-3 text-white placeholder-emerald-900/50 outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all ${(isMachineLocked && !isBCACFile) ? 'opacity-50 cursor-not-allowed' : ''} font-mono tracking-widest`}
+                                        className={`w-full border rounded-xl px-4 py-3 text-white outline-none transition-all ${
+                                            backupMode === 'DATAMIGRATE'
+                                                ? 'bg-[#0a0514] border-violet-900/50 placeholder-violet-900/50 focus:ring-2 focus:ring-violet-500/50'
+                                                : 'bg-[#021109] border-emerald-900/50 placeholder-emerald-900/50 focus:ring-2 focus:ring-emerald-500/50'
+                                        } ${(isMachineLocked && !isBCACFile) ? 'opacity-50 cursor-not-allowed' : ''} font-mono tracking-widest`}
                                         value={encryptionKey}
                                         onChange={(e) => setEncryptionKey(e.target.value)}
                                     />
                                     {(isMachineLocked && !isBCACFile) && (
-                                        <div className="mt-1 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300">
-                                            <ShieldCheck size={12} className="text-emerald-400" />
-                                            <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest">Secure Binary Backup Detected</span>
+                                        <div className={`mt-1 p-2 border rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300 ${
+                                            backupMode === 'DATAMIGRATE'
+                                                ? 'bg-violet-500/10 border-violet-500/20 text-violet-400'
+                                                : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                                        }`}>
+                                            <ShieldCheck size={12} />
+                                            <span className="text-[9px] font-bold uppercase tracking-widest">Secure Binary Backup Detected</span>
                                         </div>
                                     )}
                                     {isBCACFile && (
-                                        <div className="mt-1 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300">
-                                            <ShieldCheck size={12} className="text-emerald-400 shrink-0" />
-                                            <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest leading-relaxed">
+                                        <div className={`mt-1 p-2 border rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300 ${
+                                            backupMode === 'DATAMIGRATE'
+                                                ? 'bg-violet-500/10 border-violet-500/20 text-violet-400'
+                                                : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                                        }`}>
+                                            <ShieldCheck size={12} className="shrink-0" />
+                                            <span className="text-[9px] font-bold uppercase tracking-widest leading-relaxed">
                                                 Before/After Confirmation Backup Detected. Enter Security PIN to Restore.
                                             </span>
                                         </div>
                                     )}
                                 </div>
 
-                                {/* V03.01.07: Removed 'Restore into current company profile' to avoid data pollution */}
-
-                                {processStatus && <p className="text-[10px] text-emerald-400 font-bold text-center animate-pulse uppercase tracking-widest">{processStatus}</p>}
+                                {processStatus && <p className={`text-[10px] font-bold text-center animate-pulse uppercase tracking-widest ${backupMode === 'DATAMIGRATE' ? 'text-violet-400' : 'text-emerald-400'}`}>{processStatus}</p>}
 
                                 {isProcessing && (
-                                    <div className="w-full bg-[#021109] border border-emerald-900/50 h-2.5 rounded-full overflow-hidden shadow-inner my-2">
+                                    <div className={`w-full border h-2.5 rounded-full overflow-hidden shadow-inner my-2 ${
+                                        backupMode === 'DATAMIGRATE' ? 'bg-[#0a0514] border-violet-900/50' : 'bg-[#021109] border-emerald-900/50'
+                                    }`}>
                                         <div
                                             ref={progressRef}
-                                            className="h-full bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-400 transition-all duration-500 ease-out shadow-[0_0_12px_rgba(16,185,129,0.4)]"
+                                            className={`h-full transition-all duration-500 ease-out ${
+                                                backupMode === 'DATAMIGRATE'
+                                                    ? 'bg-gradient-to-r from-violet-600 via-fuchsia-500 to-violet-400 shadow-[0_0_12px_rgba(139,92,246,0.4)]'
+                                                    : 'bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
+                                            }`}
                                         ></div>
                                     </div>
                                 )}
@@ -4234,13 +4773,17 @@ const Settings: React.FC<SettingsProps> = ({
                                 <button
                                     onClick={backupMode === 'EXPORT' ? handleEncryptedExport : backupMode === 'MIGRATE' ? initiateLegacyMigration : initiateRestore}
                                     disabled={isProcessing || (backupMode !== 'EXPORT' && !selectedBackupFile)}
-                                    className={`w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-widest border border-emerald-500/50`}
+                                    className={`w-full disabled:opacity-50 text-white font-black text-xs py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-widest border ${
+                                        backupMode === 'DATAMIGRATE'
+                                            ? 'bg-violet-600 hover:bg-violet-700 border-violet-500/50 shadow-violet-900/30'
+                                            : 'bg-emerald-600 hover:bg-emerald-700 border-emerald-500/50 shadow-emerald-900/30'
+                                    }`}
                                 >
                                     {isProcessing ? <Loader2 size={16} className="animate-spin" /> : (backupMode === 'EXPORT' ? <Download size={16} /> : <RefreshCw size={16} />)}
-                                    {backupMode === 'EXPORT' ? 'DOWNLOAD ENCRYPTED BACKUP' : backupMode === 'MIGRATE' ? 'MIGRATE & RESTORE' : 'RESTORE DATA'}
+                                    {backupMode === 'EXPORT' ? 'DOWNLOAD ENCRYPTED BACKUP' : backupMode === 'MIGRATE' ? 'MIGRATE & RESTORE' : backupMode === 'DATAMIGRATE' ? 'PROCEED TO MIGRATION' : 'RESTORE DATA'}
                                 </button>
 
-                                {backupMode === 'IMPORT' && !selectedBackupFile && (
+                                {(backupMode === 'IMPORT' || backupMode === 'DATAMIGRATE') && !selectedBackupFile && (
                                     <p className="text-[9px] text-slate-500 text-center italic font-medium">
                                         * Please select a valid .enc or .sqlite file to proceed
                                     </p>
@@ -4727,22 +5270,15 @@ const Settings: React.FC<SettingsProps> = ({
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button
-                                                        onClick={() => handleUmEdit(u)}
-                                                        className="p-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-lg border border-sky-500/20 transition-all shadow-inner"
-                                                        title="Edit User"
-                                                    >
-                                                        <RotateCw size={14} />
-                                                    </button>
+                                                <div className="flex items-center gap-2">
                                                     {/* Delete restricted: Cannot delete self, and Admins can only be deleted by Developers */}
                                                     {u.username !== currentUser?.username && (u.role !== 'Administrator' || userRole === 'Developer') && (
                                                         <button
                                                             onClick={() => handleUmDelete(u.username)}
-                                                            className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-rose-500/20 transition-all shadow-inner"
+                                                            className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-rose-500/20 transition-all shadow-inner"
                                                             title="Delete User"
                                                         >
-                                                            <Trash2 size={14} />
+                                                            <Trash2 size={12} />
                                                         </button>
                                                     )}
                                                 </div>
@@ -5206,6 +5742,104 @@ const Settings: React.FC<SettingsProps> = ({
 
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {
+                showPeriodModal && (
+                    <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-[#0f172a] w-full max-w-md rounded-2xl border border-violet-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
+                            <button onClick={() => setShowPeriodModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Migration Period Selector"><X size={20} /></button>
+                            
+                            <div className="flex flex-col items-center gap-2 text-center">
+                                <div className="p-3 bg-violet-900/20 text-violet-400 rounded-full border border-violet-500/30 mb-2">
+                                    <Calendar size={32} />
+                                </div>
+                                <h3 className="text-lg font-black text-white uppercase tracking-wider">Select Migration Scope</h3>
+                                <p className="text-[11px] text-slate-400">
+                                    Choose whether to migrate all history or target a specific month's payroll ledgers for <span className="text-violet-400 font-bold font-mono">{activeCompanyId}</span>.
+                                </p>
+                            </div>
+
+                            <div className="space-y-4 my-2">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setMigratePeriodType('ALL')}
+                                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+                                            migratePeriodType === 'ALL'
+                                                ? 'bg-violet-600/10 border-violet-500 text-white shadow-lg shadow-violet-950/50'
+                                                : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                                        }`}
+                                    >
+                                        <span className="text-xs font-bold uppercase tracking-wider">All History</span>
+                                        <span className="text-[9px] text-slate-500">Migrate all payroll years</span>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setMigratePeriodType('PERIOD')}
+                                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+                                            migratePeriodType === 'PERIOD'
+                                                ? 'bg-violet-600/10 border-violet-500 text-white shadow-lg shadow-violet-950/50'
+                                                : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                                        }`}
+                                    >
+                                        <span className="text-xs font-bold uppercase tracking-wider">Specific Period</span>
+                                        <span className="text-[9px] text-slate-500">Target one month & year</span>
+                                    </button>
+                                </div>
+
+                                {migratePeriodType === 'PERIOD' && (
+                                    <div className="grid grid-cols-2 gap-3 p-3 bg-slate-950/50 rounded-xl border border-slate-800 animate-in slide-in-from-top-2 duration-200">
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Month</label>
+                                            <select
+                                                value={migrateMonth}
+                                                onChange={e => setMigrateMonth(e.target.value)}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 focus:ring-violet-500"
+                                            >
+                                                {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => (
+                                                    <option key={m} value={m}>{m}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Year</label>
+                                            <select
+                                                value={migrateYear}
+                                                onChange={e => setMigrateYear(parseInt(e.target.value))}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 focus:ring-violet-500"
+                                            >
+                                                {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map(y => (
+                                                    <option key={y} value={y}>{y}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex gap-3 mt-4">
+                                <button
+                                    onClick={() => setShowPeriodModal(false)}
+                                    className="flex-1 py-3 border border-slate-800 rounded-xl text-slate-400 font-bold hover:text-white transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setShowPeriodModal(false);
+                                        executeImport();
+                                    }}
+                                    className="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold shadow-lg shadow-violet-900/30 transition-all uppercase text-xs tracking-widest font-black"
+                                >
+                                    Proceed
+                                </button>
                             </div>
                         </div>
                     </div>

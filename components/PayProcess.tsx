@@ -224,18 +224,28 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         else newOTRecords.push(otRecord);
                     }
 
+                    const getRowVal = (keys: string[]) => {
+                        for (const k of keys) {
+                            const foundKey = Object.keys(row).find(rk => rk.trim().toLowerCase() === k.toLowerCase());
+                            if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null && row[foundKey] !== '') {
+                                return Number(row[foundKey]);
+                            }
+                        }
+                        return 0;
+                    };
+
                     // 2. ATTENDANCE PROCESSING
-                    const attIdx = newAttendances.findIndex(a => a.employeeId === empId && a.month === props.month && a.year === props.year);
+                    const attIdx = newAttendances.findIndex(a => a.employeeId === empId && String(a.month).trim().toLowerCase() === String(props.month).trim().toLowerCase() && Number(a.year) === Number(props.year));
                     const attRecord: Attendance = {
                         employeeId: empId,
                         month: props.month,
-                        year: props.year,
-                        presentDays: Math.min(Number(row['Present Days'] || 0), daysInMonth),
-                        earnedLeave: Number(row['EL (Availed)'] || 0),
-                        encashedDays: Number(row['EL Encash'] || 0),
-                        sickLeave: Number(row['SL (Sick)'] || 0),
-                        casualLeave: Number(row['CL (Casual)'] || 0),
-                        lopDays: Number(row['LOP'] || 0)
+                        year: Number(props.year),
+                        presentDays: Math.min(getRowVal(['Present Days', 'Paid Days', 'present_days', 'paidDays', 'Present', 'present', 'paid_days']), daysInMonth),
+                        earnedLeave: getRowVal(['EL (Availed)', 'EL', 'Earned Leave', 'EL (Earned)', 'earned_leave']),
+                        encashedDays: getRowVal(['EL Encash', 'Encashment', 'EL Encashed', 'encashed_days']),
+                        sickLeave: getRowVal(['SL (Sick)', 'SL', 'Sick Leave', 'sick_leave']),
+                        casualLeave: getRowVal(['CL (Casual)', 'CL', 'Casual Leave', 'casual_leave']),
+                        lopDays: getRowVal(['LOP', 'Loss of Pay', 'lop_days', 'absent', 'absentDays'])
                     };
                     if (attIdx >= 0) newAttendances[attIdx] = attRecord;
                     else newAttendances.push(attRecord);
