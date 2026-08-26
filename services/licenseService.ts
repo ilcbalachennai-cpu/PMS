@@ -280,31 +280,45 @@ export const clearSyncRetryCount = () => {
 
 export const findMatchingCloudSignature = (
   company: { id?: string; establishmentName?: string; companySignature?: string } | null | undefined, 
-  cloudSigs: string[]
+  cloudSigs: string[],
+  userId?: string
 ): string | null => {
-  if (!company || !Array.isArray(cloudSigs) || cloudSigs.length === 0) return null;
-  const cid = (company.id || '').trim();
-  const estName = (company.establishmentName || '').trim();
-  const currentSig = (company.companySignature || '').trim();
+  if (!company || !company.id || !Array.isArray(cloudSigs) || cloudSigs.length === 0) return null;
+  const cid = String(company.id).trim();
+  const currentSig = String(company.companySignature || '').trim();
 
-  const match = cloudSigs.find(s => {
+  // Resolve User ID strictly: passed userId -> stored license userID
+  let uid = String(userId || '').trim().toUpperCase();
+  if (!uid) {
+    try {
+      const stored = getStoredLicense();
+      if (stored?.userID) uid = stored.userID.trim().toUpperCase();
+    } catch (_) {}
+  }
+  if (!uid) return null; // Mandatory User ID security requirement: no movement from User A to User B allowed!
+
+  const requiredPrefix = `USIG-${uid}_`;
+  const requiredSiloSegment = `_${cid}-`;
+
+  // 1. Direct Full Signature Match with MANDATORY 3-part validation (USIG-{USERID}_{COMPANY_ID}-{HASH})
+  if (currentSig && cloudSigs.includes(currentSig)) {
+    const hasUid = currentSig.toUpperCase().includes(requiredPrefix);
+    const hasCid = currentSig.includes(requiredSiloSegment);
+    if (hasUid && hasCid) {
+      return currentSig;
+    }
+  }
+
+  // 2. Exact 3-Part Match from Cloud Column R: USIG-{USERID}_{cid}-{HASH}
+  const exactMatch = cloudSigs.find(s => {
     if (!s || typeof s !== 'string') return false;
-    const cleanS = s.trim();
-    if (currentSig && cleanS === currentSig) return true;
-    if (cid && cleanS.includes(`_${cid}-`)) return true;
-    if (estName) {
-      const cleanEst = estName.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-      if (cleanEst && cleanS.toUpperCase().includes(`_${cleanEst}-`)) return true;
-      if (cleanEst.length >= 4 && cleanS.toUpperCase().includes(`_${cleanEst.slice(0, 6)}`)) return true;
-    }
-    if (cid && cid.includes('_')) {
-      const idPrefix = cid.split('_')[0].replace(/[^A-Z0-9]/gi, '').toUpperCase();
-      if (idPrefix.length >= 4 && cleanS.toUpperCase().includes(`_${idPrefix}`)) return true;
-    }
-    return false;
+    const sClean = s.trim();
+    const hasUid = sClean.toUpperCase().includes(requiredPrefix);
+    const hasCid = sClean.includes(requiredSiloSegment);
+    return hasUid && hasCid;
   });
 
-  return match || null;
+  return exactMatch ? exactMatch.trim() : null;
 };
 
 export const getStoredLicense = (): LicenseData | null => {
@@ -1714,11 +1728,11 @@ export const validateLicenseStartup = async (
 
                     const savedCompsRaw = localStorage.getItem('app_companies');
                     if (savedCompsRaw) {
-                      const comps = JSON.parse(savedCompsRaw);
+                      let comps: any[] = JSON.parse(savedCompsRaw);
                       if (Array.isArray(comps)) {
                         let compsChanged = false;
                         for (const c of comps) {
-                          const matchingCloudSig = findMatchingCloudSignature(c, cloudSigs);
+                          const matchingCloudSig = findMatchingCloudSignature(c, cloudSigs, stored?.userID);
                           let isMatch = !!matchingCloudSig;
                           
                           if (isMatch && matchingCloudSig && c.companySignature !== matchingCloudSig) {
@@ -1752,7 +1766,12 @@ export const validateLicenseStartup = async (
                           }
                         }
 
-                        // Auto-Mount physical folders from disk ONLY if they exist, are not in index, and are not dismounted
+                        // Filter out any dismounted companies from comps
+                        const originalCompsLen = comps.length;
+                        comps = comps.filter((c: any) => c && c.id && !dismounted.includes(c.id));
+                        if (comps.length !== originalCompsLen) compsChanged = true;
+
+                        // Auto-Mount physical folders from disk ONLY if they exist, are NOT dismounted, AND have a valid matching Cloud Signature
                         if (api && api.listSilos) {
                           try {
                             const silosRes = await api.listSilos();
@@ -1762,8 +1781,15 @@ export const validateLicenseStartup = async (
                                 if (siloId === 'default') continue; // Never auto-mount default legacy template folder
                                 const existsInComps = comps.some(c => c.id === siloId);
                                 if (!existsInComps && !dismounted.includes(siloId)) {
-                                  const matchingCloudSig = cloudSigs.find(sig => sig.includes(`_${siloId}-`));
+                                  const matchingCloudSig = findMatchingCloudSignature({ id: siloId }, cloudSigs, stored?.userID);
                                   const hasCloudSig = !!matchingCloudSig;
+                                  
+                                  // Dismounted or unregistered folders without a Cloud Signature MUST NOT auto-mount!
+                                  if (!hasCloudSig) {
+                                    console.log(`[Auto-Mount Suppressed] Folder ${siloId} is dismounted or lacks a Cloud Signature. Remounting requires manual 'Rescue Company'.`);
+                                    continue;
+                                  }
+
                                   let estName = `Rescued: ${siloId}`;
                                   let cin = '';
                                   if (api.dbGetGlobal) {
@@ -1775,13 +1801,13 @@ export const validateLicenseStartup = async (
                                     }
                                   }
 
-                                  console.log(`[Auto-Mount] Mounting folder ${siloId} (Cloud Signature Present: ${hasCloudSig})`);
+                                  console.log(`[Auto-Mount] Auto-mounting registered cloud folder ${siloId}`);
                                   comps.push({
                                     id: siloId,
                                     establishmentName: estName,
                                     cin: cin,
-                                    companySignature: hasCloudSig ? matchingCloudSig : "",
-                                    isReadOnly: !hasCloudSig
+                                    companySignature: matchingCloudSig,
+                                    isReadOnly: false
                                   } as any);
 
                                   if (api.dbSetGlobal) {
@@ -1789,8 +1815,8 @@ export const validateLicenseStartup = async (
                                       id: siloId,
                                       establishmentName: estName,
                                       cin: cin,
-                                      companySignature: hasCloudSig ? matchingCloudSig : "",
-                                      isReadOnly: !hasCloudSig
+                                      companySignature: matchingCloudSig,
+                                      isReadOnly: false
                                     });
                                   }
                                   compsChanged = true;

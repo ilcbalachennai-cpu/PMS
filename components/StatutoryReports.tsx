@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, BookOpen, ScrollText, ReceiptText, Info } from 'lucide-react';
-import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch, BranchDetail, getBranchName } from '../types';
+import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch, BranchDetail } from '../types';
 import { INDIAN_STATES } from '../constants';
 import {
     generatePFECR,
@@ -42,7 +42,8 @@ import {
     generatePrincipalMappingText,
     generatePrincipalMappingPDF,
     generateESIIPMappingText,
-    generateESIIPMappingPDF
+    generateESIIPMappingPDF,
+    resolveBranchCompanyProfile
 } from '../services/reportService';
 
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
@@ -237,32 +238,10 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
         setRangeModal({ isOpen: true, reportType, fromMonth: 'April', fromYear: startYear, toMonth: globalMonth, toYear: globalYear });
     };
 
-    // When a branch is selected, override company profile with branch-specific statutory details
-    // Only fields that appear in report headers/labels are applied (address, PF code, ESI code, PT code)
+    // When a branch is selected, override company profile with branch-specific statutory details, address, and Branch Name
     const effectiveCompanyProfile = useMemo((): CompanyProfile => {
         if (statFilter !== 'branch' || !statFilterValue) return companyProfile;
-        const branchDetail = branches
-            .map(b => typeof b === 'string' ? null : b)
-            .find(b => b && getBranchName(b) === statFilterValue);
-        if (!branchDetail) return companyProfile;
-        return {
-            ...companyProfile,
-            // Conditionally override address fields only if base profile has address fields set
-            ...(branchDetail.address && (companyProfile.street || companyProfile.doorNo || companyProfile.buildingName || companyProfile.locality || companyProfile.area || companyProfile.city || companyProfile.pincode) ? {
-                // Preserve existing address structure but replace street with branch address
-                doorNo: companyProfile.doorNo,
-                buildingName: companyProfile.buildingName,
-                street: branchDetail.address,
-                locality: companyProfile.locality,
-                area: companyProfile.area,
-                city: companyProfile.city,
-                pincode: companyProfile.pincode,
-            } : {}),
-            // Conditionally override statutory registration codes only if they exist in base profile
-            ...(branchDetail.pfCode && companyProfile.pfCode ? { pfCode: branchDetail.pfCode } : {}),
-            ...(branchDetail.esiCode && companyProfile.esiCode ? { esiCode: branchDetail.esiCode } : {}),
-            ...(branchDetail.ptTaxCode && companyProfile.ptNo ? { ptNo: branchDetail.ptTaxCode } : {}),
-        };
+        return resolveBranchCompanyProfile(companyProfile, statFilterValue, branches);
     }, [statFilter, statFilterValue, branches, companyProfile]);
 
     const handleDownload = async (reportName: string, format: 'PDF' | 'Excel' | 'Text') => {

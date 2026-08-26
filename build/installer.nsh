@@ -68,29 +68,49 @@ FunctionEnd
     CopyFiles /SILENT "$INSTDIR\resources\manual_assets\*.*" "$3\"
     RMDir /r "$INSTDIR\resources\manual_assets"
     
+    # Pre-create small HTA launch popup during install phase for INSTANT launch on finish
+    FileOpen $0 "$TEMP\bpp_launch_msg.hta" w
+    FileWrite $0 '<HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal" ALWAYSONTOP="yes"/>$\r$\n'
+    FileWrite $0 '<html><head><meta http-equiv="X-UA-Compatible" content="IE=edge"/>$\r$\n'
+    FileWrite $0 '<title>BharatPay Pro Update</title>$\r$\n'
+    FileWrite $0 '<style>$\r$\n'
+    FileWrite $0 '  body { background-color: #020617; color: #f8fafc; font-family: $\'Segoe UI$\', Tahoma, Arial, sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 100%; border: 1px solid #1e293b; box-sizing: border-box; overflow: hidden; }$\r$\n'
+    FileWrite $0 '  .title { margin-bottom: 12px; font-weight: 700; font-size: 18px; color: #10b981; letter-spacing: 0.5px; }$\r$\n'
+    FileWrite $0 '  .loading-box { font-size: 13px; color: #94a3b8; }$\r$\n'
+    FileWrite $0 '  .wait-label { color: #38bdf8; font-weight: 600; }$\r$\n'
+    FileWrite $0 '  .dots { color: #38bdf8; font-weight: 700; font-size: 16px; width: 24px; display: inline-block; text-align: left; }$\r$\n'
+    FileWrite $0 '</style></head>$\r$\n'
+    FileWrite $0 '<body>$\r$\n'
+    FileWrite $0 '  <div class="title">Application Update Complete</div>$\r$\n'
+    FileWrite $0 '  <div class="loading-box">$\r$\n'
+    FileWrite $0 '    <span>Launching BharatPay Pro... <span class="wait-label">Please wait</span><span id="dots" class="dots">.</span></span>$\r$\n'
+    FileWrite $0 '  </div>$\r$\n'
+    FileWrite $0 '  <script>$\r$\n'
+    FileWrite $0 '    window.resizeTo(560, 210); window.moveTo((screen.width - 560) / 2, (screen.height - 210) / 2); window.focus();$\r$\n'
+    FileWrite $0 '    var step = 1; var waitEl = document.getElementById("dots");$\r$\n'
+    FileWrite $0 '    setInterval(function() {$\r$\n'
+    FileWrite $0 '      step = (step % 4) + 1; var d = ""; for (var i = 0; i < step; i++) { d += "."; }$\r$\n'
+    FileWrite $0 '      if (waitEl) { waitEl.innerHTML = d; }$\r$\n'
+    FileWrite $0 '      try { window.focus(); } catch(e) {}$\r$\n'
+    FileWrite $0 '    }, 100);$\r$\n'
+    FileWrite $0 '    setTimeout(function() { window.close(); }, 60000);$\r$\n'
+    FileWrite $0 '  </script>$\r$\n'
+    FileWrite $0 '</body></html>'
+    FileClose $0
+
     # Set NSIS installer to automatically close upon progress completion
     SetAutoClose true
 !macroend
 
 # Function .onGUIEnd is executed AFTER the NSIS setup window has CLOSED COMPLETELY
 Function .onGUIEnd
-    # 1. Ensure small HTA launch popup exists
-    IfFileExists "$TEMP\bpp_launch_msg.hta" hta_exists
-        FileOpen $0 "$TEMP\bpp_launch_msg.hta" w
-        FileWrite $0 '<HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal"/>$\r$\n'
-        FileWrite $0 '<title>BharatPay Pro Update</title>$\r$\n'
-        FileWrite $0 '<body style="background-color:#0f172a; color:#f8fafc; font-family:$\'Segoe UI$\', sans-serif; font-size:14px; margin:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; height:100%; border:1px solid #1e293b;">$\r$\n'
-        FileWrite $0 '  <p style="margin-bottom:12px; font-weight:bold; font-size:18px; color:#38bdf8;">Application Update Complete</p>$\r$\n'
-        FileWrite $0 '  <p style="margin:0; font-size:14px; opacity:0.85;">Launching BharatPay Pro... Please wait.</p>$\r$\n'
-        FileWrite $0 '  <script>window.resizeTo(550, 200); window.moveTo((screen.width - 550) / 2, (screen.height - 200) / 2); window.focus(); setTimeout(function() { window.close(); }, 60000);</script>$\r$\n'
-        FileWrite $0 '</body>'
-        FileClose $0
-    hta_exists:
+    # 1. Instantly launch small HTA info popup via direct CreateProcess (0ms delay)
+    Exec '"mshta.exe" "$TEMP\bpp_launch_msg.hta"'
 
-    # 2. Launch small HTA info popup (now that setup window is completely closed!)
-    ExecShell "" "mshta.exe" "$TEMP\bpp_launch_msg.hta"
+    # 2. Set working directory strictly to $INSTDIR so BPP_APP.exe finds all binaries & assets
+    SetOutPath "$INSTDIR"
 
-    # 3. Launch main application executable
-    ExecShell "" "$INSTDIR\BPP_APP.exe"
+    # 3. Launch main application executable cleanly from $INSTDIR
+    Exec '"$INSTDIR\BPP_APP.exe"'
 FunctionEnd
 

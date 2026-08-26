@@ -5,7 +5,7 @@ import {
     Briefcase, ShieldCheck, ShieldAlert, UserMinus, Lock, BookOpen,
     AlertCircle
 } from 'lucide-react';
-import { Employee, CompanyProfile } from '../../types';
+import { Employee, CompanyProfile, getBranchName } from '../../types';
 import { INDIAN_STATES } from '../../constants';
 import { formatIndianNumber } from '../../utils/formatters';
 
@@ -540,19 +540,19 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 </div>
                                 <div className="space-y-1.5">
                                     <label htmlFor="designationInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Designation</label>
-                                    <select id="designationInput" tabIndex={isRejoining ? -1 : undefined} title="Designation" aria-label="Designation" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.designation} onChange={e => setNewEmpForm({ ...newEmpForm, designation: e.target.value })}>{designations.map(d => <option key={d}>{d}</option>)}</select>
+                                    <select id="designationInput" tabIndex={isRejoining ? -1 : undefined} title="Designation" aria-label="Designation" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={typeof newEmpForm.designation === 'object' ? (newEmpForm.designation as any)?.name : newEmpForm.designation} onChange={e => setNewEmpForm({ ...newEmpForm, designation: e.target.value })}>{designations.map(d => { const dName = typeof d === 'object' ? (d as any)?.name : String(d); return <option key={dName} value={dName}>{dName}</option>; })}</select>
                                 </div>
                                 <div className="space-y-1.5">
                                     <label htmlFor="divisionInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Department/Division</label>
-                                    <select id="divisionInput" tabIndex={isRejoining ? -1 : undefined} title="Department/Division" aria-label="Department/Division" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.division} onChange={e => setNewEmpForm({ ...newEmpForm, division: e.target.value })}>{divisions.map(d => <option key={d}>{d}</option>)}</select>
+                                    <select id="divisionInput" tabIndex={isRejoining ? -1 : undefined} title="Department/Division" aria-label="Department/Division" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={typeof newEmpForm.division === 'object' ? (newEmpForm.division as any)?.name : newEmpForm.division} onChange={e => setNewEmpForm({ ...newEmpForm, division: e.target.value })}>{divisions.map(d => { const dName = typeof d === 'object' ? (d as any)?.name : String(d); return <option key={dName} value={dName}>{dName}</option>; })}</select>
                                 </div>
                                 <div className="space-y-1.5">
                                     <label htmlFor="branchInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Work Branch</label>
-                                    <select id="branchInput" tabIndex={isRejoining ? -1 : undefined} title="Work Branch" aria-label="Work Branch" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.branch} onChange={e => setNewEmpForm({ ...newEmpForm, branch: e.target.value })}>{branches.map(b => <option key={b}>{b}</option>)}</select>
+                                    <select id="branchInput" tabIndex={isRejoining ? -1 : undefined} title="Work Branch" aria-label="Work Branch" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={getBranchName(newEmpForm.branch)} onChange={e => setNewEmpForm({ ...newEmpForm, branch: e.target.value })}>{branches.map(b => { const bName = getBranchName(b); return <option key={bName} value={bName}>{bName}</option>; })}</select>
                                 </div>
                                 <div className="space-y-1.5">
                                     <label htmlFor="siteInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Site</label>
-                                    <select id="siteInput" tabIndex={isRejoining ? -1 : undefined} title="Site Name" aria-label="Site Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={newEmpForm.site} onChange={e => setNewEmpForm({ ...newEmpForm, site: e.target.value })}>{sites.map(s => <option key={s}>{s}</option>)}</select>
+                                    <select id="siteInput" tabIndex={isRejoining ? -1 : undefined} title="Site Name" aria-label="Site Name" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white outline-none" value={typeof newEmpForm.site === 'object' ? (newEmpForm.site as any)?.name : newEmpForm.site} onChange={e => setNewEmpForm({ ...newEmpForm, site: e.target.value })}>{sites.map(s => { const sName = typeof s === 'object' ? (s as any)?.name : String(s); return <option key={sName} value={sName}>{sName}</option>; })}</select>
                                 </div>
                             </div>
                         </div>

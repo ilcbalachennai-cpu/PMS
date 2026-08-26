@@ -10,8 +10,28 @@ import {
   DEFAULT_LEAVE_POLICY 
 } from '../constants';
 import { getStoredLicense, findMatchingCloudSignature } from '../services/licenseService';
-import { getCompanyBackupFolder, generateCompanyId, normalizeEmployeeDates } from '../utils/formatters';
+import { getCompanyBackupFolder, generateCompanyId, findMatchingCompanySilo, normalizeEmployeeDates } from '../utils/formatters';
 import { getBackupFileName, getMonthAbbr } from '../services/reportService';
+
+export interface PartialResetFilters {
+  resetRange?: {
+    fromMonth: string;
+    fromYear: number;
+    toMonth: string;
+    toYear: number;
+  };
+  isAllMonths?: boolean;
+  employeeDojScope?: 'START_MONTH' | 'NEXT_MONTH';
+  categories: {
+    payrollHistory: boolean;
+    attendance: boolean;
+    advances: boolean;
+    fines: boolean;
+    arrears: boolean;
+    otRecords: boolean;
+    employees: boolean;
+  };
+}
 
 export const usePayrollData = (showAlert: any) => {
   const [isResetting, setIsResetting] = useState(false);
@@ -27,10 +47,13 @@ export const usePayrollData = (showAlert: any) => {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
+          const dismountedRaw = localStorage.getItem('app_dismounted_companies') || '[]';
+          let dismounted: string[] = [];
+          try { dismounted = JSON.parse(dismountedRaw); } catch (e) {}
           const seen = new Set<string>();
           const cleaned: CompanyProfile[] = [];
           for (const c of parsed) {
-            if (c && c.id && c.id.trim() !== '' && !seen.has(c.id)) {
+            if (c && c.id && c.id.trim() !== '' && !seen.has(c.id) && !dismounted.includes(c.id)) {
               seen.add(c.id);
               cleaned.push(c);
             }
@@ -836,9 +859,19 @@ export const usePayrollData = (showAlert: any) => {
               let updated = [...parsed];
               let modified = false;
 
+              // Scrub any dismounted companies from the active companies registry
+              const dismountedRaw = localStorage.getItem('app_dismounted_companies') || '[]';
+              let dismounted: string[] = [];
+              try { dismounted = JSON.parse(dismountedRaw); } catch (e) {}
+              if (dismounted.length > 0) {
+                const countBefore = updated.length;
+                updated = updated.filter(c => c && c.id && !dismounted.includes(c.id));
+                if (updated.length !== countBefore) modified = true;
+              }
+
               // Full mode ONLY if signature matches cloud Column R (when cloudSigs exist). Otherwise read-only even if under limit.
               updated = updated.map(c => {
-                const matchingCloudSig = findMatchingCloudSignature(c, cloudSigs);
+                const matchingCloudSig = findMatchingCloudSignature(c, cloudSigs, license?.userID);
                 let targetReadOnly = true;
 
                 if (Array.isArray(cloudSigs) && cloudSigs.length > 0 && matchingCloudSig) {
@@ -856,13 +889,19 @@ export const usePayrollData = (showAlert: any) => {
                 return c;
               });
 
-              // Sanitize and deduplicate company IDs
+              // Sanitize and deduplicate company IDs & establishment profiles
               const seen = new Set<string>();
               const hasRealCompany = updated.some(c => c && c.id && c.id !== 'default' && c.id !== 'null');
               const sanitized: CompanyProfile[] = [];
               for (let c of updated) {
                 if (!c || !c.id || c.id.trim() === '') continue;
                 if (c.id === 'default' && hasRealCompany) {
+                  modified = true;
+                  continue;
+                }
+                const existingMatch = findMatchingCompanySilo(c, sanitized);
+                if (existingMatch) {
+                  console.log(`[Deduplication] Purging duplicate company silo '${c.id}' because registered silo '${existingMatch.id}' already exists for '${c.establishmentName}'.`);
                   modified = true;
                   continue;
                 }
@@ -1007,28 +1046,25 @@ export const usePayrollData = (showAlert: any) => {
     // Companies lacking a signature will remain Read-Only until manually activated.
     const license = getStoredLicense();
     const cloudSigs = license?.cloudSignatures || [];
-    let currentSig = profileToLoad.companySignature;
+    const hasCloudSigs = Array.isArray(cloudSigs) && cloudSigs.length > 0;
 
-    if (Array.isArray(cloudSigs) && cloudSigs.length > 0 && profileToLoad.id) {
-      const matchingSig = cloudSigs.find(s => s.includes(`_${profileToLoad.id}-`));
-      if (matchingSig) {
-        currentSig = matchingSig;
-        profileToLoad.companySignature = matchingSig;
+    let initialReadOnly = true;
+
+    if (hasCloudSigs && profileToLoad.id) {
+      const matchingCloudSig = findMatchingCloudSignature(profileToLoad, cloudSigs, license?.userID);
+      if (matchingCloudSig) {
+        initialReadOnly = false;
+        profileToLoad.companySignature = matchingCloudSig;
+      } else {
+        initialReadOnly = true;
+        profileToLoad.companySignature = "";
       }
+    } else if (profileToLoad.companySignature) {
+      initialReadOnly = profileToLoad.isReadOnly === true;
     }
 
-    let shouldBeReadOnly = true;
-    if (Array.isArray(cloudSigs) && cloudSigs.length > 0) {
-      const isCloudValid = currentSig ? cloudSigs.includes(currentSig) : false;
-      shouldBeReadOnly = !isCloudValid;
-    } else if (currentSig) {
-      shouldBeReadOnly = false;
-    } else {
-      shouldBeReadOnly = true;
-    }
-
-    profileToLoad.isReadOnly = shouldBeReadOnly;
-    if (shouldBeReadOnly) {
+    profileToLoad.isReadOnly = initialReadOnly;
+    if (initialReadOnly) {
       profileToLoad.companySignature = "";
     }
 
@@ -1045,23 +1081,38 @@ export const usePayrollData = (showAlert: any) => {
         window.electronAPI.getActivatedSilos(isDevUser).then((res: any) => {
             if (res?.success) {
                 const cloudSigs = license?.cloudSignatures || [];
+                const hasCloudSigs = Array.isArray(cloudSigs) && cloudSigs.length > 0;
                 const activeSilos = Array.isArray(res.silos) ? res.silos : [];
                 let finalReadOnly = true;
                 let finalSignature = "";
 
                 if (profileToLoad.id) {
-                    const matchingCloudSig = Array.isArray(cloudSigs) ? cloudSigs.find((s: string) => s.includes(`_${profileToLoad.id}-`)) : undefined;
-                    const matchingLocalSig = activeSilos.find((s: string) => s.includes(`_${profileToLoad.id}-`));
-                    const effectiveSig = matchingCloudSig || matchingLocalSig || (profileToLoad.companySignature && activeSilos.includes(profileToLoad.companySignature) ? profileToLoad.companySignature : undefined);
-
-                    if (effectiveSig) {
-                        finalReadOnly = false;
-                        finalSignature = effectiveSig;
+                    if (hasCloudSigs) {
+                        // --- ONLINE MODE: Cloud Column R is the FINAL AUTHORITY ---
+                        const matchingCloudSig = findMatchingCloudSignature(profileToLoad, cloudSigs, license?.userID);
+                        if (matchingCloudSig) {
+                            finalReadOnly = false;
+                            finalSignature = matchingCloudSig;
+                        } else {
+                            // NOT IN CLOUD COLUMN R -> FORCE-LOCK READ ONLY & PURGE FROM sys_limit.bin
+                            finalReadOnly = true;
+                            finalSignature = "";
+                            const unMatchedLocalSig = activeSilos.find((s: string) => s.includes(`_${profileToLoad.id}-`)) || profileToLoad.companySignature;
+                            if (unMatchedLocalSig && window.electronAPI?.removeActivatedSilo) {
+                                console.log(`[Cloud Enforcement] Silo ${profileToLoad.id} is NOT in Cloud Column R. Purging local signature '${unMatchedLocalSig}' from sys_limit.bin...`);
+                                window.electronAPI.removeActivatedSilo(unMatchedLocalSig, isDevUser).catch(() => {});
+                            }
+                        }
                     } else {
-                        finalReadOnly = true;
-                        finalSignature = "";
-                        if (profileToLoad.companySignature && window.electronAPI?.removeActivatedSilo) {
-                            window.electronAPI.removeActivatedSilo(profileToLoad.companySignature, isDevUser).catch(() => {});
+                        // --- OFFLINE MODE: Temporary access via sys_limit.bin ---
+                        const matchingLocalSig = activeSilos.find((s: string) => s.includes(`_${profileToLoad.id}-`));
+                        const isLocalValid = (profileToLoad.companySignature && activeSilos.includes(profileToLoad.companySignature)) ? profileToLoad.companySignature : matchingLocalSig;
+                        if (isLocalValid) {
+                            finalReadOnly = false;
+                            finalSignature = isLocalValid;
+                        } else {
+                            finalReadOnly = true;
+                            finalSignature = "";
                         }
                     }
                 }
@@ -1248,37 +1299,48 @@ export const usePayrollData = (showAlert: any) => {
     }
 
     if (id === activeCompanyId) {
-      showAlert('warning', 'Action Prohibited', "Can't DELETE the current company which is in open state. Please switch to another company first.");
+      showAlert('warning', 'Action Prohibited', "Can't dismount the active company in open state. Please switch to another company first.");
       return;
     }
 
+    // 1. Scrub from active companies list
     const updated = companies.filter(c => c.id !== id);
     setCompanies(updated);
     localStorage.setItem('app_companies', JSON.stringify(updated));
     if (window.electronAPI?.dbSetGlobal) {
-      window.electronAPI.dbSetGlobal('app_companies', updated);
+      await window.electronAPI.dbSetGlobal('app_companies', updated).catch(() => {});
     }
 
+    // 2. Add to dismounted list permanently in both LocalStorage & Global DB
     try {
       const dismountedRaw = localStorage.getItem('app_dismounted_companies') || '[]';
-      const dismounted = JSON.parse(dismountedRaw);
+      let dismounted: string[] = [];
+      try { dismounted = JSON.parse(dismountedRaw); } catch (e) {}
+      if (!Array.isArray(dismounted)) dismounted = [];
       if (!dismounted.includes(id)) {
         dismounted.push(id);
         localStorage.setItem('app_dismounted_companies', JSON.stringify(dismounted));
         if (window.electronAPI?.dbSetGlobal) {
-          window.electronAPI.dbSetGlobal('app_dismounted_companies', dismounted).catch(() => {});
+          await window.electronAPI.dbSetGlobal('app_dismounted_companies', dismounted).catch(() => {});
         }
       }
     } catch (e) {
       console.warn("Failed to store dismounted tag:", e);
     }
 
-    // V03.01.04: Physical cleanup
+    // 3. Remove from local active silos if any
+    const targetComp = companies.find(c => c.id === id);
+    if (targetComp?.companySignature && window.electronAPI?.removeActivatedSilo) {
+      const license = getStoredLicense();
+      const isDevUser = license?.userID === 'VRANGA' || (!import.meta.env.PROD);
+      await window.electronAPI.removeActivatedSilo(targetComp.companySignature, isDevUser).catch(() => {});
+    }
+
+    // 4. Attempt physical folder cleanup
     if (window.electronAPI?.deleteSilo) {
       const res = await window.electronAPI.deleteSilo(id);
       if (res && res.success === false) {
-        showAlert('error', 'Folder Deletion Failed', `Could not delete the company's physical folder: ${res.error || 'Unknown Error'}. Please ensure no files inside are open in another application and try again.`);
-        return;
+        console.warn(`Physical folder cleanup note for ${id}:`, res.error);
       }
     }
 
@@ -1286,7 +1348,7 @@ export const usePayrollData = (showAlert: any) => {
       switchCompany(updated[0].id);
     }
 
-    showAlert('success', 'Organization Removed', 'The organization and its physical data have been permanently deleted.');
+    showAlert('success', 'Organization Dismounted', `Organization '${id}' has been dismounted and removed from your workspace. Use 'Rescue Company' if you need to re-link it in the future.`);
   }, [companies, activeCompanyId, switchCompany, showAlert]);
 
 
@@ -1387,49 +1449,207 @@ export const usePayrollData = (showAlert: any) => {
     }
   }, [companyProfile, payrollHistory, showAlert, activeFinancialYear, activeCompanyId]);
 
-  const handlePayrollReset = useCallback(async () => {
+  const handlePayrollReset = useCallback(async (filters?: PartialResetFilters) => {
     setIsResetting(true);
     
-    const keysToWipe = [
-      'app_employees', 'app_attendance', 'app_leave_ledgers', 
-      'app_advance_ledgers', 'app_payroll_history', 'app_fines', 
-      'app_arrear_history', 'app_ot_records'
-    ];
+    const isAllMonths = filters?.isAllMonths || !filters?.resetRange;
+    const MONTH_ORDER = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
+    const getPeriodVal = (m?: string, y?: any) => {
+      if (!m || !y) return 0;
+      const idx = MONTH_ORDER.indexOf(m);
+      return Number(y) * 12 + (idx >= 0 ? idx : 0);
+    };
 
-    // Clear Local Storage (Scoped)
-    keysToWipe.forEach(k => {
-      localStorage.removeItem(getCKey(k));
-      localStorage.removeItem(k); // Also clear legacy global keys if any
-    });
+    const fromVal = getPeriodVal(filters?.resetRange?.fromMonth, filters?.resetRange?.fromYear);
+    const toVal = getPeriodVal(filters?.resetRange?.toMonth, filters?.resetRange?.toYear);
 
-    // Wipe electron SQLite database
-    // @ts-ignore
-    if (window.electronAPI && window.electronAPI.dbDelete) {
-      for (const k of keysToWipe) {
+    const isInResetRange = (m?: string, y?: any) => {
+      if (isAllMonths) return true;
+      if (!m || !y) return false;
+      const val = getPeriodVal(m, y);
+      return val >= fromVal && val <= toVal;
+    };
+
+    const cats = filters?.categories || {
+      payrollHistory: true,
+      attendance: true,
+      advances: true,
+      fines: true,
+      arrears: true,
+      otRecords: true,
+      employees: true,
+    };
+
+    const saveUpdatedDataset = async (key: string, data: any[]) => {
+      const scopedKey = getCKey(key);
+      try {
+        localStorage.setItem(scopedKey, JSON.stringify(data));
+      } catch (e) {}
+      // @ts-ignore
+      if (window.electronAPI && window.electronAPI.dbSet) {
         try {
           // @ts-ignore
-          await window.electronAPI.dbDelete(getCKey(k));
+          await window.electronAPI.dbSet(scopedKey, data);
+        } catch (e) {
+          console.error(`Error updating ${scopedKey} in db`, e);
+        }
+      }
+    };
+
+    const wipeDataset = async (key: string) => {
+      const scopedKey = getCKey(key);
+      localStorage.removeItem(scopedKey);
+      localStorage.removeItem(key);
+      // @ts-ignore
+      if (window.electronAPI && window.electronAPI.dbDelete) {
+        try {
           // @ts-ignore
-          await window.electronAPI.dbDelete(k);
-        } catch (e) { console.error(`Error deleting ${k} from db`, e); }
+          await window.electronAPI.dbDelete(scopedKey);
+          // @ts-ignore
+          await window.electronAPI.dbDelete(key);
+        } catch (e) { console.error(`Error deleting ${key} from db`, e); }
+      }
+    };
+
+    // 1. Processed Payroll
+    if (cats.payrollHistory) {
+      if (isAllMonths) {
+        await wipeDataset('app_payroll_history');
+        setPayrollHistory([]);
+      } else {
+        const updated = payrollHistory.filter(rec => !isInResetRange(rec.month, rec.year));
+        await saveUpdatedDataset('app_payroll_history', updated);
+        setPayrollHistory(updated);
       }
     }
 
-    // Refresh State
-    setEmployees([]);
-    setAttendances([]);
-    setLeaveLedgers([]);
-    setAdvanceLedgers([]);
-    setPayrollHistory([]);
-    setFines([]);
-    setArrearHistory([]);
-    setOTRecords([]);
-    
-    showAlert('success', 'Partial Reset Complete', 'All employee and payroll records for the active company have been cleared. System will now reload.', () => {
+    // 2. Attendance
+    if (cats.attendance) {
+      if (isAllMonths) {
+        await wipeDataset('app_attendance');
+        setAttendances([]);
+      } else {
+        const updated = attendances.filter(rec => !isInResetRange(rec.month, rec.year));
+        await saveUpdatedDataset('app_attendance', updated);
+        setAttendances(updated);
+      }
+    }
+
+    // 3. Advances & Ledgers
+    if (cats.advances) {
+      if (isAllMonths) {
+        await wipeDataset('app_advance_ledgers');
+        setAdvanceLedgers([]);
+      } else {
+        const updated = advanceLedgers.filter((rec: any) => !isInResetRange(rec.month, rec.year));
+        await saveUpdatedDataset('app_advance_ledgers', updated);
+        setAdvanceLedgers(updated);
+      }
+    }
+
+    // 4. Fines & Penalties
+    if (cats.fines) {
+      if (isAllMonths) {
+        await wipeDataset('app_fines');
+        setFines([]);
+      } else {
+        const updated = fines.filter(rec => !isInResetRange(rec.month, rec.year));
+        await saveUpdatedDataset('app_fines', updated);
+        setFines(updated);
+      }
+    }
+
+    // 5. Salary Arrears
+    if (cats.arrears) {
+      if (isAllMonths) {
+        await wipeDataset('app_arrear_history');
+        setArrearHistory([]);
+      } else {
+        const updated = arrearHistory.filter(rec => !isInResetRange(rec.month, rec.year));
+        await saveUpdatedDataset('app_arrear_history', updated);
+        setArrearHistory(updated);
+      }
+    }
+
+    // 6. OT Records
+    if (cats.otRecords) {
+      if (isAllMonths) {
+        await wipeDataset('app_ot_records');
+        setOTRecords([]);
+      } else {
+        const updated = otRecords.filter(rec => !isInResetRange(rec.month, rec.year));
+        await saveUpdatedDataset('app_ot_records', updated);
+        setOTRecords(updated);
+      }
+    }
+
+    // 7. Employee Master Data (Wiped entirely if ALL months, or filtered by DOJ period if range reset)
+    if (cats.employees) {
+      if (isAllMonths) {
+        await wipeDataset('app_employees');
+        setEmployees([]);
+      } else {
+        const parseDojPeriodVal = (dojStr?: string) => {
+          if (!dojStr) return 0;
+          let dateObj: Date | null = null;
+          if (dojStr.includes('-')) {
+            const parts = dojStr.split('-');
+            if (parts[0].length === 4) {
+              dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+            } else {
+              dateObj = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+            }
+          } else if (dojStr.includes('/')) {
+            const parts = dojStr.split('/');
+            if (parts[0].length === 4) {
+              dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+            } else {
+              dateObj = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+            }
+          } else {
+            dateObj = new Date(dojStr);
+          }
+          if (dateObj && !isNaN(dateObj.getTime())) {
+            const mIdx = dateObj.getMonth();
+            const calNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const mName = calNames[mIdx];
+            const yNum = dateObj.getFullYear();
+            return getPeriodVal(mName, yNum);
+          }
+          return 0;
+        };
+
+        let effectiveFromVal = fromVal;
+        if (filters?.employeeDojScope === 'NEXT_MONTH' && filters?.resetRange) {
+          const fromMonthIdx = MONTH_ORDER.indexOf(filters.resetRange.fromMonth);
+          if (fromMonthIdx >= 0) {
+            let nextMIdx = (fromMonthIdx + 1) % 12;
+            let nextY = filters.resetRange.fromYear + (fromMonthIdx === 11 ? 1 : 0);
+            effectiveFromVal = getPeriodVal(MONTH_ORDER[nextMIdx], nextY);
+          }
+        }
+
+        const updatedEmployees = employees.filter(emp => {
+          const dojVal = parseDojPeriodVal(emp.doj);
+          if (!dojVal) return true;
+          const isDojInTargetRange = (dojVal >= effectiveFromVal && dojVal <= toVal);
+          return !isDojInTargetRange;
+        });
+
+        await saveUpdatedDataset('app_employees', updatedEmployees);
+        setEmployees(updatedEmployees);
+      }
+    }
+
+    const summaryText = isAllMonths
+      ? 'Selected transactional records for the active company have been reset.'
+      : `Transactional records from ${filters?.resetRange?.fromMonth} ${filters?.resetRange?.fromYear} to ${filters?.resetRange?.toMonth} ${filters?.resetRange?.toYear} have been sequentially cleared.`;
+
+    showAlert('success', 'Partial Reset Complete', `${summaryText} System will now reload.`, () => {
        sessionStorage.setItem('app_is_reloading_after_reset', 'true');
        window.location.reload();
     }, undefined, 'RELOAD NOW', undefined, undefined, 5, false, 'Disk Cleanup in Progress...');
-  }, [showAlert, activeCompanyId, getCKey]);
+  }, [showAlert, activeCompanyId, getCKey, payrollHistory, attendances, advanceLedgers, fines, arrearHistory, otRecords]);
 
   const handleDeepReset = useCallback(async (deleteFolder = true, targetCompanyId?: string) => {
     const purgeId = targetCompanyId || activeCompanyId;

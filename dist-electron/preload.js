@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 var electron_1 = require("electron");
+var electronModule = require('electron');
 electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     saveReport: function (fileName, data, type, subfolder) {
         return electron_1.ipcRenderer.invoke('save-report', { fileName: fileName, data: data, type: type, subfolder: subfolder });
@@ -30,7 +31,21 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         return electron_1.ipcRenderer.invoke('run-backup', fileName ? { data: data, fileName: fileName, subfolder: subfolder } : data);
     },
     createDataBackup: function (arg) { return electron_1.ipcRenderer.invoke('create-data-backup', arg); },
+    runFullBackup: function (arg) { return electron_1.ipcRenderer.invoke('run-full-backup', arg); },
     restoreSqliteBackup: function (arg) { return electron_1.ipcRenderer.invoke('restore-sqlite-backup', arg); },
+    restoreFromSnapshot: function (snapshotFileName) { return electron_1.ipcRenderer.invoke('restore-from-snapshot', snapshotFileName); },
+    listSafetySnapshots: function () { return electron_1.ipcRenderer.invoke('list-safety-snapshots'); },
+    selectBackupFile: function () { return electron_1.ipcRenderer.invoke('select-backup-file'); },
+    getPathForFile: function (file) {
+        try {
+            var webUtils = electronModule.webUtils;
+            if (webUtils && typeof webUtils.getPathForFile === 'function') {
+                return webUtils.getPathForFile(file);
+            }
+        }
+        catch (_) { }
+        return file.path || file.filePath || '';
+    },
     closeApp: function () { return electron_1.ipcRenderer.invoke('close-app'); },
     hardResetApp: function () { return electron_1.ipcRenderer.invoke('hard-reset-app'); },
     closeUpdateMessage: function () { return electron_1.ipcRenderer.invoke('close-update-message'); },
@@ -57,6 +72,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         return electron_1.ipcRenderer.invoke('handle-statutory-form', { formName: formName, action: action });
     },
     getOSVersion: function () { return electron_1.ipcRenderer.invoke('get-os-version'); },
+    signalInitComplete: function () { return electron_1.ipcRenderer.invoke('app-initialization-complete'); },
     setFullScreen: function (flag) { return electron_1.ipcRenderer.invoke('set-fullscreen', flag); },
     getIsFullScreen: function () { return electron_1.ipcRenderer.invoke('get-fullscreen'); },
     onUpdateDownloadComplete: function (callback) {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { User2, Edit2, Trash2 } from 'lucide-react';
-import { Employee, User } from '../../types';
+import { Employee, User, getBranchName } from '../../types';
 import { formatDateInd } from '../../services/reportService';
 import { formatIndianNumber } from '../../utils/formatters';
 
@@ -71,7 +71,7 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                                 <div className="text-[10px] text-sky-400 font-black uppercase tracking-wider truncate text-left pl-12">{emp.designation}</div>
                             </td>
                             <td className="px-4 py-2.5 overflow-hidden">
-                                <div className="text-[9px] text-amber-200/80 font-bold uppercase truncate tracking-wide">{emp.branch || emp.site || 'Main Office'}</div>
+                                <div className="text-[9px] text-amber-200/80 font-bold uppercase truncate tracking-wide">{getBranchName(emp.branch) || (typeof emp.site === 'object' ? (emp.site as any)?.name : emp.site) || 'Main Office'}</div>
                             </td>
                             <td className="px-2 py-2.5 text-center">
                                 <div className="text-[10px] font-bold font-mono text-slate-300 whitespace-nowrap">{formatDateInd(emp.doj)}</div>

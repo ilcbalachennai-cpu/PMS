@@ -11,21 +11,48 @@ import { getActivePaySheetColumns } from '../constants';
 
 export const resolveBranchCompanyProfile = (companyProfile: any, branchName?: string, branches?: any[]): any => {
     if (!companyProfile) return companyProfile;
-    if (!branchName || !branches || !Array.isArray(branches) || branches.length === 0) return companyProfile;
+    if (!branchName || typeof branchName !== 'string' || !branchName.trim()) return companyProfile;
+
+    const cleanBranch = branchName.trim();
+    const baseEstName = companyProfile.establishmentName || '';
+    const branchEstName = baseEstName.includes(' - Branch : ') 
+        ? baseEstName 
+        : `${baseEstName} - Branch : ${cleanBranch}`;
+
+    if (!branches || !Array.isArray(branches) || branches.length === 0) {
+        return {
+            ...companyProfile,
+            establishmentName: branchEstName
+        };
+    }
 
     const targetBranch = branches.find((b: any) => {
         const name = typeof b === 'string' ? b : b?.name;
-        return String(name || '').trim().toLowerCase() === String(branchName).trim().toLowerCase();
+        return String(name || '').trim().toLowerCase() === cleanBranch.toLowerCase();
     });
 
-    if (!targetBranch || typeof targetBranch === 'string') return companyProfile;
+    if (!targetBranch || typeof targetBranch === 'string') {
+        return {
+            ...companyProfile,
+            establishmentName: branchEstName
+        };
+    }
 
     return {
         ...companyProfile,
-        address: targetBranch.address?.trim() || [companyProfile.doorNo, companyProfile.buildingName, companyProfile.street, companyProfile.area, companyProfile.city, companyProfile.state, companyProfile.pincode].filter(Boolean).join(', '),
+        establishmentName: branchEstName,
+        doorNo: '',
+        buildingName: '',
+        street: targetBranch.address?.trim() || companyProfile.street,
+        locality: '',
+        area: '',
+        city: '',
+        state: '',
+        pincode: '',
         pfCode: targetBranch.pfCode?.trim() || companyProfile.pfCode,
         esiCode: targetBranch.esiCode?.trim() || companyProfile.esiCode,
         ptTaxCode: targetBranch.ptTaxCode?.trim() || companyProfile.ptTaxCode,
+        ptNo: targetBranch.ptTaxCode?.trim() || companyProfile.ptNo || companyProfile.ptTaxCode,
         contactPerson: targetBranch.contactPerson?.trim() || companyProfile.contactPerson,
         mobile: targetBranch.mobile?.trim() || companyProfile.mobile,
         officialEmail: targetBranch.email?.trim() || companyProfile.officialEmail || companyProfile.email,

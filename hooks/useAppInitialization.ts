@@ -103,6 +103,11 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
       console.error("License verification failed during initApp:", licErr);
     }
     setIsBootSyncComplete(true);
+    // @ts-ignore
+    if (window.electronAPI && typeof window.electronAPI.signalInitComplete === 'function') {
+      // @ts-ignore
+      window.electronAPI.signalInitComplete();
+    }
   }, [verifyLicense]);
 
   useEffect(() => {

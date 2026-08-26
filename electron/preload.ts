@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+const electronModule = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
     saveReport: (fileName: string, data: Uint8Array, type: string, subfolder?: string) =>
@@ -24,7 +25,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     createDataBackup: (arg: any) => ipcRenderer.invoke('create-data-backup', arg),
+    runFullBackup: (arg: any) => ipcRenderer.invoke('run-full-backup', arg),
     restoreSqliteBackup: (arg: any) => ipcRenderer.invoke('restore-sqlite-backup', arg),
+    restoreFromSnapshot: (snapshotFileName?: string) => ipcRenderer.invoke('restore-from-snapshot', snapshotFileName),
+    listSafetySnapshots: () => ipcRenderer.invoke('list-safety-snapshots'),
+    selectBackupFile: () => ipcRenderer.invoke('select-backup-file'),
+    getPathForFile: (file: File) => {
+        try {
+            const webUtils = (electronModule as any).webUtils;
+            if (webUtils && typeof webUtils.getPathForFile === 'function') {
+                return webUtils.getPathForFile(file);
+            }
+        } catch (_) {}
+        return (file as any).path || (file as any).filePath || '';
+    },
     closeApp: () => ipcRenderer.invoke('close-app'),
     hardResetApp: () => ipcRenderer.invoke('hard-reset-app'),
     closeUpdateMessage: () => ipcRenderer.invoke('close-update-message'),
@@ -48,6 +62,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     handleStatutoryForm: (formName: string, action: 'preview' | 'download') =>
         ipcRenderer.invoke('handle-statutory-form', { formName, action }),
     getOSVersion: () => ipcRenderer.invoke('get-os-version'),
+    signalInitComplete: () => ipcRenderer.invoke('app-initialization-complete'),
     setFullScreen: (flag: boolean) => ipcRenderer.invoke('set-fullscreen', flag),
     getIsFullScreen: () => ipcRenderer.invoke('get-fullscreen'),
     onUpdateDownloadComplete: (callback: () => void) => {

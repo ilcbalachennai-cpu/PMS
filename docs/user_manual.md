@@ -431,108 +431,109 @@ Simulates ESI medical cover contributions and statutory eligibility shifts:
 
 ---
 
-## 10. Legacy Data Migration
-
-The Legacy Data Migration module is an advanced ETL (Extract, Transform, Load) pipeline designed strictly to bridge the architectural gap between older single-company environments and the new multi-establishment database platform.
-
-> [!IMPORTANT]
-> **Under what circumstance is it used?**
-> This utility is used **only** when an organization is upgrading from a legacy major version of BharatPay Pro (specifically the **V2 series** or older, which operated in a single-company environment where all database records were globally stored under a single, non-isolated file structure).
-> *Do NOT use this tool for daily backups, restoration of current V5 environments, or moving data between active V5 installations (for which you should use standard Backup and Restore tools under Section 11).*
-
-### 10.1 Why is Legacy Migration Required?
-In older legacy versions, employee profiles, statutory registers, and monthly payroll histories lacked a distinct **Establishment ID** or **Company Silo Scope**. The V5 engine runs in a fully isolated sandbox environment. The migration engine is built to safely reflow, map, and import those older structures into the new Multi-Company system without data loss or record duplication.
-
-### 10.2 How it Works: Step-by-Step Migration Guide
-1.  **Silo Provisioning**: First, launch BharatPay Pro V05 and register a brand new establishment silo to act as the destination container for the legacy data (following the steps in Section 2.1).
-2.  **Access the Utility**: Log into your newly created establishment silo, navigate to **Utilities > Data Management** from the main dashboard, and select the **"Previous Version Data"** tab.
-3.  **Upload Legacy Database**: Click the **"Import Legacy Database"** button and browse to locate your legacy backup file (typically named `active_db.sqlite` or an encrypted `.enc` backup file from your old installation).
-4.  **Automated Structural Transformation**: Once uploaded, the migration engine runs a background processing pipeline:
-    *   *Entity Mapping*: Automatically parses legacy tables and maps the global employee records to new unique, company-scoped ID schemas (preventing key conflicts).
-    *   *Wage Slabs Conversion*: Transforms older wage components to conform to the new **Code Wages** and statutory definition rules.
-    *   *History Recompilation*: Rebuilds past monthly payroll logs and staging databases month-by-month, carrying forward historical leave balances and advances securely.
-5.  **Verify Migration Logs**: Upon completion, the system displays a migration summary log, showing total migrated employee records, historic payroll months recovered, and flags any statutory field mismatches (like missing UAN or ESI registers) for immediate correction.
-
-> [!WARNING]
-> **One-Time Operation:** Migration should only be performed once per legacy establishment. Performing a legacy import on an active, populated V5 silo will overwrite the current database and corrupt active staging records. Always perform a local secure backup before initiating any migration actions.
-
 ---
 
-## 11. Data Management Functions
+## 9. Data Management Functions
 
-BharatPay Pro provides advanced data maintenance tools to ensure your establishment records remain healthy and secure. Each function is strictly scoped to the **active establishment** only.
+BharatPay Pro provides advanced data maintenance tools to ensure your establishment records remain healthy and secure. Each function is strictly scoped to the **active establishment** only, ensuring complete multi-tenant data isolation.
 
-### 11.1 Backup Data (LOCAL SECURE BACKUP)
-Creates a high-security encrypted snapshot (`.enc`) of the active establishment's database. It is highly recommended to perform a backup before every payroll finalization.
+### 9.1 Backup Data (LOCAL SECURE BACKUP)
+* **Primary Purpose:** Creates a high-security, encrypted snapshot (`.enc`) of the active establishment's database.
+* **Importance:** Highly recommended before finalizing monthly payrolls, before major system updates, or for routine data archiving.
+* **Full Process & Workflow:**
+  1. The user initiates **Initiate Local Backup** from the Data Management Center.
+  2. The system prompts for an optional custom encryption password (or defaults to the Universal Portable Encryption Standard `INITIAL_PMS_KEY`).
+  3. The engine extracts all database tables, encrypts the payload using AES-256-CBC with a 16-byte prepended random Initialization Vector (IV) header, and generates a timestamped `.enc` archive file.
 
-### 11.2 Restore Data (DATA SWAPPING & MACHINE PORTABILITY)
-Imports an existing backup into the active establishment silo. This selectively updates the unit's operational pay records while preserving local company profiles and system security signatures.
+### 9.2 Data Migration (CROSS-MACHINE PORTABILITY / PAY LEDGERS ONLY)
+* **Primary Purpose:** Safely transfers operational payroll data from **Machine A** to **Machine B** without disrupting Machine B’s registered company profile, user accounts, or system license signatures.
+* **Importance:** Essential when moving payroll work between computers (e.g., from an office desktop to a laptop or accountant machine).
+* **Full Process & Step-by-Step Workflow:**
+  1. **Source Backup (Machine A):** Perform a **Local Secure Backup** on Machine A to create the `.enc` file.
+  2. **File Transfer:** Copy the `.enc` file to Machine B via USB drive or secure email.
+  3. **Target Selection (Machine B):** Log into the matching target establishment on Machine B and navigate to **Utilities > Data Management > Data Migration**.
+  4. **Two-Tier Compatibility Verification:**
+     * **Hard Block Gate:** The engine inspects 6 core identity attributes (Silo ID, Company Name, PAN, CIN, PF Code, ESI Code). If values are present on both sides but **differ**, migration is strictly blocked to prevent importing data into the wrong company.
+     * **Interactive Confirmation Gate:** If Silo ID & Company Name match, but optional statutory fields (PAN, CIN, PF, ESI) are **blank on either side**, the system displays an **Incomplete Profile Warning Modal**, allowing the user to click **"Proceed Anyway"** or **"Cancel"**.
+  5. **Automated Pre-Operation Safety Snapshot:** Before altering any records on Machine B, the system automatically creates a timestamped fallback copy (`active_db_pre_restore.snapshot.bak`).
+  6. **Selective Pay Ledger Import:** The engine replaces operational tables (Employees, Monthly Attendance, Payroll History, Leave/Advance Ledgers, Fines, OT Records), while **strictly preserving** Machine B's existing Company Profile (`company_profile`), Statutory Rules (`config`), Logins (`users`), and License Signature (`companySignature`).
 
 > [!TIP]
-> **Data Swapping & Porting Between Licensed Machines (Machine A to Machine B):**
-> **Under What Circumstances is it Allowed?**
-> Data swapping is allowed when transferring operational payroll records for an establishment from a source machine (Machine A) to a destination machine (Machine B).
-> 
-> **Mandatory Profile Matching Rule:**
-> The destination company profile on Machine B (Establishment Name, Company ID, PAN/CIN) **MUST MATCH EXACTLY** with the source company profile from Machine A. If company details do not match, the system will block the import to prevent data corruption or unauthorized overwrites.
-> 
-> **Selective Pay Data Import (BC / AC Model):**
-> *   **What is Imported:** The migration engine selectively imports *only* operational pay data — Employees, Monthly Attendance Sheets, Payroll History, Leave & Advance Ledgers, Fines, OT Records, and Master Designations/Divisions/Branches/Sites.
-> *   **What is Protected:** Machine B's existing Company Profile (`company_profile`), Statutory Compliance Rules (`config`), User Accounts (`users`), and System Security Signature (`companySignature`) are **strictly preserved and never overwritten**.
-> *   **Slot Count & License Security:** The import will **never** add duplicate companies or alter your registered company list (`app_companies`). Your registered company count remains locked at `3 / 3`, keeping your app in full-featured mode.
-> 
-> **Step-by-Step Data Swapping Guide:**
-> 1. Perform a **Backup Data** operation on Machine A to generate the `.enc` backup file.
-> 2. Transfer the `.enc` file to Machine B (via USB or secure cloud drive).
-> 3. On Machine B, log into the matching target establishment (ensuring Establishment Name and Company ID match Machine A).
-> 4. Go to **System Configuration > Data Management > Restore Data** and select the `.enc` file. The operational pay data is now seamlessly ported!
+> **Data Swapping & Porting Summary:**
+> * **What is Imported:** Operational pay data — Employees, Monthly Attendance Sheets, Payroll History, Leave & Advance Ledgers, Fines, OT Records, and Master Designations/Divisions/Branches/Sites.
+> * **What is Protected:** Machine B's existing Company Profile, Statutory Compliance Rules, User Accounts, and System Security Signature are **strictly preserved and never overwritten**.
+
+### 9.3 Universal Restoration (STRICT SINGLE-MACHINE DISASTER RECOVERY)
+* **Primary Purpose:** Full establishment disaster recovery after database corruption or system crash on the **EXACT SAME COMPUTER** where the backup was created.
+* **Importance:** Used strictly when recovering a damaged company database on the original computer.
+* **Full Process & Step-by-Step Workflow:**
+  1. The user selects a backup file (`.enc` or `.sqlite`) under **Universal Restoration**.
+  2. **Hardware Validation Check:** The engine reads the hardware Machine ID embedded inside the backup header.
+     * **If Hardware IDs Match:** The restoration proceeds with a full entity overwrite.
+     * **If Hardware IDs Mismatch (File came from another computer):** The engine **HARD BLOCKS** the restore and prompts the user to use **Data Migration** instead.
+  3. **Atomic Overwrite:** Creates a pre-operation safety snapshot, wipes the active target silo database, and performs a complete database restoration.
+
+> [!IMPORTANT]
+> **Strict Single-Machine Rule:** Universal Restoration is **POSSIBLE ONLY IF THE BACKUP WAS CREATED ON THE EXACT SAME LOCAL MACHINE**. Backups created on Machine A **CANNOT BE RESTORED** on Machine B using Universal Restoration (use Data Migration instead).
+
+### 9.4 Legacy Migration Wizard (UPGRADE FROM OLDER VERSIONS v2/v3/v4)
+* **Primary Purpose:** Bridges the architectural gap between older single-company software versions (v2/v3/v4) and the modern multi-company silo platform.
+* **Importance:** Used **ONLY** when upgrading from legacy software versions or importing old unencrypted backup files (`active_db.sqlite`) created before the multi-tenant architecture was introduced.
+* **Full Process & Step-by-Step Workflow:**
+  1. **Provision Silo:** Register a new establishment container in the current version.
+  2. **Launch Wizard:** Navigate to **Utilities > Data Management > Legacy Migration Wizard** and select the legacy backup file.
+  3. **Background ETL Pipeline:**
+     * *Entity Mapping:* Parses legacy global tables and assigns new company-scoped IDs.
+     * *Code Wages Conversion:* Transforms old wage structures to conform to new **Code Wages** compliance rules.
+     * *History Recompilation:* Rebuilds past monthly payroll logs and leave ledgers month-by-month.
+  4. **Audit Report:** Displays a summary log detailing migrated employee counts, historical months recovered, and any field formatting alerts.
 
 > [!WARNING]
-> **Read-Only Mode System Restrictions:**
-> When an establishment is flagged in **Read-Only Mode** (e.g. when license slot limits are exceeded or system signatures mismatch):
-> *   **"Process Payroll" Main Tab Deactivated:** The **Process Payroll** sidebar navigation tab is set to **INACTIVE / DISABLED** with a warning tooltip (*"Process Payroll Inactive: Company is in Read-Only Mode"*).
-> *   **No Edit or Input Operations Allowed:** All input fields across Attendance Entry, Overtime Records, Fine Registers, Leave/Advance Ledgers, Employee Master Edits, and Pay Calculations are strictly locked.
-> *   **View & Export Only:** You may view historical reports and export diagnostics, but no new data entry or calculation is permitted until the license/signature status is resolved.
+> **One-Time Operation:** Migration should only be performed once per legacy establishment. Performing a legacy import on an active, populated V5 silo will overwrite the current database. Always perform a local secure backup before initiating any migration actions.
 
-### 11.3 Previous Version Data (LEGACY MIGRATION)
-Provides a seamless import path for legacy databases, restoring structured employee and historical pay records from previous V3 or V4 major versions into the new multi-unit environment.
+### 9.5 Pre-Operation Safety Snapshot (AUTOMATED FALLBACK PROTECTION)
+* **Primary Purpose:** Automated safety buffer that shields the user from data loss during restore or migration operations.
+* **Full Process:** Automatically triggers before any write/restore command executes. The engine saves a physical database snapshot (`active_db_pre_restore.snapshot.bak`) and LocalStorage state (`app_safety_snapshot_[COMPANY_ID]`). If a power outage or transaction error occurs during processing, the engine automatically rolls back to the snapshot.
 
-### 11.4 Partial Payroll Reset (ONLY PAY DATA RESET)
-Clears only the payroll results for the **current active month**. This allows you to start the monthly processing from scratch if errors are detected, without affecting your Employee Master or previous months' history.
+### 9.6 Partial Payroll Reset (ONLY PAY DATA RESET)
+* **Primary Purpose:** Clears only the payroll calculation results and attendance logs for the **currently active processing month**.
+* **Importance & When to Use:** Used if calculation errors occurred during the current month's processing and you wish to recalculate from scratch without affecting Employee Master profiles or past historical months.
 
-### 11.5 Factory Reset (Company Scope)
-Wipes **all** data associated with the current establishment (Employees, Payroll History, and Settings). This action is permanent and requires the Administrator Password. Other establishments in your installation remain unaffected.
+### 9.7 Factory Reset (Company Scope)
+* **Primary Purpose:** Permanently wipes all data (Employees, History, Settings) for the **active establishment only**.
+* **Importance & When to Use:** Used when closing an establishment or restarting a company setup from scratch under Administrator password authentication. Other establishments in your installation remain unaffected.
 
-### 11.6 Purge System Logs
-Cleans the background activity logs and temporary calculation files. Regular purging helps maintain high application performance during complex payroll runs.
+### 9.8 Purge System Logs
+* **Primary Purpose:** Cleans background calculation logs, temporary report files, and cache files to maintain high application performance during bulk payroll processing.
 
-### 11.7 Purge Company (Permanent Silo Deletion)
-Permanently deletes an entire establishment silo, erasing its sqlite database file and all physical folders from your installation. This frees up licensed company slots if an establishment is closed or created by mistake.
+### 9.9 Purge & Dismount Company (SILO DISMOUNT vs PERMANENT DELETION)
+Provides two distinct modes for managing inactive establishment silos:
+
+* **Option A: Dismount Company (Dashboard Removal / Unmount):**
+  * **Function:** Removes the target company from the **Organization Selector** screen and **Dashboard List** without deleting any underlying operational data.
+  * **Disk Protection:** The physical SQLite database files and company directories remain 100% intact on disk.
+  * **Re-mounting:** Dismounted companies can be re-loaded into your dashboard list at any time using **Rescue Company**.
+* **Option B: Permanent Deletion (Hard Silo Purge):**
+  * **Function:** Permanently wipes the establishment silo from disk under active **Administrator Password Authorization**.
+  * **Disk Purge:** Erases its SQLite database file, physical folder structure, and frees up a registered company slot. This action is **irreversible**.
 
 > [!WARNING]
-> **Active Silo Protection Lock:** To prevent catastrophic data loss, the system **never** allows you to delete or purge the currently active company. If you attempt to delete the active company, a prohibited warning is shown.
-> *The "Shut Company" Rule:* To purge a company, you must first switch to another active company (rendering the target company "inactive" or "shut" in your session), return to the Company Selector (Organization Gate), and then perform the delete action.
-
-#### Step-by-Step Deletion Flow:
-1.  **Open Organization Gate**: Go to the startup Company Selector portal (via startup, logging out, or clicking "Exit to Company Gate" in Settings).
-2.  **Toggle Purge Mode**: Click the red **"Delete Company"** button in the Selection screen to enter Purge Mode. Inactive companies will display a red Trash/Delete icon.
-3.  **Select Inactive Company**: Click the delete icon on the target "shut" company.
-4.  **Verify Security Password**: The **Secure Purge Authorization** modal will appear.
-5.  **Authenticate**: Enter your active **Administrator Password** and click **"Authorize Purge"**. The engine will instantly wipe all database tables, delete the local SQLite file and folder structure, and free up the licensed slot.
+> **Active Silo Protection Lock & "Shut Company" Rule:**
+> To prevent catastrophic data loss, the system **never** allows you to dismount or purge the currently active company. You must first switch to another active company (rendering the target company "inactive" or "shut" in your current session), return to the Organization Gate (Company Selector), enter Purge Mode, and perform the desired action under Administrator authentication.
 
 ---
 
-## 12. Troubleshooting & Support
+## 10. Troubleshooting & Support
 
-### 12.1 Common Errors
+### 10.1 Common Errors
 *   **"Security Violation"**: Occurs if system clock is changed. Reset to "Internet Time".
 *   **"License Locked"**: Ensure internet connectivity. For hardware changes, use **Identity Restoration**.
 
-### 12.2 Contacting Support
+### 10.2 Contacting Support
 📧 **Email**: ilcbala.Bharatpayroll@gmail.com
 📞 **Support**: Refer to your License Agreement for the dedicated helpdesk number.
 
-### 12.3 Important Troubleshooting
+### 10.3 Important Troubleshooting
 > [!IMPORTANT]
 > **IN CASE THE APP FAILS TO LOAD OR IS CORRUPTED**, go to the main installation folder (e.g., `D:\BharatPayRoll`) and **DOUBLE CLICK THE Launch_BPP_Installer.exe** to download/install fresh and launch the app again without any errors.
 

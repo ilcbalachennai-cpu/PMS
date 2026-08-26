@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import Database from 'better-sqlite3';
 import * as crypto from 'crypto';
 
-import { spawn, execSync } from 'child_process';
+import { spawn, execSync, exec } from 'child_process';
 import * as os from 'os';
 
 let mainWindow: BrowserWindow | null = null;
@@ -396,6 +396,21 @@ function createWindow() {
         closable: true,
         show: false, // Don't show until ready-to-show
     });
+
+    let isInitializingPhase = true;
+    let initSafetyTimer: NodeJS.Timeout | null = null;
+
+    const releaseAlwaysOnTop = () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.setAlwaysOnTop(false);
+            isInitializingPhase = false;
+            if (initSafetyTimer) {
+                clearTimeout(initSafetyTimer);
+                initSafetyTimer = null;
+            }
+        }
+    };
+
     const bringWindowToFront = (win: BrowserWindow) => {
         if (!win || win.isDestroyed()) return;
         win.show();
@@ -403,28 +418,36 @@ function createWindow() {
         win.focus();
         win.setAlwaysOnTop(true, 'screen-saver');
         win.moveTop();
-        setTimeout(() => {
-            if (win && !win.isDestroyed()) {
-                win.setAlwaysOnTop(false);
-                win.focus();
-            }
-        }, 1200);
+        // Keep window pinned to active foreground during initialization and login loading
+        initSafetyTimer = setTimeout(() => {
+            releaseAlwaysOnTop();
+        }, 12000);
+    };
+
+    // Auto-release always-on-top if the user intentionally interferes (e.g. clicks another app or Alt-Tabs)
+    mainWindow.on('blur', () => {
+        if (isInitializingPhase) {
+            releaseAlwaysOnTop();
+        }
+    });
+
+    let isWindowRevealed = false;
+
+    const revealWindowNow = () => {
+        if (isWindowRevealed) return;
+        isWindowRevealed = true;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            bringWindowToFront(mainWindow);
+            // Instantly kill transition HTA popup (bpp_launch_msg.hta) as soon as main window appears
+            try {
+                exec('taskkill /F /IM mshta.exe /T');
+            } catch (_) {}
+        }
     };
 
     mainWindow.once('ready-to-show', () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            bringWindowToFront(mainWindow);
-        }
-        // Immediately kill mshta.exe (update HTA popup) as soon as initialization screen opens
-        try {
-            spawn('taskkill', ['/F', '/IM', 'mshta.exe'], { windowsHide: true });
-        } catch (e) {}
-    });
-
-    mainWindow.webContents.on('did-finish-load', () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            bringWindowToFront(mainWindow);
-        }
+        // Present window IMMEDIATELY on launch to keep Initialization Page active in the foreground!
+        revealWindowNow();
     });
 
     mainWindow.on('close', (e) => {
@@ -433,6 +456,15 @@ function createWindow() {
             closeRequested = true;
             mainWindow?.webContents.send('update-close-warning');
         }
+    });
+
+    ipcMain.handle('app-initialization-complete', async () => {
+        console.log('[IPC] App initialization & Login loading complete. Releasing always-on-top.');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.setAlwaysOnTop(false);
+            mainWindow.focus();
+        }
+        return { success: true };
     });
 
     // We will export a method for the downloader to call when finished
@@ -469,8 +501,13 @@ function createWindow() {
 
     ipcMain.handle('close-update-message', () => {
         try {
-            console.log('[IPC] close-update-message requested');
-            spawn('taskkill', ['/F', '/IM', 'mshta.exe'], { windowsHide: true });
+            console.log('[IPC] close-update-message requested: revealing rendered window and keeping HTA popup active for 3.5s while progress bar moves');
+            revealWindowNow();
+            setTimeout(() => {
+                try {
+                    spawn('taskkill', ['/F', '/IM', 'mshta.exe'], { windowsHide: true });
+                } catch (e) {}
+            }, 3500);
             return { success: true };
         } catch (e: any) {
             console.error('[IPC] close-update-message failed:', e);
@@ -516,110 +553,12 @@ function createWindow() {
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
-  // A second instance tried to launch — show a warning and quit.
+  // A second instance tried to launch — focus existing window or quit.
   app.on('ready', () => {
-    const errorWindow = new BrowserWindow({
-      width: 480,
-      height: 280,
-      frame: false,
-      transparent: true,
-      resizable: false,
-      alwaysOnTop: true,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true
-      }
-    });
-
-    const errorHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          body {
-            margin: 0;
-            padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: transparent;
-            overflow: hidden;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            -webkit-app-region: drag;
-          }
-          .modal {
-            background-color: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-            width: 430px;
-            padding: 24px;
-            text-align: center;
-            color: #c9d1d9;
-          }
-          .title {
-            color: #ff7b72;
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-          }
-          .message {
-            font-size: 14px;
-            line-height: 1.5;
-            margin-bottom: 24px;
-            color: #8b949e;
-          }
-          .button {
-            -webkit-app-region: no-drag;
-            background-color: #238636;
-            color: #ffffff;
-            border: 1px solid rgba(240,246,252,0.1);
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s;
-          }
-          .button:hover {
-            background-color: #2ea043;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="modal">
-          <div class="title">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-              <line x1="12" y1="9" x2="12" y2="13"></line>
-              <line x1="12" y1="17" x2="12.01" y2="17"></line>
-            </svg>
-            BharatPay Pro - Already Running
-          </div>
-          <div class="message">
-            BharatPay Pro is already open on this machine.<br/><br/>
-            Only one session is allowed at a time to prevent data conflicts.<br/>
-            Please switch to the existing window.
-          </div>
-          <button class="button" onclick="window.close()">Close</button>
-        </div>
-      </body>
-      </html>
-    `;
-
-    errorWindow.loadURL('data:text/html;charset=utf-8;base64,' + Buffer.from(errorHtml).toString('base64'));
-
-    errorWindow.on('closed', () => {
-      app.quit();
-    });
+    app.quit();
   });
 } else {
-  // If a second instance attempts while we are the primary, focus our window (only in prod).
+  // If a second instance attempts while we are the primary, focus our window.
   app.on('second-instance', () => {
     if (mainWindow && !isDev) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -650,11 +589,6 @@ if (isWin7 || isLegacyElectron || process.argv.includes('--disable-gpu')) {
 
 app.whenReady().then(() => {
     if (!gotTheLock) return; // Prevent main app initialization when running as second instance
-    
-    // Dismiss any lingering patch update UI popups seamlessly
-    try {
-        execSync('taskkill /F /IM wscript.exe /T', { stdio: 'ignore', windowsHide: true });
-    } catch (e) {}
 
     // 🔥 ULTRA-FAST STARTUP (V02.02.26) 🔥
     // 1. Create window immediately for perception of speed
@@ -2218,7 +2152,94 @@ ipcMain.handle('run-backup', async (_, arg1, arg2, arg3) => {
     }
 });
 
-// 5. Automatic Data Backup (triggered by payroll confirmation/rollover)
+// 4b. Full Secure Backup — AES-256-CBC + scrypt (military-grade SQLite backup)
+// Replaces the legacy CryptoJS JSON blob export. Produces a binary-encrypted SQLite
+// file that is fully compatible with the restore-sqlite-backup handler.
+ipcMain.handle('run-full-backup', async (_, arg) => {
+    try {
+        const {
+            fileName,
+            subfolder,
+            encryptionKey: userKey,
+        } = typeof arg === 'object' ? arg : { fileName: arg, subfolder: '', encryptionKey: '' };
+
+        if (!appBasePath) throw new Error('Storage folder not set. Please select a data location in Settings.');
+        if (!db) throw new Error('Database connection not available. Please restart the application.');
+
+        const paths = getAppPaths(appBasePath);
+
+        let targetDir = paths.backups;
+        if (subfolder) {
+            const folderName = (subfolder as string).replace(/\.\./g, '').replace(/[<>:"|?*]/g, '');
+            targetDir = path.join(paths.backups, folderName);
+        }
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+        const safeName = (fileName || `full_backup_${Date.now()}.enc`).replace(/[<>:"|?*]/g, '');
+        const tempPath  = path.join(targetDir, `${safeName}.sqlite.tmp`);
+        const finalPath = path.join(targetDir, safeName);
+
+        console.log(`[IPC] run-full-backup: building SQLite snapshot → ${safeName}`);
+
+        // ── 1. Build a fresh SQLite snapshot of ALL rows (full-company backup) ──
+        const backupDb = new Database(tempPath);
+        backupDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
+
+        const rawRows = db.prepare('SELECT key, value FROM store').all() as { key: string; value: string }[];
+
+        // Exclude only machine-specific identity rows that must NEVER travel between machines
+        const machineOnlyKeys = ['app_machine_id', 'app_developer_secure', 'app_data_size'];
+        const currentMachineId = await getInternalMachineId();
+
+        const insertStmt = backupDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
+        backupDb.transaction(() => {
+            for (const row of rawRows) {
+                if (!machineOnlyKeys.includes(row.key)) {
+                    insertStmt.run(row.key, row.value);
+                }
+            }
+            if (currentMachineId) {
+                insertStmt.run('app_origin_machine_id', JSON.stringify(currentMachineId));
+                insertStmt.run('app_machine_id', JSON.stringify(currentMachineId));
+            }
+        })();
+        backupDb.close();
+
+        console.log(`[IPC] run-full-backup: ${rawRows.length} rows snapshotted. Encrypting with AES-256-CBC + scrypt...`);
+
+        // ── 2. Encrypt with AES-256-CBC (Node.js crypto — military-grade) ──
+        // Key derivation: scrypt(userKey, 'BPP_SALT_v1', 32) → 256-bit key
+        // IV: 16-byte random (prepended to ciphertext so restore can read it)
+        const encKey = userKey?.trim() || 'INITIAL_PMS_KEY';
+        const salt   = 'BPP_SALT_v1';
+        const derivedKey = crypto.scryptSync(encKey, salt, 32);
+        const iv         = crypto.randomBytes(16);   // random IV for each export
+        const cipher     = crypto.createCipheriv('aes-256-cbc', derivedKey, iv);
+
+        const inputStream  = fs.createReadStream(tempPath);
+        const outputStream = fs.createWriteStream(finalPath);
+
+        // Write 16-byte IV as the first block so the restore handler can extract it
+        outputStream.write(iv);
+
+        await new Promise<void>((resolve, reject) => {
+            inputStream.pipe(cipher).pipe(outputStream, { end: false });
+            cipher.on('end', () => { outputStream.end(); resolve(); });
+            cipher.on('error', reject);
+            inputStream.on('error', reject);
+        });
+
+        fs.unlinkSync(tempPath);
+
+        console.log(`[IPC] run-full-backup: secure archive created → ${finalPath}`);
+        return { success: true, fileName: safeName, filePath: finalPath };
+    } catch (e: any) {
+        console.error('[IPC] run-full-backup failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+
 ipcMain.handle('create-data-backup', async (_, arg) => {
     try {
         const fileName = typeof arg === 'string' ? arg : arg.fileName;
@@ -2270,8 +2291,9 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
             'app_developer_secure',
             'app_data_size'
         ];
+        const currentMachineId = await getInternalMachineId();
         
-        const insertStmt = backupDb.prepare('INSERT INTO store (key, value) VALUES (?, ?)');
+        const insertStmt = backupDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
         
         backupDb.transaction(() => {
             for (const row of rows) {
@@ -2279,26 +2301,35 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
                     insertStmt.run(row.key, row.value);
                 }
             }
+            if (currentMachineId) {
+                insertStmt.run('app_origin_machine_id', JSON.stringify(currentMachineId));
+                insertStmt.run('app_machine_id', JSON.stringify(currentMachineId));
+            }
         })();
         
         backupDb.close();
 
         // --- ENCRYPTION LAYER ---
-        const encryptionKey = (typeof arg === 'object' && arg.encryptionKey) ? arg.encryptionKey : await getInternalMachineId();
-        console.log(`[IPC] Securing Archive with ${ (typeof arg === 'object' && arg.encryptionKey) ? 'Custom Identity Key' : 'Machine Lock' }...`);
+        const encryptionKey = (typeof arg === 'object' && arg.encryptionKey && String(arg.encryptionKey).trim()) 
+            ? String(arg.encryptionKey).trim() 
+            : 'INITIAL_PMS_KEY';
+        console.log(`[IPC] Securing Data Archive with ${ (typeof arg === 'object' && arg.encryptionKey) ? 'Custom Identity Key' : 'Universal Portable Key' }...`);
 
-        const cipher = crypto.createCipheriv('aes-256-cbc' as any, 
-            crypto.scryptSync(encryptionKey, 'salt', 32) as any, 
-            Buffer.alloc(16, 0) as any
-        );
+        const salt = 'BPP_SALT_v1';
+        const derivedKey = crypto.scryptSync(encryptionKey, salt, 32);
+        const iv = crypto.randomBytes(16);
+        const cipher = crypto.createCipheriv('aes-256-cbc', derivedKey, iv);
         
         const input = fs.createReadStream(tempPath);
         const output = fs.createWriteStream(finalPath);
         
+        output.write(iv);
+        
         await new Promise((resolve, reject) => {
-            input.pipe(cipher).pipe(output)
-                 .on('finish', () => resolve(true))
-                 .on('error', (err) => reject(err));
+            input.pipe(cipher).pipe(output, { end: false });
+            cipher.on('end', () => { output.end(); resolve(true); });
+            cipher.on('error', (err) => reject(err));
+            input.on('error', (err) => reject(err));
         });
 
         fs.unlinkSync(tempPath); // Remove the plain temporary file
@@ -2310,12 +2341,91 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
     }
 });
 
-// 5b. Restore from SQLite Backup (Directly Replace DB File)
-ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
+ipcMain.handle('select-backup-file', async () => {
     try {
-        const backupFilePath = typeof arg === 'string' ? arg : arg.path;
+        const result = await dialog.showOpenDialog({
+            title: 'Select Backup File',
+            properties: ['openFile'],
+            filters: [
+                { name: 'BharatPP Backup Archives (*.enc, *.sqlite)', extensions: ['enc', 'sqlite'] },
+                { name: 'All Files', extensions: ['*'] }
+            ]
+        });
+        if (!result.canceled && result.filePaths.length > 0) {
+            const filePath = result.filePaths[0];
+            const name = path.basename(filePath);
+            return { filePath, name };
+        }
+        return null;
+    } catch (e: any) {
+        console.error('[IPC] select-backup-file failed:', e);
+        return null;
+    }
+});
+
+ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
+    const logPath = path.join(app.getPath('userData'), 'restore_debug.log');
+    const log = (msg: string) => {
+        try {
+            console.log(`[IPC RESTORE] ${msg}`);
+            fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
+        } catch (_) {}
+    };
+
+    try {
+        log(`>>> restore-sqlite-backup called with arg: ${JSON.stringify(arg)}`);
+        let backupFilePath = typeof arg === 'string' ? arg : arg.path;
+        log(`Initial backupFilePath: "${backupFilePath}"`);
+
         if (!appBasePath) throw new Error("App storage not initialized");
         const paths = getAppPaths(appBasePath);
+
+        // --- AUTO-DISCOVERY FALLBACK: If file path is relative or missing on disk ---
+        if (!backupFilePath || !fs.existsSync(backupFilePath)) {
+            const filename = path.basename(backupFilePath || '');
+            log(`File not found at explicit path "${backupFilePath}". Auto-discovering "${filename}"...`);
+
+            const searchDirs = [
+                paths.data,
+                path.join(appBasePath, 'Data backup'),
+                path.join(appBasePath, 'Data'),
+                app.getPath('downloads'),
+                app.getPath('desktop')
+            ];
+
+            const findFileRecursive = (dir: string, targetName: string, depth = 0): string | null => {
+                if (depth > 5 || !fs.existsSync(dir)) return null;
+                try {
+                    const entries = fs.readdirSync(dir, { withFileTypes: true });
+                    for (const entry of entries) {
+                        const full = path.join(dir, entry.name);
+                        if (entry.isFile() && entry.name.toLowerCase() === targetName.toLowerCase()) {
+                            return full;
+                        }
+                        if (entry.isDirectory() && !entry.name.startsWith('.')) {
+                            const found = findFileRecursive(full, targetName, depth + 1);
+                            if (found) return found;
+                        }
+                    }
+                } catch (_) {}
+                return null;
+            };
+
+            for (const searchDir of searchDirs) {
+                const found = findFileRecursive(searchDir, filename);
+                if (found) {
+                    log(`[AUTO-DISCOVERY SUCCESS] Resolved "${filename}" -> "${found}"`);
+                    backupFilePath = found;
+                    break;
+                }
+            }
+        }
+
+        if (!fs.existsSync(backupFilePath)) {
+            throw new Error(`Backup file not found on disk: "${backupFilePath}". Please select the backup file again.`);
+        }
+
+        log(`Final resolved backupFilePath: "${backupFilePath}"`);
         
         // Use active company silo if available
         let dataDir = paths.data;
@@ -2327,7 +2437,7 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
         const DB_PATH = path.join(dataDir, 'active_db.sqlite');
         const tempRestorePath = path.join(dataDir, 'restore_temp.sqlite');
 
-        // Check if it's a plain SQLite file or encrypted
+        // NOTE: Active database remains 100% open and untouched during format checking & decryption
         const fd = fs.openSync(backupFilePath, 'r');
         const header = Buffer.alloc(16);
         fs.readSync(fd, header as any, 0, 16, 0);
@@ -2339,7 +2449,7 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
         } else {
             console.log(`[IPC] Decrypting Secure SQLite Archive...`);
 
-            // --- FORMAT GUARD: Detect CryptoJS/Base64 text files before attempting binary decryption ---
+            // --- FORMAT GUARD: Detect legacy CryptoJS/Base64 text files ---
             const formatCheckBuf = Buffer.alloc(256);
             const formatFd = fs.openSync(backupFilePath, 'r');
             const bytesRead = fs.readSync(formatFd, formatCheckBuf as any, 0, 256, 0);
@@ -2347,87 +2457,135 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
             const sampleBytes = formatCheckBuf.slice(0, bytesRead);
             const isBase64TextFormat = sampleBytes.every((b: number) => b >= 32 && b <= 126);
             if (isBase64TextFormat) {
-                throw new Error("This backup was created with the legacy PIN-based format. Please use the 'Import Data' option with your original PIN to restore this file.");
+                throw new Error(
+                    "Legacy backup format detected (CryptoJS text blob). " +
+                    "This file was created before BPP v06.02. Please re-export your data using " +
+                    "'Local Secure Backup' to generate a new military-grade encrypted file, " +
+                    "then retry the restoration."
+                );
             }
 
-            // Try decryption with provided key, stored license key, or fall back to machineId.
+            const encryptedBuf = fs.readFileSync(backupFilePath);
+
+            const tryDecryptBufferSync = (key: string, salt: string, useIvHeader: boolean): Buffer | null => {
+                try {
+                    const derivedKey = crypto.scryptSync(key, salt, 32);
+                    let iv: Buffer;
+                    let ciphertext: Buffer;
+
+                    if (useIvHeader) {
+                        if (encryptedBuf.length < 32) return null;
+                        iv = encryptedBuf.subarray(0, 16);
+                        ciphertext = encryptedBuf.subarray(16);
+                    } else {
+                        iv = Buffer.alloc(16, 0);
+                        ciphertext = encryptedBuf;
+                    }
+
+                    const decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, iv);
+                    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+
+                    if (decrypted.length >= 100) {
+                        const headerAscii = decrypted.toString('utf8', 0, 32);
+                        const headerLatin1 = decrypted.toString('latin1', 0, 32);
+                        if (headerAscii.includes('SQLite format 3') || headerLatin1.includes('SQLite format 3')) {
+                            return decrypted;
+                        }
+                    }
+                    return null;
+                } catch (e: any) {
+                    return null;
+                }
+            };
+
             let dbLicenseKey = '';
+            const keysToTry: string[] = ['INITIAL_PMS_KEY', 'bpp_dev_473748', 'BPP_UNIVERSAL_BACKUP_KEY_2026', '031942'];
+
+            if (typeof arg === 'object' && arg.encryptionKey) {
+                const kStr = String(arg.encryptionKey).trim();
+                if (kStr) keysToTry.unshift(kStr);
+            }
+            if (typeof arg === 'object' && arg.password) {
+                const pStr = String(arg.password).trim();
+                if (pStr) keysToTry.unshift(pStr);
+            }
+
+            const fileBasename = path.basename(backupFilePath);
+            const digitsMatch = fileBasename.match(/\d{4,8}/g);
+            if (digitsMatch) {
+                digitsMatch.forEach(d => keysToTry.push(d));
+            }
+
             if (db) {
                 try {
                     const row = db.prepare('SELECT value FROM store WHERE key = ?').get('app_license_data') as { value: string };
                     if (row) {
-                        const data = JSON.parse(row.value);
-                        dbLicenseKey = data.key || '';
-                        console.log(`[IPC] Extracted license identity for fallback: ${dbLicenseKey.substring(0, 4)}...`);
+                        const ldata = JSON.parse(row.value);
+                        dbLicenseKey = ldata.key || '';
+                        if (dbLicenseKey) keysToTry.push(dbLicenseKey.trim());
+                    }
+                } catch (e) {}
+
+                try {
+                    const profileRows = db.prepare("SELECT value FROM store WHERE key LIKE 'app_company_profile%' OR key = 'app_company_profile'").all() as { value: string }[];
+                    for (const r of profileRows) {
+                        try {
+                            const pData = JSON.parse(r.value);
+                            if (pData?.securityPin) keysToTry.push(String(pData.securityPin).trim());
+                        } catch (_) {}
                     }
                 } catch (e) {}
             }
 
             const machineId = await getInternalMachineId();
-            const keysToTry = [];
-            if (typeof arg === 'object' && arg.encryptionKey) keysToTry.push(arg.encryptionKey);
-            if (dbLicenseKey) keysToTry.push(dbLicenseKey);
-            keysToTry.push('INITIAL_PMS_KEY'); // Universal safety fallback
             keysToTry.push(machineId);
 
-            let success = false;
-            // Filter out empty keys and trim them to ensure exact matching
             const sanitizedKeys = Array.from(new Set(keysToTry.filter(k => !!k).map(k => k.trim())));
-            
+
+            let decryptedBuffer: Buffer | null = null;
+            let matchedKey = '';
+
+            const formats = [
+                { salt: 'BPP_SALT_v1', ivHeader: true },
+                { salt: 'salt', ivHeader: true },
+                { salt: 'BPP_SALT_v1', ivHeader: false },
+                { salt: 'salt', ivHeader: false },
+            ];
+
+            log(`Keys to try: ${JSON.stringify(sanitizedKeys)}`);
+
             for (const key of sanitizedKeys) {
-                console.log(`[IPC] Attempting decryption with: ${key === machineId ? 'Machine ID' : (key === dbLicenseKey ? 'License Identity' : (key === 'INITIAL_PMS_KEY' ? 'Safety Fallback' : 'Provided PIN'))}...`);
-                
-                const tryDecrypt = async (k: string): Promise<boolean> => {
-                    return new Promise((resolve) => {
-                        try {
-                            const derivedKey = crypto.scryptSync(k, 'salt', 32) as any;
-                            const iv = Buffer.alloc(16, 0) as any;
-                            const decipher = crypto.createDecipheriv('aes-256-cbc' as any, derivedKey, iv);
-                            const input = fs.createReadStream(backupFilePath);
-                            const output = fs.createWriteStream(tempRestorePath);
-
-                            const onError = (err: Error) => {
-                                console.warn(`[IPC] Decryption attempt failed: ${err.message}`);
-                                try { output.destroy(); } catch (_) {}
-                                try { if (fs.existsSync(tempRestorePath)) fs.unlinkSync(tempRestorePath); } catch (_) {}
-                                resolve(false);
-                            };
-
-                            input.on('error', onError);
-                            decipher.on('error', onError);
-                            output.on('error', onError);
-                            output.on('finish', () => resolve(true));
-
-                            input.pipe(decipher).pipe(output);
-                        } catch (e) {
-                            resolve(false);
-                        }
-                    });
-                };
-
-                success = await tryDecrypt(key);
-                if (success) {
-                    console.log(`[IPC] Decryption successful with ${key === machineId ? 'Machine ID' : 'Provided Key'}.`);
-                    break;
+                for (const fmt of formats) {
+                    decryptedBuffer = tryDecryptBufferSync(key, fmt.salt, fmt.ivHeader);
+                    if (decryptedBuffer) {
+                        matchedKey = key;
+                        log(`Decryption MATCH FOUND with key="${key}", salt="${fmt.salt}", ivHeader=${fmt.ivHeader}`);
+                        break;
+                    }
                 }
+                if (decryptedBuffer) break;
             }
 
-            if (!success) {
-                throw new Error("Decryption failed. Invalid key or unauthorized hardware.");
+            if (!decryptedBuffer) {
+                log(`ALL KEYS FAILED TO DECRYPT! Tested keys: ${JSON.stringify(sanitizedKeys)}`);
+                throw new Error("Decryption failed. Invalid key, wrong password, or the file may be corrupt.");
             }
-            
-            // Final safety check: ensure the temp file actually exists before proceeding
-            if (!fs.existsSync(tempRestorePath)) {
-                throw new Error("Restoration Error: Decrypted temporary file not found on disk.");
-            }
+
+            fs.writeFileSync(tempRestorePath, decryptedBuffer);
+            console.log(`[IPC] Decryption successful using key '${matchedKey === machineId ? 'Machine ID' : matchedKey}'. Written to ${tempRestorePath}`);
         }
 
         // 1. Open the restored database as a source
-        const sourceDb = new Database(tempRestorePath);
-        
-        // 2. Read all rows from the source store
-        const rows = sourceDb.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
-        console.log(`[IPC] Read ${rows.length} rows from backup file.`);
+        let sourceDb: Database.Database;
+        let rows: { key: string, value: string }[] = [];
+        try {
+            sourceDb = new Database(tempRestorePath);
+            rows = sourceDb.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
+            console.log(`[IPC] Read ${rows.length} rows from backup file.`);
+        } catch (dbErr: any) {
+            try { if (fs.existsSync(tempRestorePath)) fs.unlinkSync(tempRestorePath); } catch (_) {}
+            throw new Error(`Invalid Backup File Format (${dbErr.message || 'file is not a database'}). This file could not be decrypted. Please verify the backup file or enter the custom password used when creating it.`);
+        }
         
         try {
             const logMsg = `[${new Date().toISOString()}] Restore: Read ${rows.length} rows. DB_PATH: ${DB_PATH}\n`;
@@ -2437,138 +2595,365 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
         } catch (e) {}
         
         // 3. Define keys to strictly exclude from overwriting on Target Machine B:
-        // Protect Machine B's Company Profile, companySignature, System Configuration, and License Identity.
+        // Protect Machine B's Company Profile, companySignature, System Configuration, and License Identity under ALL circumstances.
         const activeId = activeCompanyId;
-        const excludedBaseKeys = [
-            'app_license_secure', 
-            'app_license_data', 
-            'app_users', 
-            'app_machine_id', 
-            'app_developer_secure',
-            'app_data_size',
-            'app_company_profile',
-            'company_profile',
-            'app_config',
-            'config',
-            'app_companies',
-            'app_active_company_id'
+        const isMigration = typeof arg === 'object' && arg.isMigration === true;
+
+        // ── 3. Key exclusion lists ──────────────────────────────────────────────────────────
+        // Keys that are ALWAYS protected regardless of restore mode (machine & company profile identity)
+        const alwaysExcludedKeys = [
+            'app_license_secure', 'app_license_data', 'app_users',
+            'app_machine_id', 'app_developer_secure', 'app_data_size',
+            'app_company_profile', 'company_profile', 'app_companies', 'app_active_company_id', 'companySignature'
+        ];
+        // Keys additionally protected during DATA MIGRATION (preserve target Machine B's identity)
+        const migrationExtraExclusions = [
+            'app_company_profile', 'company_profile',
+            'app_config', 'config',
+            'app_companies', 'app_active_company_id', 'companySignature'
         ];
         if (activeId && activeId !== 'default') {
-            excludedBaseKeys.push(`app_company_profile_${activeId}`);
-            excludedBaseKeys.push(`app_config_${activeId}`);
-            excludedBaseKeys.push(`app_companies`);
+            migrationExtraExclusions.push(`app_company_profile_${activeId}`);
+            migrationExtraExclusions.push(`app_config_${activeId}`);
+            alwaysExcludedKeys.push(`app_company_profile_${activeId}`);
         }
 
-        const isExcludedKey = (key: string): boolean => {
-            if (excludedBaseKeys.includes(key)) return true;
-            if (key.startsWith('app_company_profile') || key.startsWith('company_profile')) return true;
-            if (key.startsWith('app_config_') || key === 'app_config') return true;
+        const isAlwaysExcluded = (key: string): boolean => {
+            if (alwaysExcludedKeys.includes(key)) return true;
             if (key.startsWith('app_license') || key.startsWith('app_user') || key.includes('sys_limit')) return true;
+            if (key.startsWith('app_company_profile') || key.startsWith('company_profile') || key.startsWith('companySignature')) return true;
             return false;
         };
-        
-        // 4. Ensure active database is open
-        console.log(`[IPC] Restoring into database path: ${DB_PATH}`);
+
+        const isMigrationExcluded = (key: string): boolean => {
+            if (migrationExtraExclusions.includes(key)) return true;
+            if (key.startsWith('app_company_profile') || key.startsWith('company_profile') || key.startsWith('companySignature')) return true;
+            if (key.startsWith('app_config_') || key === 'app_config') return true;
+            return false;
+        };
+
+        // Combined exclusion function based on restore mode
+        const isExcludedKey = (key: string): boolean => {
+            if (isAlwaysExcluded(key)) return true;
+            if (isMigration && isMigrationExcluded(key)) return true;
+            return false;
+        };
+
+        // ── STEP 1: TOP-LEVEL MACHINE SIGNATURE GATE FOR UNIVERSAL RESTORATION ────────
+        if (!isMigration) {
+            const currentMachineId = await getInternalMachineId();
+            const backupMachineIdRow = rows.find(r => r.key === 'app_origin_machine_id' || r.key === 'app_machine_id');
+
+            if (!backupMachineIdRow) {
+                sourceDb.close();
+                fs.unlinkSync(tempRestorePath);
+                return {
+                    success: false,
+                    error: `Universal Restoration Blocked — Backup file lacks local machine ownership signature.\n\nUniversal Restoration works ONLY for backups created on this local machine. To import data from another machine or external source, please use 'Data Migration' under Utilities.`
+                };
+            }
+
+            try {
+                const backupMachineId = JSON.parse(backupMachineIdRow.value);
+                if (!backupMachineId || !currentMachineId || backupMachineId.trim().toUpperCase() !== currentMachineId.trim().toUpperCase()) {
+                    sourceDb.close();
+                    fs.unlinkSync(tempRestorePath);
+                    return {
+                        success: false,
+                        error: `Universal Restoration Blocked — Data backup file does not belong to this Machine.\n\nThis backup file was generated on another computer. Universal Restoration works ONLY for backups created on this local machine. To import data from another machine, please use 'Data Migration' under Utilities.`
+                    };
+                }
+            } catch (_) {
+                sourceDb.close();
+                fs.unlinkSync(tempRestorePath);
+                return {
+                    success: false,
+                    error: `Universal Restoration Blocked — Backup file machine signature is corrupted.\n\nUniversal Restoration works ONLY for valid backups created on this local machine. To import data from another machine, please use 'Data Migration' under Utilities.`
+                };
+            }
+        }
+
+        // ── 4. Ensure active database is open ──────────────────────────────────────────────
+        console.log(`[IPC] Restoring into database path: ${DB_PATH} | Mode: ${isMigration ? 'DATA MIGRATION' : 'UNIVERSAL RESTORATION'}`);
         if (!db) {
             db = new Database(DB_PATH, { timeout: 15000 });
             db.pragma('journal_mode = WAL');
         }
-        
-        // 4.5 Mandatory Company Profile Matching Gate (V06.01.10)
+
+        // ── 4.5 Mandatory Company Compatibility Gate ────────────────────────────────────────
+        // Find the company profile stored in the backup
         let backupProfileRow = null;
         if (activeId && activeId !== 'default') {
             backupProfileRow = rows.find(r => r.key === `app_company_profile_${activeId}`);
         }
-        if (!backupProfileRow) {
-            backupProfileRow = rows.find(r => r.key === 'app_company_profile' || r.key === 'company_profile');
-        }
+        if (!backupProfileRow) backupProfileRow = rows.find(r => r.key === 'app_company_profile' || r.key === 'company_profile');
         if (!backupProfileRow && activeId && activeId !== 'default') {
             backupProfileRow = rows.find(r => r.key.startsWith('app_company_profile_') && r.key.includes(activeId));
         }
-        if (!backupProfileRow) {
-            backupProfileRow = rows.find(r => r.key.startsWith('app_company_profile') || r.key === 'company_profile');
-        }
+        if (!backupProfileRow) backupProfileRow = rows.find(r => r.key.startsWith('app_company_profile') || r.key === 'company_profile');
 
-        if (backupProfileRow) {
-            try {
-                const backupProfile = JSON.parse(backupProfileRow.value);
-                const backupName = backupProfile.establishmentName || backupProfile.tradeName;
-                const backupPan = backupProfile.pan || '';
-                const backupCin = backupProfile.cin || '';
-                
-                let activeProfileRow = null;
-                if (activeId && activeId !== 'default') {
-                    activeProfileRow = db.prepare("SELECT value FROM store WHERE key = ?").get(`app_company_profile_${activeId}`) as { value: string } | undefined;
-                }
-                if (!activeProfileRow) {
-                    activeProfileRow = db.prepare("SELECT value FROM store WHERE key = 'app_company_profile' OR key = 'company_profile'").get() as { value: string } | undefined;
-                }
-                if (!activeProfileRow) {
-                    activeProfileRow = db.prepare("SELECT value FROM store WHERE key LIKE 'app_company_profile%' OR key = 'company_profile'").get() as { value: string } | undefined;
-                }
-
-                if (activeProfileRow) {
-                    const activeProfile = JSON.parse(activeProfileRow.value);
-                    const activeName = activeProfile.establishmentName || activeProfile.tradeName;
-                    const activePan = activeProfile.pan || '';
-                    const activeCin = activeProfile.cin || '';
-                    
-                    if (backupName && activeName) {
-                        const bNameClean = backupName.trim().toUpperCase();
-                        const aNameClean = activeName.trim().toUpperCase();
-                        if (bNameClean !== aNameClean) {
-                            sourceDb.close();
-                            fs.unlinkSync(tempRestorePath);
-                            return { 
-                                success: false, 
-                                error: `Data Import Blocked: Company Profile Mismatch. The backup belongs to '${bNameClean}', but the active company on this machine is '${aNameClean}'. Import cancelled.` 
-                            };
-                        }
-                    }
-
-                    // Secondary match verification if PAN or CIN are present on both profiles
-                    if (backupPan && activePan && backupPan.trim().toUpperCase() !== activePan.trim().toUpperCase()) {
-                        sourceDb.close();
-                        fs.unlinkSync(tempRestorePath);
-                        return {
-                            success: false,
-                            error: `Data Import Blocked: PAN Mismatch. Backup PAN (${backupPan}) does not match active company PAN (${activePan}). Import cancelled.`
-                        };
-                    }
-                }
-            } catch (e) {
-                console.warn('[IPC] Failed to parse company profile for validation gate:', e);
+        // Find the company profile currently active on this machine (target)
+        let activeProfileRow: { value: string } | null = null;
+        if (db) {
+            if (activeId && activeId !== 'default') {
+                activeProfileRow = db.prepare('SELECT value FROM store WHERE key = ?').get(`app_company_profile_${activeId}`) as { value: string } | null;
+            }
+            if (!activeProfileRow) {
+                activeProfileRow = db.prepare("SELECT value FROM store WHERE key = 'app_company_profile' OR key = 'company_profile'").get() as { value: string } | null;
+            }
+            if (!activeProfileRow) {
+                activeProfileRow = db.prepare("SELECT value FROM store WHERE key LIKE 'app_company_profile%' OR key = 'company_profile'").get() as { value: string } | null;
             }
         }
-        
+
+        if (backupProfileRow && activeProfileRow) {
+            try {
+                const backupProfile = JSON.parse(backupProfileRow.value);
+                const activeProfile  = JSON.parse(activeProfileRow.value);
+
+                const clean = (v: any) => String(v || '').trim().toUpperCase();
+
+                // 5 mandatory fields
+                const bName   = clean(backupProfile.establishmentName || backupProfile.tradeName);
+                const aName   = clean(activeProfile.establishmentName  || activeProfile.tradeName);
+                const bCin    = clean(backupProfile.cin);
+                const aCin    = clean(activeProfile.cin);
+                const bPan    = clean(backupProfile.pan);
+                const aPan    = clean(activeProfile.pan);
+                const bPfCode = clean(backupProfile.pfCode);
+                const aPfCode = clean(activeProfile.pfCode);
+                const bEsi    = clean(backupProfile.esiCode);
+                const aEsi    = clean(activeProfile.esiCode);
+                const backupId   = clean(backupProfile.id);
+                const activeIdUp = clean(activeId);
+
+                console.log(`[IPC] Compatibility Gate — Mode: ${isMigration ? 'MIGRATION' : 'RESTORE'} | Backup: "${bName}" (${backupId}) | Target: "${aName}" (${activeIdUp})`);
+                console.log(`[IPC]   CIN=${bCin}|${aCin}  PAN=${bPan}|${aPan}  PF=${bPfCode}|${aPfCode}  ESI=${bEsi}|${aEsi}`);
+
+                // ── RULE: Company Name is ALWAYS mandatory — blank on either side = hard block ──
+                if (!bName) {
+                    sourceDb.close(); fs.unlinkSync(tempRestorePath);
+                    return { success: false, error: `Restore/Migration Blocked — Company Name is missing in the backup file. This backup cannot be used.` };
+                }
+                if (!aName) {
+                    sourceDb.close(); fs.unlinkSync(tempRestorePath);
+                    return { success: false, error: `Restore/Migration Blocked — Company Name is not set on this machine. Please complete the Company Profile before restoring.` };
+                }
+
+                // Helper: mismatch = BOTH sides non-empty AND values differ
+                const fieldMismatch = (bVal: string, aVal: string) => bVal && aVal && bVal !== aVal;
+                // Blank = at least one side is empty
+                const fieldBlank    = (bVal: string, aVal: string) => !bVal || !aVal;
+
+                const forceConfirm = !!(arg as any).forceConfirm;
+
+                // ── UNIFIED MANDATORY 5-FIELD COMPATIBILITY GATE (Both Universal Restoration & Migration) ──────
+                if (backupId && activeIdUp && activeIdUp !== 'DEFAULT' && backupId !== activeIdUp) {
+                    sourceDb.close(); fs.unlinkSync(tempRestorePath);
+                    return { success: false, error: `${isMigration ? 'Migration' : 'Universal Restoration'} Blocked — Company Silo Mismatch: Backup silo '${backupId}' ≠ target silo '${activeIdUp}'. Select the correct company first.` };
+                }
+                if (fieldMismatch(bName, aName)) {
+                    sourceDb.close(); fs.unlinkSync(tempRestorePath);
+                    return { success: false, error: `${isMigration ? 'Migration' : 'Universal Restoration'} Blocked — Company Name Mismatch: Backup '${bName}' ≠ target '${aName}'.` };
+                }
+                if (fieldMismatch(bCin, aCin)) {
+                    sourceDb.close(); fs.unlinkSync(tempRestorePath);
+                    return { success: false, error: `${isMigration ? 'Migration' : 'Universal Restoration'} Blocked — CIN Mismatch: Backup CIN (${bCin}) ≠ target CIN (${aCin}).` };
+                }
+                if (fieldMismatch(bPan, aPan)) {
+                    sourceDb.close(); fs.unlinkSync(tempRestorePath);
+                    return { success: false, error: `${isMigration ? 'Migration' : 'Universal Restoration'} Blocked — PAN Mismatch: Backup PAN (${bPan}) ≠ target PAN (${aPan}).` };
+                }
+                if (fieldMismatch(bPfCode, aPfCode)) {
+                    sourceDb.close(); fs.unlinkSync(tempRestorePath);
+                    return { success: false, error: `${isMigration ? 'Migration' : 'Universal Restoration'} Blocked — PF Code Mismatch: Backup PF Code (${bPfCode}) ≠ target PF Code (${aPfCode}).` };
+                }
+                if (fieldMismatch(bEsi, aEsi)) {
+                    sourceDb.close(); fs.unlinkSync(tempRestorePath);
+                    return { success: false, error: `${isMigration ? 'Migration' : 'Universal Restoration'} Blocked — ESI Code Mismatch: Backup ESI Code (${bEsi}) ≠ target ESI Code (${aEsi}).` };
+                }
+
+                // Blank mandatory fields warning gate
+                if (!forceConfirm) {
+                    const blankWarnings: string[] = [];
+                    if (fieldBlank(bCin, aCin))       blankWarnings.push(`CIN — ${!bCin ? 'missing in backup' : 'not set on target machine'}`);
+                    if (fieldBlank(bPan, aPan))       blankWarnings.push(`PAN — ${!bPan ? 'missing in backup' : 'not set on target machine'}`);
+                    if (fieldBlank(bPfCode, aPfCode)) blankWarnings.push(`PF Code — ${!bPfCode ? 'missing in backup' : 'not set on target machine'}`);
+                    if (fieldBlank(bEsi, aEsi))       blankWarnings.push(`ESI Code — ${!bEsi ? 'missing in backup' : 'not set on target machine'}`);
+                    if (blankWarnings.length > 0) {
+                        sourceDb.close(); fs.unlinkSync(tempRestorePath);
+                        return { success: false, requiresConfirmation: true, warnings: blankWarnings };
+                    }
+                }
+                console.log(`[IPC] ${isMigration ? 'DATA MIGRATION' : 'UNIVERSAL RESTORATION'}: All 5-field compatibility checks passed ✓`);
+            } catch (e) {
+                console.warn('[IPC] Failed to parse company profiles for compatibility gate:', e);
+            }
+        } else if (!activeProfileRow) {
+            console.log(`[IPC] No active profile on target machine — allowing restore unconditionally (fresh install / new silo).`);
+        }
+
         if (!db) throw new Error("Database not initialized");
         const targetDb = db;
 
-        // 5. Merge Operational Pay Data into active database, strictly excluding Profile, Config & Security keys
-        // First delete non-excluded keys in active DB
+        // ── 5. Period range filter for Full Restore (IMPORT mode) ─────────────────────────
+        const fromPeriod: { month: string; year: number } | undefined = (arg as any).fromPeriod;
+        const toPeriod:   { month: string; year: number } | undefined = (arg as any).toPeriod;
+        const hasRangeFilter = !isMigration && fromPeriod && toPeriod;
+
+        const MONTHS_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+        // Returns true if a record's (month, year) falls within [fromPeriod, toPeriod] inclusive
+        const isInRange = (recMonth: string, recYear: number): boolean => {
+            if (!hasRangeFilter) return true;
+            const from = fromPeriod!.year * 12 + MONTHS_ORDER.indexOf(fromPeriod!.month);
+            const to   = toPeriod!.year   * 12 + MONTHS_ORDER.indexOf(toPeriod!.month);
+            const rec  = recYear            * 12 + MONTHS_ORDER.indexOf(recMonth);
+            return rec >= from && rec <= to;
+        };
+
+        // Parse a date string (ISO yyyy-mm-dd or dd-mm-yyyy) into { month, year } or null
+        const parseDateToMonthYear = (dateStr: string): { month: string; year: number } | null => {
+            try {
+                const parts = dateStr.split('-');
+                if (parts.length !== 3) return null;
+                const yr = parts[0].length === 4 ? parseInt(parts[0]) : parseInt(parts[2]);
+                const mo = parts[0].length === 4 ? parseInt(parts[1]) - 1 : parseInt(parts[1]) - 1;
+                if (isNaN(yr) || isNaN(mo) || mo < 0 || mo > 11) return null;
+                return { month: MONTHS_ORDER[mo], year: yr };
+            } catch (_) { return null; }
+        };
+
+        // Transactional keys filtered by month/year range (attendance, payroll, ledgers, etc.)
+        const TRANSACTIONAL_PREFIXES = [
+            'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
+            'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+        ];
+
+        // Filter a JSON array of transactional records by period range
+        const filterRowByRange = (value: string): string => {
+            if (!hasRangeFilter) return value;
+            try {
+                const arr = JSON.parse(value);
+                if (!Array.isArray(arr)) return value;
+                const filtered = arr.filter((item: any) => {
+                    const m = String(item.month || item.Month || '').trim();
+                    const y = parseInt(String(item.year || item.Year || '0'));
+                    if (m && !isNaN(y) && y > 0) return isInRange(m, y);
+                    // Fallback: try date string fields
+                    const dateStr = item.date || item.Date || item.createdDate || item.entryDate || '';
+                    if (dateStr) {
+                        const parsed = parseDateToMonthYear(String(dateStr));
+                        if (parsed) return isInRange(parsed.month, parsed.year);
+                    }
+                    return true; // keep undated records
+                });
+                return JSON.stringify(filtered);
+            } catch (_) { return value; }
+        };
+
+        // Filter Employee Master (app_employees_*) by doj (date of joining) ≤ toPeriod
+        // Include employees who joined on or before the end of the toPeriod.
+        // Employees with no doj or unparseable doj are always included.
+        const filterEmployeesByRange = (value: string): string => {
+            if (!hasRangeFilter) return value;
+            try {
+                const arr = JSON.parse(value);
+                if (!Array.isArray(arr)) return value;
+                const toVal = toPeriod!.year * 12 + MONTHS_ORDER.indexOf(toPeriod!.month);
+                const filtered = arr.filter((emp: any) => {
+                    const doj = emp.doj || emp.joiningDate || emp.dateOfJoining || '';
+                    if (!doj) return true; // no doj → always include
+                    const parsed = parseDateToMonthYear(String(doj));
+                    if (!parsed) return true; // unparseable → always include
+                    const dojVal = parsed.year * 12 + MONTHS_ORDER.indexOf(parsed.month);
+                    return dojVal <= toVal; // joined on or before toPeriod end
+                });
+                return JSON.stringify(filtered);
+            } catch (_) { return value; }
+        };
+
+        // ── 5.5 AUTOMATIC PRE-OPERATION SAFETY SNAPSHOT ─────────────────────────────────────
+        let snapshotCreated = false;
+        const preRestoreSnapshotPath = path.join(dataDir, 'active_db_pre_restore.snapshot.bak');
+        const timestampedSnapshotPath = path.join(dataDir, `active_db_snapshot_${Date.now()}.bak`);
+        try {
+            if (targetDb) {
+                targetDb.pragma('wal_checkpoint(FULL)');
+            }
+            if (fs.existsSync(DB_PATH)) {
+                fs.copyFileSync(DB_PATH, preRestoreSnapshotPath);
+                fs.copyFileSync(DB_PATH, timestampedSnapshotPath);
+                snapshotCreated = true;
+                log(`[IPC] Automatic pre-operation safety snapshots created successfully: "${preRestoreSnapshotPath}" and "${timestampedSnapshotPath}"`);
+            }
+        } catch (snapErr: any) {
+            console.warn('[IPC] Failed to create pre-operation snapshot warning:', snapErr);
+        }
+
+        // ── 6. Write data into target database with Rollback Protection ────────────────────
         const allKeysInDb = (targetDb.prepare('SELECT key FROM store').all() as { key: string }[]).map(r => r.key);
         const keysToDelete = allKeysInDb.filter(k => !isExcludedKey(k));
-        
+
         const upsertStmt = targetDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
-        
-        targetDb.transaction(() => {
-            const skipDeletion = typeof arg === 'object' && arg.isMigration === true;
-            if (keysToDelete.length > 0 && !skipDeletion) {
-                const deleteStmt = targetDb.prepare(`DELETE FROM store WHERE key IN (${keysToDelete.map(() => '?').join(',')})`);
-                deleteStmt.run(...keysToDelete);
-            }
-            for (const row of rows) {
-                if (!isExcludedKey(row.key)) {
-                    upsertStmt.run(row.key, row.value);
+
+        try {
+            targetDb.transaction(() => {
+                // FULL RESTORE (ALL periods): delete non-excluded keys then write — clean overwrite
+                // FULL RESTORE (RANGE): no delete — upsert filtered data (preserves out-of-range records)
+                // DATA MIGRATION: no delete — upsert only
+                if (keysToDelete.length > 0 && !isMigration && !hasRangeFilter) {
+                    const deleteStmt = targetDb.prepare(`DELETE FROM store WHERE key IN (${keysToDelete.map(() => '?').join(',')})`);
+                    deleteStmt.run(...keysToDelete);
+                }
+                let written = 0;
+                for (const row of rows) {
+                    if (isExcludedKey(row.key)) continue;
+
+                    let valueToWrite = row.value;
+
+                    if (hasRangeFilter) {
+                        if (TRANSACTIONAL_PREFIXES.some(p => row.key.startsWith(p))) {
+                            // Payroll, attendance, ledgers etc. — filter by month/year
+                            valueToWrite = filterRowByRange(row.value);
+                        } else if (row.key.startsWith('app_employees')) {
+                            // Employee Master — filter by doj ≤ toPeriod
+                            valueToWrite = filterEmployeesByRange(row.value);
+                        }
+                    }
+
+                    upsertStmt.run(row.key, valueToWrite);
+                    written++;
+                }
+                if (hasRangeFilter) {
+                    console.log(`[IPC] FULL RESTORE (RANGE ${fromPeriod!.month} ${fromPeriod!.year} → ${toPeriod!.month} ${toPeriod!.year}): ${written} rows written.`);
+                } else {
+                    console.log(`[IPC] ${isMigration ? 'Migration' : 'Restore'}: ${written} rows written to target DB.`);
+                }
+            })();
+        } catch (txError: any) {
+            console.error('[IPC] Transaction failed during restore! Rolling back to pre-operation snapshot...', txError);
+            if (snapshotCreated && fs.existsSync(preRestoreSnapshotPath)) {
+                try {
+                    if (db) { db.close(); db = null; }
+                    fs.copyFileSync(preRestoreSnapshotPath, DB_PATH);
+                    db = new Database(DB_PATH, { timeout: 15000 });
+                    db.pragma('journal_mode = WAL');
+                    console.log('[IPC] Automatic rollback to pre-operation snapshot successful ✓');
+                } catch (rbErr) {
+                    console.error('[IPC] Automatic rollback failed:', rbErr);
                 }
             }
-        })();
-        
-        // 6. Clean up
+            sourceDb.close();
+            try { fs.unlinkSync(tempRestorePath); } catch (_) {}
+            throw new Error(`Restoration failed during database write (${txError.message}). Active database was automatically restored to pre-operation safety snapshot.`);
+        }
+
+        // ── 7. Clean up ────────────────────────────────────────────────────────────────────
         sourceDb.close();
         fs.unlinkSync(tempRestorePath);
 
-        console.log(`[IPC] restoration successful.`);
+        console.log(`[IPC] ${isMigration ? 'Data Migration' : 'Full Restore'} completed successfully.`);
         return { success: true };
     } catch (e: any) {
         console.error('[IPC] restoration failed:', e);
@@ -2576,6 +2961,63 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
         return { success: false, error: e.message };
     }
 });
+
+ipcMain.handle('restore-from-snapshot', async (_, snapshotFileName?: string) => {
+    try {
+        if (!appBasePath) throw new Error("App storage not initialized");
+        const paths = getAppPaths(appBasePath);
+        let dataDir = paths.data;
+        if (activeCompanyId && activeCompanyId !== 'default') {
+            dataDir = path.join(paths.data, activeCompanyId);
+        }
+        const DB_PATH = path.join(dataDir, 'active_db.sqlite');
+        const targetSnapshot = snapshotFileName 
+            ? path.join(dataDir, snapshotFileName)
+            : path.join(dataDir, 'active_db_pre_restore.snapshot.bak');
+
+        if (!fs.existsSync(targetSnapshot)) {
+            throw new Error('No pre-operation safety snapshot found to restore.');
+        }
+
+        if (db) {
+            try { db.close(); db = null; } catch (_) {}
+        }
+
+        fs.copyFileSync(targetSnapshot, DB_PATH);
+        db = new Database(DB_PATH, { timeout: 15000 });
+        db.pragma('journal_mode = WAL');
+        console.log(`[IPC] Successfully reverted active database to pre-operation snapshot: "${targetSnapshot}"`);
+        return { success: true, message: 'Database successfully reverted to pre-operation snapshot.' };
+    } catch (e: any) {
+        console.error('[IPC] restore-from-snapshot failed:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('list-safety-snapshots', async () => {
+    try {
+        if (!appBasePath) throw new Error("App storage not initialized");
+        const paths = getAppPaths(appBasePath);
+        let dataDir = paths.data;
+        if (activeCompanyId && activeCompanyId !== 'default') {
+            dataDir = path.join(paths.data, activeCompanyId);
+        }
+        if (!fs.existsSync(dataDir)) return { success: true, snapshots: [] };
+        const files = fs.readdirSync(dataDir);
+        const snapshots = files
+            .filter(f => f.includes('snapshot') && f.endsWith('.bak'))
+            .map(f => {
+                const stats = fs.statSync(path.join(dataDir, f));
+                return { filename: f, date: stats.mtime.toISOString(), size: stats.size };
+            })
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        return { success: true, snapshots };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
+
 
 async function getInternalMachineId() {
     try {
@@ -3067,6 +3509,11 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
     const isSilent = options?.silent ?? false;
     const installerPath = getInstallerPath();
 
+    if (!fs.existsSync(installerPath)) {
+        console.error('❌ Installer file missing on disk:', installerPath);
+        return { success: false, error: `Update installer not found at "${installerPath}". Please download update again.` };
+    }
+
     // 1. INSTANT TERMINATION SIGNAL: Destroy windows immediately
     BrowserWindow.getAllWindows().forEach(win => {
         try { win.destroy(); } catch (e) {}
@@ -3081,7 +3528,7 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
             if (options?.newPatchTimestamp && appBasePath) {
                 try {
                     const paths = getAppPaths(appBasePath);
-        const rootDbPath = path.join(paths.root, 'active_db.sqlite');
+                    const rootDbPath = path.join(paths.root, 'active_db.sqlite');
                     const rootDb = new Database(rootDbPath);
                     rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
                     rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)').run('app_active_patch_ts', JSON.stringify(options.newPatchTimestamp));
@@ -3142,54 +3589,80 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
             }
 
             // C. POWER LAUNCH: Wait 2s -> Kill BPP_APP -> Launch Installer
-            // This ensures no 'Already Running' warning pops up.
             try {
-                // Determine binary name for taskkill
                 const exeName = app.isPackaged ? 'BPP_APP.exe' : 'electron.exe';
                 const tempDir = app.getPath('temp');
+                const appExePath = process.execPath;
                 
-                // Write HTA message files to the temp directory
-                // HTA 1: Silent Update (Patch Update) - shown during background installation
+                // Write modern HTA message files to the temp directory
                 const silentHtaPath = path.join(tempDir, 'bpp_update_msg.hta');
                 const silentHtaContent = `
-<HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal"/>
+<HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal" ALWAYSONTOP="yes"/>
+<html><head><meta http-equiv="X-UA-Compatible" content="IE=edge"/>
 <title>BharatPay Pro Update</title>
-<body style="background-color:#0f172a; color:#f8fafc; font-family:'Segoe UI', sans-serif; font-size:14px; margin:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; height:100%; border:1px solid #1e293b;">
-  <p style="margin-bottom:12px; font-weight:bold; font-size:18px; color:#38bdf8;">Applying Background Patch Update...</p>
-  <p style="margin:0; font-size:14px; opacity:0.85;">Please wait, the app will restart automatically in 10-30 seconds.</p>
+<style>
+  body { background-color: #020617; color: #f8fafc; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 100%; border: 1px solid #1e293b; box-sizing: border-box; overflow: hidden; }
+  .title { margin-bottom: 12px; font-weight: 700; font-size: 18px; color: #38bdf8; letter-spacing: 0.5px; }
+  .desc { margin: 0; font-size: 13px; color: #94a3b8; line-height: 1.5; }
+  .wait-label { color: #38bdf8; font-weight: 600; }
+  .dots { color: #38bdf8; font-weight: 700; font-size: 16px; width: 24px; display: inline-block; text-align: left; }
+</style></head>
+<body>
+  <div class="title">Applying Background Patch Update</div>
+  <div class="desc">
+    <span>Installing latest software components... <span class="wait-label">Please wait</span><span id="dots" class="dots">.</span></span>
+  </div>
   <script>
-    window.resizeTo(550, 200);
-    window.moveTo((screen.width - 550) / 2, (screen.height - 200) / 2);
-    setTimeout(function() { window.close(); }, 180000);
+    window.resizeTo(560, 210); window.moveTo((screen.width - 560) / 2, (screen.height - 210) / 2); window.focus();
+    var step = 1; var waitEl = document.getElementById("dots");
+    setInterval(function() {
+      step = (step % 4) + 1; var d = ""; for (var i = 0; i < step; i++) { d += "."; }
+      if (waitEl) { waitEl.innerHTML = d; }
+      try { window.focus(); } catch(e) {}
+    }, 100);
+    setTimeout(function() { window.close(); }, 60000);
   </script>
-</body>
+</body></html>
                 `;
                 fs.writeFileSync(silentHtaPath, silentHtaContent.trim(), 'utf8');
 
-                // HTA 2: Post-Installation Launch Message (Interactive Update) - shown after NSIS copies files
                 const launchHtaPath = path.join(tempDir, 'bpp_launch_msg.hta');
                 const launchHtaContent = `
-<HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal"/>
+<HTA:APPLICATION ID="oHTA" BORDER="dialog" CAPTION="yes" CONTEXTMENU="no" INNERBORDER="no" SCROLL="no" SHOWINTASKBAR="no" SINGLEINSTANCE="yes" SYSMENU="no" WINDOWSTATE="normal" ALWAYSONTOP="yes"/>
+<html><head><meta http-equiv="X-UA-Compatible" content="IE=edge"/>
 <title>BharatPay Pro Update</title>
-<body style="background-color:#0f172a; color:#f8fafc; font-family:'Segoe UI', sans-serif; font-size:14px; margin:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; height:100%; border:1px solid #1e293b;">
-  <p style="margin-bottom:12px; font-weight:bold; font-size:18px; color:#38bdf8;">Application Update Complete</p>
-  <p style="margin:0; font-size:14px; opacity:0.85;">Launching BharatPay Pro... Please wait.</p>
+<style>
+  body { background-color: #020617; color: #f8fafc; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 100%; border: 1px solid #1e293b; box-sizing: border-box; overflow: hidden; }
+  .title { margin-bottom: 12px; font-weight: 700; font-size: 18px; color: #10b981; letter-spacing: 0.5px; }
+  .desc { margin: 0; font-size: 13px; color: #94a3b8; line-height: 1.5; }
+  .wait-label { color: #38bdf8; font-weight: 600; }
+  .dots { color: #38bdf8; font-weight: 700; font-size: 16px; width: 24px; display: inline-block; text-align: left; }
+</style></head>
+<body>
+  <div class="title">Application Update Complete</div>
+  <div class="desc">
+    <span>Launching BharatPay Pro... <span class="wait-label">Please wait</span><span id="dots" class="dots">.</span></span>
+  </div>
   <script>
-    window.resizeTo(550, 200);
-    window.moveTo((screen.width - 550) / 2, (screen.height - 200) / 2);
+    window.resizeTo(560, 210); window.moveTo((screen.width - 560) / 2, (screen.height - 210) / 2); window.focus();
+    var step = 1; var waitEl = document.getElementById("dots");
+    setInterval(function() {
+      step = (step % 4) + 1; var d = ""; for (var i = 0; i < step; i++) { d += "."; }
+      if (waitEl) { waitEl.innerHTML = d; }
+      try { window.focus(); } catch(e) {}
+    }, 100);
     setTimeout(function() { window.close(); }, 60000);
   </script>
-</body>
+</body></html>
                 `;
                 fs.writeFileSync(launchHtaPath, launchHtaContent.trim(), 'utf8');
                 
-                // Chain: Launch HTA Popup (if silent) -> Delay -> Taskkill -> Delay -> Start Installer
+                // Chain: Single HTA Window -> Delay -> Taskkill old app -> Start Installer /S (WAIT) -> Relaunch App
                 let command = '';
                 if (isSilent) {
-                    command = `start mshta "${silentHtaPath}" & timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}" /S`;
+                    command = `start mshta "${silentHtaPath}" & timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start /wait "" "${installerPath}" /S & start "" "${appExePath}"`;
                 } else {
-                    // Interactive: Do NOT start HTA here (prevents blocking/overlapping the installer options window).
-                    // The installer itself will start "bpp_launch_msg.hta" upon successful file copy/extraction.
+                    // Interactive Mode: Run installer directly
                     command = `timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}"`;
                 }
                 

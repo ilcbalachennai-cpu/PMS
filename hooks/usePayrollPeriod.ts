@@ -1,5 +1,4 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -19,6 +18,8 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
   const [globalMonth, setGlobalMonth] = useState<string>('January');
   const [globalYear, setGlobalYear] = useState<number>(2026);
   const [latestFrozenPeriod, setLatestFrozenPeriod] = useState<{ month: string, year: number } | null>(null);
+
+  const hasInitializedRef = useRef<string>('');
 
   useEffect(() => {
     const fetchPeriod = async () => {
@@ -47,7 +48,7 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
 
         const getMonthValue = (m: string | null | undefined, y: number | null | undefined) => {
           if (!m || !y) return 0;
-          const idx = monthsArr.indexOf(String(m).trim());
+          const idx = monthsArr.findIndex(item => item.toLowerCase() === String(m).trim().toLowerCase());
           if (idx === -1) return 0;
           return (Number(y) * 12) + idx;
         };
@@ -65,9 +66,9 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
           const frozen = history.filter((h: any) => h.status === 'Finalized');
           if (frozen.length > 0) {
               let latest = frozen[0];
-              let maxVal = (latest.year * 12) + monthsArr.indexOf(latest.month);
+              let maxVal = getMonthValue(latest.month, latest.year);
               frozen.forEach((h: any) => {
-                  const val = (h.year * 12) + monthsArr.indexOf(h.month);
+                  const val = getMonthValue(h.month, h.year);
                   if (val > maxVal) {
                       maxVal = val;
                       latest = h;
@@ -81,21 +82,23 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
           setLatestFrozenPeriod(null);
         }
 
-        // Default to last frozen/confirmed month if available so confirmed data shows on load
-        if (lastLockedVal > getMonthValue('March', baseYear)) {
-          setGlobalMonth(monthsArr[lastLockedVal % 12]);
-          setGlobalYear(Math.floor(lastLockedVal / 12));
-          return;
-        }
+        // Only auto-set globalMonth & globalYear on initial mount or when company/FY changes
+        const initKey = `${activeCompanyId}_${activeFinancialYear}`;
+        if (hasInitializedRef.current !== initKey) {
+          hasInitializedRef.current = initKey;
 
-        const nextVal = lastLockedVal + 1;
-        setGlobalMonth(monthsArr[nextVal % 12]);
-        setGlobalYear(Math.floor(nextVal / 12));
+          // Target period is the NEXT unfinalized month after the last finalized period
+          const nextVal = lastLockedVal > getMonthValue('March', baseYear) ? lastLockedVal + 1 : getMonthValue('April', baseYear);
+          setGlobalMonth(monthsArr[nextVal % 12]);
+          setGlobalYear(Math.floor(nextVal / 12));
+        }
 
       } catch (e) {
         console.error("Error determining default period:", e);
-        setGlobalMonth('April');
-        setGlobalYear(baseYear);
+        if (!hasInitializedRef.current) {
+          setGlobalMonth('April');
+          setGlobalYear(baseYear);
+        }
       }
     };
 
@@ -104,4 +107,3 @@ export const usePayrollPeriod = (activeCompanyId: string = 'default', activeFina
 
   return { globalMonth, setGlobalMonth, globalYear, setGlobalYear, latestFrozenPeriod };
 };
-

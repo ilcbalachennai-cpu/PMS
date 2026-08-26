@@ -5,7 +5,7 @@ import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileS
 // Global OS Detection for UI refinement
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
 
-import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, ArrearBatch } from '../types';
+import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, ArrearBatch, BranchDetail } from '../types';
 import {
     generateExcelReport,
     generateSimplePaySheetPDF,
@@ -19,7 +19,8 @@ import {
     getBackupFileName,
     openSavedReport,
     generateTemplateWorkbook,
-    getMonthAbbr
+    getMonthAbbr,
+    resolveBranchCompanyProfile
 } from '../services/reportService';
 import { formatIndianNumber, getCompanyBackupFolder } from '../utils/formatters';
 import { getActivePaySheetColumns } from '../constants';
@@ -48,6 +49,7 @@ interface ReportsProps {
     latestFrozenPeriod: { month: string; year: number } | null;
     onNavigate: (view: any, tab?: string) => void;
     activeFinancialYear?: string;
+    branches?: (string | BranchDetail)[];
 }
 
 const Reports: React.FC<ReportsProps> = ({
@@ -69,7 +71,8 @@ const Reports: React.FC<ReportsProps> = ({
     arrearHistory,
     showAlert: _showAlert,
     onNavigate,
-    activeFinancialYear
+    activeFinancialYear,
+    branches = []
 }) => {
     const [reportType, setReportType] = useState<string>('Pay Sheet');
     const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
@@ -86,6 +89,19 @@ const Reports: React.FC<ReportsProps> = ({
     const [paySlipFilter, setPaySlipFilter] = useState<'all' | 'site' | 'branch' | 'division'>('all');
     const [paySlipFilterValue, setPaySlipFilterValue] = useState<string>('');
     const [useLegacyDesign, setUseLegacyDesign] = useState(false);
+
+    // Resolve branch-specific profile overrides when branch filtering is active
+    const effectiveCompanyProfile = useMemo((): CompanyProfile => {
+        let branchName = '';
+        if (reportType === 'Pay Sheet' && paySheetFilter === 'branch' && paySheetFilterValue) {
+            branchName = paySheetFilterValue;
+        } else if (reportType === 'Pay Slips' && paySlipFilter === 'branch' && paySlipFilterValue) {
+            branchName = paySlipFilterValue;
+        }
+        if (!branchName || !branches || branches.length === 0) return companyProfile;
+
+        return resolveBranchCompanyProfile(companyProfile, branchName, branches);
+    }, [companyProfile, paySheetFilter, paySheetFilterValue, paySlipFilter, paySlipFilterValue, reportType, branches]);
 
     useEffect(() => {
         if (arrearHistory && arrearHistory.length > 0) {
@@ -761,10 +777,10 @@ const Reports: React.FC<ReportsProps> = ({
                         customExcelFilename = `${paySheetFilterValue} Pay Sheet ${monthAbbr} ${year}`;
                     }
 
-                    const fileName = customExcelFilename || getStandardFileName('Summary Pay Sheet', companyProfile, month, year);
+                    const fileName = customExcelFilename || getStandardFileName('Summary Pay Sheet', effectiveCompanyProfile, month, year);
                     savedPath = await generateExcelReport(excelData, 'Pay Sheet', fileName, {
-                        company: companyProfile.establishmentName,
-                        companyId: companyProfile.id,
+                        company: effectiveCompanyProfile.establishmentName,
+                        companyId: effectiveCompanyProfile.id,
                         type: 'Pay Sheet',
                         period: `${month} ${year}`
                     });
@@ -785,22 +801,22 @@ const Reports: React.FC<ReportsProps> = ({
                     let customPDFFileName = undefined;
                     if (paySheetFilter !== 'all') {
                         subtitle = `${paySheetFilter === 'site' ? 'Site' : paySheetFilter === 'branch' ? 'Branch' : 'Division'}: ${paySheetFilterValue}`;
-                        customPDFFileName = getStandardFileName(paySheetFilterValue, companyProfile, month, year);
+                        customPDFFileName = getStandardFileName(paySheetFilterValue, effectiveCompanyProfile, month, year);
                     }
 
                     if (paySheetFilter === 'all') {
                         if (useLegacyDesign) {
-                            customPDFFileName = getStandardFileName('Legacy Pay Sheet', companyProfile, month, year);
+                            customPDFFileName = getStandardFileName('Legacy Pay Sheet', effectiveCompanyProfile, month, year);
                         } else {
-                            customPDFFileName = getStandardFileName('Summary Pay Sheet', companyProfile, month, year);
+                            customPDFFileName = getStandardFileName('Summary Pay Sheet', effectiveCompanyProfile, month, year);
                         }
                         subtitle = 'Site: CONSOLIDATED';
                     }
 
                     if (useLegacyDesign) {
-                        savedPath = await generateLegacyFormB(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName);
+                        savedPath = await generateLegacyFormB(validToExport, employees, month, year, effectiveCompanyProfile, subtitle, customPDFFileName);
                     } else {
-                        savedPath = await generateSimplePaySheetPDF(validToExport, employees, month, year, companyProfile, subtitle, customPDFFileName, config);
+                        savedPath = await generateSimplePaySheetPDF(validToExport, employees, month, year, effectiveCompanyProfile, subtitle, customPDFFileName, config);
                     }
                 }
             } else if (['Pay Slips', 'Bank Statement', 'Leave Ledger', 'Advance Shortfall'].includes(reportType)) {
@@ -830,7 +846,7 @@ const Reports: React.FC<ReportsProps> = ({
                     let customSlipTitle = customTitlePrefix ? `Pay Slips - ${paySlipFilterValue} - ${month} ${year}` : undefined;
 
                     if (slipRecords.length === 0) throw new Error("No matching payroll records found for the selected filter.");
-                    savedPath = await generatePaySlipsPDF(slipRecords, employees, month, year, companyProfile, customSlipTitle, customSlipFilename);
+                    savedPath = await generatePaySlipsPDF(slipRecords, employees, month, year, effectiveCompanyProfile, customSlipTitle, customSlipFilename);
                 } else if (reportType === 'Bank Statement') {
                     const bankRecords = filteredResults.filter(r => r.netPay > 0);
                     if (bankRecords.length === 0) throw new Error("No employees with positive Net Pay found for Bank Statement.");
@@ -868,15 +884,15 @@ const Reports: React.FC<ReportsProps> = ({
                         'Amount': totalAmount
                     } as any);
 
-                    const fileName = getStandardFileName(customTitlePrefix ? `${customTitlePrefix.trim()} Bank Statement` : 'Bank Statement', companyProfile, month, year);
+                    const fileName = getStandardFileName(customTitlePrefix ? `${customTitlePrefix.trim()} Bank Statement` : 'Bank Statement', effectiveCompanyProfile, month, year);
                     savedPath = await generateExcelReport(data, 'Bank Statement', fileName, {
-                        company: companyProfile.establishmentName,
-                        companyId: companyProfile.id,
+                        company: effectiveCompanyProfile.establishmentName,
+                        companyId: effectiveCompanyProfile.id,
                         type: 'Bank Statement',
                         period: `${month} ${year}`
                     });
                 } else {
-                    savedPath = await generateBankStatementPDF(bankRecords, employees, month, year, companyProfile);
+                    savedPath = await generateBankStatementPDF(bankRecords, employees, month, year, effectiveCompanyProfile);
                 }
                 } else if (reportType === 'Leave Ledger') {
                     const resultsMap = new Map<string, PayrollResult>(filteredResults.map(r => [r.employeeId, r]));
@@ -929,15 +945,15 @@ const Reports: React.FC<ReportsProps> = ({
                             'CL Balance': l.cl.balance || 0
                         };
                     });
-                    const fileName = getStandardFileName(customTitlePrefix ? `${customTitlePrefix.trim()} Leave Ledger` : 'Leave Ledger', companyProfile, month, year);
+                    const fileName = getStandardFileName(customTitlePrefix ? `${customTitlePrefix.trim()} Leave Ledger` : 'Leave Ledger', effectiveCompanyProfile, month, year);
                     savedPath = await generateExcelReport(data, 'Leave Ledger', fileName, {
-                        company: companyProfile.establishmentName,
-                        companyId: companyProfile.id,
+                        company: effectiveCompanyProfile.establishmentName,
+                        companyId: effectiveCompanyProfile.id,
                         type: 'Leave Ledger',
                         period: `${month} ${year}`
                     });
                 } else {
-                    savedPath = await generateLeaveLedgerReport(filteredResults, activeEmps, leaveLedgers, month, year, 'AC', companyProfile);
+                    savedPath = await generateLeaveLedgerReport(filteredResults, activeEmps, leaveLedgers, month, year, 'AC', effectiveCompanyProfile);
                 }
             } else if (reportType === 'Advance Shortfall') {
                 const shortfallData = filteredResults.map(r => {
@@ -963,7 +979,7 @@ const Reports: React.FC<ReportsProps> = ({
                     return;
                 }
 
-                savedPath = await generateAdvanceShortfallReport(shortfallData, month, year, format, companyProfile);
+                savedPath = await generateAdvanceShortfallReport(shortfallData, month, year, format, effectiveCompanyProfile);
             }
         } else if (reportType === 'Arrear Report') {
             let batch: ArrearBatch | undefined;
@@ -974,7 +990,7 @@ const Reports: React.FC<ReportsProps> = ({
                 if (!batch || !batch.records || batch.records.length === 0) {
                     throw new Error(`No arrear calculation found. Please process increments in Pay Process > Arrear Salary first.`);
                 }
-                savedPath = await generateArrearReport(batch.records, batch.effectiveMonth, batch.effectiveYear, batch.month, batch.year, format, companyProfile);
+                savedPath = await generateArrearReport(batch.records, batch.effectiveMonth, batch.effectiveYear, batch.month, batch.year, format, effectiveCompanyProfile);
             } else if (reportType === 'Master Template') {
                 const fileName = getStandardFileName('MasterTemplate', companyProfile, month, year);
                 const wb = (await import('xlsx')).utils.book_new();

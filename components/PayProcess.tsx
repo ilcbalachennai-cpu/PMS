@@ -69,13 +69,13 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
 
     // Compute lock status
     const isLocked = useMemo(() => {
-        return props.savedRecords.some(r => r.month === props.month && r.year === props.year && r.status === 'Finalized');
+        return props.savedRecords.some(r => String(r.month || '').trim().toLowerCase() === String(props.month || '').trim().toLowerCase() && Number(r.year) === Number(props.year) && r.status === 'Finalized');
     }, [props.savedRecords, props.month, props.year]);
 
     const hasAnyAttendance = useMemo(() => {
         return props.attendances.some(a => 
-            a.month === props.month && 
-            a.year === props.year && 
+            String(a.month || '').trim().toLowerCase() === String(props.month || '').trim().toLowerCase() && 
+            Number(a.year) === Number(props.year) && 
             ((a.presentDays || 0) + (a.earnedLeave || 0) + (a.sickLeave || 0) + (a.casualLeave || 0) + (a.lopDays || 0)) > 0
         );
     }, [props.attendances, props.month, props.year]);
@@ -353,20 +353,20 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
 
         props.showAlert('confirm', 'MASTER DATA RESET', 'This will CLEAR ALL Attendance, Advances (Current), Fines, and OT data for the current period. Opening balances will be preserved. Proceed?', () => {
             // 1. Reset Attendance
-            const newAttendances = props.attendances.filter(a => !(a.month === props.month && a.year === props.year));
+            const newAttendances = props.attendances.filter(a => !(String(a.month || '').trim().toLowerCase() === String(props.month || '').trim().toLowerCase() && Number(a.year) === Number(props.year)));
             props.setAttendances(newAttendances);
 
             // 2. Reset Fines
-            const newFines = props.fines.filter(f => !(f.month === props.month && f.year === props.year));
+            const newFines = props.fines.filter(f => !(String(f.month || '').trim().toLowerCase() === String(props.month || '').trim().toLowerCase() && Number(f.year) === Number(props.year)));
             props.setFines(newFines);
 
             // 3. Reset OT
-            const newOT = props.otRecords.filter(r => !(r.month === props.month && r.year === props.year));
+            const newOT = props.otRecords.filter(r => !(String(r.month || '').trim().toLowerCase() === String(props.month || '').trim().toLowerCase() && Number(r.year) === Number(props.year)));
             props.setOTRecords(newOT);
 
             // 4. Reset Arrears (if applicable)
             if (props.setArrearHistory) {
-                const newArrears = (props.arrearHistory || []).filter(b => !(b.month === props.month && b.year === props.year));
+                const newArrears = (props.arrearHistory || []).filter(b => !(String(b.month || '').trim().toLowerCase() === String(props.month || '').trim().toLowerCase() && Number(b.year) === Number(props.year)));
                 props.setArrearHistory(newArrears);
             }
 

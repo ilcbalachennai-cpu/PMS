@@ -139,6 +139,54 @@ export const generateCompanyId = (establishmentName: string): string => {
 };
 
 /**
+ * Checks whether an incoming company profile matches an existing company silo in the local registry.
+ * Prevents duplicating company silos for the same establishment entity.
+ */
+export const findMatchingCompanySilo = (
+    profile: { id?: string; establishmentName?: string; tradeName?: string; pan?: string; cin?: string; pfCode?: string; esiCode?: string; companySignature?: string } | null | undefined,
+    companiesList: any[]
+): any | null => {
+    if (!profile || !Array.isArray(companiesList) || companiesList.length === 0) return null;
+    const clean = (v: any) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    
+    const pId = clean(profile.id);
+    const pName = clean(profile.establishmentName || profile.tradeName);
+    const pPan = clean(profile.pan);
+    const pCin = clean(profile.cin);
+    const pPf = clean(profile.pfCode);
+    const pEsi = clean(profile.esiCode);
+    const pSig = (profile.companySignature || '').trim();
+
+    for (const c of companiesList) {
+        if (!c) continue;
+        const cId = clean(c.id);
+        const cName = clean(c.establishmentName || c.tradeName);
+        const cPan = clean(c.pan);
+        const cCin = clean(c.cin);
+        const cPf = clean(c.pfCode);
+        const cEsi = clean(c.esiCode);
+        const cSig = (c.companySignature || '').trim();
+
+        // 1. Direct ID match
+        if (pId && cId && pId === cId) return c;
+
+        // 2. Direct Signature match
+        if (pSig && cSig && pSig === cSig) return c;
+
+        // 3. Establishment Name match (must be at least 3 chars)
+        if (pName && cName && pName.length >= 3 && pName === cName) return c;
+
+        // 4. Statutory Identifiers (PAN / CIN / PF Code / ESI Code)
+        if (pPan && cPan && pPan === cPan) return c;
+        if (pCin && cCin && pCin === cCin) return c;
+        if (pPf && cPf && pPf === cPf) return c;
+        if (pEsi && cEsi && pEsi === cEsi) return c;
+    }
+
+    return null;
+};
+
+/**
  * Generates a standard backup filename based on company name, data month/year, and current date.
  * Pattern: [FirstWordOfCompany]_[DataMonth]_[Year]_[DateOfBackup].enc
  * Example: NKE_DEC_2025_04May2026.enc

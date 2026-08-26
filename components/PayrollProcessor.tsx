@@ -106,7 +106,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
     const isLocked = useMemo(() => {
-        return savedRecords.some(r => r.month === month && r.year === year && r.status === 'Finalized');
+        return savedRecords.some(r => String(r.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(r.year) === Number(year) && r.status === 'Finalized');
     }, [savedRecords, month, year]);
 
     const hasAnyAttendance = useMemo(() => {
@@ -151,7 +151,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         }
 
         if (!loadedFromTemp) {
-            const drafts = savedRecords.filter(r => r.month === month && r.year === year);
+            const drafts = savedRecords.filter(r => String(r.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(r.year) === Number(year));
             if (drafts.length > 0) {
                 setResults(drafts);
                 setIsSaved(true);
@@ -661,7 +661,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         const employeesKey = `app_calc_employees_${companyProfile.id}_${month}_${year}`;
         localStorage.setItem(employeesKey, JSON.stringify(activeEmployees));
 
-        const otherRecords = savedRecords.filter(r => !(r.month === month && r.year === year));
+        const otherRecords = savedRecords.filter(r => !(String(r.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(r.year) === Number(year)));
         const newRecords = results.map(r => ({ ...r, status: 'Draft' as const }));
         setSavedRecords([...otherRecords, ...newRecords]);
         setIsSaved(true);

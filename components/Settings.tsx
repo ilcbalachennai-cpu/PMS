@@ -1,10 +1,10 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
     X, Save, RefreshCw, Loader2, Download, Upload, Trash2, AlertTriangle,
     Database, Users, KeyRound, ShieldCheck, Mail, Megaphone, Building2,
     CalendarClock, Calendar, Phone, Globe, CheckCircle2, AlertCircle, Lock, Plus,
     ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator,
-    ScrollText, HandCoins, Wallet, Scale, RotateCw, TrendingUp,
+    ScrollText, HandCoins, Wallet, Scale, RotateCw, RotateCcw, TrendingUp,
     ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
     FolderOpen, FileText, Sparkles
 } from 'lucide-react';
@@ -16,10 +16,11 @@ import {
     getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
     requestResetOTP, verifyResetOTP, sendPolicyConfirmationEmailGAS, getAppDeveloper, APP_VERSION, APP_PATCH_TIMESTAMP
 } from '../services/licenseService';
-import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, generateBackupFilename, getCompanyBackupFolder, didConfigCalculationFieldsChange } from '../utils/formatters';
+import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, findMatchingCompanySilo, generateBackupFilename, getCompanyBackupFolder, didConfigCalculationFieldsChange } from '../utils/formatters';
 import { getMonthAbbr } from '../services/reportService';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 import { executeDiagnosticExport } from '../utils/diagnostics';
+import { PartialResetFilters } from '../hooks/usePayrollData';
 
 interface SettingsProps {
     config: StatutoryConfig;
@@ -32,7 +33,7 @@ interface SettingsProps {
     setLeavePolicy: (policy: LeavePolicy) => void;
     onRestore: () => void;
     onNuclearReset: () => void;
-    onPayrollReset: () => Promise<void>;
+    onPayrollReset: (filters?: PartialResetFilters) => Promise<void>;
     onDeepReset: (deleteFolder?: boolean, targetCompanyId?: string) => Promise<void>;
     initialTab?: SettingsTab;
     setSettingsTab?: (tab: SettingsTab) => void;
@@ -195,14 +196,7 @@ const Settings: React.FC<SettingsProps> = ({
         }
     });
 
-    const hasData = useMemo(() => {
-        try {
-            const emps = JSON.parse(localStorage.getItem(getCKey('app_employees')) || '[]');
-            return Array.isArray(emps) && emps.length > 0;
-        } catch (e) {
-            return false;
-        }
-    }, [activeCompanyId]);
+
 
     const isDirty = useMemo(() => {
         const statutoryDirty = JSON.stringify(formData) !== JSON.stringify(config);
@@ -250,6 +244,7 @@ const Settings: React.FC<SettingsProps> = ({
     const [showBackupModal, setShowBackupModal] = useState(false);
     const [encryptionKey, setEncryptionKey] = useState('');
     const [selectedBackupFile, setSelectedBackupFile] = useState<File | null>(null);
+    const [selectedBackupPath, setSelectedBackupPath] = useState<string>('');
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [isSqliteFile, setIsSqliteFile] = useState(false);
     const [isMachineLocked, setIsMachineLocked] = useState(false);
@@ -264,6 +259,8 @@ const Settings: React.FC<SettingsProps> = ({
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
     const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+    const [showRestoreSuccessModal, setShowRestoreSuccessModal] = useState(false);
+    const [restoreSuccessSummary, setRestoreSuccessSummary] = useState({ fileName: '', rowCount: 0, timestamp: '' });
 
     const isBCACFile = useMemo(() => {
         if (!selectedBackupFile) return false;
@@ -307,15 +304,124 @@ const Settings: React.FC<SettingsProps> = ({
     const [showPayrollResetModal, setShowPayrollResetModal] = useState(false);
     const [resetPassword, setResetPassword] = useState('');
     const [resetError, setResetError] = useState('');
+    const [selectedFromKey, setSelectedFromKey] = useState<string>('ALL');
+    const [employeeDojScope, setEmployeeDojScope] = useState<'START_MONTH' | 'NEXT_MONTH' | null>(null);
+    const [resetCategories, setResetCategories] = useState({
+        payrollHistory: true,
+        attendance: true,
+        advances: true,
+        fines: true,
+        arrears: true,
+        otRecords: true,
+        employees: false,
+    });
     const [resetMode, setResetMode] = useState<'DEEP' | 'FACTORY'>('FACTORY');
     const [purgeScope, setPurgeScope] = useState<'LIST_ONLY' | 'COMPLETE'>('LIST_ONLY');
     const [isActivating, setIsActivating] = useState(false);
+
+    const closePayrollResetModal = useCallback(() => {
+        setSelectedFromKey('ALL');
+        setEmployeeDojScope(null);
+        setResetCategories({
+            payrollHistory: true,
+            attendance: true,
+            advances: true,
+            fines: true,
+            arrears: true,
+            otRecords: true,
+            employees: false,
+        });
+        setResetPassword('');
+        setResetError('');
+        setShowPayrollResetModal(false);
+    }, []);
+
+    useEffect(() => {
+        if (!showPayrollResetModal) {
+            setSelectedFromKey('ALL');
+            setEmployeeDojScope(null);
+            setResetCategories({
+                payrollHistory: true,
+                attendance: true,
+                advances: true,
+                fines: true,
+                arrears: true,
+                otRecords: true,
+                employees: false,
+            });
+            setResetPassword('');
+            setResetError('');
+        }
+    }, [showPayrollResetModal]);
+
+    // Compute Sequential Periods for Partial Reset
+    const MONTH_ORDER = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
+    const getPeriodIndex = useCallback((m?: string, y?: any) => {
+        if (!m || !y) return 0;
+        const idx = MONTH_ORDER.indexOf(m);
+        return Number(y) * 12 + (idx >= 0 ? idx : 0);
+    }, [MONTH_ORDER]);
+
+    const processedPeriods = useMemo(() => {
+        const map = new Map<string, { month: string; year: number; val: number }>();
+        
+        try {
+            const keys = Object.keys(localStorage);
+            keys.forEach(k => {
+                if (k.startsWith('app_payroll_history') || k.startsWith('app_attendance')) {
+                    const item = localStorage.getItem(k);
+                    if (item) {
+                        try {
+                            const parsed = JSON.parse(item);
+                            if (Array.isArray(parsed)) {
+                                parsed.forEach((rec: any) => {
+                                    if (rec && rec.month && rec.year) {
+                                        const key = `${rec.month}_${rec.year}`;
+                                        if (!map.has(key)) {
+                                            map.set(key, { month: rec.month, year: Number(rec.year), val: getPeriodIndex(rec.month, rec.year) });
+                                        }
+                                    }
+                                });
+                            }
+                        } catch (e) {}
+                    }
+                }
+            });
+        } catch (e) {}
+
+        // Always include globalMonth / globalYear (yet to freeze data month)
+        if (globalMonth && globalYear) {
+            const key = `${globalMonth}_${globalYear}`;
+            if (!map.has(key)) {
+                map.set(key, { month: globalMonth, year: Number(globalYear), val: getPeriodIndex(globalMonth, globalYear) });
+            }
+        }
+
+        return Array.from(map.values()).sort((a, b) => a.val - b.val);
+    }, [globalMonth, globalYear, showPayrollResetModal, getPeriodIndex]);
+
+    const latestPeriod = useMemo(() => {
+        if (processedPeriods.length > 0) {
+            return processedPeriods[processedPeriods.length - 1];
+        }
+        return { month: globalMonth || 'April', year: Number(globalYear || new Date().getFullYear()), val: getPeriodIndex(globalMonth || 'April', globalYear || new Date().getFullYear()) };
+    }, [processedPeriods, globalMonth, globalYear, getPeriodIndex]);
+
+    const fromObj = useMemo(() => {
+        return processedPeriods.find(p => `${p.month}_${p.year}` === selectedFromKey);
+    }, [processedPeriods, selectedFromKey]);
 
     const [backupMode, setBackupMode] = useState<'EXPORT' | 'IMPORT' | 'MIGRATE' | 'DATAMIGRATE'>('EXPORT');
     const [showPeriodModal, setShowPeriodModal] = useState(false);
     const [migratePeriodType, setMigratePeriodType] = useState<'ALL' | 'PERIOD'>('ALL');
     const [migrateMonth, setMigrateMonth] = useState('April');
     const [migrateYear, setMigrateYear] = useState(new Date().getFullYear());
+    // Full Restore period range filter
+    const [restorePeriodType, setRestorePeriodType] = useState<'ALL' | 'RANGE'>('ALL');
+    const [restoreFromMonth, setRestoreFromMonth] = useState('April');
+    const [restoreFromYear, setRestoreFromYear] = useState(new Date().getFullYear());
+    const [restoreToMonth, setRestoreToMonth] = useState(new Date().toLocaleString('default', { month: 'long' }));
+    const [restoreToYear, setRestoreToYear] = useState(new Date().getFullYear());
     const [currentPass, setCurrentPass] = useState('');
     const [newPass, setNewPass] = useState('');
     const [confirmPass, setConfirmPass] = useState('');
@@ -555,6 +661,11 @@ const Settings: React.FC<SettingsProps> = ({
         const file = e.target.files?.[0];
         if (file) {
             setSelectedBackupFile(file);
+            let pathVal = (file as any).path || (file as any).filePath || '';
+            if (!pathVal && (window.electronAPI as any)?.getPathForFile) {
+                try { pathVal = (window.electronAPI as any).getPathForFile(file); } catch (_) {}
+            }
+            setSelectedBackupPath(pathVal);
             const name = file.name.toUpperCase();
             const isSqlite = name.endsWith('.sqlite') || name.includes('_BC_') || name.includes('_AC_');
             setIsSqliteFile(isSqlite);
@@ -663,37 +774,20 @@ const Settings: React.FC<SettingsProps> = ({
         setIsProcessing(true);
         setProcessProgress(0);
 
-        // Use overrideKey if provided (from OTP recovery)
-        const activeKey = overrideKey || encryptionKey;
+        // Use overrideKey if provided (from direct PIN parameter or OTP recovery)
+        const activeKey = (overrideKey && overrideKey.trim()) ? overrideKey.trim() : (encryptionKey ? encryptionKey.trim() : '');
 
-        // --- SMART DETECTION: Check if .enc is actually a SQLite Binary (from Rollover) ---
-        // RULE: If the user entered a PIN, it's ALWAYS a CryptoJS legacy text file.
-        // isMachineLocked only applies when there is NO user-entered PIN.
-        const hasPinEntered = !!activeKey;
-        let detectedAsSqlite = isSqliteFile || (!hasPinEntered && isMachineLocked);
-        if (!detectedAsSqlite && file.name.endsWith('.enc')) {
-            try {
-                setProcessStatus('Analyzing archive format...');
-                const blob = file.slice(0, 16);
-                const buffer = await blob.arrayBuffer();
-                const arr = new Uint8Array(buffer);
-
-                // 1. Check for plain SQLite header
-                const header = new TextDecoder().decode(buffer);
-                if (header.startsWith('SQLite format 3')) {
-                    detectedAsSqlite = true;
-                } else {
-                    // 2. Check for binary format (indicates encrypted SQLite)
-                    // CryptoJS Base64 files look like binary to some checks - don't misroute them
-                    const isBinary = arr.some((b: number) => (b < 32 && b !== 9 && b !== 10 && b !== 13) || b > 126);
-                    if (isBinary || isBCACFile) {
-                        detectedAsSqlite = true;
-                    }
-                }
-            } catch (e) {
-                console.error("Format detection failed", e);
-            }
-        }
+        // --- FORMAT DETECTION: Determine if the file is a binary SQLite-based archive ---
+        // Priority order:
+        //  1. If filename contains _BC_ or _AC_ → always SQLite binary (BC/AC auto-backup)
+        //  2. If filename ends with .sqlite → plain SQLite
+        //  3. Read first 16 bytes of the file:
+        //     a. Starts with 'SQLite format 3' → plain SQLite
+        //     b. Contains any non-printable byte → binary-encrypted SQLite (new AES-256-CBC format OR old BC/AC)
+        //     c. All printable ASCII (Base64) → legacy CryptoJS blob (old full backup format)
+        // NOTE: The old rule "PIN entered = CryptoJS" is REMOVED. New full backups are binary AND use a PIN.
+        // All modern BPP backup archives (.enc and .sqlite) are processed by SQLite IPC handler
+        let detectedAsSqlite = true;
 
         if (detectedAsSqlite) {
             try {
@@ -709,11 +803,103 @@ const Settings: React.FC<SettingsProps> = ({
                     }
                 }
 
-                const res = await window.electronAPI.restoreSqliteBackup({
-                    path: (file as unknown as { path: string }).path,
-                    encryptionKey: licenseKey,
-                    isMigration: backupMode === 'DATAMIGRATE'
-                });
+                const isRangeRestore = backupMode === 'IMPORT' && restorePeriodType === 'RANGE';
+                const resolvedPath = selectedBackupPath || ((window.electronAPI as any)?.getPathForFile && file instanceof File
+                    ? ((window.electronAPI as any).getPathForFile(file) || (file as any).path || (file as any).filePath)
+                    : ((file as any).path || (file as any).filePath || file.name));
+
+                console.log(`[RESTORE] Executing restore for path: "${resolvedPath}"`);
+
+                // ── Helper: calls the restore IPC, optionally with forceConfirm ─────────────
+                const callRestoreIPC = (forceConfirm: boolean) =>
+                    window.electronAPI.restoreSqliteBackup({
+                        path: resolvedPath,
+                        encryptionKey: licenseKey,
+                        isMigration: backupMode === 'DATAMIGRATE',
+                        forceConfirm,
+                        ...(isRangeRestore ? {
+                            fromPeriod: { month: restoreFromMonth, year: restoreFromYear },
+                            toPeriod:   { month: restoreToMonth,   year: restoreToYear   },
+                        } : {}),
+                    });
+
+                let res = await callRestoreIPC(false);
+
+                // ── Blank-Field Warning Gate ──────────────────────────────────────────────────
+                // If the IPC found blank mandatory fields (PAN/CIN/PF Code/ESI Code),
+                // it returns requiresConfirmation=true with a warnings list.
+                // Show the user a confirm dialog: Accept → proceed with forceConfirm, Reject → abort.
+                if (!res.success && (res as any).requiresConfirmation) {
+                    const blankWarnings: string[] = (res as any).warnings || [];
+                    setIsProcessing(false);
+                    showAlert?.(
+                        'confirm',
+                        '⚠ Incomplete Mandatory Profile Fields',
+                        (
+                            <div className="space-y-3">
+                                <p className="text-sm text-slate-300">
+                                    The following <span className="text-amber-400 font-bold">mandatory fields</span> are blank or missing in the backup / company profile:
+                                </p>
+                                <ul className="space-y-1">
+                                    {blankWarnings.map((w, i) => (
+                                        <li key={i} className="flex items-start gap-2 text-[11px] font-mono text-amber-300 bg-amber-900/20 border border-amber-700/30 rounded-lg px-3 py-1.5">
+                                            <span className="text-amber-500 shrink-0">⚠</span>
+                                            <span>{w}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                                <p className="text-[11px] text-slate-400 italic">
+                                    Proceeding without these fields may cause verification issues in future payroll operations.
+                                    It is strongly recommended to complete the Company Profile before restoring.
+                                </p>
+                            </div>
+                        ),
+                        // onConfirm → user accepted, retry with forceConfirm
+                        async () => {
+                            setIsProcessing(true);
+                            setProcessProgress(40);
+                            setProcessStatus('Proceeding with confirmed restore...');
+                            try {
+                                const confirmedRes = await callRestoreIPC(true);
+                                if (!confirmedRes.success) {
+                                    throw new Error(confirmedRes.error || 'Restore failed after confirmation.');
+                                }
+                                setProcessProgress(100);
+                                setIsProcessing(false);
+                                setShowBackupModal(false);
+                                const fileLabel = selectedBackupFile?.name || 'Backup Archive';
+                                setSelectedBackupFile(null);
+                                setSelectedBackupPath('');
+                                setEncryptionKey('');
+                                sessionStorage.setItem('settings_initial_tab', 'DATA');
+                                setRestoreSuccessSummary({
+                                    fileName: fileLabel,
+                                    rowCount: 0,
+                                    timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                });
+                                setShowRestoreSuccessModal(true);
+                            } catch (confirmErr: any) {
+                                setIsProcessing(false);
+                                setShowBackupModal(false);
+                                setSelectedBackupFile(null);
+                                setSelectedBackupPath('');
+                                setEncryptionKey('');
+                                setActiveTab(SettingsTab.Data);
+                                setSettingsTab?.(SettingsTab.Data);
+                                const isBlocked = confirmErr.message?.includes("Universal Restoration Blocked") || confirmErr.message?.includes("Blocked");
+                                const alertTitle = isBlocked ? 'Restore Blocked' : 'Restoration Failed';
+                                const alertBody = isBlocked ? confirmErr.message : `Restore Error: ${confirmErr.message}`;
+                                showAlert?.('error', alertTitle, alertBody);
+                            }
+                        },
+                        // onCancel → user rejected, stay on backup modal
+                        undefined,
+                        'Accept & Proceed',
+                        'Reject & Abort'
+                    );
+                    return; // stop — user will decide via the confirm dialog
+                }
+
 
                 if (res.success) {
                     const isExcludedRestoreKey = (k: string): boolean => {
@@ -815,9 +1001,10 @@ const Settings: React.FC<SettingsProps> = ({
                             }
                             
                             let valToSet = item.value;
+                            let parsedVal = typeof item.value === 'string' ? (() => { try { return JSON.parse(item.value); } catch { return item.value; } })() : item.value;
                             
                             // V06.01.13: Period-Specific Ledger Merging
-                            if (isPeriodMigration && Array.isArray(valToSet)) {
+                            if (isPeriodMigration && Array.isArray(parsedVal)) {
                                 const isTransactional = transactionalPrefixes.some(pref => storageKey.startsWith(pref));
                                 if (isTransactional && storageKey.endsWith(`_${activeCompanyId}`)) {
                                     const localRaw = localStorage.getItem(storageKey);
@@ -830,7 +1017,7 @@ const Settings: React.FC<SettingsProps> = ({
                                     // Preserve local records for other months
                                     const preservedLocal = localArray.filter(r => !recordMatchesPeriod(r, migrateMonth, migrateYear));
                                     // Import only target month records from backup
-                                    const incomingMigrated = valToSet.filter(r => recordMatchesPeriod(r, migrateMonth, migrateYear));
+                                    const incomingMigrated = parsedVal.filter(r => recordMatchesPeriod(r, migrateMonth, migrateYear));
                                     
                                     valToSet = [...preservedLocal, ...incomingMigrated];
                                     
@@ -851,6 +1038,13 @@ const Settings: React.FC<SettingsProps> = ({
                                 console.warn(`[RESTORE] LocalStorage write skipped for key ${storageKey}:`, quotaErr);
                             }
                         }
+
+                        // Clear temp payroll calculations & calc caches so stale draft calculations don't override migrated data
+                        Object.keys(localStorage).forEach(k => {
+                            if (k.startsWith('app_temp_payroll_') || k.startsWith('app_calc_')) {
+                                localStorage.removeItem(k);
+                            }
+                        });
                     }
 
                     // --- SMART MIGRATION BRIDGE: Legacy (Single-Company) to Multi-Company ---
@@ -921,17 +1115,32 @@ const Settings: React.FC<SettingsProps> = ({
                     await delay(500);
                     setIsProcessing(false);
                     setShowBackupModal(false);
+                    const fileLabel = selectedBackupFile?.name || 'Backup Archive';
+                    const recordCount = (dbRes && Array.isArray(dbRes.data)) ? dbRes.data.length : 0;
                     setSelectedBackupFile(null);
+                    setSelectedBackupPath('');
                     setEncryptionKey('');
                     sessionStorage.setItem('settings_initial_tab', 'DATA');
-                    onRestore();
+                    setRestoreSuccessSummary({
+                        fileName: fileLabel,
+                        rowCount: recordCount,
+                        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                    });
+                    setShowRestoreSuccessModal(true);
                     return;
                 } else {
                     throw new Error(res.error || "Failed to restore database file.");
                 }
             } catch (err: any) {
                 setIsProcessing(false);
+                setShowBackupModal(false);
+                setSelectedBackupFile(null);
+                setSelectedBackupPath('');
+                setEncryptionKey('');
+                setActiveTab(SettingsTab.Data);
+                setSettingsTab?.(SettingsTab.Data);
                 const isDecryptionError = err.message.includes("Decryption failed") || err.message.includes("Invalid key");
+                const isBlocked = err.message?.includes("Universal Restoration Blocked") || err.message?.includes("Blocked");
 
                 if (isDecryptionError && isMachineLocked) {
                     showAlert?.('warning', 'Hardware Mismatch Detected', (
@@ -950,7 +1159,9 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
                     ));
                 } else {
-                    showAlert?.('error', 'Restoration Failed', `Restore Error: ${err.message}`);
+                    const alertTitle = isBlocked ? 'Restore Blocked' : 'Restoration Failed';
+                    const alertBody = isBlocked ? err.message : `Restore Error: ${err.message}`;
+                    showAlert?.('error', alertTitle, alertBody);
                 }
                 return;
             }
@@ -990,29 +1201,46 @@ const Settings: React.FC<SettingsProps> = ({
                 const data = JSON.parse(decryptedString);
                 setProcessProgress(70);
 
-                // V03.01.07: Company ID Conflict Check
+                // V03.01.07: Company ID & Silo Signature Check
                 const isDataMigration = backupMode === 'DATAMIGRATE';
                 const rawProfile = data.company_profile || data.companyProfile || data.app_company_profile || {};
                 const backupCompanyId = rawProfile.id;
 
-                let targetId = activeCompanyId !== 'default' ? activeCompanyId : generateCompanyId(rawProfile.establishmentName || 'COMPANY');
-                let conflictMessage = "";
-
-                if (isDataMigration) {
-                    targetId = (activeCompanyId && activeCompanyId !== 'default') ? activeCompanyId : (backupCompanyId || targetId);
-                    conflictMessage = `DATA MIGRATION ACTIVE: Machine B Target Company Profile (${targetId}), Password & Credentials Preserved 100%.`;
-                } else if (backupCompanyId && backupCompanyId !== activeCompanyId) {
-                    console.log(`[RESTORE] Conflict detected: Backup ID ${backupCompanyId} !== Active ID ${activeCompanyId}`);
-                    conflictMessage = `Restoring CompanyID (${backupCompanyId}) and current CompanyID (${activeCompanyId}) are different. Proceeding to restore as a separate entity.`;
-                    targetId = backupCompanyId;
-                } else {
-                    console.log(`[RESTORE] No conflict or matching ID: ${backupCompanyId}`);
-                    conflictMessage = `Restoring from backup "${backupCompanyId || 'Unknown'}". Full company entity overwrite for recovery.`;
-                    targetId = backupCompanyId || targetId;
-                }
                 const companiesListRaw = localStorage.getItem('app_companies');
                 let companiesList: any[] = [];
                 try { companiesList = companiesListRaw ? JSON.parse(companiesListRaw) : []; } catch (e) { }
+
+                const existingMatch = findMatchingCompanySilo(rawProfile, companiesList);
+
+                let targetId = activeCompanyId !== 'default' 
+                    ? activeCompanyId 
+                    : (existingMatch ? existingMatch.id : (backupCompanyId || generateCompanyId(rawProfile.establishmentName || 'COMPANY')));
+                let conflictMessage = "";
+
+                if (isDataMigration) {
+                    targetId = (activeCompanyId && activeCompanyId !== 'default') ? activeCompanyId : (existingMatch ? existingMatch.id : (backupCompanyId || targetId));
+                    conflictMessage = `DATA MIGRATION ACTIVE: Machine B Target Company Profile (${targetId}), Password & Credentials Preserved 100%.`;
+                } else {
+                    // Universal Restoration must strictly belong to the same machine and company silo!
+                    const backupMachineId = data.app_origin_machine_id || data.app_machine_id;
+                    const currentMachineId = window.electronAPI ? await window.electronAPI.getMachineId() : localStorage.getItem('app_machine_id');
+
+                    if (!backupMachineId) {
+                        throw new Error(`Universal Restoration Blocked — Backup file lacks local machine ownership signature. Universal Restoration works ONLY for backups created on this local machine. To import data from another machine or external source, please use 'Data Migration' under Utilities.`);
+                    }
+
+                    if (!currentMachineId || String(backupMachineId).trim().toUpperCase() !== String(currentMachineId).trim().toUpperCase()) {
+                        throw new Error(`Universal Restoration Blocked — Data backup file does not belong to this Machine. This backup file was generated on another computer. Universal Restoration works ONLY for backups created on this local machine. To import data from another machine, please use 'Data Migration' under Utilities.`);
+                    }
+
+                    const bIdClean = String(backupCompanyId || '').trim().toUpperCase();
+                    const aIdClean = String(activeCompanyId || '').trim().toUpperCase();
+                    if (bIdClean && aIdClean && aIdClean !== 'DEFAULT' && bIdClean !== aIdClean) {
+                        throw new Error(`Universal Restoration Blocked — This backup file belongs to company silo '${backupCompanyId}', which does not match active company silo '${activeCompanyId}'. Universal Restoration works only for backups created on the same company silo. Please use 'Data Migration' under Utilities to import data from another machine.`);
+                    }
+                    console.log(`[RESTORE] Universal Restoration matching Silo ID: ${targetId}`);
+                    conflictMessage = `Restoring from backup "${targetId}". Full company entity overwrite for recovery.`;
+                }
 
                 const targetCompanyObj = {
                     ...INITIAL_COMPANY_PROFILE,
@@ -1664,11 +1892,19 @@ const Settings: React.FC<SettingsProps> = ({
             } catch (err: any) {
                 console.error(err);
                 setIsProcessing(false);
-                let displayError = `Restore Error: ${err.message}`;
+                setShowBackupModal(false);
+                setSelectedBackupFile(null);
+                setSelectedBackupPath('');
+                setEncryptionKey('');
+                setActiveTab(SettingsTab.Data);
+                setSettingsTab?.(SettingsTab.Data);
+                const isBlocked = err.message?.includes("Universal Restoration Blocked") || err.message?.includes("Blocked");
+                let displayError = isBlocked ? err.message : `Restore Error: ${err.message}`;
                 if (err.message === "Wrong Password or Corrupt File" || err.message.includes("Malformed UTF-8") || err.message === "Invalid Decryption Result") {
                     displayError = "Decryption Failed: Incorrect password or invalid file.";
                 }
-                showAlert?.('error', 'Restoration Failed', displayError);
+                const alertTitle = isBlocked ? 'Restore Blocked' : 'Restoration Failed';
+                showAlert?.('error', alertTitle, displayError);
             }
         };
         reader.readAsText(file);
@@ -1728,13 +1964,22 @@ const Settings: React.FC<SettingsProps> = ({
 
                 let targetCompanyId = activeCompanyId;
 
-                // V03.01.07: Always generate a standalone company ID for legacy migration to avoid data pollution
                 const rawProfile = data.company_profile || data.app_company_profile || data.companyProfile || {};
                 const establishmentName = rawProfile.establishmentName || 'COMPANY';
-                targetCompanyId = generateCompanyId(establishmentName);
+
+                // Check if an existing company silo matches the incoming profile to avoid creating a duplicate silo
+                const existingMatch = findMatchingCompanySilo(rawProfile, companiesList);
+                if (existingMatch) {
+                    targetCompanyId = existingMatch.id;
+                    console.log(`[MIGRATE] Matched existing company silo '${existingMatch.establishmentName}' (${existingMatch.id}). Data will be restored directly into existing silo.`);
+                } else if (activeCompanyId && activeCompanyId !== 'default') {
+                    targetCompanyId = activeCompanyId;
+                } else {
+                    targetCompanyId = generateCompanyId(establishmentName);
+                }
 
                 const getCKey = (key: string) => `${key}_${targetCompanyId}`;
-                console.log(`[MIGRATE] Standalone Target Company ID: ${targetCompanyId}`);
+                console.log(`[MIGRATE] Resolved Target Company ID: ${targetCompanyId}`);
 
                 // V03.01.05: CRITICAL - Switch backend silo focus before writing migrated data
                 if (window.electronAPI?.switchCompanyData) {
@@ -1960,14 +2205,16 @@ const Settings: React.FC<SettingsProps> = ({
             return;
         }
 
+        const currentPin = encryptionKey ? encryptionKey.trim() : '';
+
         // 2FA: Require Login Password to finalize the restore
         requireAuth(() => {
             if (backupMode === 'DATAMIGRATE') {
                 setShowPeriodModal(true);
-            } else if (hasData) {
-                setShowOverwriteConfirm(true);
             } else {
-                executeImport();
+                // Universal Restoration (IMPORT mode): restore all periods directly without showing period modal
+                setRestorePeriodType('ALL');
+                executeImport(currentPin);
             }
         });
     };
@@ -2164,12 +2411,9 @@ const Settings: React.FC<SettingsProps> = ({
                 timestamp: new Date().toISOString()
             };
             const jsonString = JSON.stringify(dataBundle);
-            const encrypted = CryptoJS.AES.encrypt(jsonString, encryptionKey).toString();
-            const blob = new Blob([encrypted], { type: 'text/plain' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            // Standardized Naming Convention: [FirstWord]_[Month]_[Year]_[Date].enc
+
+            // ── V06.02: Military-grade AES-256-CBC export via Electron (replaces CryptoJS blob) ──
+            // Determine filename
             let fileName = 'backup.enc';
             try {
                 fileName = generateBackupFilename(companyProfile.establishmentName, globalMonth, globalYear);
@@ -2179,23 +2423,40 @@ const Settings: React.FC<SettingsProps> = ({
                 fileName = `backup_${today.getFullYear()}_${today.getMonth() + 1}.enc`;
             }
 
-            a.download = fileName;
-            if (window.electronAPI && window.electronAPI.runBackup) {
-                setProcessStatus('Saving to BharatPP location...');
+            if (window.electronAPI?.runFullBackup) {
+                setProcessStatus('Encrypting with AES-256-CBC (Military Grade)...');
+                setProcessProgress(70);
+
                 const subfolderPath = `${getCompanyBackupFolder(companyProfile.establishmentName, companyProfile.id)}/BK_${getMonthAbbr(globalMonth)}${String(globalYear).slice(-2)}`;
-                const res = await window.electronAPI.runBackup(encrypted, fileName, subfolderPath);
+
+                const res = await window.electronAPI.runFullBackup({
+                    fileName,
+                    subfolder: subfolderPath,
+                    encryptionKey: encryptionKey,
+                });
 
                 if (res.success) {
                     setProcessProgress(100);
-                    setProcessStatus('Backup Saved Successfully');
-                    showAlert?.('success', 'Secure Backup Created & Auto-Saved', `Your active working data and full payroll snapshot have been automatically saved and packaged into your backup file:\n\n${res.fileName || fileName}\n\n* Note: You can continue to edit or correct working attendance on this machine at any time before final confirmation.`, () => {
-                        // Open the folder location ONLY after clicking OK
-                        if (res.filePath && window.electronAPI.openItemLocation) {
-                            window.electronAPI.openItemLocation(res.filePath);
+                    setProcessStatus('Secure Backup Saved Successfully');
+                    showAlert?.('success', 'Secure Backup Created & Auto-Saved',
+                        `Your data has been encrypted with AES-256-CBC (military-grade) and saved:\n\n${res.fileName || fileName}\n\n* This new format is fully compatible with Universal Restoration and Data Migration.`,
+                        () => {
+                            if (res.filePath && window.electronAPI.openItemLocation) {
+                                window.electronAPI.openItemLocation(res.filePath);
+                            }
                         }
-                    });
-                } else throw new Error(res.error || 'Unknown backup error');
+                    );
+                } else {
+                    throw new Error(res.error || 'Backup failed in the secure export handler.');
+                }
             } else {
+                // Fallback for non-Electron (browser preview only) — still uses CryptoJS
+                const encrypted = (window as any).CryptoJS?.AES.encrypt(jsonString, encryptionKey).toString() || jsonString;
+                const blob = new Blob([encrypted], { type: 'text/plain' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -2203,6 +2464,7 @@ const Settings: React.FC<SettingsProps> = ({
                 setProcessProgress(100);
                 setProcessStatus('Export Complete');
             }
+
             setTimeout(() => { setShowBackupModal(false); setEncryptionKey(''); setIsProcessing(false); }, 1500);
         } catch (e: any) {
             setIsProcessing(false);
@@ -2685,9 +2947,21 @@ const Settings: React.FC<SettingsProps> = ({
 
         if (isAuthorized) {
             setIsProcessing(true);
-            await onPayrollReset();
+            const isAll = selectedFromKey === 'ALL';
+
+            await onPayrollReset({
+                isAllMonths: isAll,
+                resetRange: (!isAll && fromObj) ? {
+                    fromMonth: fromObj.month,
+                    fromYear: fromObj.year,
+                    toMonth: latestPeriod.month,
+                    toYear: latestPeriod.year
+                } : undefined,
+                employeeDojScope: employeeDojScope || undefined,
+                categories: resetCategories
+            });
             setIsProcessing(false);
-            setShowPayrollResetModal(false);
+            closePayrollResetModal();
         } else {
             setResetError("Incorrect Login Password. Access Denied.");
         }
@@ -4332,10 +4606,10 @@ const Settings: React.FC<SettingsProps> = ({
                                         </div>
                                         <div>
                                             <h4 className="font-black text-white uppercase tracking-tighter">Universal Restoration</h4>
-                                            <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">Enc / SQLite</span>
+                                            <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">Same-Machine Full Recovery</span>
                                         </div>
                                     </div>
-                                    <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Reverse previous exports or recover from database files directly. Atomic restoration ensures system integrity on failure."</p>
+                                    <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Full establishment disaster recovery strictly for backups created on THIS SAME MACHINE. Performs a complete entity overwrite for local recovery. Backups from other machines cannot be restored here (use Data Migration instead)."</p>
                                     <button
                                         onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }}
                                         disabled={isReadOnly || !getPermission('dmRestore')}
@@ -4354,10 +4628,10 @@ const Settings: React.FC<SettingsProps> = ({
                                             </div>
                                             <div>
                                                 <h4 className="font-black text-white uppercase tracking-tighter">Data Migration</h4>
-                                                <span className="text-[9px] font-bold text-violet-400 uppercase tracking-widest px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 rounded">Payroll Ledgers Only</span>
+                                                <span className="text-[9px] font-bold text-violet-400 uppercase tracking-widest px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 rounded">Cross-Machine Portability</span>
                                             </div>
                                         </div>
-                                        <p className="text-[11px] text-slate-400 mb-4 leading-relaxed italic">"Import only transactional payroll registers, attendance logs, and employee ledgers from another machine's backup. Strictly preserves your local profiles, settings, PINs, and logins."</p>
+                                        <p className="text-[11px] text-slate-400 mb-4 leading-relaxed italic">"Port operational payroll data (Employees, Attendance, Ledgers) from another computer (Machine A to Machine B). Validates 5-field profile compatibility while strictly preserving local settings, logins, and signatures."</p>
                                     </div>
                                     <div className="space-y-4">
                                         <div className="p-2 bg-violet-500/5 border border-violet-500/10 rounded text-[9px] text-violet-400/80 font-bold uppercase tracking-wider text-center">
@@ -4382,10 +4656,10 @@ const Settings: React.FC<SettingsProps> = ({
                                             </div>
                                             <div>
                                                 <h4 className="font-black text-white uppercase tracking-tighter">Legacy Migration Wizard</h4>
-                                                <span className="text-[9px] font-bold text-amber-400 uppercase tracking-widest px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded">Single -&gt; Multi-Company Bridge</span>
+                                                <span className="text-[9px] font-bold text-amber-400 uppercase tracking-widest px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded">Upgrade from Older Versions</span>
                                             </div>
                                         </div>
-                                        <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Specifically for older backups. Extracts data, generates fresh IDs, and extrapolates fields for the new multi-company architecture."</p>
+                                        <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Used when upgrading from older single-company software versions (v3/v4) or when importing legacy backup files created before the multi-company format. Auto-transforms legacy tables into modern company silos."</p>
                                     </div>
                                     <button
                                         onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }}
@@ -4535,6 +4809,48 @@ const Settings: React.FC<SettingsProps> = ({
                                     <FileText size={14} /> Export Diagnostic Logs
                                 </button>
                             </div>
+
+                            {/* Safety Snapshot Recovery Card */}
+                            <div className="p-5 rounded-2xl border border-emerald-900/40 bg-emerald-950/20 hover:bg-emerald-950/40 transition-colors flex flex-col justify-between group shadow-lg">
+                                <div>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="p-2 bg-emerald-900/30 text-emerald-400 rounded-lg group-hover:scale-110 transition-transform">
+                                            <ShieldCheck size={18} />
+                                        </div>
+                                        <div>
+                                            <h5 className="text-xs font-black text-emerald-400 uppercase tracking-tighter">Safety Snapshot Recovery</h5>
+                                            <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">Automatic Protection</span>
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
+                                        Revert database to the exact safety snapshot captured automatically <span className="text-emerald-300 font-bold underline underline-offset-2">immediately prior</span> to your last Data Restore or Migration operation.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        showAlert(
+                                            'confirm',
+                                            '🛡 Revert to Last Pre-Operation Snapshot?',
+                                            'Are you sure you want to revert your database to the safety snapshot captured before your last Restore/Migration attempt? All company profile data and employee records will be restored to their exact state prior to that command.',
+                                            async () => {
+                                                if ((window.electronAPI as any)?.restoreFromSnapshot) {
+                                                    const res = await (window.electronAPI as any).restoreFromSnapshot();
+                                                    if (res.success) {
+                                                        showAlert('success', 'Snapshot Restored ✓', 'Database successfully reverted to the pre-operation safety snapshot. All company profile data and records have been recovered.');
+                                                        onRestore();
+                                                    } else {
+                                                        showAlert('danger', 'Snapshot Restore Error', res.error || 'Failed to revert to pre-operation snapshot.');
+                                                    }
+                                                }
+                                            }
+                                        );
+                                    }}
+                                    disabled={isReadOnly}
+                                    className="mt-4 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white border border-emerald-400/30 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg"
+                                >
+                                    <RotateCcw size={14} /> Revert To Last Safety Snapshot
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -4643,24 +4959,274 @@ const Settings: React.FC<SettingsProps> = ({
                     </div>
                 )
             }
-
             {
                 showPayrollResetModal && (
-                    <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-900/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                            <button onClick={() => setShowPayrollResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Payroll Reset Modal"><X size={20} /></button>
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="p-4 bg-amber-900/20 text-[#FFD700] rounded-full border border-amber-900/50 mb-2"><Trash2 size={32} /></div>
-                                <h3 className="text-xl font-black text-white text-center">PARTIAL DATA RESET</h3>
-                                <p className="text-xs text-amber-300 text-center leading-relaxed">This will erase all employees and payroll for {companyProfile.establishmentName} only.</p>
+                    <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+                        <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-amber-500/40 shadow-2xl p-6 flex flex-col gap-4 relative max-h-[90vh] overflow-y-auto">
+                            <button 
+                                onClick={closePayrollResetModal} 
+                                className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors" 
+                                title="Close" 
+                                aria-label="Close Partial Reset Modal"
+                            >
+                                <X size={20} />
+                            </button>
+
+                            <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                                <div className="p-3 bg-amber-900/20 text-[#FFD700] rounded-xl border border-amber-900/50">
+                                    <RotateCw size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-black text-white uppercase tracking-tight">Selective Partial Reset</h3>
+                                    <p className="text-[11px] text-amber-400 font-medium">Unit: <span className="text-white font-bold">{companyProfile.establishmentName}</span> ({companyProfile.id})</p>
+                                </div>
                             </div>
-                            <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                                <input type="password" placeholder="Enter Login Password" title="Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} />
+
+                            {/* Section 1: Sequential Range Protection Filter */}
+                            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                                        <Calendar size={13} className="text-amber-400" /> Sequential Range Protection
+                                    </label>
+                                    <span className="text-[9px] font-bold text-amber-400 bg-amber-950/40 border border-amber-800/50 px-2 py-0.5 rounded">Backwards Rollback</span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">From Period (Start Rollback)</label>
+                                        <select
+                                            value={selectedFromKey}
+                                            onChange={(e) => setSelectedFromKey(e.target.value)}
+                                            className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer"
+                                        >
+                                            <option value="ALL">All Months (Full Reset)</option>
+                                            {processedPeriods.map(p => (
+                                                <option key={`${p.month}_${p.year}`} value={`${p.month}_${p.year}`}>
+                                                    From: {p.month} {p.year}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">To Period (Fixed / Latest)</label>
+                                        <div className="w-full bg-[#0f172a]/60 border border-slate-800 rounded-lg px-3 py-2 text-xs font-bold text-slate-300 flex items-center justify-between">
+                                            <span>{latestPeriod.month} {latestPeriod.year}</span>
+                                            <span className="text-[8px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-1.5 py-0.5 rounded uppercase">
+                                                {latestPeriod.month === globalMonth && Number(latestPeriod.year) === Number(globalYear) ? 'Active / Unfrozen' : 'Latest'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {selectedFromKey !== 'ALL' && (
+                                    <div className="bg-amber-950/30 border border-amber-900/40 rounded-lg p-2.5 flex items-start gap-2">
+                                        <ShieldCheck size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                                        <p className="text-[10px] text-amber-200 leading-relaxed font-medium">
+                                            Rollback will sequentially erase records from <span className="font-bold underline text-white">{selectedFromKey.replace('_', ' ')}</span> through <span className="font-bold underline text-white">{latestPeriod.month} {latestPeriod.year}</span> (including unfrozen data). Records prior to {selectedFromKey.replace('_', ' ')} will remain <span className="font-bold text-emerald-400">100% protected</span>.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Section 2: Data Category Checkboxes */}
+                            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                                        <Database size={13} className="text-amber-400" /> Transactional Data Categories
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setResetCategories({
+                                                payrollHistory: true, attendance: true, advances: true, fines: true, arrears: true, otRecords: true, employees: false
+                                            })}
+                                            className="text-[9px] font-bold text-sky-400 hover:underline uppercase"
+                                        >
+                                            Select All
+                                        </button>
+                                        <span className="text-slate-600">|</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setResetCategories({
+                                                payrollHistory: false, attendance: false, advances: false, fines: false, arrears: false, otRecords: false, employees: false
+                                            })}
+                                            className="text-[9px] font-bold text-slate-400 hover:underline uppercase"
+                                        >
+                                            Deselect All
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                    <label className={`flex items-center gap-2.5 p-2 rounded-lg border transition-all cursor-pointer ${resetCategories.payrollHistory ? 'bg-amber-950/30 border-amber-800/60 text-amber-200' : 'bg-slate-950/40 border-slate-800 text-slate-400'}`}>
+                                        <input
+                                            type="checkbox"
+                                            checked={resetCategories.payrollHistory}
+                                            onChange={(e) => setResetCategories(prev => ({ ...prev, payrollHistory: e.target.checked }))}
+                                            className="rounded border-slate-700 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="text-xs font-bold">Processed Payroll</span>
+                                    </label>
+
+                                    <label className={`flex items-center gap-2.5 p-2 rounded-lg border transition-all cursor-pointer ${resetCategories.attendance ? 'bg-amber-950/30 border-amber-800/60 text-amber-200' : 'bg-slate-950/40 border-slate-800 text-slate-400'}`}>
+                                        <input
+                                            type="checkbox"
+                                            checked={resetCategories.attendance}
+                                            onChange={(e) => setResetCategories(prev => ({ ...prev, attendance: e.target.checked }))}
+                                            className="rounded border-slate-700 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="text-xs font-bold">Attendance Records</span>
+                                    </label>
+
+                                    <label className={`flex items-center gap-2.5 p-2 rounded-lg border transition-all cursor-pointer ${resetCategories.advances ? 'bg-amber-950/30 border-amber-800/60 text-amber-200' : 'bg-slate-950/40 border-slate-800 text-slate-400'}`}>
+                                        <input
+                                            type="checkbox"
+                                            checked={resetCategories.advances}
+                                            onChange={(e) => setResetCategories(prev => ({ ...prev, advances: e.target.checked }))}
+                                            className="rounded border-slate-700 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="text-xs font-bold">Advances & Loans</span>
+                                    </label>
+
+                                    <label className={`flex items-center gap-2.5 p-2 rounded-lg border transition-all cursor-pointer ${resetCategories.fines ? 'bg-amber-950/30 border-amber-800/60 text-amber-200' : 'bg-slate-950/40 border-slate-800 text-slate-400'}`}>
+                                        <input
+                                            type="checkbox"
+                                            checked={resetCategories.fines}
+                                            onChange={(e) => setResetCategories(prev => ({ ...prev, fines: e.target.checked }))}
+                                            className="rounded border-slate-700 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="text-xs font-bold">Tax & Fines</span>
+                                    </label>
+
+                                    <label className={`flex items-center gap-2.5 p-2 rounded-lg border transition-all cursor-pointer ${resetCategories.arrears ? 'bg-amber-950/30 border-amber-800/60 text-amber-200' : 'bg-slate-950/40 border-slate-800 text-slate-400'}`}>
+                                        <input
+                                            type="checkbox"
+                                            checked={resetCategories.arrears}
+                                            onChange={(e) => setResetCategories(prev => ({ ...prev, arrears: e.target.checked }))}
+                                            className="rounded border-slate-700 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="text-xs font-bold">Salary Arrears</span>
+                                    </label>
+
+                                    <label className={`flex items-center gap-2.5 p-2 rounded-lg border transition-all cursor-pointer ${resetCategories.otRecords ? 'bg-amber-950/30 border-amber-800/60 text-amber-200' : 'bg-slate-950/40 border-slate-800 text-slate-400'}`}>
+                                        <input
+                                            type="checkbox"
+                                            checked={resetCategories.otRecords}
+                                            onChange={(e) => setResetCategories(prev => ({ ...prev, otRecords: e.target.checked }))}
+                                            className="rounded border-slate-700 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span className="text-xs font-bold">Overtime (OT)</span>
+                                    </label>
+
+                                    <div className="col-span-1 sm:col-span-2 space-y-2">
+                                        <label className={`flex items-center gap-2.5 p-2 rounded-lg border transition-all cursor-pointer ${resetCategories.employees ? 'bg-red-950/30 border-red-800/60 text-red-300' : 'bg-slate-950/40 border-slate-800 text-slate-400'}`}>
+                                            <input
+                                                type="checkbox"
+                                                checked={resetCategories.employees}
+                                                onChange={(e) => setResetCategories(prev => ({ ...prev, employees: e.target.checked }))}
+                                                className="rounded border-slate-700 text-red-600 focus:ring-red-500"
+                                            />
+                                            <div>
+                                                <span className="text-xs font-bold">Employee Master Profiles</span>
+                                                <span className="block text-[9px] text-slate-400">
+                                                    {selectedFromKey === 'ALL'
+                                                        ? 'Clears all employee master profiles in active company'
+                                                        : `Deletes enrolled employee profiles based on Date of Joining (DOJ)`}
+                                                </span>
+                                            </div>
+                                        </label>
+
+                                        {selectedFromKey !== 'ALL' && resetCategories.employees && (
+                                            <div className="ml-6 p-2.5 bg-slate-950/70 border border-slate-800 rounded-lg space-y-2 animate-in fade-in duration-200">
+                                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
+                                                    Employee DOJ Deletion Cutoff:
+                                                </label>
+                                                <div className="space-y-1.5">
+                                                    <label className="flex items-start gap-2 cursor-pointer">
+                                                        <input
+                                                            type="radio"
+                                                            name="dojScope"
+                                                            checked={employeeDojScope === 'NEXT_MONTH'}
+                                                            onChange={() => setEmployeeDojScope('NEXT_MONTH')}
+                                                            className="mt-0.5 text-amber-500 focus:ring-amber-500"
+                                                        />
+                                                        <div className="text-[10px]">
+                                                            <span className="font-bold text-emerald-400">Following Month Onwards (Retain {fromObj ? `${fromObj.month} ${fromObj.year}` : 'Start Month'} Hires)</span>
+                                                            <span className="block text-[8.5px] text-slate-400 leading-normal">Keeps employees who joined in {fromObj ? `${fromObj.month} ${fromObj.year}` : 'Start Month'} so you do not need to re-enter them.</span>
+                                                        </div>
+                                                    </label>
+
+                                                    <label className="flex items-start gap-2 cursor-pointer">
+                                                        <input
+                                                            type="radio"
+                                                            name="dojScope"
+                                                            checked={employeeDojScope === 'START_MONTH'}
+                                                            onChange={() => setEmployeeDojScope('START_MONTH')}
+                                                            className="mt-0.5 text-amber-500 focus:ring-amber-500"
+                                                        />
+                                                        <div className="text-[10px]">
+                                                            <span className="font-bold text-amber-300">From Start Month ({fromObj ? `${fromObj.month} ${fromObj.year}` : 'Start Month'} Onwards)</span>
+                                                            <span className="block text-[8.5px] text-slate-400 leading-normal">Deletes employees who joined in {fromObj ? `${fromObj.month} ${fromObj.year}` : 'Start Month'} or later.</span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                {!employeeDojScope && (
+                                                    <p className="text-[9px] text-amber-400 font-bold animate-pulse pt-1">
+                                                        ⚠️ Please select an employee deletion option above to enable Confirm Reset.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Security Password & Confirmation */}
+                            <div className="space-y-3 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Verify Login Password</label>
+                                <input 
+                                    type="password" 
+                                    placeholder="Enter Login Password" 
+                                    title="Password" 
+                                    disabled={isProcessing} 
+                                    className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-xs text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all font-mono`} 
+                                    value={resetPassword} 
+                                    onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} 
+                                    onKeyDown={(e) => e.key === 'Enter' && executePayrollReset()} 
+                                />
                                 {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
                             </div>
-                            <button onClick={executePayrollReset} disabled={isProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
-                                {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />} {isProcessing ? 'CLEARING...' : 'CONFIRM RESET'}
-                            </button>
+
+                            <div className="flex gap-3">
+                                <button 
+                                    type="button"
+                                    onClick={closePayrollResetModal} 
+                                    disabled={isProcessing}
+                                    className="flex-1 py-3 border border-slate-700 hover:bg-slate-800 disabled:opacity-50 text-slate-300 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                {
+                                    (() => {
+                                        const isDojScopeRequired = selectedFromKey !== 'ALL' && resetCategories.employees;
+                                        const isDojScopeSelected = !isDojScopeRequired || (employeeDojScope === 'START_MONTH' || employeeDojScope === 'NEXT_MONTH');
+                                        const isResetActionValid = Object.values(resetCategories).some(Boolean) && isDojScopeSelected;
+
+                                        return (
+                                            <button 
+                                                type="button"
+                                                onClick={executePayrollReset} 
+                                                disabled={isProcessing || !isResetActionValid} 
+                                                className="flex-2 py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wider"
+                                            >
+                                                {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />} 
+                                                {isProcessing ? 'RESETTING DATA...' : 'CONFIRM RESET'}
+                                            </button>
+                                        );
+                                    })()
+                                }
+                            </div>
                         </div>
                     </div>
                 )
@@ -4699,7 +5265,25 @@ const Settings: React.FC<SettingsProps> = ({
                                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">SELECT BACKUP FILE</label>
                                         <div className="flex items-center gap-3 p-3 bg-slate-900/50 border border-slate-700 rounded-xl">
                                             <button
-                                                onClick={() => backupFileRef.current?.click()}
+                                                onClick={async () => {
+                                                    if ((window.electronAPI as any)?.selectBackupFile) {
+                                                        const res = await (window.electronAPI as any).selectBackupFile();
+                                                        if (res && res.filePath) {
+                                                            setSelectedBackupPath(res.filePath);
+                                                            const mockFile = new File([], res.name);
+                                                            (mockFile as any).filePath = res.filePath;
+                                                            (mockFile as any).path = res.filePath;
+                                                            setSelectedBackupFile(mockFile);
+                                                            const name = res.name.toUpperCase();
+                                                            const isSqlite = name.endsWith('.sqlite') || name.includes('_BC_') || name.includes('_AC_');
+                                                            setIsSqliteFile(isSqlite);
+                                                            setBackupMode(prev => (prev === 'MIGRATE' || prev === 'DATAMIGRATE') ? prev : 'IMPORT');
+                                                            setShowBackupModal(true);
+                                                            return;
+                                                        }
+                                                    }
+                                                    backupFileRef.current?.click();
+                                                }}
                                                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg border border-slate-700 transition-colors uppercase"
                                             >
                                                 Choose File
@@ -5749,101 +6333,147 @@ const Settings: React.FC<SettingsProps> = ({
             }
 
             {
-                showPeriodModal && (
-                    <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div className="bg-[#0f172a] w-full max-w-md rounded-2xl border border-violet-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                            <button onClick={() => setShowPeriodModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Migration Period Selector"><X size={20} /></button>
-                            
-                            <div className="flex flex-col items-center gap-2 text-center">
-                                <div className="p-3 bg-violet-900/20 text-violet-400 rounded-full border border-violet-500/30 mb-2">
-                                    <Calendar size={32} />
-                                </div>
-                                <h3 className="text-lg font-black text-white uppercase tracking-wider">Select Migration Scope</h3>
-                                <p className="text-[11px] text-slate-400">
-                                    Choose whether to migrate all history or target a specific month's payroll ledgers for <span className="text-violet-400 font-bold font-mono">{activeCompanyId}</span>.
-                                </p>
-                            </div>
+                showPeriodModal && (() => {
+                    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+                    const YEARS  = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i);
+                    const isRestoreMode = backupMode === 'IMPORT';
+                    const accentBg    = isRestoreMode ? 'bg-[#052a16]'        : 'bg-[#0f172a]';
+                    const accentBorder= isRestoreMode ? 'border-emerald-500/50': 'border-violet-500/50';
+                    const accentText  = isRestoreMode ? 'text-emerald-400'     : 'text-violet-400';
+                    const accentRing  = isRestoreMode ? 'focus:ring-emerald-500': 'focus:ring-violet-500';
+                    const accentBtn   = isRestoreMode
+                        ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-900/30'
+                        : 'bg-violet-600 hover:bg-violet-700 shadow-violet-900/30';
+                    const accentSel   = isRestoreMode
+                        ? 'bg-emerald-600/10 border-emerald-500 text-white shadow-lg shadow-emerald-950/50'
+                        : 'bg-violet-600/10 border-violet-500 text-white shadow-lg shadow-violet-950/50';
 
-                            <div className="space-y-4 my-2">
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setMigratePeriodType('ALL')}
-                                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
-                                            migratePeriodType === 'ALL'
-                                                ? 'bg-violet-600/10 border-violet-500 text-white shadow-lg shadow-violet-950/50'
-                                                : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
-                                        }`}
-                                    >
-                                        <span className="text-xs font-bold uppercase tracking-wider">All History</span>
-                                        <span className="text-[9px] text-slate-500">Migrate all payroll years</span>
-                                    </button>
+                    return (
+                        <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className={`${accentBg} w-full max-w-md rounded-2xl border ${accentBorder} shadow-2xl p-6 flex flex-col gap-4 relative`}>
+                                <button onClick={() => setShowPeriodModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Period Selector"><X size={20} /></button>
 
-                                    <button
-                                        type="button"
-                                        onClick={() => setMigratePeriodType('PERIOD')}
-                                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
-                                            migratePeriodType === 'PERIOD'
-                                                ? 'bg-violet-600/10 border-violet-500 text-white shadow-lg shadow-violet-950/50'
-                                                : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
-                                        }`}
-                                    >
-                                        <span className="text-xs font-bold uppercase tracking-wider">Specific Period</span>
-                                        <span className="text-[9px] text-slate-500">Target one month & year</span>
-                                    </button>
+                                {/* Header */}
+                                <div className="flex flex-col items-center gap-2 text-center">
+                                    <div className={`p-3 rounded-full border mb-2 ${isRestoreMode ? 'bg-emerald-900/20 text-emerald-400 border-emerald-500/30' : 'bg-violet-900/20 text-violet-400 border-violet-500/30'}`}>
+                                        <Calendar size={32} />
+                                    </div>
+                                    <h3 className="text-lg font-black text-white uppercase tracking-wider">
+                                        {isRestoreMode ? 'Select Restore Period' : 'Select Migration Scope'}
+                                    </h3>
+                                    <p className="text-[11px] text-slate-400">
+                                        {isRestoreMode
+                                            ? <>Choose to restore <span className="text-emerald-400 font-bold">all periods</span> or restrict to a specific date range. Only transactional data (payroll, attendance, ledgers) within the range will be overwritten.</>
+                                            : <>Choose whether to migrate all history or target a specific month for <span className={`${accentText} font-bold font-mono`}>{activeCompanyId}</span>.</>
+                                        }
+                                    </p>
                                 </div>
 
-                                {migratePeriodType === 'PERIOD' && (
-                                    <div className="grid grid-cols-2 gap-3 p-3 bg-slate-950/50 rounded-xl border border-slate-800 animate-in slide-in-from-top-2 duration-200">
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Month</label>
-                                            <select
-                                                value={migrateMonth}
-                                                onChange={e => setMigrateMonth(e.target.value)}
-                                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 focus:ring-violet-500"
-                                            >
-                                                {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => (
-                                                    <option key={m} value={m}>{m}</option>
-                                                ))}
-                                            </select>
+                                {/* ── RESTORE MODE: ALL vs DATE RANGE ── */}
+                                {isRestoreMode && (
+                                    <div className="space-y-4 my-2">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <button type="button" onClick={() => setRestorePeriodType('ALL')}
+                                                className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${restorePeriodType === 'ALL' ? accentSel : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'}`}>
+                                                <span className="text-xs font-bold uppercase tracking-wider">All Periods</span>
+                                                <span className="text-[9px] text-slate-500">Restore complete history</span>
+                                            </button>
+                                            <button type="button" onClick={() => setRestorePeriodType('RANGE')}
+                                                className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${restorePeriodType === 'RANGE' ? accentSel : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'}`}>
+                                                <span className="text-xs font-bold uppercase tracking-wider">Date Range</span>
+                                                <span className="text-[9px] text-slate-500">From month → To month</span>
+                                            </button>
                                         </div>
 
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Year</label>
-                                            <select
-                                                value={migrateYear}
-                                                onChange={e => setMigrateYear(parseInt(e.target.value))}
-                                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 focus:ring-violet-500"
-                                            >
-                                                {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map(y => (
-                                                    <option key={y} value={y}>{y}</option>
-                                                ))}
-                                            </select>
-                                        </div>
+                                        {restorePeriodType === 'RANGE' && (
+                                            <div className="space-y-3 p-3 bg-slate-950/50 rounded-xl border border-slate-800 animate-in slide-in-from-top-2 duration-200">
+                                                {/* FROM */}
+                                                <div>
+                                                    <label className={`text-[9px] font-black uppercase tracking-widest block mb-1 ${accentText}`}>From Period</label>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <select value={restoreFromMonth} onChange={e => setRestoreFromMonth(e.target.value)}
+                                                            className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
+                                                            {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                                                        </select>
+                                                        <select value={restoreFromYear} onChange={e => setRestoreFromYear(parseInt(e.target.value))}
+                                                            className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
+                                                            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                {/* TO */}
+                                                <div>
+                                                    <label className={`text-[9px] font-black uppercase tracking-widest block mb-1 ${accentText}`}>To Period</label>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <select value={restoreToMonth} onChange={e => setRestoreToMonth(e.target.value)}
+                                                            className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
+                                                            {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                                                        </select>
+                                                        <select value={restoreToYear} onChange={e => setRestoreToYear(parseInt(e.target.value))}
+                                                            className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
+                                                            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <p className="text-[9px] text-slate-500 italic">
+                                                    * Non-transactional data (employees, company profile, config) will always be fully restored regardless of range.
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
-                            </div>
 
-                            <div className="flex gap-3 mt-4">
-                                <button
-                                    onClick={() => setShowPeriodModal(false)}
-                                    className="flex-1 py-3 border border-slate-800 rounded-xl text-slate-400 font-bold hover:text-white transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setShowPeriodModal(false);
-                                        executeImport();
-                                    }}
-                                    className="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold shadow-lg shadow-violet-900/30 transition-all uppercase text-xs tracking-widest font-black"
-                                >
-                                    Proceed
-                                </button>
+                                {/* ── MIGRATION MODE: ALL vs SINGLE MONTH (unchanged behaviour) ── */}
+                                {!isRestoreMode && (
+                                    <div className="space-y-4 my-2">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <button type="button" onClick={() => setMigratePeriodType('ALL')}
+                                                className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${migratePeriodType === 'ALL' ? accentSel : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'}`}>
+                                                <span className="text-xs font-bold uppercase tracking-wider">All History</span>
+                                                <span className="text-[9px] text-slate-500">Migrate all payroll years</span>
+                                            </button>
+                                            <button type="button" onClick={() => setMigratePeriodType('PERIOD')}
+                                                className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${migratePeriodType === 'PERIOD' ? accentSel : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'}`}>
+                                                <span className="text-xs font-bold uppercase tracking-wider">Specific Month</span>
+                                                <span className="text-[9px] text-slate-500">Target one month &amp; year</span>
+                                            </button>
+                                        </div>
+                                        {migratePeriodType === 'PERIOD' && (
+                                            <div className="grid grid-cols-2 gap-3 p-3 bg-slate-950/50 rounded-xl border border-slate-800 animate-in slide-in-from-top-2 duration-200">
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Month</label>
+                                                    <select value={migrateMonth} onChange={e => setMigrateMonth(e.target.value)}
+                                                        className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
+                                                        {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Year</label>
+                                                    <select value={migrateYear} onChange={e => setMigrateYear(parseInt(e.target.value))}
+                                                        className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
+                                                        {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <div className="flex gap-3 mt-2">
+                                    <button onClick={() => setShowPeriodModal(false)}
+                                        className="flex-1 py-3 border border-slate-800 rounded-xl text-slate-400 font-bold hover:text-white transition-colors">
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => { setShowPeriodModal(false); executeImport(); }}
+                                        className={`flex-1 py-3 ${accentBtn} text-white rounded-xl font-black shadow-lg transition-all uppercase text-xs tracking-widest`}>
+                                        Proceed
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )
+                    );
+                })()
             }
 
             {
@@ -5887,28 +6517,69 @@ const Settings: React.FC<SettingsProps> = ({
             }
 
             {
-                showPayrollResetModal && (
-                    <div className="fixed inset-0 z-[800] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div className="bg-[#1e293b] w-full max-w-sm rounded-2xl border border-amber-500/50 shadow-2xl p-6 flex flex-col gap-4 relative">
-                            <button onClick={() => setShowPayrollResetModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white" title="Close" aria-label="Close Payroll Reset Modal"><X size={20} /></button>
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="p-3 bg-amber-900/20 text-amber-500 rounded-full border border-amber-900/50 mb-2"><RotateCw size={32} /></div>
-                                <h3 className="text-xl font-black text-white text-center">Payroll Reset</h3>
-                                <p className="text-xs text-slate-300 text-center">This will <span className="text-amber-400 font-bold">PERMANENTLY DELETE</span> all employees, attendance, and payroll records for the active company.</p>
+                showRestoreSuccessModal && (
+                    <div className="fixed inset-0 z-[900] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+                        <div className="bg-[#0f172a] w-full max-w-md rounded-3xl border border-emerald-500/50 shadow-2xl shadow-emerald-950/50 p-6 flex flex-col items-center text-center relative overflow-hidden">
+                            <div className="absolute -top-24 -left-24 w-48 h-48 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none" />
+                            <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-teal-500/20 rounded-full blur-3xl pointer-events-none" />
+
+                            <div className="p-4 bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/30 mb-4 animate-bounce">
+                                <CheckCircle2 size={48} className="drop-shadow-[0_0_12px_rgba(16,185,129,0.8)]" />
                             </div>
-                            <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Verify Password to Proceed</label>
-                                <input type="password" placeholder="Login Password" autoFocus className="w-full bg-[#0f172a] border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all font-mono" value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} />
-                                {resetError && <p className="text-[10px] text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
+
+                            <h3 className="text-2xl font-black text-white uppercase tracking-wider mb-1">
+                                Restoration Successful
+                            </h3>
+                            <p className="text-xs text-emerald-400 font-bold uppercase tracking-widest mb-4">
+                                Database Verified & Synchronized 100%
+                            </p>
+
+                            <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-4 text-left space-y-2 mb-6">
+                                <div className="flex justify-between items-center text-xs">
+                                    <span className="text-slate-400 font-medium">Archive Source:</span>
+                                    <span className="text-slate-200 font-mono font-bold truncate max-w-[200px]" title={restoreSuccessSummary.fileName}>
+                                        {restoreSuccessSummary.fileName}
+                                    </span>
+                                </div>
+                                {restoreSuccessSummary.rowCount > 0 && (
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-slate-400 font-medium">Records Restored:</span>
+                                        <span className="text-emerald-400 font-mono font-bold">
+                                            {formatIndianNumber(restoreSuccessSummary.rowCount)} Entities
+                                        </span>
+                                    </div>
+                                )}
+                                <div className="flex justify-between items-center text-xs">
+                                    <span className="text-slate-400 font-medium">Completed At:</span>
+                                    <span className="text-slate-300 font-mono">
+                                        {restoreSuccessSummary.timestamp}
+                                    </span>
+                                </div>
                             </div>
-                            <div className="flex gap-3 mt-4">
-                                <button onClick={() => setShowPayrollResetModal(false)} className="flex-1 py-3 border border-slate-600 rounded-xl text-slate-300 font-bold">Cancel</button>
-                                <button onClick={executePayrollReset} className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold uppercase text-xs tracking-widest">Reset Data</button>
-                            </div>
+
+                            <p className="text-xs text-slate-300 mb-6">
+                                The application will now reload to initialize all system modules with your restored dataset.
+                            </p>
+
+                            <button
+                                onClick={() => {
+                                    setShowRestoreSuccessModal(false);
+                                    onRestore();
+                                    setTimeout(() => {
+                                        window.location.reload();
+                                    }, 200);
+                                }}
+                                className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl shadow-lg shadow-emerald-600/30 transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2 group cursor-pointer"
+                            >
+                                <RotateCw size={18} className="group-hover:rotate-180 transition-transform duration-500" />
+                                Initialize Application
+                            </button>
                         </div>
                     </div>
                 )
             }
+
+
 
             {
                 showResetModal && resetMode === 'DEEP' && (
