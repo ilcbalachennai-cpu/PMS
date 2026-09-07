@@ -16,7 +16,7 @@ import {
     getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
     requestResetOTP, verifyResetOTP, sendPolicyConfirmationEmailGAS, getAppDeveloper, APP_VERSION, APP_PATCH_TIMESTAMP
 } from '../services/licenseService';
-import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, findMatchingCompanySilo, generateBackupFilename, getCompanyBackupFolder, didConfigCalculationFieldsChange } from '../utils/formatters';
+import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, findMatchingCompanySilo, generateBackupFilename, getCompanyBackupFolder, didConfigCalculationFieldsChange, parseDateTime } from '../utils/formatters';
 import { getMonthAbbr } from '../services/reportService';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 import { executeDiagnosticExport } from '../utils/diagnostics';
@@ -416,6 +416,219 @@ const Settings: React.FC<SettingsProps> = ({
     const [migratePeriodType, setMigratePeriodType] = useState<'ALL' | 'PERIOD'>('ALL');
     const [migrateMonth, setMigrateMonth] = useState('April');
     const [migrateYear, setMigrateYear] = useState(new Date().getFullYear());
+    const [existingCompanyPeriods, setExistingCompanyPeriods] = useState<Set<string>>(new Set());
+    const [backupAvailablePeriods, setBackupAvailablePeriods] = useState<Set<string> | null>(null);
+
+    const getPreviousMonthAndYear = useCallback((month: string, year: number) => {
+        const CALENDAR_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const mIdx = CALENDAR_MONTHS.findIndex(m => m.toLowerCase() === String(month).trim().toLowerCase());
+        if (mIdx === 0) {
+            return { prevMonth: 'December', prevYear: Number(year) - 1 };
+        } else if (mIdx > 0) {
+            return { prevMonth: CALENDAR_MONTHS[mIdx - 1], prevYear: Number(year) };
+        }
+        return { prevMonth: month, prevYear: Number(year) };
+    }, []);
+
+    const getExistingCompanyPeriods = useCallback(async (): Promise<Set<string>> => {
+        const periods = new Set<string>();
+        const CALENDAR_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const transactionalPrefixes = ['app_attendance', 'app_payroll_history', 'app_leave_ledgers', 'app_advance_ledgers'];
+
+        const extractPeriodsFromList = (arr: any[]) => {
+            if (!Array.isArray(arr)) return;
+            arr.forEach(itm => {
+                if (!itm || typeof itm !== 'object') return;
+                let m = itm.month || itm.Month || itm.payrollMonth;
+                let y = Number(itm.year || itm.Year || itm.payrollYear);
+                if (!m && itm.date) {
+                    const parts = String(itm.date).split('-');
+                    if (parts.length === 3) {
+                        const yr = parts[0].length === 4 ? parseInt(parts[0]) : parseInt(parts[2]);
+                        const mo = parts[0].length === 4 ? parseInt(parts[1]) - 1 : parseInt(parts[1]) - 1;
+                        if (!isNaN(yr) && !isNaN(mo) && mo >= 0 && mo <= 11) {
+                            m = CALENDAR_MONTHS[mo];
+                            y = yr;
+                        }
+                    }
+                }
+                if (m && !isNaN(y) && y > 0) {
+                    const normM = String(m).trim();
+                    const matchedMonth = CALENDAR_MONTHS.find(monthName => monthName.toLowerCase() === normM.toLowerCase());
+                    if (matchedMonth) {
+                        periods.add(`${matchedMonth}_${y}`);
+                    }
+                }
+            });
+        };
+
+        // 1. Scan SQLite DB
+        if (window.electronAPI?.dbGetAll) {
+            try {
+                const dbRes = await window.electronAPI.dbGetAll();
+                if (dbRes?.success && Array.isArray(dbRes.data)) {
+                    dbRes.data.forEach((item: any) => {
+                        const key = item.key;
+                        const isRelevant = transactionalPrefixes.some(pref => key.startsWith(pref));
+                        const isForThisCompany = activeCompanyId === 'default'
+                            ? !key.match(/_[A-Z0-9]+_\d{6}$/)
+                            : (key.endsWith(`_${activeCompanyId}`) || key.includes(`_${activeCompanyId}_`));
+
+                        if (isRelevant && isForThisCompany) {
+                            try {
+                                const parsed = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
+                                extractPeriodsFromList(parsed);
+                            } catch (_) {}
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn('[Integrity Check] Failed to fetch SQLite data:', e);
+            }
+        }
+
+        // 2. Scan localStorage
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (!key) continue;
+                const isRelevant = transactionalPrefixes.some(pref => key.startsWith(pref));
+                const isForThisCompany = activeCompanyId === 'default'
+                    ? !key.match(/_[A-Z0-9]+_\d{6}$/)
+                    : (key.endsWith(`_${activeCompanyId}`) || key.includes(`_${activeCompanyId}_`));
+
+                if (isRelevant && isForThisCompany) {
+                    try {
+                        const val = localStorage.getItem(key);
+                        if (val) {
+                            const parsed = JSON.parse(val);
+                            extractPeriodsFromList(parsed);
+                        }
+                    } catch (_) {}
+                }
+            }
+        } catch (e) {}
+
+        return periods;
+    }, [activeCompanyId]);
+
+    const evaluatePeriodIntegrity = useCallback((targetMonth: string, targetYear: number, existingPeriods: Set<string>) => {
+        if (!existingPeriods || existingPeriods.size === 0) {
+            return { isValid: true, message: '' };
+        }
+        const targetKey = `${targetMonth}_${targetYear}`;
+        if (existingPeriods.has(targetKey)) {
+            return { isValid: true, message: '' };
+        }
+        const { prevMonth, prevYear } = getPreviousMonthAndYear(targetMonth, targetYear);
+        const prevKey = `${prevMonth}_${prevYear}`;
+
+        const hasPriorYears = Array.from(existingPeriods).some(p => Number(p.split('_')[1]) < targetYear);
+        if (targetMonth === 'April' && !hasPriorYears) {
+            return { isValid: true, message: '' };
+        }
+
+        if (!existingPeriods.has(prevKey)) {
+            return {
+                isValid: false,
+                message: `${prevMonth} ${prevYear} data is missing, you have to restore date of ${prevMonth} ${prevYear} and then ${targetMonth} ${targetYear}`,
+                missingMonth: prevMonth,
+                missingYear: prevYear
+            };
+        }
+        return { isValid: true, message: '' };
+    }, [getPreviousMonthAndYear]);
+
+    useEffect(() => {
+        if (showPeriodModal && backupMode === 'DATAMIGRATE') {
+            getExistingCompanyPeriods().then(periods => {
+                setExistingCompanyPeriods(periods);
+            });
+
+            // Inspect available periods inside the selected backup file
+            const file = selectedBackupFile;
+            const resolvedPath = selectedBackupPath || ((window.electronAPI as any)?.getPathForFile && file instanceof File
+                ? ((window.electronAPI as any).getPathForFile(file) || (file as any).path || (file as any).filePath)
+                : ((file as any).path || (file as any).filePath || file?.name || ''));
+
+            if ((window.electronAPI as any)?.getBackupPeriods && resolvedPath) {
+                const activeKey = encryptionKey ? encryptionKey.trim() : (licenseInfo?.key || '');
+                (window.electronAPI as any).getBackupPeriods({ path: resolvedPath, encryptionKey: activeKey })
+                    .then((bRes: any) => {
+                        if (bRes?.success && Array.isArray(bRes.periods)) {
+                            setBackupAvailablePeriods(new Set(bRes.periods));
+                        } else {
+                            setBackupAvailablePeriods(null);
+                        }
+                    })
+                    .catch(() => setBackupAvailablePeriods(null));
+            } else {
+                setBackupAvailablePeriods(null);
+            }
+        } else {
+            setBackupAvailablePeriods(null);
+        }
+    }, [showPeriodModal, backupMode, getExistingCompanyPeriods, selectedBackupFile, selectedBackupPath, encryptionKey, licenseInfo?.key]);
+
+    const maxBackupPeriodFromFilename = useMemo(() => {
+        const file = selectedBackupFile;
+        const filename = (selectedBackupPath ? selectedBackupPath.split(/[\\/]/).pop() : '') || file?.name || '';
+        if (!filename) return null;
+        const MONTHS = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
+        const SHORT_MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+        const upper = filename.toUpperCase();
+        const match = upper.match(/(?:_|-)([A-Z]{3,9})(?:_|-)?(\d{4})/);
+        if (match) {
+            const mStr = match[1];
+            const yr = parseInt(match[2]);
+            const idx = MONTHS.findIndex((m, i) => m === mStr || SHORT_MONTHS[i] === mStr);
+            if (idx !== -1 && yr >= 2000 && yr <= 2100) {
+                return { month: MONTHS[idx], monthIndex: idx, year: yr };
+            }
+        }
+        return null;
+    }, [selectedBackupFile, selectedBackupPath]);
+
+    const migrationPeriodIntegrity = useMemo(() => {
+        if (backupMode !== 'DATAMIGRATE' || migratePeriodType !== 'PERIOD') {
+            return { isValid: true, message: '' };
+        }
+
+        // 1a. Check if backup database contains the selected month and year
+        const targetKey = `${migrateMonth}_${migrateYear}`;
+        if (backupAvailablePeriods && backupAvailablePeriods.size > 0 && !backupAvailablePeriods.has(targetKey)) {
+            return {
+                isValid: false,
+                isBackupMissing: true,
+                message: `Data for selected Month & Year {${migrateMonth} ${migrateYear}} not avialble to restore`,
+                missingMonth: migrateMonth,
+                missingYear: migrateYear
+            };
+        }
+
+        // 1b. Check if selected period is chronologically after the maximum period in the backup archive filename
+        if (maxBackupPeriodFromFilename) {
+            const MONTHS_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const selIdx = MONTHS_ORDER.findIndex(m => m.toLowerCase() === migrateMonth.toLowerCase());
+            if (selIdx !== -1) {
+                const isAfterBackup = migrateYear > maxBackupPeriodFromFilename.year ||
+                    (migrateYear === maxBackupPeriodFromFilename.year && selIdx > maxBackupPeriodFromFilename.monthIndex);
+                if (isAfterBackup) {
+                    return {
+                        isValid: false,
+                        isBackupMissing: true,
+                        message: `Data for selected Month & Year {${migrateMonth} ${migrateYear}} not avialble to restore`,
+                        missingMonth: migrateMonth,
+                        missingYear: migrateYear
+                    };
+                }
+            }
+        }
+
+        // 2. Check preceding period continuity in existing company records
+        return evaluatePeriodIntegrity(migrateMonth, migrateYear, existingCompanyPeriods);
+    }, [backupMode, migratePeriodType, migrateMonth, migrateYear, existingCompanyPeriods, backupAvailablePeriods, maxBackupPeriodFromFilename, evaluatePeriodIntegrity]);
+
     // Full Restore period range filter
     const [restorePeriodType, setRestorePeriodType] = useState<'ALL' | 'RANGE'>('ALL');
     const [restoreFromMonth, setRestoreFromMonth] = useState('April');
@@ -791,6 +1004,68 @@ const Settings: React.FC<SettingsProps> = ({
 
         if (detectedAsSqlite) {
             try {
+                // Safeguard: verify period continuity and availability for specific-month data migration
+                if (backupMode === 'DATAMIGRATE' && migratePeriodType === 'PERIOD') {
+                    const resolvedBackupPath = selectedBackupPath || ((window.electronAPI as any)?.getPathForFile && file instanceof File
+                        ? ((window.electronAPI as any).getPathForFile(file) || (file as any).path || (file as any).filePath)
+                        : ((file as any).path || (file as any).filePath || file.name));
+
+                    let available = backupAvailablePeriods;
+                    if ((!available || available.size === 0) && (window.electronAPI as any)?.getBackupPeriods && resolvedBackupPath) {
+                        try {
+                            const bRes = await (window.electronAPI as any).getBackupPeriods({ path: resolvedBackupPath, encryptionKey: activeKey });
+                            if (bRes?.success && Array.isArray(bRes.periods)) {
+                                available = new Set(bRes.periods);
+                                setBackupAvailablePeriods(available);
+                            }
+                        } catch (_) {}
+                    }
+
+                    const targetKey = `${migrateMonth}_${migrateYear}`;
+                    const MONTHS_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+                    const selIdx = MONTHS_ORDER.findIndex(m => m.toLowerCase() === migrateMonth.toLowerCase());
+                    const isMissingInDb = available && available.size > 0 && !available.has(targetKey);
+                    const isMissingFromFilename = maxBackupPeriodFromFilename && selIdx !== -1 && (
+                        migrateYear > maxBackupPeriodFromFilename.year ||
+                        (migrateYear === maxBackupPeriodFromFilename.year && selIdx > maxBackupPeriodFromFilename.monthIndex)
+                    );
+
+                    if (isMissingInDb || isMissingFromFilename) {
+                        setIsProcessing(false);
+                        setShowPeriodModal(true);
+                        showAlert?.(
+                            'error',
+                            'Period Not Available to Restore',
+                            (
+                                <div className="space-y-3">
+                                    <div className="p-3.5 bg-rose-950/50 border border-rose-500/40 rounded-xl text-rose-200 text-xs flex items-start gap-3">
+                                        <AlertTriangle size={20} className="shrink-0 text-rose-400 mt-0.5" />
+                                        <div className="space-y-1">
+                                            <p className="font-bold text-sm text-white">Restore Terminated</p>
+                                            <p className="leading-relaxed font-semibold text-rose-300">
+                                                Data for selected Month & Year {`{${migrateMonth} ${migrateYear}}`} not avialble to restore
+                                            </p>
+                                            <p className="text-[11px] text-slate-400 italic pt-1">
+                                                The selected backup file does not contain data for this month. Please change your selection of Month and Year.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        );
+                        return;
+                    }
+
+                    const existingP = await getExistingCompanyPeriods();
+                    const check = evaluatePeriodIntegrity(migrateMonth, migrateYear, existingP);
+                    if (!check.isValid) {
+                        setIsProcessing(false);
+                        setShowPeriodModal(true);
+                        showAlert?.('error', 'Migration Scope Rejected', check.message);
+                        return;
+                    }
+                }
+
                 setProcessStatus('Restoring Secure Archive...');
                 setProcessProgress(40);
 
@@ -821,9 +1096,39 @@ const Settings: React.FC<SettingsProps> = ({
                             fromPeriod: { month: restoreFromMonth, year: restoreFromYear },
                             toPeriod:   { month: restoreToMonth,   year: restoreToYear   },
                         } : {}),
+                        ...(backupMode === 'DATAMIGRATE' && migratePeriodType === 'PERIOD' ? {
+                            migrationPeriod: { month: migrateMonth, year: migrateYear },
+                        } : {}),
                     });
 
                 let res = await callRestoreIPC(false);
+
+                // ── Period Not Available in Backup Gate ──────────────────────────────────────
+                if (!res.success && (res as any).backupMissingPeriod) {
+                    setIsProcessing(false);
+                    setShowPeriodModal(true); // Stay at the period selection UI!
+                    showAlert?.(
+                        'error',
+                        'Period Not Available to Restore',
+                        (
+                            <div className="space-y-3">
+                                <div className="p-3.5 bg-rose-950/50 border border-rose-500/40 rounded-xl text-rose-200 text-xs flex items-start gap-3">
+                                    <AlertTriangle size={20} className="shrink-0 text-rose-400 mt-0.5" />
+                                    <div className="space-y-1">
+                                        <p className="font-bold text-sm text-white">Restore Terminated</p>
+                                        <p className="leading-relaxed font-semibold text-rose-300">
+                                            {res.error || `Data for selected Month & Year {${migrateMonth} ${migrateYear}} not avialble to restore`}
+                                        </p>
+                                        <p className="text-[11px] text-slate-400 italic pt-1">
+                                            The chosen backup archive does not contain records for this period. Please change your selection of Month and Year to proceed.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )
+                    );
+                    return; // Terminate restore process and stay at UI for changing month & year
+                }
 
                 // ── Blank-Field Warning Gate ──────────────────────────────────────────────────
                 // If the IPC found blank mandatory fields (PAN/CIN/PF Code/ESI Code),
@@ -3628,7 +3933,7 @@ const Settings: React.FC<SettingsProps> = ({
                                                     ))}
                                                 </div>
                                             </div>
-                                            <p className="text-[9px] text-amber-300 italic leading-relaxed">* PF Wages will be taken from Higher Contribution based on Legacy Wage Ceiling or Code Wages.</p>
+                                            <p className="text-[9px] text-amber-300 italic leading-relaxed">* Note: If specific wage components are selected under Higher Contribution, PF will be calculated strictly on those components. If no wage components are selected, 50% of Gross Earnings will be considered for PF calculation.</p>
                                         </div>
                                     )}
                                 </div>
@@ -3899,6 +4204,10 @@ const Settings: React.FC<SettingsProps> = ({
                                                         );
                                                     })}
                                                 </div>
+                                                <p className="text-[10px] text-amber-300/90 italic bg-amber-950/40 p-2.5 rounded-xl border border-amber-500/20 flex items-center gap-2 mt-2">
+                                                    <Info size={14} className="shrink-0 text-amber-400" />
+                                                    <span>Note: If Higher Contribution is opted and no specific components are selected, 50% of Gross Earnings will be considered for PF calculation.</span>
+                                                </p>
                                             </div>
                                         ) : (
                                             <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-800/50">
@@ -5775,10 +6084,12 @@ const Settings: React.FC<SettingsProps> = ({
                                         Additionally, <strong className="text-slate-300">Compiled Executable Version</strong> must not be higher than <strong className="text-slate-300">Cloud App_Config Version</strong>.
                                     </p>
 
+                                    {/* --- FORCE PATCH UPDATE NOW Button --- */}
                                     {(() => {
                                         const cloudTs = latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || '';
                                         const localTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
-                                        if (cloudTs && localTs && cloudTs > localTs) {
+                                        const isPatchNewer = (cloudTs && localTs) ? parseDateTime(cloudTs) > parseDateTime(localTs) : false;
+                                        if (isPatchNewer) {
                                             return (
                                                 <div className="mt-4 flex justify-center">
                                                     <button
@@ -5786,9 +6097,9 @@ const Settings: React.FC<SettingsProps> = ({
                                                             sessionStorage.setItem('force_patch_update', 'true');
                                                             window.location.reload();
                                                         }}
-                                                        className="w-full max-w-sm bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-xs tracking-widest py-2.5 rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2"
+                                                        className="w-full max-w-md bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-xs tracking-widest py-3 rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
                                                     >
-                                                        <Download size={16} /> Force Patch Update Now
+                                                        <Download size={16} /> FORCE PATCH UPDATE NOW
                                                     </button>
                                                 </div>
                                             );
@@ -6439,37 +6750,145 @@ const Settings: React.FC<SettingsProps> = ({
                                             </button>
                                         </div>
                                         {migratePeriodType === 'PERIOD' && (
-                                            <div className="grid grid-cols-2 gap-3 p-3 bg-slate-950/50 rounded-xl border border-slate-800 animate-in slide-in-from-top-2 duration-200">
-                                                <div className="space-y-1">
-                                                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Month</label>
-                                                    <select value={migrateMonth} onChange={e => setMigrateMonth(e.target.value)}
-                                                        className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
-                                                        {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-                                                    </select>
+                                            <div className="space-y-3 p-3 bg-slate-950/50 rounded-xl border border-slate-800 animate-in slide-in-from-top-2 duration-200">
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div className="space-y-1">
+                                                        <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Month</label>
+                                                        <select value={migrateMonth} onChange={e => setMigrateMonth(e.target.value)}
+                                                            className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
+                                                            {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                                                        </select>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Year</label>
+                                                        <select value={migrateYear} onChange={e => setMigrateYear(parseInt(e.target.value))}
+                                                            className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
+                                                            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                                                        </select>
+                                                    </div>
                                                 </div>
-                                                <div className="space-y-1">
-                                                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Year</label>
-                                                    <select value={migrateYear} onChange={e => setMigrateYear(parseInt(e.target.value))}
-                                                        className={`w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white outline-none focus:ring-1 ${accentRing}`}>
-                                                        {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
-                                                    </select>
-                                                </div>
+
+                                                {!migrationPeriodIntegrity.isValid && (
+                                                    <div className="p-3 bg-rose-950/40 border border-rose-500/40 rounded-xl flex items-start gap-2.5 text-rose-300 text-xs animate-in slide-in-from-top-1 duration-200">
+                                                        <AlertTriangle size={16} className="shrink-0 mt-0.5 text-rose-400" />
+                                                        <div className="space-y-1">
+                                                            <p className="font-bold text-rose-200 text-[10px] uppercase tracking-wider">
+                                                                {(migrationPeriodIntegrity as any).isBackupMissing ? 'Period Not Available in Backup' : 'Missing Preceding Period Data'}
+                                                            </p>
+                                                            <p className="text-[11px] font-semibold text-rose-300 leading-snug">
+                                                                {migrationPeriodIntegrity.message}
+                                                            </p>
+                                                            <p className="text-[9px] text-rose-400/80 italic">
+                                                                {(migrationPeriodIntegrity as any).isBackupMissing
+                                                                    ? '* Please change your selection of Month and Year to proceed.'
+                                                                    : '* This ensures data flow and payroll integrity.'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
                                 )}
 
-                                <div className="flex gap-3 mt-2">
-                                    <button onClick={() => setShowPeriodModal(false)}
-                                        className="flex-1 py-3 border border-slate-800 rounded-xl text-slate-400 font-bold hover:text-white transition-colors">
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={() => { setShowPeriodModal(false); executeImport(); }}
-                                        className={`flex-1 py-3 ${accentBtn} text-white rounded-xl font-black shadow-lg transition-all uppercase text-xs tracking-widest`}>
-                                        Proceed
-                                    </button>
-                                </div>
+                                {(() => {
+                                    const handleProceedMigration = async () => {
+                                        if (!isRestoreMode && migratePeriodType === 'PERIOD') {
+                                            const file = selectedBackupFile;
+                                            const resolvedBackupPath = selectedBackupPath || ((window.electronAPI as any)?.getPathForFile && file instanceof File
+                                                ? ((window.electronAPI as any).getPathForFile(file) || (file as any).path || (file as any).filePath)
+                                                : ((file as any).path || (file as any).filePath || file?.name || ''));
+
+                                            let available = backupAvailablePeriods;
+                                            if ((!available || available.size === 0) && (window.electronAPI as any)?.getBackupPeriods && resolvedBackupPath) {
+                                                const activeKey = encryptionKey ? encryptionKey.trim() : (licenseInfo?.key || '');
+                                                try {
+                                                    const bRes = await (window.electronAPI as any).getBackupPeriods({ path: resolvedBackupPath, encryptionKey: activeKey });
+                                                    if (bRes?.success && Array.isArray(bRes.periods)) {
+                                                        available = new Set(bRes.periods);
+                                                        setBackupAvailablePeriods(available);
+                                                    }
+                                                } catch (_) {}
+                                            }
+
+                                            // Check 1: Target period exists in the selected backup archive
+                                            const targetKey = `${migrateMonth}_${migrateYear}`;
+                                            const MONTHS_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+                                            const selIdx = MONTHS_ORDER.findIndex(m => m.toLowerCase() === migrateMonth.toLowerCase());
+                                            const isMissingInDb = available && available.size > 0 && !available.has(targetKey);
+                                            const isMissingFromFilename = maxBackupPeriodFromFilename && selIdx !== -1 && (
+                                                migrateYear > maxBackupPeriodFromFilename.year ||
+                                                (migrateYear === maxBackupPeriodFromFilename.year && selIdx > maxBackupPeriodFromFilename.monthIndex)
+                                            );
+
+                                            if (isMissingInDb || isMissingFromFilename) {
+                                                showAlert?.(
+                                                    'error',
+                                                    'Period Not Available to Restore',
+                                                    (
+                                                        <div className="space-y-3">
+                                                            <div className="p-3.5 bg-rose-950/50 border border-rose-500/40 rounded-xl text-rose-200 text-xs flex items-start gap-3">
+                                                                <AlertTriangle size={20} className="shrink-0 text-rose-400 mt-0.5" />
+                                                                <div className="space-y-1">
+                                                                    <p className="font-bold text-sm text-white">Restore Terminated</p>
+                                                                    <p className="leading-relaxed font-semibold text-rose-300">
+                                                                        Data for selected Month & Year {`{${migrateMonth} ${migrateYear}}`} not avialble to restore
+                                                                    </p>
+                                                                    <p className="text-[11px] text-slate-400 italic pt-1">
+                                                                        The selected backup file does not contain data for this month. Please change your selection of Month and Year.
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                );
+                                                return; // Terminate restore and STAY at the UI!
+                                            }
+
+                                            // Check 2: Sequential continuity in existing company records
+                                            const freshPeriods = await getExistingCompanyPeriods();
+                                            setExistingCompanyPeriods(freshPeriods);
+                                            const check = evaluatePeriodIntegrity(migrateMonth, migrateYear, freshPeriods);
+                                            if (!check.isValid) {
+                                                showAlert?.(
+                                                    'error',
+                                                    'Migration Scope Rejected',
+                                                    (
+                                                        <div className="space-y-3">
+                                                            <div className="p-3.5 bg-rose-950/50 border border-rose-500/40 rounded-xl text-rose-200 text-xs flex items-start gap-3">
+                                                                <AlertTriangle size={20} className="shrink-0 text-rose-400 mt-0.5" />
+                                                                <div className="space-y-1">
+                                                                    <p className="font-bold text-sm text-white">Data Flow Check Failed</p>
+                                                                    <p className="leading-relaxed font-semibold text-rose-300">{check.message}</p>
+                                                                    <p className="text-[11px] text-slate-400 italic pt-1">
+                                                                        This ensures data flow and payroll integrity. No previous months data should be blank or missed out.
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                );
+                                                return; // Terminate and stay at UI!
+                                            }
+                                        }
+                                        setShowPeriodModal(false);
+                                        executeImport();
+                                    };
+
+                                    return (
+                                        <div className="flex gap-3 mt-2">
+                                            <button onClick={() => setShowPeriodModal(false)}
+                                                className="flex-1 py-3 border border-slate-800 rounded-xl text-slate-400 font-bold hover:text-white transition-colors">
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={handleProceedMigration}
+                                                className={`flex-1 py-3 ${accentBtn} text-white rounded-xl font-black shadow-lg transition-all uppercase text-xs tracking-widest`}>
+                                                Proceed
+                                            </button>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                     );

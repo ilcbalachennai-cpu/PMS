@@ -538,4 +538,31 @@ Provides two distinct modes for managing inactive establishment silos:
 > **IN CASE THE APP FAILS TO LOAD OR IS CORRUPTED**, go to the main installation folder (e.g., `D:\BharatPayRoll`) and **DOUBLE CLICK THE Launch_BPP_Installer.exe** to download/install fresh and launch the app again without any errors.
 
 ---
+
+## 11. Provident Fund (PF) Calculation Architecture
+
+BharatPay Pro provides a dual-mode calculation engine for **Employees' Provident Fund (EPF)** and **Employees' Pension Scheme (EPS)**:
+
+### 11.1 Normal Conditions (`enableHigherContribution = false`)
+* **Standard Rule**: PF is capped at the statutory ceiling (₹15,000 prorated for days worked).
+  $$\text{basePFWage} = \min(\text{pfStandardBasisWage}, \text{proratedCeiling})$$
+* **Employee Contribution**: $12\%$ of `basePFWage`.
+* **Employer Contribution**: Capped at ceiling ($12\% = 8.33\% \text{ EPS} + 3.67\% \text{ EPF}$).
+
+### 11.2 Higher Contribution Conditions (`enableHigherContribution = true`)
+* **Wage Base Determination**:
+  $$\text{higherWageBase} = \sum (\text{Selected Components prorated for Days Worked})$$
+* **Statutory Floor & Ceiling Preservation**:
+  * If $\text{higherWageBase} \ge \text{proratedCeiling}$: Contributions are calculated on the full higher wage base.
+  * If $\text{higherWageBase} < \text{proratedCeiling}$ and Gross exceeds ceiling (e.g., Employee ID 0043: Basic ₹14,777, Gross ₹32,741):
+    * The base lifts to the **Statutory Ceiling (₹15,000)** (PF: ₹1,800).
+    * Code on Wages (50% rule) is capped at ceiling ($\min(\text{codeWage}, \text{ceiling})$) to prevent wage inflation.
+* **Proportionate Proration**: For employees working fewer days (e.g. 29 days in August), the ceiling is naturally prorated to ₹14,032 (PF: ₹1,684).
+* **Applicability Scope**:
+  * **By Employee**: Employee contributes on higher wage base; Employer liability is capped at ceiling.
+  * **By Employee & Employer**: Both parties contribute on the higher wage base.
+
+> *For the complete technical specification with formulas and calculation examples, refer to [Provident Fund Calculation Guide](provident_fund_calculation_guide.md).*
+
+---
 *© 2026 BharatPay Pro. All Rights Reserved.*

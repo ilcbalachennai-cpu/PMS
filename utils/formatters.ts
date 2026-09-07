@@ -62,6 +62,83 @@ export const parseExpiryDate = (dateStr: string | undefined | null): Date | null
 };
 
 /**
+ * Universal date-time parser that safely handles DD-MM-YYYY HH:mm:ss, ISO strings, etc.
+ * Returns timestamp in milliseconds, or 0 if invalid.
+ */
+export const parseDateTime = (str: string | null | undefined): number => {
+  if (!str || typeof str !== 'string') return 0;
+  try {
+    const cleanStr = str.trim().replace(/\u00a0/g, ' ');
+
+    // 1. Try standard Date.parse first if not in DD-MM-YYYY format
+    const looksLikeIndianFormat = /^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(cleanStr);
+    if (!looksLikeIndianFormat) {
+      const parsedNative = Date.parse(cleanStr);
+      if (!isNaN(parsedNative)) {
+        const nativeDate = new Date(parsedNative);
+        if (nativeDate.getFullYear() > 1900 && nativeDate.getFullYear() < 2100) {
+          return parsedNative;
+        }
+      }
+    }
+
+    // 2. Manual parsing fallback for dd-MM-yyyy / yyyy-MM-dd / MM-dd-yyyy formats
+    const parts = cleanStr.split(/[\sT]+/).filter(Boolean);
+    const datePart = parts[0];
+    const timePart = parts[1] || '00:00:00';
+
+    const dateSep = datePart.includes('-') ? '-' : '/';
+    const dateParts = datePart.split(dateSep).map(Number);
+
+    let day = 1;
+    let month = 1;
+    let year = 2026;
+
+    if (dateParts[0] > 1900) {
+      year = dateParts[0];
+      month = dateParts[1];
+      day = dateParts[2];
+    } else {
+      if (dateParts[2] > 1900) {
+        year = dateParts[2];
+        if (dateParts[0] > 12) {
+          day = dateParts[0];
+          month = dateParts[1];
+        } else if (dateParts[1] > 12) {
+          month = dateParts[0];
+          day = dateParts[1];
+        } else {
+          day = dateParts[0];
+          month = dateParts[1];
+        }
+      } else {
+        const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        const monthIndex = months.findIndex(m => cleanStr.toLowerCase().includes(m));
+        if (monthIndex !== -1) {
+          month = monthIndex + 1;
+          const yearMatch = cleanStr.match(/\b(19|20)\d{2}\b/);
+          if (yearMatch) year = Number(yearMatch[0]);
+          const dayMatch = cleanStr.replace(/\b(19|20)\d{2}\b/, '').match(/\b\d{1,2}\b/);
+          if (dayMatch) day = Number(dayMatch[0]);
+        }
+      }
+    }
+
+    let [hour, minute, second] = timePart.split(':').map(s => parseInt(s, 10) || 0);
+    const isPM = cleanStr.toLowerCase().includes('pm');
+    const isAM = cleanStr.toLowerCase().includes('am');
+
+    if (isPM && hour < 12) hour += 12;
+    if (isAM && hour === 12) hour = 0;
+
+    const d = new Date(year, month - 1, day, hour, minute, second);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+  } catch (e) {
+    return 0;
+  }
+};
+
+/**
  * Formats a date object or string into professional DD-MM-YYYY
  */
 export const formatExpiryDate = (date: Date | string | undefined | null): string => {
@@ -293,7 +370,7 @@ export const normalizeEmployeeDates = (emp: any): any => {
  * Checks if any calculation-affecting fields of StatutoryConfig have changed.
  */
 export const didConfigCalculationFieldsChange = (c1: any, c2: any): boolean => {
-  if (!c1 || !c2) return true;
+  if (!c1 || !c2) return false;
   const keys = [
     'enablePF', 'enableESI', 'enableBonus', 'enableGratuity',
     'epfCeiling', 'epfEmployeeRate', 'epfEmployerRate',
@@ -306,40 +383,61 @@ export const didConfigCalculationFieldsChange = (c1: any, c2: any): boolean => {
     'pfEsiCalculationBasis', 'pfOriginalWagesComponents', 'esiOriginalWagesComponents',
     'bonusWagesComponents', 'gratuityWagesComponents', 'enableArrearSalary'
   ];
-  return keys.some(key => JSON.stringify(c1[key]) !== JSON.stringify(c2[key]));
+  return keys.some(key => JSON.stringify(c1[key] ?? null) !== JSON.stringify(c2[key] ?? null));
 };
 
 /**
  * Checks if any payroll calculation-affecting fields of Employee have changed.
  */
 export const didEmployeePayFieldsChange = (oldEmp: any, newEmp: any): boolean => {
-  if (!oldEmp || !newEmp) return true;
-  const payFields = [
+  if (!oldEmp || !newEmp) return false;
+
+  const numFields = [
     'basicPay', 'da', 'retainingAllowance', 'hra', 'conveyance', 'washing', 'attire',
     'specialAllowance1', 'specialAllowance2', 'specialAllowance3',
-    'isPFExempt', 'isESIExempt', 'isEPSEligible', 'isPTExempt', 'isLWFExempt',
-    'employeeVPFRate', 'isPFHigherWages', 'isEmployerPFHigher',
-    'dob', 'doj', 'dol', 'leavingReason',
-    'isDeferredPension', 'epsMaturityConfigured', 'epsMaturityConfiguredAge'
+    'employeeVPFRate', 'epsMaturityConfiguredAge'
   ];
-  
-  for (const field of payFields) {
-    if (oldEmp[field] !== newEmp[field]) return true;
+  for (const f of numFields) {
+    if (Number(oldEmp[f] || 0) !== Number(newEmp[f] || 0)) return true;
+  }
+
+  const boolFields = [
+    'isPFExempt', 'isESIExempt', 'isPTExempt', 'isLWFExempt',
+    'isPFHigherWages', 'isEmployerPFHigher', 'isDeferredPension', 'epsMaturityConfigured'
+  ];
+  for (const f of boolFields) {
+    if (Boolean(oldEmp[f]) !== Boolean(newEmp[f])) return true;
+  }
+
+  // Date fields - normalize to YYYY-MM-DD before comparing to avoid false diffs from format differences
+  const dateFields = ['dob', 'doj', 'dol', 'epfMembershipDate'];
+  for (const f of dateFields) {
+    const d1 = parseDateToYYYYMMDD(oldEmp[f]);
+    const d2 = parseDateToYYYYMMDD(newEmp[f]);
+    if (d1 !== d2) return true;
+  }
+
+  const strFields = [
+    'isEPSEligible', 'leavingReason'
+  ];
+  for (const f of strFields) {
+    const s1 = String(oldEmp[f] || '').trim();
+    const s2 = String(newEmp[f] || '').trim();
+    if (s1 !== s2) return true;
   }
   
   const oldHP = oldEmp.pfHigherPension || {};
   const newHP = newEmp.pfHigherPension || {};
   if (
-    oldHP.enabled !== newHP.enabled ||
-    oldHP.contributedBefore2014 !== newHP.contributedBefore2014 ||
-    oldHP.employeeContribution !== newHP.employeeContribution ||
-    oldHP.employerContribution !== newHP.employerContribution ||
-    oldHP.isHigherPensionOpted !== newHP.isHigherPensionOpted
+    Boolean(oldHP.enabled) !== Boolean(newHP.enabled) ||
+    String(oldHP.contributedBefore2014 || '').trim() !== String(newHP.contributedBefore2014 || '').trim() ||
+    String(oldHP.employeeContribution || '').trim() !== String(newHP.employeeContribution || '').trim() ||
+    String(oldHP.employerContribution || '').trim() !== String(newHP.employerContribution || '').trim() ||
+    String(oldHP.isHigherPensionOpted || '').trim() !== String(newHP.isHigherPensionOpted || '').trim() ||
+    String(oldHP.dojImpact || '').trim() !== String(newHP.dojImpact || '').trim()
   ) {
     return true;
   }
-  
-  if (oldEmp.epfMembershipDate !== newEmp.epfMembershipDate) return true;
   
   return false;
 };

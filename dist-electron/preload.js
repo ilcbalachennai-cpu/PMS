@@ -33,6 +33,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     createDataBackup: function (arg) { return electron_1.ipcRenderer.invoke('create-data-backup', arg); },
     runFullBackup: function (arg) { return electron_1.ipcRenderer.invoke('run-full-backup', arg); },
     restoreSqliteBackup: function (arg) { return electron_1.ipcRenderer.invoke('restore-sqlite-backup', arg); },
+    getBackupPeriods: function (arg) { return electron_1.ipcRenderer.invoke('get-backup-periods', arg); },
     restoreFromSnapshot: function (snapshotFileName) { return electron_1.ipcRenderer.invoke('restore-from-snapshot', snapshotFileName); },
     listSafetySnapshots: function () { return electron_1.ipcRenderer.invoke('list-safety-snapshots'); },
     selectBackupFile: function () { return electron_1.ipcRenderer.invoke('select-backup-file'); },

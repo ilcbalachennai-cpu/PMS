@@ -660,7 +660,14 @@ export const usePayrollData = (showAlert: any) => {
             ];
             for (let i = localStorage.length - 1; i >= 0; i--) {
                const k = localStorage.key(i);
-               if (k && k.startsWith('app_') && !keysToKeep.includes(k) && !k.startsWith('app_msg_dismissed') && !k.includes('app_setup_complete')) {
+               if (
+                  k && k.startsWith('app_') && 
+                  !keysToKeep.includes(k) && 
+                  !k.startsWith('app_msg_dismissed') && 
+                  !k.includes('app_setup_complete') &&
+                  !k.startsWith('app_calc_') &&
+                  !k.startsWith('app_temp_payroll_')
+               ) {
                   localStorage.removeItem(k);
                }
             }
@@ -716,9 +723,16 @@ export const usePayrollData = (showAlert: any) => {
 
             // V03.01.07: Fallback for company profile and config if not found in DB
             // This prevents a new company from inheriting data from the previous company state.
+            const currentComp = companies.find(c => c.id === activeCompanyId);
             if (!loadedProfile) {
-              const currentComp = companies.find(c => c.id === activeCompanyId);
               loadedProfile = currentComp ? { ...currentComp } : { ...INITIAL_COMPANY_PROFILE };
+            } else if (currentComp) {
+              loadedProfile = {
+                ...currentComp,
+                ...loadedProfile,
+                establishmentName: loadedProfile.establishmentName || currentComp.establishmentName,
+                id: activeCompanyId
+              };
             }
             // Enforce activeCompanyId so loading per-silo profile never corrupts company ID
             loadedProfile.id = activeCompanyId;
@@ -1239,9 +1253,13 @@ export const usePayrollData = (showAlert: any) => {
     // V03.01.05: Smooth Isolation - No more nuclear reload
     // We purge and then let the activeCompanyId effect handle the switch.
     purgeState();
+    const targetComp = companies.find(c => c.id === id);
+    if (targetComp) {
+      setCompanyProfile(targetComp);
+    }
     setActiveCompanyId(id);
     localStorage.setItem('app_active_company_id', id);
-  }, [activeCompanyId, purgeState]);
+  }, [activeCompanyId, companies, purgeState]);
 
   const addCompany = useCallback(async (newCompany: CompanyProfile, initialConfig?: StatutoryConfig) => {
     // 1. Switch Electron process to the new Company Silo to physically create it!

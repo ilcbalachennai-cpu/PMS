@@ -2525,10 +2525,225 @@ electron_1.ipcMain.handle('select-backup-file', function () { return __awaiter(v
         }
     });
 }); });
+electron_1.ipcMain.handle('get-backup-periods', function (_, arg) { return __awaiter(void 0, void 0, void 0, function () {
+    var backupFilePath, paths, filename, searchDirs, findFileRecursive_1, _i, searchDirs_1, searchDir, found, dataDir, tempInspectPath, fd, header, encryptedBuf_1, tryDecryptBufferSync, keysToTry_1, kStr, pStr, fileBasename, digitsMatch, row, ldata, profileRows, _a, profileRows_1, r, pData, machineId, sanitizedKeys, formats, decryptedBuffer, _b, sanitizedKeys_1, key, _c, formats_1, fmt, sourceDb, rows, MONTHS_ORDER, transactionalPrefixes, periods, _loop_3, _d, rows_5, r, e_9;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
+            case 0:
+                _e.trys.push([0, 4, , 5]);
+                backupFilePath = typeof arg === 'string' ? arg : ((arg === null || arg === void 0 ? void 0 : arg.path) || '');
+                if (!appBasePath)
+                    return [2 /*return*/, { success: false, periods: [] }];
+                paths = getAppPaths(appBasePath);
+                if (!backupFilePath || !fs.existsSync(backupFilePath)) {
+                    filename = path.basename(backupFilePath || '');
+                    searchDirs = [
+                        paths.data,
+                        path.join(appBasePath, 'Data backup'),
+                        path.join(appBasePath, 'Data'),
+                        electron_1.app.getPath('downloads'),
+                        electron_1.app.getPath('desktop')
+                    ];
+                    findFileRecursive_1 = function (dir, targetName, depth) {
+                        if (depth === void 0) { depth = 0; }
+                        if (depth > 5 || !fs.existsSync(dir))
+                            return null;
+                        try {
+                            var entries = fs.readdirSync(dir, { withFileTypes: true });
+                            for (var _i = 0, entries_2 = entries; _i < entries_2.length; _i++) {
+                                var entry = entries_2[_i];
+                                var full = path.join(dir, entry.name);
+                                if (entry.isFile() && entry.name.toLowerCase() === targetName.toLowerCase())
+                                    return full;
+                                if (entry.isDirectory() && !entry.name.startsWith('.')) {
+                                    var found = findFileRecursive_1(full, targetName, depth + 1);
+                                    if (found)
+                                        return found;
+                                }
+                            }
+                        }
+                        catch (_) { }
+                        return null;
+                    };
+                    for (_i = 0, searchDirs_1 = searchDirs; _i < searchDirs_1.length; _i++) {
+                        searchDir = searchDirs_1[_i];
+                        found = findFileRecursive_1(searchDir, filename);
+                        if (found) {
+                            backupFilePath = found;
+                            break;
+                        }
+                    }
+                }
+                if (!backupFilePath || !fs.existsSync(backupFilePath)) {
+                    return [2 /*return*/, { success: false, periods: [], error: 'File not found' }];
+                }
+                dataDir = paths.data;
+                if (activeCompanyId && activeCompanyId !== 'default') {
+                    dataDir = path.join(paths.data, activeCompanyId);
+                    if (!fs.existsSync(dataDir))
+                        fs.mkdirSync(dataDir, { recursive: true });
+                }
+                tempInspectPath = path.join(dataDir, "inspect_temp_".concat(Date.now(), ".sqlite"));
+                fd = fs.openSync(backupFilePath, 'r');
+                header = Buffer.alloc(16);
+                fs.readSync(fd, header, 0, 16, 0);
+                fs.closeSync(fd);
+                if (!header.toString().startsWith('SQLite format 3')) return [3 /*break*/, 1];
+                fs.copyFileSync(backupFilePath, tempInspectPath);
+                return [3 /*break*/, 3];
+            case 1:
+                encryptedBuf_1 = fs.readFileSync(backupFilePath);
+                tryDecryptBufferSync = function (key, salt, useIvHeader) {
+                    try {
+                        var derivedKey = crypto.scryptSync(key, salt, 32);
+                        var iv = useIvHeader ? (encryptedBuf_1.length >= 32 ? encryptedBuf_1.subarray(0, 16) : Buffer.alloc(16, 0)) : Buffer.alloc(16, 0);
+                        var ciphertext = useIvHeader ? encryptedBuf_1.subarray(16) : encryptedBuf_1;
+                        var decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, iv);
+                        var decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+                        if (decrypted.length >= 100) {
+                            var headerAscii = decrypted.toString('utf8', 0, 32);
+                            var headerLatin1 = decrypted.toString('latin1', 0, 32);
+                            if (headerAscii.includes('SQLite format 3') || headerLatin1.includes('SQLite format 3'))
+                                return decrypted;
+                        }
+                        return null;
+                    }
+                    catch (_) {
+                        return null;
+                    }
+                };
+                keysToTry_1 = ['INITIAL_PMS_KEY', 'bpp_dev_473748', 'BPP_UNIVERSAL_BACKUP_KEY_2026', '031942'];
+                if (typeof arg === 'object' && arg.encryptionKey) {
+                    kStr = String(arg.encryptionKey).trim();
+                    if (kStr)
+                        keysToTry_1.unshift(kStr);
+                }
+                if (typeof arg === 'object' && arg.password) {
+                    pStr = String(arg.password).trim();
+                    if (pStr)
+                        keysToTry_1.unshift(pStr);
+                }
+                fileBasename = path.basename(backupFilePath);
+                digitsMatch = fileBasename.match(/\d{4,8}/g);
+                if (digitsMatch)
+                    digitsMatch.forEach(function (d) { return keysToTry_1.push(d); });
+                if (db) {
+                    try {
+                        row = db.prepare('SELECT value FROM store WHERE key = ?').get('app_license_data');
+                        if (row) {
+                            ldata = JSON.parse(row.value);
+                            if (ldata === null || ldata === void 0 ? void 0 : ldata.key)
+                                keysToTry_1.push(ldata.key.trim());
+                        }
+                    }
+                    catch (e) { }
+                    try {
+                        profileRows = db.prepare("SELECT value FROM store WHERE key LIKE 'app_company_profile%' OR key = 'app_company_profile'").all();
+                        for (_a = 0, profileRows_1 = profileRows; _a < profileRows_1.length; _a++) {
+                            r = profileRows_1[_a];
+                            try {
+                                pData = JSON.parse(r.value);
+                                if (pData === null || pData === void 0 ? void 0 : pData.securityPin)
+                                    keysToTry_1.push(String(pData.securityPin).trim());
+                            }
+                            catch (_) { }
+                        }
+                    }
+                    catch (e) { }
+                }
+                return [4 /*yield*/, getInternalMachineId()];
+            case 2:
+                machineId = _e.sent();
+                keysToTry_1.push(machineId);
+                sanitizedKeys = Array.from(new Set(keysToTry_1.filter(Boolean)));
+                formats = [
+                    { salt: 'BPP_SALT_v1', ivHeader: true },
+                    { salt: 'salt', ivHeader: true },
+                    { salt: 'BPP_SALT_v1', ivHeader: false },
+                    { salt: 'salt', ivHeader: false },
+                ];
+                decryptedBuffer = null;
+                for (_b = 0, sanitizedKeys_1 = sanitizedKeys; _b < sanitizedKeys_1.length; _b++) {
+                    key = sanitizedKeys_1[_b];
+                    for (_c = 0, formats_1 = formats; _c < formats_1.length; _c++) {
+                        fmt = formats_1[_c];
+                        decryptedBuffer = tryDecryptBufferSync(key, fmt.salt, fmt.ivHeader);
+                        if (decryptedBuffer)
+                            break;
+                    }
+                    if (decryptedBuffer)
+                        break;
+                }
+                if (!decryptedBuffer)
+                    return [2 /*return*/, { success: false, periods: [], error: 'Decryption failed' }];
+                fs.writeFileSync(tempInspectPath, decryptedBuffer);
+                _e.label = 3;
+            case 3:
+                sourceDb = new better_sqlite3_1.default(tempInspectPath);
+                rows = sourceDb.prepare('SELECT key, value FROM store').all();
+                sourceDb.close();
+                try {
+                    fs.unlinkSync(tempInspectPath);
+                }
+                catch (_) { }
+                MONTHS_ORDER = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                transactionalPrefixes = [
+                    'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
+                    'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+                ];
+                periods = new Set();
+                _loop_3 = function (r) {
+                    if (transactionalPrefixes.some(function (p) { return r.key.startsWith(p); })) {
+                        try {
+                            var parsed = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+                            if (Array.isArray(parsed)) {
+                                var _loop_4 = function (itm) {
+                                    var m = String(itm.month || itm.Month || itm.payrollMonth || '').trim();
+                                    var y = Number(itm.year || itm.Year || itm.payrollYear || 0);
+                                    if (m && y > 0) {
+                                        var normM = MONTHS_ORDER.find(function (mo) { return mo.toLowerCase() === m.toLowerCase(); });
+                                        if (normM)
+                                            periods.add("".concat(normM, "_").concat(y));
+                                    }
+                                    else {
+                                        var dateStr = String(itm.date || itm.Date || itm.entryDate || itm.createdDate || '').trim();
+                                        if (dateStr && dateStr.includes('-')) {
+                                            var parts = dateStr.split('-');
+                                            if (parts.length === 3) {
+                                                var yr = parts[0].length === 4 ? parseInt(parts[0]) : parseInt(parts[2]);
+                                                var mo = parts[0].length === 4 ? parseInt(parts[1]) - 1 : parseInt(parts[1]) - 1;
+                                                if (!isNaN(yr) && !isNaN(mo) && mo >= 0 && mo <= 11) {
+                                                    periods.add("".concat(MONTHS_ORDER[mo], "_").concat(yr));
+                                                }
+                                            }
+                                        }
+                                    }
+                                };
+                                for (var _f = 0, parsed_1 = parsed; _f < parsed_1.length; _f++) {
+                                    var itm = parsed_1[_f];
+                                    _loop_4(itm);
+                                }
+                            }
+                        }
+                        catch (_) { }
+                    }
+                };
+                for (_d = 0, rows_5 = rows; _d < rows_5.length; _d++) {
+                    r = rows_5[_d];
+                    _loop_3(r);
+                }
+                return [2 /*return*/, { success: true, periods: Array.from(periods) }];
+            case 4:
+                e_9 = _e.sent();
+                return [2 /*return*/, { success: false, periods: [], error: e_9.message }];
+            case 5: return [2 /*return*/];
+        }
+    });
+}); });
 electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __awaiter(void 0, void 0, void 0, function () {
-    var logPath, log, backupFilePath, paths, filename, searchDirs, findFileRecursive_1, _i, searchDirs_1, searchDir, found, dataDir, DB_PATH, tempRestorePath, fd, header, formatCheckBuf, formatFd, bytesRead, sampleBytes, isBase64TextFormat, encryptedBuf_1, tryDecryptBufferSync, dbLicenseKey, keysToTry_1, kStr, pStr, fileBasename, digitsMatch, row, ldata, profileRows, _a, profileRows_1, r, pData, machineId, sanitizedKeys, decryptedBuffer, matchedKey, formats, _b, sanitizedKeys_1, key, _c, formats_1, fmt, sourceDb, rows_5, logMsg, fs_1, path_1, activeId_1, isMigration_1, alwaysExcludedKeys_1, migrationExtraExclusions_1, isAlwaysExcluded_1, isMigrationExcluded_1, isExcludedKey_1, currentMachineId, backupMachineIdRow, backupMachineId, backupProfileRow, activeProfileRow, backupProfile, activeProfile, clean, bName, aName, bCin, aCin, bPan, aPan, bPfCode, aPfCode, bEsi, aEsi, backupId, activeIdUp, fieldMismatch, fieldBlank, forceConfirm, blankWarnings, targetDb_1, fromPeriod_1, toPeriod_1, hasRangeFilter_1, MONTHS_ORDER_1, isInRange_1, parseDateToMonthYear_1, TRANSACTIONAL_PREFIXES_1, filterRowByRange_1, filterEmployeesByRange_1, snapshotCreated, preRestoreSnapshotPath, timestampedSnapshotPath, allKeysInDb, keysToDelete_1, upsertStmt_1, e_9;
-    return __generator(this, function (_d) {
-        switch (_d.label) {
+    var logPath, log, backupFilePath, paths, filename, searchDirs, findFileRecursive_2, _i, searchDirs_2, searchDir, found, dataDir, DB_PATH, tempRestorePath, fd, header, formatCheckBuf, formatFd, bytesRead, sampleBytes, isBase64TextFormat, encryptedBuf_2, tryDecryptBufferSync, dbLicenseKey, keysToTry_2, kStr, pStr, fileBasename, digitsMatch, row, ldata, profileRows, _a, profileRows_2, r, pData, machineId, sanitizedKeys, decryptedBuffer, matchedKey, formats, _b, sanitizedKeys_2, key, _c, formats_2, fmt, sourceDb, rows_7, migrationPeriod, targetM, targetY, transactionalPrefixes, MONTHS_ORDER_1, hasTargetPeriod, _loop_5, _d, rows_6, r, state_1, logMsg, fs_1, path_1, activeId_1, isMigration_1, alwaysExcludedKeys_1, migrationExtraExclusions_1, isAlwaysExcluded_1, isMigrationExcluded_1, isExcludedKey_1, currentMachineId, backupMachineIdRow, backupMachineId, backupProfileRow, activeProfileRow, backupProfile, activeProfile, clean, bName, aName, bCin, aCin, bPan, aPan, bPfCode, aPfCode, bEsi, aEsi, backupId, activeIdUp, fieldMismatch, fieldBlank, forceConfirm, blankWarnings, targetDb_1, fromPeriod_1, toPeriod_1, hasRangeFilter_1, MONTHS_ORDER_2, isInRange_1, parseDateToMonthYear_1, TRANSACTIONAL_PREFIXES_1, filterRowByRange_1, filterEmployeesByRange_1, snapshotCreated, preRestoreSnapshotPath, timestampedSnapshotPath, allKeysInDb, keysToDelete_1, upsertStmt_1, e_10;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
             case 0:
                 logPath = path.join(electron_1.app.getPath('userData'), 'restore_debug.log');
                 log = function (msg) {
@@ -2538,9 +2753,9 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                     }
                     catch (_) { }
                 };
-                _d.label = 1;
+                _e.label = 1;
             case 1:
-                _d.trys.push([1, 7, , 8]);
+                _e.trys.push([1, 7, , 8]);
                 log(">>> restore-sqlite-backup called with arg: ".concat(JSON.stringify(arg)));
                 backupFilePath = typeof arg === 'string' ? arg : arg.path;
                 log("Initial backupFilePath: \"".concat(backupFilePath, "\""));
@@ -2558,20 +2773,20 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                         electron_1.app.getPath('downloads'),
                         electron_1.app.getPath('desktop')
                     ];
-                    findFileRecursive_1 = function (dir, targetName, depth) {
+                    findFileRecursive_2 = function (dir, targetName, depth) {
                         if (depth === void 0) { depth = 0; }
                         if (depth > 5 || !fs.existsSync(dir))
                             return null;
                         try {
                             var entries = fs.readdirSync(dir, { withFileTypes: true });
-                            for (var _i = 0, entries_2 = entries; _i < entries_2.length; _i++) {
-                                var entry = entries_2[_i];
+                            for (var _i = 0, entries_3 = entries; _i < entries_3.length; _i++) {
+                                var entry = entries_3[_i];
                                 var full = path.join(dir, entry.name);
                                 if (entry.isFile() && entry.name.toLowerCase() === targetName.toLowerCase()) {
                                     return full;
                                 }
                                 if (entry.isDirectory() && !entry.name.startsWith('.')) {
-                                    var found = findFileRecursive_1(full, targetName, depth + 1);
+                                    var found = findFileRecursive_2(full, targetName, depth + 1);
                                     if (found)
                                         return found;
                                 }
@@ -2580,9 +2795,9 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                         catch (_) { }
                         return null;
                     };
-                    for (_i = 0, searchDirs_1 = searchDirs; _i < searchDirs_1.length; _i++) {
-                        searchDir = searchDirs_1[_i];
-                        found = findFileRecursive_1(searchDir, filename);
+                    for (_i = 0, searchDirs_2 = searchDirs; _i < searchDirs_2.length; _i++) {
+                        searchDir = searchDirs_2[_i];
+                        found = findFileRecursive_2(searchDir, filename);
                         if (found) {
                             log("[AUTO-DISCOVERY SUCCESS] Resolved \"".concat(filename, "\" -> \"").concat(found, "\""));
                             backupFilePath = found;
@@ -2624,21 +2839,21 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                         "'Local Secure Backup' to generate a new military-grade encrypted file, " +
                         "then retry the restoration.");
                 }
-                encryptedBuf_1 = fs.readFileSync(backupFilePath);
+                encryptedBuf_2 = fs.readFileSync(backupFilePath);
                 tryDecryptBufferSync = function (key, salt, useIvHeader) {
                     try {
                         var derivedKey = crypto.scryptSync(key, salt, 32);
                         var iv = void 0;
                         var ciphertext = void 0;
                         if (useIvHeader) {
-                            if (encryptedBuf_1.length < 32)
+                            if (encryptedBuf_2.length < 32)
                                 return null;
-                            iv = encryptedBuf_1.subarray(0, 16);
-                            ciphertext = encryptedBuf_1.subarray(16);
+                            iv = encryptedBuf_2.subarray(0, 16);
+                            ciphertext = encryptedBuf_2.subarray(16);
                         }
                         else {
                             iv = Buffer.alloc(16, 0);
-                            ciphertext = encryptedBuf_1;
+                            ciphertext = encryptedBuf_2;
                         }
                         var decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, iv);
                         var decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
@@ -2656,21 +2871,21 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                     }
                 };
                 dbLicenseKey = '';
-                keysToTry_1 = ['INITIAL_PMS_KEY', 'bpp_dev_473748', 'BPP_UNIVERSAL_BACKUP_KEY_2026', '031942'];
+                keysToTry_2 = ['INITIAL_PMS_KEY', 'bpp_dev_473748', 'BPP_UNIVERSAL_BACKUP_KEY_2026', '031942'];
                 if (typeof arg === 'object' && arg.encryptionKey) {
                     kStr = String(arg.encryptionKey).trim();
                     if (kStr)
-                        keysToTry_1.unshift(kStr);
+                        keysToTry_2.unshift(kStr);
                 }
                 if (typeof arg === 'object' && arg.password) {
                     pStr = String(arg.password).trim();
                     if (pStr)
-                        keysToTry_1.unshift(pStr);
+                        keysToTry_2.unshift(pStr);
                 }
                 fileBasename = path.basename(backupFilePath);
                 digitsMatch = fileBasename.match(/\d{4,8}/g);
                 if (digitsMatch) {
-                    digitsMatch.forEach(function (d) { return keysToTry_1.push(d); });
+                    digitsMatch.forEach(function (d) { return keysToTry_2.push(d); });
                 }
                 if (db) {
                     try {
@@ -2679,18 +2894,18 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                             ldata = JSON.parse(row.value);
                             dbLicenseKey = ldata.key || '';
                             if (dbLicenseKey)
-                                keysToTry_1.push(dbLicenseKey.trim());
+                                keysToTry_2.push(dbLicenseKey.trim());
                         }
                     }
                     catch (e) { }
                     try {
                         profileRows = db.prepare("SELECT value FROM store WHERE key LIKE 'app_company_profile%' OR key = 'app_company_profile'").all();
-                        for (_a = 0, profileRows_1 = profileRows; _a < profileRows_1.length; _a++) {
-                            r = profileRows_1[_a];
+                        for (_a = 0, profileRows_2 = profileRows; _a < profileRows_2.length; _a++) {
+                            r = profileRows_2[_a];
                             try {
                                 pData = JSON.parse(r.value);
                                 if (pData === null || pData === void 0 ? void 0 : pData.securityPin)
-                                    keysToTry_1.push(String(pData.securityPin).trim());
+                                    keysToTry_2.push(String(pData.securityPin).trim());
                             }
                             catch (_) { }
                         }
@@ -2699,9 +2914,9 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                 }
                 return [4 /*yield*/, getInternalMachineId()];
             case 3:
-                machineId = _d.sent();
-                keysToTry_1.push(machineId);
-                sanitizedKeys = Array.from(new Set(keysToTry_1.filter(function (k) { return !!k; }).map(function (k) { return k.trim(); })));
+                machineId = _e.sent();
+                keysToTry_2.push(machineId);
+                sanitizedKeys = Array.from(new Set(keysToTry_2.filter(function (k) { return !!k; }).map(function (k) { return k.trim(); })));
                 decryptedBuffer = null;
                 matchedKey = '';
                 formats = [
@@ -2711,10 +2926,10 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                     { salt: 'salt', ivHeader: false },
                 ];
                 log("Keys to try: ".concat(JSON.stringify(sanitizedKeys)));
-                for (_b = 0, sanitizedKeys_1 = sanitizedKeys; _b < sanitizedKeys_1.length; _b++) {
-                    key = sanitizedKeys_1[_b];
-                    for (_c = 0, formats_1 = formats; _c < formats_1.length; _c++) {
-                        fmt = formats_1[_c];
+                for (_b = 0, sanitizedKeys_2 = sanitizedKeys; _b < sanitizedKeys_2.length; _b++) {
+                    key = sanitizedKeys_2[_b];
+                    for (_c = 0, formats_2 = formats; _c < formats_2.length; _c++) {
+                        fmt = formats_2[_c];
                         decryptedBuffer = tryDecryptBufferSync(key, fmt.salt, fmt.ivHeader);
                         if (decryptedBuffer) {
                             matchedKey = key;
@@ -2731,14 +2946,82 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                 }
                 fs.writeFileSync(tempRestorePath, decryptedBuffer);
                 console.log("[IPC] Decryption successful using key '".concat(matchedKey === machineId ? 'Machine ID' : matchedKey, "'. Written to ").concat(tempRestorePath));
-                _d.label = 4;
+                _e.label = 4;
             case 4:
                 sourceDb = void 0;
-                rows_5 = [];
+                rows_7 = [];
                 try {
                     sourceDb = new better_sqlite3_1.default(tempRestorePath);
-                    rows_5 = sourceDb.prepare('SELECT key, value FROM store').all();
-                    console.log("[IPC] Read ".concat(rows_5.length, " rows from backup file."));
+                    rows_7 = sourceDb.prepare('SELECT key, value FROM store').all();
+                    console.log("[IPC] Read ".concat(rows_7.length, " rows from backup file."));
+                    migrationPeriod = typeof arg === 'object' ? arg.migrationPeriod : null;
+                    if (typeof arg === 'object' && arg.isMigration && migrationPeriod && migrationPeriod.month && migrationPeriod.year) {
+                        targetM = String(migrationPeriod.month || '').trim().toLowerCase();
+                        targetY = Number(migrationPeriod.year || 0);
+                        transactionalPrefixes = [
+                            'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
+                            'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+                        ];
+                        MONTHS_ORDER_1 = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+                        hasTargetPeriod = false;
+                        _loop_5 = function (r) {
+                            if (transactionalPrefixes.some(function (pref) { return r.key.startsWith(pref); })) {
+                                try {
+                                    var parsed = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+                                    if (Array.isArray(parsed)) {
+                                        for (var _f = 0, parsed_2 = parsed; _f < parsed_2.length; _f++) {
+                                            var itm = parsed_2[_f];
+                                            var m = String(itm.month || itm.Month || itm.payrollMonth || '').trim().toLowerCase();
+                                            var y = Number(itm.year || itm.Year || itm.payrollYear || 0);
+                                            if (m && y > 0) {
+                                                if (m === targetM && y === targetY) {
+                                                    hasTargetPeriod = true;
+                                                    break;
+                                                }
+                                            }
+                                            var dateStr = String(itm.date || itm.Date || itm.entryDate || itm.createdDate || '').trim();
+                                            if (dateStr && dateStr.includes('-')) {
+                                                var parts = dateStr.split('-');
+                                                if (parts.length === 3) {
+                                                    var yr = parts[0].length === 4 ? parseInt(parts[0]) : parseInt(parts[2]);
+                                                    var mo = parts[0].length === 4 ? parseInt(parts[1]) - 1 : parseInt(parts[1]) - 1;
+                                                    if (yr === targetY && MONTHS_ORDER_1[mo] === targetM) {
+                                                        hasTargetPeriod = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (_) { }
+                                if (hasTargetPeriod)
+                                    return "break";
+                            }
+                        };
+                        for (_d = 0, rows_6 = rows_7; _d < rows_6.length; _d++) {
+                            r = rows_6[_d];
+                            state_1 = _loop_5(r);
+                            if (state_1 === "break")
+                                break;
+                        }
+                        if (!hasTargetPeriod) {
+                            sourceDb.close();
+                            try {
+                                if (fs.existsSync(tempRestorePath))
+                                    fs.unlinkSync(tempRestorePath);
+                            }
+                            catch (_) { }
+                            log("[IPC] Migration target period \"".concat(targetM, " ").concat(targetY, "\" not found in backup file. Aborting restore."));
+                            return [2 /*return*/, {
+                                    success: false,
+                                    backupMissingPeriod: true,
+                                    targetMonth: migrationPeriod.month,
+                                    targetYear: migrationPeriod.year,
+                                    error: "Data for selected Month & Year {".concat(migrationPeriod.month, " ").concat(migrationPeriod.year, "} not avialble to restore")
+                                }];
+                        }
+                    }
                 }
                 catch (dbErr) {
                     try {
@@ -2749,7 +3032,7 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                     throw new Error("Invalid Backup File Format (".concat(dbErr.message || 'file is not a database', "). This file could not be decrypted. Please verify the backup file or enter the custom password used when creating it."));
                 }
                 try {
-                    logMsg = "[".concat(new Date().toISOString(), "] Restore: Read ").concat(rows_5.length, " rows. DB_PATH: ").concat(DB_PATH, "\n");
+                    logMsg = "[".concat(new Date().toISOString(), "] Restore: Read ").concat(rows_7.length, " rows. DB_PATH: ").concat(DB_PATH, "\n");
                     fs_1 = require('fs');
                     path_1 = require('path');
                     fs_1.appendFileSync(path_1.join(require('electron').app.getPath('userData'), 'restore_log.txt'), logMsg);
@@ -2800,8 +3083,8 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                 if (!!isMigration_1) return [3 /*break*/, 6];
                 return [4 /*yield*/, getInternalMachineId()];
             case 5:
-                currentMachineId = _d.sent();
-                backupMachineIdRow = rows_5.find(function (r) { return r.key === 'app_origin_machine_id' || r.key === 'app_machine_id'; });
+                currentMachineId = _e.sent();
+                backupMachineIdRow = rows_7.find(function (r) { return r.key === 'app_origin_machine_id' || r.key === 'app_machine_id'; });
                 if (!backupMachineIdRow) {
                     sourceDb.close();
                     fs.unlinkSync(tempRestorePath);
@@ -2829,7 +3112,7 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                             error: "Universal Restoration Blocked \u2014 Backup file machine signature is corrupted.\n\nUniversal Restoration works ONLY for valid backups created on this local machine. To import data from another machine, please use 'Data Migration' under Utilities."
                         }];
                 }
-                _d.label = 6;
+                _e.label = 6;
             case 6:
                 // ── 4. Ensure active database is open ──────────────────────────────────────────────
                 console.log("[IPC] Restoring into database path: ".concat(DB_PATH, " | Mode: ").concat(isMigration_1 ? 'DATA MIGRATION' : 'UNIVERSAL RESTORATION'));
@@ -2839,15 +3122,15 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                 }
                 backupProfileRow = null;
                 if (activeId_1 && activeId_1 !== 'default') {
-                    backupProfileRow = rows_5.find(function (r) { return r.key === "app_company_profile_".concat(activeId_1); });
+                    backupProfileRow = rows_7.find(function (r) { return r.key === "app_company_profile_".concat(activeId_1); });
                 }
                 if (!backupProfileRow)
-                    backupProfileRow = rows_5.find(function (r) { return r.key === 'app_company_profile' || r.key === 'company_profile'; });
+                    backupProfileRow = rows_7.find(function (r) { return r.key === 'app_company_profile' || r.key === 'company_profile'; });
                 if (!backupProfileRow && activeId_1 && activeId_1 !== 'default') {
-                    backupProfileRow = rows_5.find(function (r) { return r.key.startsWith('app_company_profile_') && r.key.includes(activeId_1); });
+                    backupProfileRow = rows_7.find(function (r) { return r.key.startsWith('app_company_profile_') && r.key.includes(activeId_1); });
                 }
                 if (!backupProfileRow)
-                    backupProfileRow = rows_5.find(function (r) { return r.key.startsWith('app_company_profile') || r.key === 'company_profile'; });
+                    backupProfileRow = rows_7.find(function (r) { return r.key.startsWith('app_company_profile') || r.key === 'company_profile'; });
                 activeProfileRow = null;
                 if (db) {
                     if (activeId_1 && activeId_1 !== 'default') {
@@ -2956,13 +3239,13 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                 fromPeriod_1 = arg.fromPeriod;
                 toPeriod_1 = arg.toPeriod;
                 hasRangeFilter_1 = !isMigration_1 && fromPeriod_1 && toPeriod_1;
-                MONTHS_ORDER_1 = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                MONTHS_ORDER_2 = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
                 isInRange_1 = function (recMonth, recYear) {
                     if (!hasRangeFilter_1)
                         return true;
-                    var from = fromPeriod_1.year * 12 + MONTHS_ORDER_1.indexOf(fromPeriod_1.month);
-                    var to = toPeriod_1.year * 12 + MONTHS_ORDER_1.indexOf(toPeriod_1.month);
-                    var rec = recYear * 12 + MONTHS_ORDER_1.indexOf(recMonth);
+                    var from = fromPeriod_1.year * 12 + MONTHS_ORDER_2.indexOf(fromPeriod_1.month);
+                    var to = toPeriod_1.year * 12 + MONTHS_ORDER_2.indexOf(toPeriod_1.month);
+                    var rec = recYear * 12 + MONTHS_ORDER_2.indexOf(recMonth);
                     return rec >= from && rec <= to;
                 };
                 parseDateToMonthYear_1 = function (dateStr) {
@@ -2974,7 +3257,7 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                         var mo = parts[0].length === 4 ? parseInt(parts[1]) - 1 : parseInt(parts[1]) - 1;
                         if (isNaN(yr) || isNaN(mo) || mo < 0 || mo > 11)
                             return null;
-                        return { month: MONTHS_ORDER_1[mo], year: yr };
+                        return { month: MONTHS_ORDER_2[mo], year: yr };
                     }
                     catch (_) {
                         return null;
@@ -3018,7 +3301,7 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                         var arr = JSON.parse(value);
                         if (!Array.isArray(arr))
                             return value;
-                        var toVal_1 = toPeriod_1.year * 12 + MONTHS_ORDER_1.indexOf(toPeriod_1.month);
+                        var toVal_1 = toPeriod_1.year * 12 + MONTHS_ORDER_2.indexOf(toPeriod_1.month);
                         var filtered = arr.filter(function (emp) {
                             var doj = emp.doj || emp.joiningDate || emp.dateOfJoining || '';
                             if (!doj)
@@ -3026,7 +3309,7 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                             var parsed = parseDateToMonthYear_1(String(doj));
                             if (!parsed)
                                 return true; // unparseable → always include
-                            var dojVal = parsed.year * 12 + MONTHS_ORDER_1.indexOf(parsed.month);
+                            var dojVal = parsed.year * 12 + MONTHS_ORDER_2.indexOf(parsed.month);
                             return dojVal <= toVal_1; // joined on or before toPeriod end
                         });
                         return JSON.stringify(filtered);
@@ -3065,7 +3348,7 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                             deleteStmt.run.apply(deleteStmt, keysToDelete_1);
                         }
                         var written = 0;
-                        var _loop_3 = function (row) {
+                        var _loop_6 = function (row) {
                             if (isExcludedKey_1(row.key))
                                 return "continue";
                             var valueToWrite = row.value;
@@ -3082,9 +3365,9 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                             upsertStmt_1.run(row.key, valueToWrite);
                             written++;
                         };
-                        for (var _i = 0, rows_6 = rows_5; _i < rows_6.length; _i++) {
-                            var row = rows_6[_i];
-                            _loop_3(row);
+                        for (var _i = 0, rows_8 = rows_7; _i < rows_8.length; _i++) {
+                            var row = rows_8[_i];
+                            _loop_6(row);
                         }
                         if (hasRangeFilter_1) {
                             console.log("[IPC] FULL RESTORE (RANGE ".concat(fromPeriod_1.month, " ").concat(fromPeriod_1.year, " \u2192 ").concat(toPeriod_1.month, " ").concat(toPeriod_1.year, "): ").concat(written, " rows written."));
@@ -3124,11 +3407,11 @@ electron_1.ipcMain.handle('restore-sqlite-backup', function (_, arg) { return __
                 console.log("[IPC] ".concat(isMigration_1 ? 'Data Migration' : 'Full Restore', " completed successfully."));
                 return [2 /*return*/, { success: true }];
             case 7:
-                e_9 = _d.sent();
-                console.error('[IPC] restoration failed:', e_9);
+                e_10 = _e.sent();
+                console.error('[IPC] restoration failed:', e_10);
                 if (!db && appBasePath)
                     initializeDatabase(appBasePath);
-                return [2 /*return*/, { success: false, error: e_9.message }];
+                return [2 /*return*/, { success: false, error: e_10.message }];
             case 8: return [2 /*return*/];
         }
     });
@@ -3303,7 +3586,7 @@ electron_1.ipcMain.handle('relaunch-app', function () {
     electron_1.app.exit(0);
 });
 electron_1.ipcMain.handle('open-external', function (_, url) { return __awaiter(void 0, void 0, void 0, function () {
-    var e_10;
+    var e_11;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
@@ -3313,8 +3596,8 @@ electron_1.ipcMain.handle('open-external', function (_, url) { return __awaiter(
                 _a.sent();
                 return [2 /*return*/, { success: true }];
             case 2:
-                e_10 = _a.sent();
-                return [2 /*return*/, { success: false, error: e_10.message }];
+                e_11 = _a.sent();
+                return [2 /*return*/, { success: false, error: e_11.message }];
             case 3: return [2 /*return*/];
         }
     });
@@ -3459,7 +3742,7 @@ electron_1.ipcMain.handle('find-bpp-app', function () { return __awaiter(void 0,
 }); });
 // ── 8.5 DIAGNOSTICS & TELEMETRY ──
 electron_1.ipcMain.handle('generate-diagnostics', function (_, uiState) { return __awaiter(void 0, void 0, void 0, function () {
-    var timestamp, defaultPath, result, fsState, rootDbPath1, rootDbPath2, legacyDbPath, scanDirs, _i, scanDirs_1, scanDir, items, _loop_4, _a, items_1, item, payload, jsonString, encryptionKey, cipher, encrypted, e_11;
+    var timestamp, defaultPath, result, fsState, rootDbPath1, rootDbPath2, legacyDbPath, scanDirs, _i, scanDirs_1, scanDir, items, _loop_7, _a, items_1, item, payload, jsonString, encryptionKey, cipher, encrypted, e_12;
     return __generator(this, function (_b) {
         switch (_b.label) {
             case 0:
@@ -3507,7 +3790,7 @@ electron_1.ipcMain.handle('generate-diagnostics', function (_, uiState) { return
                         scanDir = scanDirs_1[_i];
                         if (fs.existsSync(scanDir)) {
                             items = fs.readdirSync(scanDir, { withFileTypes: true });
-                            _loop_4 = function (item) {
+                            _loop_7 = function (item) {
                                 if (item.isDirectory()) {
                                     var siloDbPath = path.join(scanDir, item.name, 'active_db.sqlite');
                                     // Only count it as a silo if it has an active_db.sqlite, or its name matches a typical ID format (e.g. SAIPRA_123456)
@@ -3525,7 +3808,7 @@ electron_1.ipcMain.handle('generate-diagnostics', function (_, uiState) { return
                             };
                             for (_a = 0, items_1 = items; _a < items_1.length; _a++) {
                                 item = items_1[_a];
-                                _loop_4(item);
+                                _loop_7(item);
                             }
                         }
                     }
@@ -3544,9 +3827,9 @@ electron_1.ipcMain.handle('generate-diagnostics', function (_, uiState) { return
                 fs.writeFileSync(result.filePath, encrypted, 'utf8');
                 return [2 /*return*/, { success: true, filePath: result.filePath }];
             case 2:
-                e_11 = _b.sent();
-                console.error('[IPC] generate-diagnostics failed:', e_11);
-                return [2 /*return*/, { success: false, error: e_11.message }];
+                e_12 = _b.sent();
+                console.error('[IPC] generate-diagnostics failed:', e_12);
+                return [2 /*return*/, { success: false, error: e_12.message }];
             case 3: return [2 /*return*/];
         }
     });

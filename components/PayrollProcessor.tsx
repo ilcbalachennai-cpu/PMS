@@ -130,9 +130,10 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         });
     }, [employees, month, year]);
 
-    // Load Data Effect (Priority: Temp Storage > Saved Records)
+    // Load Data Effect (Priority: Saved Records > Temp Storage when drafts exist)
     useEffect(() => {
         const tempKey = `app_temp_payroll_${companyProfile.id}_${month}_${year}`;
+        const drafts = savedRecords.filter(r => String(r.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(r.year) === Number(year));
 
         const savedTemp = localStorage.getItem(tempKey);
         let loadedFromTemp = false;
@@ -141,9 +142,20 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             try {
                 const parsed = JSON.parse(savedTemp);
                 if (Array.isArray(parsed) && parsed.length > 0) {
-                    setResults(parsed);
-                    setIsSaved(false); // Temp data is by definition unsaved
-                    loadedFromTemp = true;
+                    const isSameAsDrafts = drafts.length > 0 && 
+                        drafts.length === parsed.length &&
+                        parsed.every((p: any) => {
+                            const d = drafts.find(dr => dr.employeeId === p.employeeId);
+                            return d && Number(d.netPay || 0) === Number(p.netPay || 0);
+                        });
+
+                    if (isSameAsDrafts) {
+                        localStorage.removeItem(tempKey);
+                    } else if (drafts.length === 0) {
+                        setResults(parsed);
+                        setIsSaved(false); // Temp data is by definition unsaved
+                        loadedFromTemp = true;
+                    }
                 }
             } catch (e) {
                 localStorage.removeItem(tempKey);
@@ -151,10 +163,10 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         }
 
         if (!loadedFromTemp) {
-            const drafts = savedRecords.filter(r => String(r.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(r.year) === Number(year));
             if (drafts.length > 0) {
                 setResults(drafts);
                 setIsSaved(true);
+                localStorage.removeItem(tempKey);
             } else {
                 setResults([]);
                 setIsSaved(false);
@@ -167,38 +179,43 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         const tempKey = `app_temp_payroll_${companyProfile.id}_${month}_${year}`;
         if (!isSaved && results.length > 0) {
             localStorage.setItem(tempKey, JSON.stringify(results));
+        } else if (isSaved) {
+            localStorage.removeItem(tempKey);
         }
-    }, [results, isSaved, month, year]);
-
-    const initialEmployees = useMemo(() => {
-        const employeesKey = `app_calc_employees_${companyProfile.id}_${month}_${year}`;
-        const stored = localStorage.getItem(employeesKey);
-        if (stored) {
-            try {
-                return JSON.parse(stored) as Employee[];
-            } catch (e) {
-                return null;
-            }
-        }
-        return null;
-    }, [companyProfile.id, month, year, results.length]);
+    }, [results, isSaved, month, year, companyProfile.id]);
 
     useEffect(() => {
         if (results.length > 0 && !isLocked) {
-            if (initialEmployees === null) {
-                setMasterDataChanged(true);
-                setIsSaved(false);
+            const employeesKey = `app_calc_employees_${companyProfile.id}_${month}_${year}`;
+            const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
+
+            const stored = localStorage.getItem(employeesKey);
+            let snapshot: Employee[] | null = null;
+            if (stored) {
+                try {
+                    snapshot = JSON.parse(stored) as Employee[];
+                } catch (e) {
+                    snapshot = null;
+                }
+            }
+
+            if (snapshot === null) {
+                localStorage.setItem(employeesKey, JSON.stringify(activeEmployees));
+                if (!localStorage.getItem(configKey)) {
+                    localStorage.setItem(configKey, JSON.stringify(config));
+                }
+                setMasterDataChanged(false);
             } else {
                 let payAffected = false;
                 for (const emp of activeEmployees) {
-                    const original = initialEmployees.find(e => e.id === emp.id);
+                    const original = snapshot.find(e => e.id === emp.id);
                     if (!original || didEmployeePayFieldsChange(original, emp)) {
                         payAffected = true;
                         break;
                     }
                 }
                 if (!payAffected) {
-                    for (const orig of initialEmployees) {
+                    for (const orig of snapshot) {
                         const current = activeEmployees.find(e => e.id === orig.id);
                         if (!current) {
                             payAffected = true;
@@ -217,7 +234,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         } else {
             setMasterDataChanged(false);
         }
-    }, [activeEmployees, initialEmployees, results.length, isLocked]);
+    }, [activeEmployees, results.length, isLocked, companyProfile.id, month, year, config]);
 
     const prevAttendancesRef = React.useRef(attendances);
     const prevAdvancesRef = React.useRef(advanceLedgers);
@@ -225,8 +242,22 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     const prevOtRecordsRef = React.useRef(otRecords);
     const prevArrearHistoryRef = React.useRef(arrearHistory);
     const prevConfigRef = React.useRef(config);
+    const prevPeriodContextRef = React.useRef(`${companyProfile.id}_${month}_${year}`);
 
     useEffect(() => {
+        const currentPeriodContext = `${companyProfile.id}_${month}_${year}`;
+        if (prevPeriodContextRef.current !== currentPeriodContext) {
+            prevPeriodContextRef.current = currentPeriodContext;
+            prevAttendancesRef.current = attendances;
+            prevAdvancesRef.current = advanceLedgers;
+            prevFinesRef.current = fines;
+            prevOtRecordsRef.current = otRecords;
+            prevArrearHistoryRef.current = arrearHistory;
+            prevConfigRef.current = config;
+            setDataIsStale(false);
+            return;
+        }
+
         if (results.length > 0 && !isLocked) {
             const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
             const storedConfig = localStorage.getItem(configKey);
@@ -942,13 +973,13 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                         (() => {
                             const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
                             const storedConfig = localStorage.getItem(configKey);
-                            const isConfigStale = results.length > 0 && (!storedConfig || (() => {
+                            const isConfigStale = results.length > 0 && !!storedConfig && (() => {
                                 try {
                                     return didConfigCalculationFieldsChange(JSON.parse(storedConfig), config);
                                 } catch (e) {
                                     return false;
                                 }
-                            })());
+                            })();
                             const hasPendingChanges = hasAnyUnsavedTab || dataIsStale || masterDataChanged || isConfigStale;
                             const isCalculateDisabled = isProcessing || !hasAnyAttendance || (results.length > 0 && !hasPendingChanges) || companyProfile.isReadOnly;
                             const isSaveDraftDisabled = isSaved || !hasAnyAttendance || hasPendingChanges || results.length === 0 || companyProfile.isReadOnly;

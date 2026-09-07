@@ -3063,7 +3063,7 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
                     <div className="flex flex-col items-start leading-tight">
                        <div className="flex items-center gap-2 max-w-[340px]">
                          <span className="text-sm font-black text-white tracking-tight truncate">
-                           {companyProfile.establishmentName?.replace('Rescued: ', '') || "Select Organization"}
+                           {companies.find(c => c.id === activeCompanyId)?.establishmentName?.replace('Rescued: ', '') || companyProfile.establishmentName?.replace('Rescued: ', '') || "Select Organization"}
                          </span>
                          <span className="text-[9px] px-1.5 py-0.5 bg-blue-600 text-white rounded border border-blue-400 font-mono font-black shrink-0 shadow-lg uppercase tracking-tighter">
                            {activeCompanyId}
@@ -3314,7 +3314,7 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
                       <div className="flex flex-col items-center gap-4 text-center">
                          <h2 className="text-2xl font-black text-white tracking-tight leading-tight">
                            Please wait,&nbsp; Loading&nbsp; {activeFinancialYear ? activeFinancialYear.replace('FY', 'FY ') : ''} <br/>
-                           <span className="text-blue-400">{companyProfile.establishmentName || 'Organization'}</span>
+                           <span className="text-blue-400">{companies.find(c => c.id === activeCompanyId)?.establishmentName?.replace('Rescued: ', '') || companyProfile.establishmentName?.replace('Rescued: ', '') || 'Organization'}</span>
                          </h2>
                          <div className="px-4 py-1.5 bg-blue-500/10 rounded-full border border-blue-500/20">
                             <p className="text-xs font-black text-blue-300 uppercase tracking-widest">

@@ -65,7 +65,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
         setAdvanceJustSaved(true);
         setFineJustSaved(true);
         setOtJustSaved(true);
-    }, [props.month, props.year]);
+    }, [props.month, props.year, props.companyProfile?.id]);
 
     // Compute lock status
     const isLocked = useMemo(() => {

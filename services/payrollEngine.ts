@@ -365,7 +365,7 @@ export const calculatePayroll = (
         // If Higher Contribution is enabled, we use the sum of configured components (Actual Wage),
         // effectively treating it as "Higher Wages" opted.
 
-        const hc = config.higherContributionComponents;
+        const hc = config.higherContributionComponents || {};
         let higherWageBase = 0;
         if (hc.basic) higherWageBase += basic;
         if (hc.da) higherWageBase += da;

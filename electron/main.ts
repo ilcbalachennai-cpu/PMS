@@ -2363,6 +2363,184 @@ ipcMain.handle('select-backup-file', async () => {
     }
 });
 
+ipcMain.handle('get-backup-periods', async (_, arg) => {
+    try {
+        let backupFilePath = typeof arg === 'string' ? arg : (arg?.path || '');
+        if (!appBasePath) return { success: false, periods: [] };
+        const paths = getAppPaths(appBasePath);
+
+        if (!backupFilePath || !fs.existsSync(backupFilePath)) {
+            const filename = path.basename(backupFilePath || '');
+            const searchDirs = [
+                paths.data,
+                path.join(appBasePath, 'Data backup'),
+                path.join(appBasePath, 'Data'),
+                app.getPath('downloads'),
+                app.getPath('desktop')
+            ];
+            const findFileRecursive = (dir: string, targetName: string, depth = 0): string | null => {
+                if (depth > 5 || !fs.existsSync(dir)) return null;
+                try {
+                    const entries = fs.readdirSync(dir, { withFileTypes: true });
+                    for (const entry of entries) {
+                        const full = path.join(dir, entry.name);
+                        if (entry.isFile() && entry.name.toLowerCase() === targetName.toLowerCase()) return full;
+                        if (entry.isDirectory() && !entry.name.startsWith('.')) {
+                            const found = findFileRecursive(full, targetName, depth + 1);
+                            if (found) return found;
+                        }
+                    }
+                } catch (_) {}
+                return null;
+            };
+            for (const searchDir of searchDirs) {
+                const found = findFileRecursive(searchDir, filename);
+                if (found) { backupFilePath = found; break; }
+            }
+        }
+
+        if (!backupFilePath || !fs.existsSync(backupFilePath)) {
+            return { success: false, periods: [], error: 'File not found' };
+        }
+
+        let dataDir = paths.data;
+        if (activeCompanyId && activeCompanyId !== 'default') {
+            dataDir = path.join(paths.data, activeCompanyId);
+            if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+        }
+
+        const tempInspectPath = path.join(dataDir, `inspect_temp_${Date.now()}.sqlite`);
+
+        const fd = fs.openSync(backupFilePath, 'r');
+        const header = Buffer.alloc(16);
+        fs.readSync(fd, header as any, 0, 16, 0);
+        fs.closeSync(fd);
+
+        if (header.toString().startsWith('SQLite format 3')) {
+            fs.copyFileSync(backupFilePath, tempInspectPath);
+        } else {
+            const encryptedBuf = fs.readFileSync(backupFilePath);
+            const tryDecryptBufferSync = (key: string, salt: string, useIvHeader: boolean): Buffer | null => {
+                try {
+                    const derivedKey = crypto.scryptSync(key, salt, 32);
+                    let iv: Buffer = useIvHeader ? (encryptedBuf.length >= 32 ? encryptedBuf.subarray(0, 16) : Buffer.alloc(16, 0)) : Buffer.alloc(16, 0);
+                    let ciphertext: Buffer = useIvHeader ? encryptedBuf.subarray(16) : encryptedBuf;
+                    const decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, iv);
+                    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+                    if (decrypted.length >= 100) {
+                        const headerAscii = decrypted.toString('utf8', 0, 32);
+                        const headerLatin1 = decrypted.toString('latin1', 0, 32);
+                        if (headerAscii.includes('SQLite format 3') || headerLatin1.includes('SQLite format 3')) return decrypted;
+                    }
+                    return null;
+                } catch (_) { return null; }
+            };
+
+            const keysToTry: string[] = ['INITIAL_PMS_KEY', 'bpp_dev_473748', 'BPP_UNIVERSAL_BACKUP_KEY_2026', '031942'];
+            if (typeof arg === 'object' && arg.encryptionKey) {
+                const kStr = String(arg.encryptionKey).trim();
+                if (kStr) keysToTry.unshift(kStr);
+            }
+            if (typeof arg === 'object' && arg.password) {
+                const pStr = String(arg.password).trim();
+                if (pStr) keysToTry.unshift(pStr);
+            }
+            const fileBasename = path.basename(backupFilePath);
+            const digitsMatch = fileBasename.match(/\d{4,8}/g);
+            if (digitsMatch) digitsMatch.forEach(d => keysToTry.push(d));
+
+            if (db) {
+                try {
+                    const row = db.prepare('SELECT value FROM store WHERE key = ?').get('app_license_data') as { value: string };
+                    if (row) {
+                        const ldata = JSON.parse(row.value);
+                        if (ldata?.key) keysToTry.push(ldata.key.trim());
+                    }
+                } catch (e) {}
+
+                try {
+                    const profileRows = db.prepare("SELECT value FROM store WHERE key LIKE 'app_company_profile%' OR key = 'app_company_profile'").all() as { value: string }[];
+                    for (const r of profileRows) {
+                        try {
+                            const pData = JSON.parse(r.value);
+                            if (pData?.securityPin) keysToTry.push(String(pData.securityPin).trim());
+                        } catch (_) {}
+                    }
+                } catch (e) {}
+            }
+
+            const machineId = await getInternalMachineId();
+            keysToTry.push(machineId);
+
+            const sanitizedKeys = Array.from(new Set(keysToTry.filter(Boolean)));
+            const formats = [
+                { salt: 'BPP_SALT_v1', ivHeader: true },
+                { salt: 'salt', ivHeader: true },
+                { salt: 'BPP_SALT_v1', ivHeader: false },
+                { salt: 'salt', ivHeader: false },
+            ];
+
+            let decryptedBuffer: Buffer | null = null;
+            for (const key of sanitizedKeys) {
+                for (const fmt of formats) {
+                    decryptedBuffer = tryDecryptBufferSync(key, fmt.salt, fmt.ivHeader);
+                    if (decryptedBuffer) break;
+                }
+                if (decryptedBuffer) break;
+            }
+
+            if (!decryptedBuffer) return { success: false, periods: [], error: 'Decryption failed' };
+            fs.writeFileSync(tempInspectPath, decryptedBuffer);
+        }
+
+        const sourceDb = new Database(tempInspectPath);
+        const rows = sourceDb.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
+        sourceDb.close();
+        try { fs.unlinkSync(tempInspectPath); } catch (_) {}
+
+        const MONTHS_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const transactionalPrefixes = [
+            'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
+            'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+        ];
+
+        const periods = new Set<string>();
+        for (const r of rows) {
+            if (transactionalPrefixes.some(p => r.key.startsWith(p))) {
+                try {
+                    const parsed = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+                    if (Array.isArray(parsed)) {
+                        for (const itm of parsed) {
+                            const m = String(itm.month || itm.Month || itm.payrollMonth || '').trim();
+                            const y = Number(itm.year || itm.Year || itm.payrollYear || 0);
+                            if (m && y > 0) {
+                                const normM = MONTHS_ORDER.find(mo => mo.toLowerCase() === m.toLowerCase());
+                                if (normM) periods.add(`${normM}_${y}`);
+                            } else {
+                                const dateStr = String(itm.date || itm.Date || itm.entryDate || itm.createdDate || '').trim();
+                                if (dateStr && dateStr.includes('-')) {
+                                    const parts = dateStr.split('-');
+                                    if (parts.length === 3) {
+                                        const yr = parts[0].length === 4 ? parseInt(parts[0]) : parseInt(parts[2]);
+                                        const mo = parts[0].length === 4 ? parseInt(parts[1]) - 1 : parseInt(parts[1]) - 1;
+                                        if (!isNaN(yr) && !isNaN(mo) && mo >= 0 && mo <= 11) {
+                                            periods.add(`${MONTHS_ORDER[mo]}_${yr}`);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (_) {}
+            }
+        }
+
+        return { success: true, periods: Array.from(periods) };
+    } catch (e: any) {
+        return { success: false, periods: [], error: e.message };
+    }
+});
+
 ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
     const logPath = path.join(app.getPath('userData'), 'restore_debug.log');
     const log = (msg: string) => {
@@ -2582,6 +2760,67 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
             sourceDb = new Database(tempRestorePath);
             rows = sourceDb.prepare('SELECT key, value FROM store').all() as { key: string, value: string }[];
             console.log(`[IPC] Read ${rows.length} rows from backup file.`);
+
+            // ── Period Availability Check for Specific Month Data Migration ──────────────
+            const migrationPeriod = typeof arg === 'object' ? arg.migrationPeriod : null;
+            if (typeof arg === 'object' && arg.isMigration && migrationPeriod && migrationPeriod.month && migrationPeriod.year) {
+                const targetM = String(migrationPeriod.month || '').trim().toLowerCase();
+                const targetY = Number(migrationPeriod.year || 0);
+
+                const transactionalPrefixes = [
+                    'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
+                    'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+                ];
+
+                const MONTHS_ORDER = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+
+                let hasTargetPeriod = false;
+                for (const r of rows) {
+                    if (transactionalPrefixes.some(pref => r.key.startsWith(pref))) {
+                        try {
+                            const parsed = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+                            if (Array.isArray(parsed)) {
+                                for (const itm of parsed) {
+                                    const m = String(itm.month || itm.Month || itm.payrollMonth || '').trim().toLowerCase();
+                                    const y = Number(itm.year || itm.Year || itm.payrollYear || 0);
+                                    if (m && y > 0) {
+                                        if (m === targetM && y === targetY) {
+                                            hasTargetPeriod = true;
+                                            break;
+                                        }
+                                    }
+                                    const dateStr = String(itm.date || itm.Date || itm.entryDate || itm.createdDate || '').trim();
+                                    if (dateStr && dateStr.includes('-')) {
+                                        const parts = dateStr.split('-');
+                                        if (parts.length === 3) {
+                                            const yr = parts[0].length === 4 ? parseInt(parts[0]) : parseInt(parts[2]);
+                                            const mo = parts[0].length === 4 ? parseInt(parts[1]) - 1 : parseInt(parts[1]) - 1;
+                                            if (yr === targetY && MONTHS_ORDER[mo] === targetM) {
+                                                hasTargetPeriod = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (_) {}
+                        if (hasTargetPeriod) break;
+                    }
+                }
+
+                if (!hasTargetPeriod) {
+                    sourceDb.close();
+                    try { if (fs.existsSync(tempRestorePath)) fs.unlinkSync(tempRestorePath); } catch (_) {}
+                    log(`[IPC] Migration target period "${targetM} ${targetY}" not found in backup file. Aborting restore.`);
+                    return {
+                        success: false,
+                        backupMissingPeriod: true,
+                        targetMonth: migrationPeriod.month,
+                        targetYear: migrationPeriod.year,
+                        error: `Data for selected Month & Year {${migrationPeriod.month} ${migrationPeriod.year}} not avialble to restore`
+                    };
+                }
+            }
         } catch (dbErr: any) {
             try { if (fs.existsSync(tempRestorePath)) fs.unlinkSync(tempRestorePath); } catch (_) {}
             throw new Error(`Invalid Backup File Format (${dbErr.message || 'file is not a database'}). This file could not be decrypted. Please verify the backup file or enter the custom password used when creating it.`);

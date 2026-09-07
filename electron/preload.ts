@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createDataBackup: (arg: any) => ipcRenderer.invoke('create-data-backup', arg),
     runFullBackup: (arg: any) => ipcRenderer.invoke('run-full-backup', arg),
     restoreSqliteBackup: (arg: any) => ipcRenderer.invoke('restore-sqlite-backup', arg),
+    getBackupPeriods: (arg: any) => ipcRenderer.invoke('get-backup-periods', arg),
     restoreFromSnapshot: (snapshotFileName?: string) => ipcRenderer.invoke('restore-from-snapshot', snapshotFileName),
     listSafetySnapshots: () => ipcRenderer.invoke('list-safety-snapshots'),
     selectBackupFile: () => ipcRenderer.invoke('select-backup-file'),
