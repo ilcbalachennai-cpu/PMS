@@ -160,7 +160,7 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
     employees, setEmployees, config, setConfig, companyProfile, setCompanyProfile,
     leavePolicy, setLeavePolicy, attendances, setAttendances, leaveLedgers, setLeaveLedgers,
     advanceLedgers, setAdvanceLedgers, payrollHistory, setPayrollHistory, fines, setFines,
-    arrearHistory, setArrearHistory, otRecords, setOTRecords, designations, setDesignations, divisions, setDivisions,
+    arrearHistory, setArrearHistory, otRecords, setOTRecords, vpfRecords, setVpfRecords, designations, setDesignations, divisions, setDivisions,
     branches, setBranches, sites, setSites, logoUrl, setLogoUrl,
     safeSave, handleRollover, handlePayrollReset, handleDeepReset, handleNuclearReset,
     companies, setCompanies, activeCompanyId, activeFinancialYear, availableFinancialYears, switchCompany, switchFinancialYear, addCompany, deleteCompany, isHydrating, isResetting
@@ -609,7 +609,8 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
     downloadProgress,
     isPatchNotice, isPatchMandatory, isSessionDismissed, patchSkipCount, versionSkipCount,
     deploymentStep,
-    handleUpdateNow, handleUpdateLater 
+    handleUpdateNow, handleUpdateLater,
+    triggerUpdateModal 
   } = useAppUpdate(showAlert, currentUser?.role === 'Developer', currentUser?.username, currentUser?.email, isBootSyncComplete);
 
   const [isInstalling, setIsInstalling] = useState(false);
@@ -634,6 +635,8 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
     showRegistrationManual, setShowRegistrationManual, setSkipSetupRedirect,
     isSetupComplete, setIsSetupComplete
   } = useUIState(activeCompanyId, employees.length);
+
+  const [misTab, setMisTab] = useState<'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT' | 'AUDIT_TRAIL'>('DYNAMIC_REPORT');
 
   // --- V03.01.02: SMART GATE INITIALIZATION ---
   // Start with the selection gate closed to directly load the Dashboard of the active company
@@ -1237,7 +1240,10 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
           }
           
           setActiveView(view);
-          if (tab) setSettingsTab(tab as any);
+          if (tab) {
+            if (view === View.MIS) setMisTab(tab as any);
+            else setSettingsTab(tab as any);
+          }
         },
         'Stay & Save',
         'Discard & Leave'
@@ -1265,7 +1271,8 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
 
     setActiveView(view);
     if (tab) {
-      setSettingsTab(tab as any);
+      if (view === View.MIS) setMisTab(tab as any);
+      else setSettingsTab(tab as any);
     } else if (view === View.Settings) {
       setSettingsTab(SettingsTab.Company);
     }
@@ -1294,13 +1301,19 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
     const lastAgreedDate = localStorage.getItem('app_legal_agreed_date');
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    return lastAgreedDate === today;
+    const isMigrationSkip = sessionStorage.getItem('app_skip_migration_alerts') === 'true';
+    return isMigrationSkip || lastAgreedDate === today;
   });
 
   useEffect(() => {
     const verifyAgreedDate = async () => {
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      if (sessionStorage.getItem('app_skip_migration_alerts') === 'true') {
+        setHasAgreedLegal(true);
+        localStorage.setItem('app_legal_agreed_date', today);
+        return;
+      }
       if (hasAgreedLegal) return;
 
       if (window.electronAPI?.dbGet) {
@@ -1339,6 +1352,11 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
   useEffect(() => {
     // V02.02.24: Legal notice now appears POST-LOGIN for better reliability
     // Updated to show on first login for the day regardless of company selection
+    if (sessionStorage.getItem('app_skip_migration_alerts') === 'true') {
+      setShowLegalModal(false);
+      setHasAgreedLegal(true);
+      return;
+    }
     if (currentUser && !hasAgreedLegal) {
       const timer = setTimeout(() => setShowLegalModal(true), 1500);
       return () => clearTimeout(timer);
@@ -1375,18 +1393,19 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
           setAdvanceLedgers(updateTable(advanceLedgers, 'employeeId'));
           setFines(updateTable(fines, 'employeeId'));
           setOTRecords(updateTable(otRecords, 'employeeId'));
+          setVpfRecords(updateTable(vpfRecords, 'employeeId'));
           setArrearHistory(updateTable(arrearHistory, 'employeeId'));
 
           showAlert('success', 'Data Synchronized', `Successfully updated ${idMap.size} legacy employee IDs to 4-digit format.`);
         }
       }
     }
-  }, [isHydrating, employees, attendances, payrollHistory, leaveLedgers, advanceLedgers, fines, otRecords, arrearHistory, setEmployees, setAttendances, setPayrollHistory, setLeaveLedgers, setAdvanceLedgers, setFines, setOTRecords, setArrearHistory, showAlert]);
+  }, [isHydrating, employees, attendances, payrollHistory, leaveLedgers, advanceLedgers, fines, otRecords, vpfRecords, arrearHistory, setEmployees, setAttendances, setPayrollHistory, setLeaveLedgers, setAdvanceLedgers, setFines, setOTRecords, setVpfRecords, setArrearHistory, showAlert]);
 
   // Persistence & Sync Hook
   useSync({
     employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers,
-    payrollHistory, fines, leavePolicy, arrearHistory, otRecords, logoUrl,
+    payrollHistory, fines, leavePolicy, arrearHistory, otRecords, vpfRecords, logoUrl,
     designations, divisions, branches, sites, isSetupComplete, safeSave,
     activeCompanyId, activeFinancialYear, isHydrating, isResetting
   });
@@ -1524,6 +1543,14 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
 
 
   useEffect(() => {
+    if (sessionStorage.getItem('app_skip_migration_alerts') === 'true') {
+      setShowLoginMessage(false);
+      const currentMsgId = (localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage || '').trim();
+      if (currentMsgId) {
+        sessionStorage.setItem(`app_msg_dismissed_${currentMsgId}`, 'true');
+      }
+      return;
+    }
     const currentMsgId = (localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage || '').trim();
     const isDismissedInSession = currentMsgId && sessionStorage.getItem(`app_msg_dismissed_${currentMsgId}`);
 
@@ -1541,6 +1568,8 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
       return () => clearTimeout(timer);
     }
   }, [isReloadingAfterReset]);
+
+  // V03.01.08: Keep app_skip_migration_alerts active for the duration of the migration session (cleared on logout)
 
   const [showIdleWarning, setShowIdleWarning] = useState(false);
   const [idleCountdown, setIdleCountdown] = useState(10);
@@ -2910,7 +2939,7 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
             </div>
           )}
 
-          {showLoginMessage && (
+          {showLoginMessage && sessionStorage.getItem('app_skip_migration_alerts') !== 'true' && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
               <div className="bg-[#1e293b] w-full max-w-lg rounded-2xl border border-blue-500/50 p-8 space-y-6">
                 <h3 className="text-lg font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
@@ -3429,14 +3458,14 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
                 )}
                 {activeView === View.Dashboard && <Dashboard employees={employees} config={config} companyProfile={companyProfile} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} payrollHistory={payrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} onNavigate={safeNavigate} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Employees && <EmployeeList employees={employees} setEmployees={setEmployees} onAddEmployee={handleAddEmployee} onBulkAddEmployees={handleBulkAddEmployees} designations={designations} divisions={divisions} branches={branches} sites={sites} currentUser={effectiveUser} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} dataSizeLimit={companyProfile?.allocatedDataSize || 0} showAlert={showAlert} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} onNavigate={safeNavigate} />}
-                {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} showAlert={showAlert} onNavigate={safeNavigate} setSettingsTab={setSettingsTab} licenseInfo={licenseInfo || undefined} hasPreviousYearData={hasPreviousYearData} activeFinancialYear={activeFinancialYear} />}
-                {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} onNavigate={safeNavigate} activeFinancialYear={activeFinancialYear} />}
-                {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
-                {activeView === View.MIS && <MISDashboard payrollHistory={payrollHistory} employees={employees} companyProfile={companyProfile} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
+                {activeView === View.PayProcess && <PayProcess employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} setAttendances={setAttendances} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} leavePolicy={leavePolicy} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} currentUser={effectiveUser} fines={fines} setFines={setFines} arrearHistory={arrearHistory} setArrearHistory={setArrearHistory} otRecords={otRecords} setOTRecords={setOTRecords} vpfRecords={vpfRecords} setVpfRecords={setVpfRecords} showAlert={showAlert} onNavigate={safeNavigate} setSettingsTab={setSettingsTab} licenseInfo={licenseInfo || undefined} hasPreviousYearData={hasPreviousYearData} activeFinancialYear={activeFinancialYear} />}
+                {activeView === View.Reports && <Reports employees={employees} setEmployees={setEmployees} config={config} companyProfile={companyProfile} attendances={attendances} savedRecords={payrollHistory} setSavedRecords={setPayrollHistory} month={globalMonth} year={globalYear} setMonth={setGlobalMonth} setYear={setGlobalYear} leaveLedgers={leaveLedgers} setLeaveLedgers={setLeaveLedgers} advanceLedgers={advanceLedgers} setAdvanceLedgers={setAdvanceLedgers} currentUser={effectiveUser} onRollover={onRolloverTrigger} arrearHistory={arrearHistory} showAlert={showAlert} latestFrozenPeriod={latestFrozenPeriod} onNavigate={safeNavigate} activeFinancialYear={activeFinancialYear} branches={branches} />}
+                {activeView === View.Statutory && <StatutoryReports payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} attendances={attendances} leaveLedgers={leaveLedgers} advanceLedgers={advanceLedgers} arrearHistory={arrearHistory} latestFrozenPeriod={latestFrozenPeriod} showAlert={showAlert} activeFinancialYear={activeFinancialYear} onNavigate={safeNavigate} branches={branches} />}
+                {activeView === View.MIS && <MISDashboard payrollHistory={payrollHistory} employees={employees} companyProfile={companyProfile} showAlert={showAlert} activeFinancialYear={activeFinancialYear} config={config} onNavigate={safeNavigate} globalMonth={globalMonth} globalYear={globalYear} initialTab={misTab} />}
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                 {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} activeFinancialYear={activeFinancialYear} showAlert={showAlert} />}
-                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { window.location.reload(); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onClaimCompany={() => handleClaimCompany(companyProfile)} availableSlots={Math.max(0, (licenseInfo?.companyLimit || 3) - companies.filter(c => !c.isReadOnly).length)} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} onNavigate={safeNavigate} />}
+                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { window.location.reload(); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onClaimCompany={() => handleClaimCompany(companyProfile)} availableSlots={Math.max(0, (licenseInfo?.companyLimit || 3) - companies.filter(c => !c.isReadOnly).length)} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} onNavigate={safeNavigate} onTriggerUpdate={triggerUpdateModal} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
 
@@ -3814,7 +3843,7 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
       )}
 
       {/* --- V02.02.24: MANDATORY LEGAL ALERT OVERLAY --- */}
-      {showLegalModal && (
+      {showLegalModal && sessionStorage.getItem('app_skip_migration_alerts') !== 'true' && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-[#020617]/95 backdrop-blur-xl animate-in fade-in duration-500">
           <div className="bg-[#1e293b] w-full max-w-2xl rounded-[2.5rem] border border-blue-500/30 shadow-[0_0_50px_rgba(37,99,235,0.2)] overflow-hidden flex flex-col animate-in zoom-in-95 duration-500">
             <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 p-8 flex items-center gap-6 border-b border-white/10">

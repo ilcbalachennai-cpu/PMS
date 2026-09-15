@@ -24,6 +24,7 @@ export const useAuth = () => {
     sessionStorage.removeItem('app_session_user');
     sessionStorage.removeItem('patch_session_suppressed');
     sessionStorage.removeItem('app_is_company_loaded');
+    sessionStorage.removeItem('app_skip_migration_alerts');
     setCurrentUser(null);
   }, []);
 

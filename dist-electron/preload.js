@@ -104,6 +104,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     listSilos: function () { return electron_1.ipcRenderer.invoke('list-silos'); },
     deleteSilo: function (companyId) { return electron_1.ipcRenderer.invoke('delete-silo', companyId); },
     wipeCompanyData: function (companyId) { return electron_1.ipcRenderer.invoke('wipe-company-data', companyId); },
-    generateDiagnostics: function (uiState) { return electron_1.ipcRenderer.invoke('generate-diagnostics', uiState); }
+    generateDiagnostics: function (uiState) { return electron_1.ipcRenderer.invoke('generate-diagnostics', uiState); },
+    getAppBuildAuditInfo: function () { return electron_1.ipcRenderer.invoke('get-app-build-audit-info'); },
+    launchInstallerManually: function () { return electron_1.ipcRenderer.invoke('launch-installer-manually'); },
+    openUpdateLog: function () { return electron_1.ipcRenderer.invoke('open-update-log'); }
 });
 console.log("EB: Electron Bridge (electronAPI) Initialized");

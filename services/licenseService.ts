@@ -3,8 +3,8 @@ import { LicenseData } from '../types';
 
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzE10qkCCczPH-_eCQ_cJBRGpu28viV8zhNRCw2iD0Rha3y_1HIuWNPGAjHBrqsHeEB/exec";
-export const APP_VERSION = "06.01.10";
-export const APP_PATCH_TIMESTAMP = "10-08-2026 18:54:34"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_VERSION = "06.01.11";
+export const APP_PATCH_TIMESTAMP = "10-09-2026 22:00:51"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -2362,11 +2362,17 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
           downloadUrl: result.downloadUrl,
           downloadUrlWin7: result.downloadUrlWin7,
           launcherUrl: result.launcherUrl,
-          patchTimestamp: result.patchTimestamp
+          patchTimestamp: result.patchTimestamp,
+          updateHashWin10: result.updateHashWin10,
+          updateHashWin7: result.updateHashWin7,
+          sha256: result.sha256
         };
         localStorage.setItem('app_latest_version', result.latestVersion);
         if (result.launcherUrl) localStorage.setItem('app_launcher_url', result.launcherUrl);
         if (result.patchTimestamp) localStorage.setItem('app_latest_patch_timestamp', result.patchTimestamp);
+        if (result.updateHashWin10) localStorage.setItem('app_update_hash_win10', result.updateHashWin10);
+        if (result.updateHashWin7) localStorage.setItem('app_update_hash_win7', result.updateHashWin7);
+        if (result.sha256) localStorage.setItem('app_update_hash', result.sha256);
 
         const api = (window as any).electronAPI;
         const dbSetFn = api?.dbSetGlobal || api?.dbSet;
@@ -2374,6 +2380,9 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
           dbSetFn('app_latest_version', result.latestVersion).catch(() => {});
           if (result.launcherUrl) dbSetFn('app_launcher_url', result.launcherUrl).catch(() => {});
           if (result.patchTimestamp) dbSetFn('app_latest_patch_timestamp', result.patchTimestamp).catch(() => {});
+          if (result.updateHashWin10) dbSetFn('app_update_hash_win10', result.updateHashWin10).catch(() => {});
+          if (result.updateHashWin7) dbSetFn('app_update_hash_win7', result.updateHashWin7).catch(() => {});
+          if (result.sha256) dbSetFn('app_update_hash', result.sha256).catch(() => {});
         }
       }
 

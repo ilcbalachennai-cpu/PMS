@@ -158,9 +158,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
   // --- 'LOCATION X' Patch Tracking (V02.02.23) ---
   const [activePatchTs, setActivePatchTs] = useState<string>(() => {
     const stored = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
-    // --- V02.02.24: Baseline Enforcement ---
-    // If the stored marker is older than the hardcoded baseline (from licenseService),
-    // elevate it to the baseline to prevent heritage patches from old versions.
+    // Elevate to baseline if stored marker is older than the hardcoded baseline
     if (parseDateTime(stored) < parseDateTime(APP_PATCH_TIMESTAMP)) {
        return APP_PATCH_TIMESTAMP;
     }
@@ -247,10 +245,16 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
           if (res && res.success === false) {
              if (res.error === 'SECURITY_HASH_MISMATCH') {
                 setUpdateError('SECURITY_VIOLATION');
+                showAlert('error', 'Update Verification Failed', 'Security Policy Violation: The downloaded update failed cryptographic integrity verification (SHA-256 mismatch). The unverified file has been removed and your current application remains active.');
+             } else if (res.error === 'SECURITY_HASH_MISSING') {
+                setUpdateError('SECURITY_VIOLATION');
+                showAlert('error', 'Update Signature Missing', 'Security Policy Notice: The cryptographic signature (SHA-256) is missing in the cloud repository (Column G / H). The installation has been safely stopped to protect application integrity, and your current application remains active.');
              } else {
                 setUpdateError('DOWNLOAD_FAILED');
                 showAlert('error', 'Download Failed', `Update failed: ${res.error || 'Network error'}.`);
              }
+             setUpdateDownloaded(false);
+             setIsUpdatePreparing(false);
              return;
           }
         }
@@ -277,20 +281,19 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
         console.log(" Patch Successfully Applied. Holding for UI readability...");
         await new Promise(resolve => setTimeout(resolve, 3100));
 
-        //  [PatchSync] Synchronize patch timestamp during Version or Patch update
+        //  [PatchSync] Record pending patch timestamp for post-reboot verification (DO NOT falsely mark active before install!)
         if (latestPatchTimestamp) {
-           localStorage.setItem('app_active_patch_ts', latestPatchTimestamp);
+           localStorage.setItem('app_pending_patch_ts', latestPatchTimestamp);
            localStorage.setItem('app_patch_skip_count', '0');
-           setActivePatchTs(latestPatchTimestamp);
            setPatchSkipCount(0);
            
            const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
            if (dbSetFn) {
               try {
-                 await dbSetFn('app_active_patch_ts', latestPatchTimestamp);
+                 await dbSetFn('app_pending_patch_ts', latestPatchTimestamp);
                  await dbSetFn('app_patch_skip_count', '0');
               } catch (dbErr) {
-                 console.warn('[PatchSync] Failed to persist patch timestamp to SQLite:', dbErr);
+                 console.warn('[PatchSync] Failed to persist pending patch timestamp to SQLite:', dbErr);
               }
            }
         }
@@ -377,7 +380,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
           let targetBaseline = APP_PATCH_TIMESTAMP;
           if (latestPatchTimestamp && parseDateTime(latestPatchTimestamp) > parseDateTime(APP_PATCH_TIMESTAMP)) {
              targetBaseline = latestPatchTimestamp;
-             console.log(` [VersionSync] Cloud patch (${latestPatchTimestamp}) is newer than compiled (${APP_PATCH_TIMESTAMP}). Adopting cloud patch baseline to prevent immediate patching.`);
+             console.log(` [VersionSync] Cloud patch (${latestPatchTimestamp}) is newer than compiled (${APP_PATCH_TIMESTAMP}). Adopting cloud patch baseline.`);
           } else {
              console.log(` [VersionSync] Using compiled baseline: ${APP_PATCH_TIMESTAMP}`);
           }
@@ -395,6 +398,71 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
           console.log(` [VersionSync] New version or fresh install detected. Waiting for cloud version and patch timestamp...`);
        }
     }
+
+    // --- Post-Update Attempt Verification: Verify installer actually succeeded ---
+    const checkPostUpdateVerification = async () => {
+        let pendingTs = localStorage.getItem('app_pending_patch_ts');
+        
+        let auditInfo: any = null;
+        if ((window as any).electronAPI?.getAppBuildAuditInfo) {
+            try {
+                auditInfo = await (window as any).electronAPI.getAppBuildAuditInfo();
+            } catch (_) {}
+        }
+        
+        // 1. If not found in localStorage, check SQLite root store
+        if (!pendingTs) {
+            try {
+                const dbGetFn = (window as any).electronAPI?.dbGetGlobal || (window as any).electronAPI?.dbGet;
+                if (dbGetFn) {
+                    const res = await dbGetFn('app_pending_patch_ts');
+                    if (res && res.success && res.data) {
+                        pendingTs = String(res.data);
+                    }
+                }
+            } catch (_) {}
+        }
+
+        // 2. Fallback: check pendingUpdate descriptor written by electron in %TEMP%
+        if (!pendingTs && auditInfo?.pendingUpdate?.targetTimestamp) {
+            pendingTs = auditInfo.pendingUpdate.targetTimestamp;
+        }
+
+        // 3. Additional Fallback: if installer succeeded with exit code 0, align with latestPatchTimestamp
+        if (!pendingTs && auditInfo?.updateStatus?.exitCode === 0 && latestPatchTimestamp && parseDateTime(latestPatchTimestamp) > parseDateTime(activePatchTs)) {
+            pendingTs = latestPatchTimestamp;
+        }
+
+        if (pendingTs) {
+            let isVerified = false;
+            // 1. Check if electron recorded a successful installer exit code 0
+            if (auditInfo?.updateStatus?.exitCode === 0) {
+                isVerified = true;
+            }
+            
+            // 2. Or if running binary baseline satisfies pendingTs
+            if (parseDateTime(APP_PATCH_TIMESTAMP) >= parseDateTime(pendingTs)) {
+                isVerified = true;
+            }
+
+            if (isVerified) {
+                console.log(`✅ [PostUpdateVerification] Update verified. Promoting active patch timestamp to: ${pendingTs}`);
+                localStorage.setItem('app_active_patch_ts', pendingTs);
+                setActivePatchTs(pendingTs);
+                localStorage.removeItem('app_pending_patch_ts');
+                const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+                if (dbSetFn) {
+                    dbSetFn('app_active_patch_ts', pendingTs).catch(() => {});
+                    dbSetFn('app_pending_patch_ts', null).catch(() => {});
+                }
+            } else if (auditInfo?.updateStatus && auditInfo.updateStatus.exitCode !== 0) {
+                console.warn(`⚠️ [PostUpdateVerification] Update failed with exit code ${auditInfo.updateStatus.exitCode} for target patch (${pendingTs}).`);
+                localStorage.removeItem('app_pending_patch_ts');
+                showAlert?.('warning', 'Update Incomplete', `The automatic update did not complete installation (Exit code: ${auditInfo.updateStatus.exitCode}). The installer is saved on your computer—you can run it manually from Settings -> License Management.`);
+            }
+        }
+    };
+    checkPostUpdateVerification();
   }, [latestPatchTimestamp, latestAppVersion, isBootSyncComplete]);
 
   // --- V03.01.04: HARD CLEANUP OF REDUNDANT UPDATE FLAGS ---
@@ -513,17 +581,17 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
 
     // Check if patch is newer AND if the 5-minute grace period has passed post-login
     if (latestTs > activeTs && (!isDismissed || patchSkipCount >= 3 || isForced)) {
-       if (!isPostLogin) {
+       if (!isPostLogin && !isForced) {
          // Pause patch updates on the pre-login screen
          setIsPatchNotice(false);
          setShowUpdateNotice(false);
-       } else if (now >= (actualStartTime + delayMs) || isForced) {
+       } else if (now >= (graceStartTime + delayMs) || isForced) {
          console.log(" [PatchSync] Grace period expired or patch update forced. Triggering update notice.");
          setIsPatchNotice(true);
          setIsPatchMandatory(patchSkipCount >= 3 || isForced);
          setShowUpdateNotice(true);
        } else {
-         const remainingSecs = Math.ceil(((actualStartTime + delayMs) - now) / 1000);
+         const remainingSecs = Math.ceil(((graceStartTime + delayMs) - now) / 1000);
          console.log(` [PatchSync] Patch detected but in 5-min cooldown. Waiting ${remainingSecs}s more for developer verification...`);
          setIsPatchNotice(false);
          setShowUpdateNotice(false);
@@ -536,6 +604,13 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
        }
     }
   }, [latestAppVersion, latestPatchTimestamp, activePatchTs, isSessionDismissed, patchSkipCount, versionSkipCount, updateDownloaded, now]);
+
+  const triggerUpdateModal = useCallback(() => {
+    sessionStorage.setItem('force_patch_update', 'true');
+    setIsPatchNotice(true);
+    setIsPatchMandatory(true);
+    setShowUpdateNotice(true);
+  }, []);
 
   useEffect(() => {
     // @ts-ignore
@@ -563,6 +638,7 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
     downloadProgress,
     isPatchNotice, isPatchMandatory, patchSkipCount, isSessionDismissed, versionSkipCount,
     deploymentStep,
-    handleUpdateNow, handleUpdateLater
+    handleUpdateNow, handleUpdateLater,
+    triggerUpdateModal
   };
 };

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { 
   Employee, StatutoryConfig, CompanyProfile, Attendance, 
-  LeaveLedger, AdvanceLedger, PayrollResult, ArrearBatch, FineRecord, OTRecord 
+  LeaveLedger, AdvanceLedger, PayrollResult, ArrearBatch, FineRecord, OTRecord, VPFRecord 
 } from '../types';
 
 interface SyncProps {
@@ -16,6 +16,7 @@ interface SyncProps {
   leavePolicy: any;
   arrearHistory: ArrearBatch[];
   otRecords: OTRecord[];
+  vpfRecords: VPFRecord[];
   logoUrl: string;
   designations: string[];
   divisions: string[];
@@ -32,7 +33,7 @@ interface SyncProps {
 export const useSync = (props: SyncProps) => {
   const {
     employees, config, companyProfile, attendances, leaveLedgers,
-    advanceLedgers, payrollHistory, fines, leavePolicy, arrearHistory, otRecords,
+    advanceLedgers, payrollHistory, fines, leavePolicy, arrearHistory, otRecords, vpfRecords,
     logoUrl, designations, divisions, branches, sites, isSetupComplete,
     safeSave, activeCompanyId, activeFinancialYear, isHydrating, isResetting
   } = props;
@@ -77,7 +78,8 @@ export const useSync = (props: SyncProps) => {
         const getCKey = (key: string) => {
           const transactionalKeys = [
             'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 
-            'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+            'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records',
+            'app_vpf_records'
           ];
           if (transactionalKeys.includes(key)) {
             return `${key}_${activeFinancialYear}_${activeCompanyId}`;
@@ -97,6 +99,7 @@ export const useSync = (props: SyncProps) => {
           { k: 'app_leave_policy', v: leavePolicy },
           { k: 'app_arrear_history', v: arrearHistory },
           { k: 'app_ot_records', v: otRecords },
+          { k: 'app_vpf_records', v: vpfRecords },
           { k: 'app_logo', v: logoUrl },
           { k: 'app_master_designations', v: designations },
           { k: 'app_master_divisions', v: divisions },
@@ -125,7 +128,7 @@ export const useSync = (props: SyncProps) => {
     return () => clearTimeout(handler);
   }, [
     employees, config, companyProfile, attendances, leaveLedgers, advanceLedgers,
-    payrollHistory, fines, leavePolicy, arrearHistory, otRecords, logoUrl,
+    payrollHistory, fines, leavePolicy, arrearHistory, otRecords, vpfRecords, logoUrl,
     designations, divisions, branches, sites, isSetupComplete, activeCompanyId,
     isHydrating, isResetting
   ]);
@@ -146,4 +149,5 @@ export const useSync = (props: SyncProps) => {
   useEffect(() => { if (isHydrating || isResetting || suspendSyncRef.current) return; safeSave('app_fines', fines); }, [fines, safeSave, isHydrating, isResetting]);
   useEffect(() => { if (isHydrating || isResetting || suspendSyncRef.current) return; safeSave('app_arrear_history', arrearHistory); }, [arrearHistory, safeSave, isHydrating, isResetting]);
   useEffect(() => { if (isHydrating || isResetting || suspendSyncRef.current) return; safeSave('app_ot_records', otRecords); }, [otRecords, safeSave, isHydrating, isResetting]);
+  useEffect(() => { if (isHydrating || isResetting || suspendSyncRef.current) return; safeSave('app_vpf_records', vpfRecords); }, [vpfRecords, safeSave, isHydrating, isResetting]);
 };

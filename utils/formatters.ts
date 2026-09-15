@@ -363,6 +363,7 @@ export const normalizeEmployeeDates = (emp: any): any => {
     doj: parseDateToYYYYMMDD(emp.doj),
     dol: emp.dol ? parseDateToYYYYMMDD(emp.dol) : undefined,
     epfMembershipDate: emp.epfMembershipDate ? parseDateToYYYYMMDD(emp.epfMembershipDate) : undefined,
+    isEPSEligible: emp.isPFExempt ? 'No' : (emp.isEPSEligible || 'Yes'),
   };
 };
 
@@ -387,11 +388,13 @@ export const didConfigCalculationFieldsChange = (c1: any, c2: any): boolean => {
 };
 
 /**
- * Checks if any payroll calculation-affecting fields of Employee have changed.
+ * Checks if any payroll calculation or statutory obligation-affecting fields of Employee have changed.
+ * Covers: Wage components, PF, EPS, VPF, Higher Pension, Deferred Pension, ESI, PT, LWF, and Statutory IDs.
  */
 export const didEmployeePayFieldsChange = (oldEmp: any, newEmp: any): boolean => {
   if (!oldEmp || !newEmp) return false;
 
+  // 1. Numeric wage components & rate configurations
   const numFields = [
     'basicPay', 'da', 'retainingAllowance', 'hra', 'conveyance', 'washing', 'attire',
     'specialAllowance1', 'specialAllowance2', 'specialAllowance3',
@@ -401,15 +404,18 @@ export const didEmployeePayFieldsChange = (oldEmp: any, newEmp: any): boolean =>
     if (Number(oldEmp[f] || 0) !== Number(newEmp[f] || 0)) return true;
   }
 
+  // 2. Boolean statutory applicability & exemption flags
   const boolFields = [
     'isPFExempt', 'isESIExempt', 'isPTExempt', 'isLWFExempt',
-    'isPFHigherWages', 'isEmployerPFHigher', 'isDeferredPension', 'epsMaturityConfigured'
+    'isPFHigherWages', 'isEmployerPFHigher', 'isDeferredPension', 'epsMaturityConfigured',
+    'jointDeclaration'
   ];
   for (const f of boolFields) {
     if (Boolean(oldEmp[f]) !== Boolean(newEmp[f])) return true;
   }
 
-  // Date fields - normalize to YYYY-MM-DD before comparing to avoid false diffs from format differences
+  // 3. Date fields affecting age (58/60 cutoff), proration, PT cycles, and statutory membership
+  // Normalize to YYYY-MM-DD before comparing to avoid false diffs from format differences
   const dateFields = ['dob', 'doj', 'dol', 'epfMembershipDate'];
   for (const f of dateFields) {
     const d1 = parseDateToYYYYMMDD(oldEmp[f]);
@@ -417,27 +423,55 @@ export const didEmployeePayFieldsChange = (oldEmp: any, newEmp: any): boolean =>
     if (d1 !== d2) return true;
   }
 
+  // 4. String statutory & pay configuration fields (case-insensitive comparison)
   const strFields = [
-    'isEPSEligible', 'leavingReason'
+    'isEPSEligible', 'deferredPensionOption', 'leavingReason',
+    'gender', 'branch', 'state', 'uanc', 'pfNumber', 'esiNumber', 'pan'
   ];
   for (const f of strFields) {
-    const s1 = String(oldEmp[f] || '').trim();
-    const s2 = String(newEmp[f] || '').trim();
+    const s1 = String(oldEmp[f] || '').trim().toLowerCase();
+    const s2 = String(newEmp[f] || '').trim().toLowerCase();
     if (s1 !== s2) return true;
   }
   
+  // 5. Higher Pension Sub-structure
   const oldHP = oldEmp.pfHigherPension || {};
   const newHP = newEmp.pfHigherPension || {};
   if (
     Boolean(oldHP.enabled) !== Boolean(newHP.enabled) ||
-    String(oldHP.contributedBefore2014 || '').trim() !== String(newHP.contributedBefore2014 || '').trim() ||
-    String(oldHP.employeeContribution || '').trim() !== String(newHP.employeeContribution || '').trim() ||
-    String(oldHP.employerContribution || '').trim() !== String(newHP.employerContribution || '').trim() ||
-    String(oldHP.isHigherPensionOpted || '').trim() !== String(newHP.isHigherPensionOpted || '').trim() ||
-    String(oldHP.dojImpact || '').trim() !== String(newHP.dojImpact || '').trim()
+    String(oldHP.contributedBefore2014 || '').trim().toLowerCase() !== String(newHP.contributedBefore2014 || '').trim().toLowerCase() ||
+    String(oldHP.employeeContribution || '').trim().toLowerCase() !== String(newHP.employeeContribution || '').trim().toLowerCase() ||
+    String(oldHP.employerContribution || '').trim().toLowerCase() !== String(newHP.employerContribution || '').trim().toLowerCase() ||
+    String(oldHP.isHigherPensionOpted || '').trim().toLowerCase() !== String(newHP.isHigherPensionOpted || '').trim().toLowerCase() ||
+    parseDateToYYYYMMDD(oldHP.dojImpact) !== parseDateToYYYYMMDD(newHP.dojImpact)
   ) {
     return true;
   }
   
   return false;
 };
+
+export const isVersionHigher = (latest: string, current: string): boolean => {
+  try {
+    const normalize = (v: string) => v.replace(/^[vV]/, '').split('.');
+    const l = normalize(latest).map(v => parseInt(v, 10) || 0);
+    const c = normalize(current).map(v => parseInt(v, 10) || 0);
+    for (let i = 0; i < Math.max(l.length, c.length); i++) {
+      const v1 = l[i] || 0;
+      const v2 = c[i] || 0;
+      if (v1 > v2) return true;
+      if (v1 < v2) return false;
+    }
+    return false;
+  } catch (_) { return false; }
+};
+
+export const formatBytes = (bytes: number, decimals = 1): string => {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+};
+

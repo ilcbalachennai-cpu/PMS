@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Mail, FileBarChart, PieChart, Info, Plus, FileText, Settings2, Trash2, Calendar, Layers, CheckCircle2, Lock, ChevronUp, ChevronDown, Play, Loader2 } from 'lucide-react';
+import { Mail, FileBarChart, PieChart, Info, Plus, FileText, Settings2, Trash2, Calendar, Layers, CheckCircle2, Lock, ChevronUp, ChevronDown, Play, Loader2, ShieldAlert } from 'lucide-react';
 import { PayrollResult, Employee, CompanyProfile } from '../../types';
 import { generateDynamicReportPDF, openSavedReport } from '../../services/reportService';
 import { sendPayslipEmail } from '../../services/mailService';
+import PayrollAuditTrail from './PayrollAuditTrail';
 
 interface ColumnDef {
   id: string;
@@ -111,6 +112,10 @@ interface MISDashboardProps {
   showAlert: any;
   config?: any;
   activeFinancialYear?: string;
+  onNavigate?: (view: any) => void;
+  globalMonth?: string;
+  globalYear?: number;
+  initialTab?: 'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT' | 'AUDIT_TRAIL';
 }
 
 const MISDashboard: React.FC<MISDashboardProps> = ({ 
@@ -118,12 +123,29 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
   employees, 
   companyProfile, 
   showAlert,
-  activeFinancialYear 
+  activeFinancialYear,
+  config,
+  onNavigate,
+  globalMonth,
+  globalYear,
+  initialTab
 }) => {
-  const [activeTab, setActiveTab] = useState<'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT'>('DYNAMIC_REPORT');
+  const [activeTab, setActiveTab] = useState<'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT' | 'AUDIT_TRAIL'>(() => initialTab || 'DYNAMIC_REPORT');
+
+  React.useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
   
-  const [reportYear, setReportYear] = useState<number>(new Date().getFullYear());
-  const [reportMonth, setReportMonth] = useState<string>('January');
+  const [reportYear, setReportYear] = useState<number>(() => globalYear || new Date().getFullYear());
+  const [reportMonth, setReportMonth] = useState<string>(() => globalMonth || 'August');
+
+  // Keep report period in sync with global application month & year
+  React.useEffect(() => {
+    if (globalMonth) setReportMonth(globalMonth);
+    if (globalYear) setReportYear(globalYear);
+  }, [globalMonth, globalYear]);
   
   const [columns, setColumns] = useState<ColumnDef[]>([]);
   const [showPresetSuccess, setShowPresetSuccess] = useState(false);
@@ -960,7 +982,7 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
       </div>
       
       <div className="bg-[#1e293b] border border-slate-700/50 shadow-2xl rounded-2xl w-full p-6 flex-1 flex flex-col">
-        <div className="flex bg-[#0f172a] p-1.5 rounded-xl mb-6 max-w-2xl border border-slate-800 shadow-inner">
+        <div className="flex bg-[#0f172a] p-1.5 rounded-xl mb-6 max-w-4xl border border-slate-800 shadow-inner">
           <button 
             onClick={() => setActiveTab('MAILING')}
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${activeTab === 'MAILING' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
@@ -978,6 +1000,12 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${activeTab === 'MIS_REPORT' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
           >
             <PieChart size={16} /> Dynamic Report
+          </button>
+          <button 
+            onClick={() => setActiveTab('AUDIT_TRAIL')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${activeTab === 'AUDIT_TRAIL' ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-900/50 font-black' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+          >
+            <ShieldAlert size={16} /> Audit Trail
           </button>
         </div>
         
@@ -2017,6 +2045,18 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
                         </div>
                     )}
                 </div>
+            )}
+            {activeTab === 'AUDIT_TRAIL' && (
+              <PayrollAuditTrail
+                employees={employees}
+                payrollHistory={payrollHistory}
+                companyProfile={companyProfile}
+                config={config}
+                showAlert={showAlert}
+                globalMonth={reportMonth}
+                globalYear={reportYear}
+                onNavigate={onNavigate}
+              />
             )}
         </div>
       </div>

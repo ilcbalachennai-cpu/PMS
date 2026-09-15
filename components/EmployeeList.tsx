@@ -7,6 +7,7 @@ import { didEmployeePayFieldsChange } from '../utils/formatters';
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
 import { generateEmployeeXLSX, parseEmployeeXLSX, generateImportFailureReport, generateEmployeeUpdateTemplateXLSX, parseEmployeeUpdateXLSX } from '../services/excelService';
 import { openSavedReport } from '../services/reportService';
+import { calculateESICodeWage } from '../services/payrollEngine';
 
 // Modular Components
 import EmployeeToolbar from './Employee/EmployeeToolbar';
@@ -389,11 +390,23 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         }
 
         if (!newEmpForm.isPFExempt && !newEmpForm.isEPSEligible) {
-            showAlert('danger', 'Validation Error', 'Please select Yes/No for 7.E. Employee Eligible for EPS. This is a mandatory field.');
+            showAlert('danger', 'Validation Error', 'Please select Yes/No for 7.D. Employee Eligible for EPS. This is a mandatory field.');
             return;
         }
 
         const data = { ...newEmpForm } as Employee;
+        if (!editingId) {
+            const esiWage = calculateESICodeWage(data);
+            if (esiWage > 21000) {
+                data.isESIExempt = true;
+            }
+        }
+        if (data.isPFExempt) {
+            data.isEPSEligible = 'No';
+            if (data.pfHigherPension) {
+                data.pfHigherPension.enabled = false;
+            }
+        }
         if (data.dob) {
             const dob = new Date(data.dob);
             const monthsArr = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -462,12 +475,13 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                     <p className="text-white">{data.id} {data.name} Saved Successfully.</p>
                     {milestoneMessage && <p className="text-red-400 font-bold">{milestoneMessage}</p>}
                     <p className="text-amber-400 font-bold mt-1">
-                        Changes would affect Pay Sheet. Click OK to go to Process Pay &gt; Run Payroll and initiate Recalculate Pay. Click Stay to continue to edit Employees.
+                        Changes affect Pay &amp; Statutory (PF/ESI/PT/LWF) calculations. Click OK to go to Process Pay &gt; Run Payroll and initiate Recalculate Pay. Click Stay to continue to edit Employees.
                     </p>
                 </div>
             ), () => {
                 // Stay here
             }, () => {
+                sessionStorage.setItem('pay_process_target_tab', 'payroll');
                 onNavigate?.('pay_process');
             }, 'Stay', 'OK');
         } else {
@@ -566,12 +580,13 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                             <div className="space-y-2">
                                 <p className="text-white">{results.success} Employees updated successfully.</p>
                                 <p className="text-amber-400 font-bold mt-1">
-                                    Changes would affect Pay Sheet. Click OK to go to Process Pay &gt; Run Payroll and initiate Recalculate Pay. Click Stay to continue to edit Employees.
+                                    Changes affect Pay &amp; Statutory (PF/ESI/PT/LWF) calculations. Click OK to go to Process Pay &gt; Run Payroll and initiate Recalculate Pay. Click Stay to continue to edit Employees.
                                 </p>
                             </div>
                         ), () => {
                             // Stay here
                         }, () => {
+                            sessionStorage.setItem('pay_process_target_tab', 'payroll');
                             onNavigate?.('pay_process');
                         }, 'Stay', 'OK');
                     } else {

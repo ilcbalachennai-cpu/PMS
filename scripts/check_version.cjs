@@ -36,5 +36,19 @@ if (!win10Script.includes(expectedArtifactFragment) || !win7Script.includes(expe
     process.exit(1);
 }
 
-console.log('✅ Version consistency audit passed.');
+const patchMatch = licenseService.match(/export const APP_PATCH_TIMESTAMP = "(.*)";/);
+if (!patchMatch) {
+    console.error('❌ Error: Could not find APP_PATCH_TIMESTAMP in licenseService.ts');
+    process.exit(1);
+}
+const patchTimestamp = patchMatch[1];
+const patchFormatRegex = /^\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/;
+if (!patchFormatRegex.test(patchTimestamp)) {
+    console.error(`❌ Error: APP_PATCH_TIMESTAMP "${patchTimestamp}" does not match required format dd-MM-yyyy HH:mm:ss`);
+    process.exit(1);
+}
+
+console.log('✅ Version consistency audit passed:');
+console.log(`   Version:         ${pkgVersion}`);
+console.log(`   Patch Baseline:  ${patchTimestamp}`);
 process.exit(0);

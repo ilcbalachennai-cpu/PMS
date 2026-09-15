@@ -94,7 +94,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listSilos: () => ipcRenderer.invoke('list-silos'),
     deleteSilo: (companyId: string) => ipcRenderer.invoke('delete-silo', companyId),
     wipeCompanyData: (companyId: string) => ipcRenderer.invoke('wipe-company-data', companyId),
-    generateDiagnostics: (uiState: any) => ipcRenderer.invoke('generate-diagnostics', uiState)
+    generateDiagnostics: (uiState: any) => ipcRenderer.invoke('generate-diagnostics', uiState),
+    getAppBuildAuditInfo: () => ipcRenderer.invoke('get-app-build-audit-info'),
+    launchInstallerManually: () => ipcRenderer.invoke('launch-installer-manually'),
+    openUpdateLog: () => ipcRenderer.invoke('open-update-log')
 });
 
 console.log("EB: Electron Bridge (electronAPI) Initialized");

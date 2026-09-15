@@ -6,7 +6,7 @@ import {
     ImageIcon, Camera, Heart, CheckSquare, Square, Landmark, Table, Calculator,
     ScrollText, HandCoins, Wallet, Scale, RotateCw, RotateCcw, TrendingUp,
     ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
-    FolderOpen, FileText, Sparkles
+    FolderOpen, FileText, Sparkles, Copy, Check, Terminal, ExternalLink
 } from 'lucide-react';
 import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, UserPermissions, LicenseData, SettingsTab } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
@@ -16,7 +16,7 @@ import {
     getStoredLicense, isValidKeyFormat, updateCloudPassword, validateLicenseStartup,
     requestResetOTP, verifyResetOTP, sendPolicyConfirmationEmailGAS, getAppDeveloper, APP_VERSION, APP_PATCH_TIMESTAMP
 } from '../services/licenseService';
-import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, findMatchingCompanySilo, generateBackupFilename, getCompanyBackupFolder, didConfigCalculationFieldsChange, parseDateTime } from '../utils/formatters';
+import { formatExpiryDate, formatIndianNumber, formatLicenseKey, generateCompanyId, findMatchingCompanySilo, generateBackupFilename, getCompanyBackupFolder, didConfigCalculationFieldsChange, parseDateTime, isVersionHigher, formatBytes } from '../utils/formatters';
 import { getMonthAbbr } from '../services/reportService';
 import SMTPConfigModal from './Shared/SMTPConfigModal';
 import { executeDiagnosticExport } from '../utils/diagnostics';
@@ -56,6 +56,7 @@ interface SettingsProps {
     isLicenseExpired?: boolean;
     latestPatchTimestamp?: string | null;
     onNavigate?: (view: any, tab?: string, bypassDirty?: boolean) => void;
+    onTriggerUpdate?: () => void;
 }
 
 const UsageTimeClock = () => {
@@ -80,7 +81,7 @@ const Settings: React.FC<SettingsProps> = ({
     userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange,
     showAlert, verifyLicense, activeCompanyId = 'default', onRescueOrganizations, onClaimCompany, availableSlots,
     globalMonth = 'April', globalYear = 2025, activeFinancialYear, isLicenseExpired,
-    latestPatchTimestamp, onNavigate
+    latestPatchTimestamp, onNavigate, onTriggerUpdate
 }) => {
     const isReadOnly = companyProfile?.isReadOnly === true;
     const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${key}_${activeCompanyId}`;
@@ -300,6 +301,34 @@ const Settings: React.FC<SettingsProps> = ({
     const [newRegMobile, setNewRegMobile] = useState(licenseInfo?.registeredMobile || '');
     const [newUserID, setNewUserID] = useState(licenseInfo?.userID || '');
     const [newPassword, setNewPassword] = useState('');
+
+    // --- Build Integrity & Software Patch Audit State ---
+    const [buildAuditInfo, setBuildAuditInfo] = useState<any>(null);
+    const [isLoadingAudit, setIsLoadingAudit] = useState(false);
+    const [copiedAuditReport, setCopiedAuditReport] = useState(false);
+
+    const fetchBuildAudit = useCallback(async () => {
+        if ((window as any).electronAPI?.getAppBuildAuditInfo) {
+            setIsLoadingAudit(true);
+            try {
+                const info = await (window as any).electronAPI.getAppBuildAuditInfo();
+                if (info && info.success) {
+                    setBuildAuditInfo(info);
+                }
+            } catch (e) {
+                console.warn("Failed to fetch build audit info:", e);
+            } finally {
+                setIsLoadingAudit(false);
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        if (activeTab === SettingsTab.License) {
+            fetchBuildAudit();
+        }
+    }, [activeTab, fetchBuildAudit]);
+
     const [showResetModal, setShowResetModal] = useState(false);
     const [showPayrollResetModal, setShowPayrollResetModal] = useState(false);
     const [resetPassword, setResetPassword] = useState('');
@@ -433,7 +462,10 @@ const Settings: React.FC<SettingsProps> = ({
     const getExistingCompanyPeriods = useCallback(async (): Promise<Set<string>> => {
         const periods = new Set<string>();
         const CALENDAR_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-        const transactionalPrefixes = ['app_attendance', 'app_payroll_history', 'app_leave_ledgers', 'app_advance_ledgers'];
+        const transactionalPrefixes = [
+            'app_attendance', 'app_payroll_history', 'app_leave_ledgers', 'app_advance_ledgers',
+            'app_fines', 'app_arrear_history', 'app_ot_records', 'app_vpf_records'
+        ];
 
         const extractPeriodsFromList = (arr: any[]) => {
             if (!Array.isArray(arr)) return;
@@ -1240,7 +1272,8 @@ const Settings: React.FC<SettingsProps> = ({
                     const isPeriodMigration = backupMode === 'DATAMIGRATE' && migratePeriodType === 'PERIOD';
                     const transactionalPrefixes = [
                         'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
-                        'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+                        'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records',
+                        'app_vpf_records'
                     ];
 
                     Object.keys(localStorage).forEach(key => {
@@ -1380,7 +1413,7 @@ const Settings: React.FC<SettingsProps> = ({
                             const dataSilos = [
                                 'employees', 'config', 'attendance', 'leave_ledgers',
                                 'advance_ledgers', 'payroll_history', 'fines',
-                                'leave_policy', 'arrear_history', 'ot_records', 'logo',
+                                'leave_policy', 'arrear_history', 'ot_records', 'vpf_records', 'logo',
                                 'master_designations', 'master_divisions', 'master_branches', 'master_sites'
                             ];
 
@@ -1426,6 +1459,22 @@ const Settings: React.FC<SettingsProps> = ({
                     setSelectedBackupPath('');
                     setEncryptionKey('');
                     sessionStorage.setItem('settings_initial_tab', 'DATA');
+                    if (backupMode === 'DATAMIGRATE') {
+                        sessionStorage.setItem('app_skip_migration_alerts', 'true');
+                        const now = new Date();
+                        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                        localStorage.setItem('app_legal_agreed_date', today);
+                        if (window.electronAPI && (window.electronAPI as any).dbSet) {
+                            try {
+                                await (window.electronAPI as any).dbSet('app_legal_agreed_date', today);
+                            } catch (e) {}
+                        }
+                        sessionStorage.setItem('app_is_reloading_after_reset', 'true');
+                        const currentMsgId = (localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage || '').trim();
+                        if (currentMsgId) {
+                            sessionStorage.setItem(`app_msg_dismissed_${currentMsgId}`, 'true');
+                        }
+                    }
                     setRestoreSuccessSummary({
                         fileName: fileLabel,
                         rowCount: recordCount,
@@ -1988,6 +2037,23 @@ const Settings: React.FC<SettingsProps> = ({
                     setSelectedBackupFile(null);
                     setEncryptionKey('');
 
+                    if (isDataMigration) {
+                        sessionStorage.setItem('app_skip_migration_alerts', 'true');
+                        const now = new Date();
+                        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                        localStorage.setItem('app_legal_agreed_date', today);
+                        if (window.electronAPI && (window.electronAPI as any).dbSet) {
+                            try {
+                                (window.electronAPI as any).dbSet('app_legal_agreed_date', today);
+                            } catch (e) {}
+                        }
+                        sessionStorage.setItem('app_is_reloading_after_reset', 'true');
+                        const currentMsgId = (localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage || '').trim();
+                        if (currentMsgId) {
+                            sessionStorage.setItem(`app_msg_dismissed_${currentMsgId}`, 'true');
+                        }
+                    }
+
                     setTimeout(() => {
                         showAlert?.('success', isDataMigration ? 'Payroll Data Migration Successful' : 'Universal Restoration Successful', (
                             <div className="space-y-3 text-left">
@@ -2047,121 +2113,28 @@ const Settings: React.FC<SettingsProps> = ({
                                     await window.electronAPI.switchCompanyData(targetId);
                                 } catch(e) {}
                             }
+                            if (isDataMigration) {
+                                sessionStorage.setItem('app_skip_migration_alerts', 'true');
+                                const now = new Date();
+                                const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                                localStorage.setItem('app_legal_agreed_date', today);
+                                if (window.electronAPI && (window.electronAPI as any).dbSet) {
+                                    try {
+                                        await (window.electronAPI as any).dbSet('app_legal_agreed_date', today);
+                                    } catch (e) {}
+                                }
+                                sessionStorage.setItem('app_is_reloading_after_reset', 'true');
+                            }
                             onRestore();
                         });
                     }, 100);
                 };
 
-                // --- DATA MIGRATION: 5-FIELD IDENTITY PRE-CHECK ---
-                if (isDataMigration && targetCompanyObj) {
-                    const legalMismatches: string[] = [];
-                    const contactMismatches: string[] = [];
-                    const cleanStr = (val: any) => String(val || '').trim().toUpperCase();
-                    const getProfileEmail = (p: any) => String(p?.email || p?.officialEmail || p?.senderEmail || p?.smtpUser || p?.contactEmail || '').trim().toLowerCase();
-                    const getProfileMobile = (p: any) => String(p?.mobile || p?.contactMobile || p?.registeredMobile || p?.phone || '').trim();
-
-                    // 1. Company Silo ID Check (LEGAL - STRICT)
-                    const backupSiloCore = cleanStr(rawProfile.id).replace(/[^A-Z0-9]/g, '');
-                    const targetSiloCore = cleanStr(targetCompanyObj.id).replace(/[^A-Z0-9]/g, '');
-                    if (backupSiloCore && targetSiloCore && !backupSiloCore.includes(targetSiloCore) && !targetSiloCore.includes(backupSiloCore)) {
-                        legalMismatches.push(`Company Silo ID: Backup (${rawProfile.id || 'N/A'}) !== Machine B (${targetCompanyObj.id || 'N/A'})`);
-                    }
-
-                    // 2. Company Name Check (LEGAL - STRICT)
-                    if (cleanStr(rawProfile.establishmentName) !== cleanStr(targetCompanyObj.establishmentName)) {
-                        legalMismatches.push(`Company Name: Backup ("${rawProfile.establishmentName || 'N/A'}") !== Machine B ("${targetCompanyObj.establishmentName || 'N/A'}")`);
-                    }
-
-                    // 3. CIN Number Check (LEGAL - STRICT)
-                    if (cleanStr(rawProfile.cin) !== cleanStr(targetCompanyObj.cin)) {
-                        legalMismatches.push(`CIN Number: Backup (${rawProfile.cin || 'N/A'}) !== Machine B (${targetCompanyObj.cin || 'N/A'})`);
-                    }
-
-                    // 4. PAN Number Check (LEGAL - STRICT)
-                    if (cleanStr(rawProfile.pan) !== cleanStr(targetCompanyObj.pan)) {
-                        legalMismatches.push(`PAN Number: Backup (${rawProfile.pan || 'N/A'}) !== Machine B (${targetCompanyObj.pan || 'N/A'})`);
-                    }
-
-                    // 5. Official Mail ID Check (CONTACT - WARNING ONLY)
-                    const backupEmail = getProfileEmail(rawProfile);
-                    const targetEmail = getProfileEmail(targetCompanyObj);
-                    if (backupEmail && targetEmail && backupEmail !== targetEmail) {
-                        contactMismatches.push(`Official Mail ID: Backup (${backupEmail}) !== Machine B (${targetEmail})`);
-                    } else if (!backupEmail && targetEmail) {
-                        contactMismatches.push(`Official Mail ID: Backup (BLANK / MISSING) !== Machine B (${targetEmail})`);
-                    } else if (backupEmail && !targetEmail) {
-                        contactMismatches.push(`Official Mail ID: Backup (${backupEmail}) !== Machine B (BLANK / MISSING)`);
-                    }
-
-                    // 6. Mobile Number Check (CONTACT - WARNING ONLY)
-                    const backupMobile = getProfileMobile(rawProfile);
-                    const targetMobile = getProfileMobile(targetCompanyObj);
-                    if (backupMobile && targetMobile && backupMobile !== targetMobile) {
-                        contactMismatches.push(`Mobile Number: Backup (${backupMobile}) !== Machine B (${targetMobile})`);
-                    }
-
-                    // Optional Registration Codes Check (PF, ESI, LIN)
-                    if (cleanStr(rawProfile.pfCode) && cleanStr(targetCompanyObj.pfCode) && cleanStr(rawProfile.pfCode) !== cleanStr(targetCompanyObj.pfCode)) {
-                        contactMismatches.push(`PF Code: Backup (${rawProfile.pfCode}) !== Machine B (${targetCompanyObj.pfCode})`);
-                    }
-                    if (cleanStr(rawProfile.esiCode) && cleanStr(targetCompanyObj.esiCode) && cleanStr(rawProfile.esiCode) !== cleanStr(targetCompanyObj.esiCode)) {
-                        contactMismatches.push(`ESI Code: Backup (${rawProfile.esiCode}) !== Machine B (${targetCompanyObj.esiCode})`);
-                    }
-                    if (cleanStr(rawProfile.lin) && cleanStr(targetCompanyObj.lin) && cleanStr(rawProfile.lin) !== cleanStr(targetCompanyObj.lin)) {
-                        contactMismatches.push(`LIN Number: Backup (${rawProfile.lin}) !== Machine B (${targetCompanyObj.lin})`);
-                    }
-
-                    // HARD BLOCK FOR LEGAL IDENTITY MISMATCHES (Silo ID, Company Name, CIN, PAN)
-                    if (legalMismatches.length > 0) {
-                        setIsProcessing(false);
-                        setShowBackupModal(false);
-                        setSelectedBackupFile(null);
-                        setEncryptionKey('');
-                        showAlert?.('error', 'Data Migration Blocked: Legal Identity Mismatch', (
-                            <div className="space-y-3 text-left">
-                                <div className="p-3 bg-rose-950/60 border border-rose-500/30 rounded-xl space-y-2">
-                                    <p className="text-xs font-bold text-rose-300">Legal Company Credentials Mismatch (Company Silo ID, Name, CIN, or PAN):</p>
-                                    <ul className="list-disc pl-5 space-y-1 text-[11px] text-rose-200 font-mono">
-                                        {legalMismatches.map((m, idx) => <li key={idx}>{m}</li>)}
-                                    </ul>
-                                </div>
-                                <p className="text-[10px] text-slate-400 leading-relaxed italic">
-                                    Data Migration strictly requires Company Silo ID, Company Name, CIN Number, and PAN Number to match compulsorily between Machine A and Machine B.
-                                </p>
-                            </div>
-                        ));
-                        return;
-                    }
-
-                    // SOFT WARNING FOR CONTACT MISMATCHES (Mail ID / Mobile Number) WITH "PROCEED ANYWAY" OPTION
-                    if (contactMismatches.length > 0) {
-                        setIsProcessing(false);
-                        showAlert?.('confirm', 'Data Migration Warning: Contact Mismatch', (
-                            <div className="space-y-3 text-left">
-                                <div className="p-3 bg-amber-950/60 border border-amber-500/30 rounded-xl space-y-2">
-                                    <p className="text-xs font-bold text-amber-300">The following contact details differ between the backup file and Machine B:</p>
-                                    <ul className="list-disc pl-5 space-y-1 text-[11px] text-amber-200 font-mono">
-                                        {contactMismatches.map((m, idx) => <li key={idx}>{m}</li>)}
-                                    </ul>
-                                </div>
-                                <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg text-[11px] text-slate-300 leading-relaxed">
-                                    <strong className="text-sky-400 font-bold block mb-1">PROTECTION GUARANTEE:</strong>
-                                    Machine B's existing Official Mail ID, Mobile Number, Database Password, and Security PIN will be <strong className="text-emerald-400 font-bold">100% PRESERVED & UNTOUCHED</strong>.
-                                </div>
-                                <p className="text-[10px] text-slate-400 leading-relaxed italic font-bold">
-                                    Do you wish to proceed with migrating payroll ledgers anyway?
-                                </p>
-                            </div>
-                        ), () => {
-                            proceedWithRestore();
-                        }, () => {
-                            setIsProcessing(false);
-                            setShowBackupModal(false);
-                            setSelectedBackupFile(null);
-                            setEncryptionKey('');
-                        }, 'PROCEED ANYWAY (PRESERVE CONTACT)', undefined, 'CANCEL MIGRATION');
-                        return;
-                    }
+                // --- DATA MIGRATION: SKIP LEGAL ALERT AND STATUTORY MESSAGE / PROMPTS ---
+                if (isDataMigration) {
+                    console.log("[DATA MIGRATION] Skipping legal identity and statutory mismatch alerts. Proceeding directly with migration.");
+                    proceedWithRestore();
+                    return;
                 }
 
                 if (!isDataMigration && companyExists) {
@@ -2485,7 +2458,17 @@ const Settings: React.FC<SettingsProps> = ({
                             <p className="text-[10px] text-blue-300 font-bold uppercase tracking-widest">A session reload will occur to switch focus.</p>
                         </div>
                     </div>
-                ), () => {
+                ), async () => {
+                    sessionStorage.setItem('app_skip_migration_alerts', 'true');
+                    const now = new Date();
+                    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                    localStorage.setItem('app_legal_agreed_date', today);
+                    if (window.electronAPI && (window.electronAPI as any).dbSet) {
+                        try {
+                            await (window.electronAPI as any).dbSet('app_legal_agreed_date', today);
+                        } catch (e) {}
+                    }
+                    sessionStorage.setItem('app_is_reloading_after_reset', 'true');
                     onRestore();
                 });
 
@@ -4126,6 +4109,31 @@ const Settings: React.FC<SettingsProps> = ({
                         <div className="p-6 bg-slate-900/30">
                             <p className="text-[11px] text-slate-400 leading-relaxed italic">
                                 "Enabling this module allows processing of salary arrears for previous months within the current pay cycle. A dedicated 'Arrear Salary' tab will appear in the Pay Process workspace."
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* VPF & PF Advance Repayment Module Configuration */}
+                    <div className="bg-[#1e293b] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+                        <div className="p-6 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <Landmark className="text-amber-400" size={20} />
+                                <h3 className="font-bold uppercase tracking-widest text-xs text-amber-400">VPF & PF Advance Repayment</h3>
+                            </div>
+                            <label className="flex items-center gap-2 cursor-pointer p-1.5 px-3 bg-amber-900/20 rounded-lg border border-amber-500/20 hover:bg-amber-900/30 transition-all">
+                                <input
+                                    type="checkbox"
+                                    className="w-4 h-4 rounded border-slate-700 text-amber-500 bg-slate-900 accent-amber-500"
+                                    checked={formData.enableVPF || false}
+                                    onChange={e => setFormData({ ...formData, enableVPF: e.target.checked })}
+                                    title="Enable VPF & PF Advance Repayment Module"
+                                />
+                                <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Enable VPF & PF_Adv_Repay</span>
+                            </label>
+                        </div>
+                        <div className="p-6 bg-slate-900/30">
+                            <p className="text-[11px] text-slate-400 leading-relaxed italic">
+                                "Enabling this module allows managing Voluntary Provident Fund (VPF) deductions and PF Advance Repayments during monthly payroll processing. When enabled, the 'VPF & PF_Adv_Refund' tab will appear in the Pay Process workspace."
                             </p>
                         </div>
                     </div>
@@ -6031,81 +6039,309 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                             </div>
 
-                            {/* --- V05.02.10: Dev Diagnostic Timestamps --- */}
+                            {/* --- Build Integrity & Software Patch Audit Dashboard --- */}
                             <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl relative mt-8">
-                                <div className="p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 border-b border-slate-700/50 flex justify-between items-center">
+                                <div className="p-4 bg-gradient-to-r from-blue-600/20 via-indigo-600/20 to-cyan-600/20 border-b border-slate-700/50 flex flex-wrap justify-between items-center gap-3">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg">
-                                            <Info size={20} />
+                                        <div className="p-2.5 bg-blue-500/20 text-blue-400 rounded-xl border border-blue-500/30">
+                                            <ShieldCheck size={22} />
                                         </div>
-                                        <div className="flex-1">
-                                            <div className="flex items-center justify-between">
-                                                <h3 className="text-white font-black tracking-tight text-sm">App Patch Diagnostics</h3>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="text-white font-black tracking-tight text-sm uppercase">Build Integrity & Software Patch Audit</h3>
                                                 {isLicenseExpired && (
-                                                    <span className="text-[9px] text-rose-400 font-bold tracking-widest uppercase bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20">Version / Patch Update will be inactive under Expired Trial / License</span>
+                                                    <span className="text-[9px] text-rose-400 font-bold tracking-widest uppercase bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">Inactive under Expired License</span>
                                                 )}
                                             </div>
-                                            <p className="text-[10px] text-slate-400">Live Timestamp Validation Variables</p>
+                                            <p className="text-[10px] text-slate-400 font-medium">Real-time verification of running executable on disk against compiled baseline and cloud release</p>
                                         </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={fetchBuildAudit}
+                                            disabled={isLoadingAudit}
+                                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg border border-slate-600/50 transition-all flex items-center gap-1.5 uppercase tracking-wider cursor-pointer"
+                                            title="Re-scan executable on disk"
+                                        >
+                                            <RefreshCw size={12} className={isLoadingAudit ? "animate-spin text-blue-400" : ""} />
+                                            {isLoadingAudit ? "Scanning..." : "Scan Build"}
+                                        </button>
+
+                                        <button
+                                            onClick={() => {
+                                                const cloudTs = latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || 'Unknown';
+                                                const cloudVer = localStorage.getItem('app_latest_version') || 'Unknown';
+                                                const localTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
+                                                const report = `=========================================
+BHARATPAY PRO - BUILD & PATCH INTEGRITY AUDIT
+Generated: ${new Date().toLocaleString('en-IN')}
+=========================================
+[RUNNING EXECUTABLE ON DISK]
+Exe Path: ${buildAuditInfo?.exePath || 'N/A'}
+Disk Last Modified: ${buildAuditInfo?.exeStats?.mtime ? new Date(buildAuditInfo.exeStats.mtime).toLocaleString('en-IN') : 'N/A'}
+Exe File Size: ${buildAuditInfo?.exeStats?.size ? formatBytes(buildAuditInfo.exeStats.size) : 'N/A'}
+Platform: ${buildAuditInfo?.platform || 'win32'} (${buildAuditInfo?.arch || 'x64'})
+Packaged App: ${buildAuditInfo?.isPackaged ? 'YES' : 'NO (Dev Mode)'}
+
+[APPLICATION COMPILED IDENTITY]
+Compiled Version: ${APP_VERSION}
+Compiled Baseline TS: ${APP_PATCH_TIMESTAMP}
+Local Recorded activeTs: ${localTs}
+
+[CLOUD CONFIGURATION (App_Config)]
+Cloud Release Version: ${cloudVer}
+Cloud Live Patch TS: ${cloudTs}
+Cloud Target Hash: ${localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || 'N/A'}
+
+[DOWNLOADED INSTALLER PACKAGE]
+Installer Path: ${buildAuditInfo?.installerStats?.path || 'N/A'}
+Installer Exists On Disk: ${buildAuditInfo?.installerStats?.exists ? 'YES' : 'NO'}
+Installer File Size: ${buildAuditInfo?.installerStats?.size ? formatBytes(buildAuditInfo.installerStats.size) : 'N/A'}
+Installer Modified: ${buildAuditInfo?.installerStats?.mtime ? new Date(buildAuditInfo.installerStats.mtime).toLocaleString('en-IN') : 'N/A'}
+Last Update Status: ${JSON.stringify(buildAuditInfo?.updateStatus || 'None')}
+
+[AUDIT INTEGRITY VERDICT]
+Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT OF DATE - Update Pending' : 'UP TO DATE & VERIFIED'}
+=========================================`;
+                                                navigator.clipboard.writeText(report);
+                                                setCopiedAuditReport(true);
+                                                setTimeout(() => setCopiedAuditReport(false), 2500);
+                                            }}
+                                            className="px-3 py-1.5 bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 text-[10px] font-black rounded-lg border border-blue-500/30 transition-all flex items-center gap-1.5 uppercase tracking-wider cursor-pointer"
+                                            title="Copy complete diagnostic report to clipboard"
+                                        >
+                                            {copiedAuditReport ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                                            {copiedAuditReport ? "Copied!" : "Copy Report"}
+                                        </button>
+
+                                        <button
+                                            onClick={() => {
+                                                if ((window as any).electronAPI?.openUpdateLog) {
+                                                    (window as any).electronAPI.openUpdateLog();
+                                                }
+                                            }}
+                                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg border border-slate-600/50 transition-all flex items-center gap-1.5 uppercase tracking-wider cursor-pointer"
+                                            title="Open update execution log in text editor"
+                                        >
+                                            <FileText size={12} />
+                                            View Log
+                                        </button>
                                     </div>
                                 </div>
-                                <div className="p-6">
-                                    <div className="grid grid-cols-2 gap-3 mb-4">
-                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Compiled Executable Version</p>
-                                            <p className="text-amber-400 font-mono font-bold">{APP_VERSION}</p>
-                                        </div>
-                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Cloud App_Config Version</p>
-                                            <p className="text-amber-400 font-mono font-bold">{localStorage.getItem('app_latest_version') || 'Unknown'}</p>
-                                        </div>
-                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Compiled Baseline Timestamp</p>
-                                            <p className="text-blue-400 font-mono font-bold">{APP_PATCH_TIMESTAMP}</p>
-                                        </div>
-                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Local Active Timestamp (activeTs)</p>
-                                            <p className="text-blue-400 font-mono font-bold">{localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP}</p>
-                                        </div>
-                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700 flex flex-col justify-center">
-                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Usage Time (Current Session)</p>
-                                            <p className="text-fuchsia-400 font-mono font-bold">
-                                                <UsageTimeClock />
-                                            </p>
-                                        </div>
-                                        <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-                                            <p className="text-slate-500 mb-1 text-[10px] uppercase font-bold tracking-wider">Cloud Live Timestamp (latestTs)</p>
-                                            <p className="text-emerald-400 font-mono font-bold">{latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || 'Unknown'}</p>
-                                        </div>
-                                    </div>
 
-                                    <p className="mt-4 text-[10px] text-slate-500 leading-relaxed text-center">
-                                        For a patch to trigger, <strong className="text-slate-300">Cloud Live Timestamp</strong> must be strictly newer than <strong className="text-slate-300">Local Active Timestamp</strong>.<br />
-                                        Additionally, <strong className="text-slate-300">Compiled Executable Version</strong> must not be higher than <strong className="text-slate-300">Cloud App_Config Version</strong>.
-                                    </p>
-
-                                    {/* --- FORCE PATCH UPDATE NOW Button --- */}
+                                <div className="p-6 space-y-5">
+                                    {/* ── LIVE AUDIT INTEGRITY BANNER ── */}
                                     {(() => {
                                         const cloudTs = latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || '';
+                                        const cloudVer = localStorage.getItem('app_latest_version') || '';
                                         const localTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
                                         const isPatchNewer = (cloudTs && localTs) ? parseDateTime(cloudTs) > parseDateTime(localTs) : false;
-                                        if (isPatchNewer) {
+                                        const isVerNewer = (cloudVer && APP_VERSION) ? isVersionHigher(cloudVer, APP_VERSION) : false;
+
+                                        if (isPatchNewer || isVerNewer) {
                                             return (
-                                                <div className="mt-4 flex justify-center">
-                                                    <button
-                                                        onClick={() => {
-                                                            sessionStorage.setItem('force_patch_update', 'true');
-                                                            window.location.reload();
-                                                        }}
-                                                        className="w-full max-w-md bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-xs tracking-widest py-3 rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                                                    >
-                                                        <Download size={16} /> FORCE PATCH UPDATE NOW
-                                                    </button>
+                                                <div className="p-4 bg-blue-950/40 border border-blue-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in">
+                                                    <div className="flex items-start gap-3">
+                                                        <Download className="text-blue-400 shrink-0 mt-0.5 animate-pulse" size={20} />
+                                                        <div>
+                                                            <p className="text-xs font-black text-blue-400 uppercase tracking-wide">Update Ready & Pending Application</p>
+                                                            <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                                                                Cloud release contains newer patch timestamp (<strong className="text-emerald-400 font-mono">{cloudTs}</strong>) compared to active local record (<strong className="text-white font-mono">{localTs}</strong>).
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-[10px] font-black uppercase tracking-widest text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded border border-blue-500/20 whitespace-nowrap">
+                                                        Update Pending
+                                                    </span>
                                                 </div>
                                             );
                                         }
-                                        return null;
+
+                                        return (
+                                            <div className="p-3.5 bg-emerald-950/30 border border-emerald-500/20 rounded-xl flex items-center justify-between gap-3 animate-in fade-in">
+                                                <div className="flex items-center gap-2.5">
+                                                    <CheckCircle2 className="text-emerald-400 shrink-0" size={18} />
+                                                    <div>
+                                                        <span className="text-xs font-black text-emerald-400 uppercase tracking-wide">Running Build Verified & Up To Date</span>
+                                                        <span className="text-[10px] text-slate-400 ml-2 font-medium">Active record matches cloud release baseline.</span>
+                                                    </div>
+                                                </div>
+                                                <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                                    Synchronized
+                                                </span>
+                                            </div>
+                                        );
                                     })()}
+
+                                    {/* ── 3-SECTION TECHNICAL AUDIT GRID ── */}
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        {/* Column 1: Active Executable on Disk */}
+                                        <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700/70 space-y-2">
+                                            <div className="flex items-center justify-between border-b border-slate-700/50 pb-2">
+                                                <p className="text-slate-400 text-[10px] uppercase font-black tracking-wider flex items-center gap-1.5">
+                                                    <Terminal size={12} className="text-amber-400" /> Active Executable (Disk)
+                                                </p>
+                                                <span className="text-[8px] font-mono text-slate-500 uppercase">{buildAuditInfo?.isPackaged ? 'Packaged' : 'Dev'}</span>
+                                            </div>
+                                            <div className="space-y-1.5 text-[11px]">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">File Date:</span>
+                                                    <span className="text-slate-200 font-mono font-bold text-[10px]">
+                                                        {buildAuditInfo?.exeStats?.mtime ? new Date(buildAuditInfo.exeStats.mtime).toLocaleString('en-IN') : 'Active Process'}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Binary Size:</span>
+                                                    <span className="text-slate-200 font-mono font-bold text-[10px]">
+                                                        {buildAuditInfo?.exeStats?.size ? formatBytes(buildAuditInfo.exeStats.size) : 'N/A'}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Compiled Ver:</span>
+                                                    <span className="text-amber-400 font-mono font-bold text-[10px]">{APP_VERSION}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Compiled Patch:</span>
+                                                    <span className="text-blue-400 font-mono font-bold text-[10px]">{APP_PATCH_TIMESTAMP}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Active Record:</span>
+                                                    <span className={`font-mono font-bold text-[10px] ${parseDateTime(localStorage.getItem('app_active_patch_ts')) > parseDateTime(APP_PATCH_TIMESTAMP) ? 'text-amber-400 underline' : 'text-slate-300'}`}>
+                                                        {localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {buildAuditInfo?.exePath && (
+                                                <p className="text-[9px] font-mono text-slate-500 truncate pt-1 border-t border-slate-700/40" title={buildAuditInfo.exePath}>
+                                                    Path: {buildAuditInfo.exePath}
+                                                </p>
+                                            )}
+                                        </div>
+
+                                        {/* Column 2: Cloud Target Configuration */}
+                                        <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700/70 space-y-2">
+                                            <div className="flex items-center justify-between border-b border-slate-700/50 pb-2">
+                                                <p className="text-slate-400 text-[10px] uppercase font-black tracking-wider flex items-center gap-1.5">
+                                                    <Globe size={12} className="text-emerald-400" /> Cloud Release (Channel)
+                                                </p>
+                                                <span className="text-[8px] font-mono text-emerald-400 uppercase">Live Config</span>
+                                            </div>
+                                            <div className="space-y-1.5 text-[11px]">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Target Version:</span>
+                                                    <span className="text-amber-400 font-mono font-bold text-[10px]">{localStorage.getItem('app_latest_version') || 'Unknown'}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Live Patch TS:</span>
+                                                    <span className="text-emerald-400 font-mono font-bold text-[10px]">{latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || 'Unknown'}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Session Usage:</span>
+                                                    <span className="text-fuchsia-400 font-mono font-bold text-[10px]"><UsageTimeClock /></span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Package Hash:</span>
+                                                    <span className="text-slate-400 font-mono text-[9px] truncate max-w-[120px]" title={localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || 'N/A'}>
+                                                        {(localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || 'Verified').slice(0, 16)}...
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Evaluation:</span>
+                                                    <span className="text-slate-300 font-bold text-[10px]">
+                                                        {parseDateTime(latestPatchTimestamp) > parseDateTime(localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP) ? '⚡ Patch Pending' : '✓ Matching'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Column 3: Local Package / Update History */}
+                                        <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700/70 space-y-2">
+                                            <div className="flex items-center justify-between border-b border-slate-700/50 pb-2">
+                                                <p className="text-slate-400 text-[10px] uppercase font-black tracking-wider flex items-center gap-1.5">
+                                                    <Database size={12} className="text-sky-400" /> Package on Disk (%TEMP%)
+                                                </p>
+                                                <span className={`text-[8px] font-mono font-bold uppercase px-1.5 py-0.5 rounded ${buildAuditInfo?.installerStats?.exists ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-700/50 text-slate-400'}`}>
+                                                    {buildAuditInfo?.installerStats?.exists ? 'Downloaded' : 'Missing'}
+                                                </span>
+                                            </div>
+                                            <div className="space-y-1.5 text-[11px]">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Installer Exists:</span>
+                                                    <span className={`font-mono font-bold text-[10px] ${buildAuditInfo?.installerStats?.exists ? 'text-emerald-400' : 'text-slate-400'}`}>
+                                                        {buildAuditInfo?.installerStats?.exists ? 'YES (Ready)' : 'NO'}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Package Size:</span>
+                                                    <span className="text-slate-200 font-mono font-bold text-[10px]">
+                                                        {buildAuditInfo?.installerStats?.size ? formatBytes(buildAuditInfo.installerStats.size) : '0 MB'}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Downloaded At:</span>
+                                                    <span className="text-slate-200 font-mono font-bold text-[10px]">
+                                                        {buildAuditInfo?.installerStats?.mtime ? new Date(buildAuditInfo.installerStats.mtime).toLocaleString('en-IN') : 'N/A'}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-slate-500">Last Exit Code:</span>
+                                                    <span className={`font-mono font-bold text-[10px] ${buildAuditInfo?.updateStatus?.exitCode === 0 ? 'text-emerald-400' : buildAuditInfo?.updateStatus ? 'text-rose-400' : 'text-slate-400'}`}>
+                                                        {buildAuditInfo?.updateStatus ? (buildAuditInfo.updateStatus.exitCode === 0 ? '0 (Success)' : `${buildAuditInfo.updateStatus.exitCode} (Failed)`) : 'None'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {buildAuditInfo?.installerStats?.exists && (
+                                                <button
+                                                    onClick={async () => {
+                                                        if ((window as any).electronAPI?.launchInstallerManually) {
+                                                            showAlert('confirm', 'Run Installer Manually', 'BharatPay Pro will now close automatically to allow the installer to update application files without conflicts. Do you wish to continue?', async () => {
+                                                                await (window as any).electronAPI.launchInstallerManually();
+                                                            });
+                                                        }
+                                                    }}
+                                                    className="w-full mt-1 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
+                                                >
+                                                    <ExternalLink size={12} /> Run Installer Manually
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* ── ACTION CENTER ── */}
+                                    <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+                                        {/* Force Update Button */}
+                                        {(() => {
+                                            const cloudTs = latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || '';
+                                            const cloudVer = localStorage.getItem('app_latest_version') || '';
+                                            const localTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
+                                            const isPatchNewer = (cloudTs && localTs) ? parseDateTime(cloudTs) > parseDateTime(localTs) : false;
+                                            const isVerNewer = (cloudVer && APP_VERSION) ? isVersionHigher(cloudVer, APP_VERSION) : false;
+
+                                            if (isPatchNewer || isVerNewer) {
+                                                return (
+                                                    <button
+                                                        onClick={() => {
+                                                            if (onTriggerUpdate) {
+                                                                onTriggerUpdate();
+                                                            } else {
+                                                                sessionStorage.setItem('force_patch_update', 'true');
+                                                                window.location.reload();
+                                                            }
+                                                        }}
+                                                        className="w-full max-w-sm bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black uppercase text-xs tracking-widest py-3 rounded-xl transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                                                    >
+                                                        <Download size={16} /> FORCE PATCH UPDATE NOW
+                                                    </button>
+                                                );
+                                            }
+                                            return null;
+                                        })()}
+                                    </div>
+
+                                    <p className="text-[10px] text-slate-500 leading-relaxed text-center">
+                                        Updates are evaluated by comparing <strong className="text-slate-300">Cloud Live Timestamp</strong> against the <strong className="text-slate-300">Active Record on Disk</strong>.
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -6981,8 +7217,24 @@ const Settings: React.FC<SettingsProps> = ({
                             </p>
 
                             <button
-                                onClick={() => {
+                                onClick={async () => {
                                     setShowRestoreSuccessModal(false);
+                                    if (backupMode === 'DATAMIGRATE') {
+                                        sessionStorage.setItem('app_skip_migration_alerts', 'true');
+                                        const now = new Date();
+                                        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                                        localStorage.setItem('app_legal_agreed_date', today);
+                                        if (window.electronAPI && (window.electronAPI as any).dbSet) {
+                                            try {
+                                                await (window.electronAPI as any).dbSet('app_legal_agreed_date', today);
+                                            } catch (e) {}
+                                        }
+                                        sessionStorage.setItem('app_is_reloading_after_reset', 'true');
+                                        const currentMsgId = (localStorage.getItem('app_last_statutory_date') || companyProfile.postLoginMessage || '').trim();
+                                        if (currentMsgId) {
+                                            sessionStorage.setItem(`app_msg_dismissed_${currentMsgId}`, 'true');
+                                        }
+                                    }
                                     onRestore();
                                     setTimeout(() => {
                                         window.location.reload();

@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, BookOpen, ScrollText, ReceiptText, Info } from 'lucide-react';
-import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch, BranchDetail } from '../types';
+import { ShieldCheck, Landmark, X, FileText, AlertTriangle, CheckCircle, BookOpen, ScrollText, ReceiptText, Info, ShieldAlert } from 'lucide-react';
+import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, ArrearBatch, BranchDetail, View } from '../types';
 import { INDIAN_STATES } from '../constants';
 import {
     generatePFECR,
@@ -67,6 +67,7 @@ interface StatutoryReportsProps {
     showAlert: any;
     activeFinancialYear?: string;
     branches?: (string | BranchDetail)[];
+    onNavigate?: (view: any, tab?: string) => void;
 }
 
 const STATE_FORM_MAPPINGS: Record<string, { wage: string; slip: string; advance: string }> = {
@@ -94,7 +95,8 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
     showAlert: _showAlert,
     latestFrozenPeriod,
     activeFinancialYear,
-    branches = []
+    branches = [],
+    onNavigate
 }) => {
     const monthsArr = useMemo(() => ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'], []);
 
@@ -321,10 +323,7 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                     if (!batch) throw new Error(`No arrears processed for ${globalMonth} ${globalYear}`);
                     savedPath = format === 'Excel' ? await generateArrearECRExcel(batch, payrollHistory, employees, config, fileName, effectiveCompanyProfile) : await generateArrearECRText(batch, payrollHistory, employees, config, fileName, effectiveCompanyProfile);
                 } else if (reportName === 'ESI Monthly' || reportName === 'ESI Challan') {
-                    const hasESIData = currentData.some(r => {
-                        const emp = employees.find(e => e.id === r.employeeId);
-                        return emp && !emp.isESIExempt && (r.deductions.esi > 0 || r.employerContributions.esi > 0);
-                    });
+                    const hasESIData = currentData.some(r => (r.deductions?.esi || 0) > 0 || (r.employerContributions?.esi || 0) > 0);
                     if (!hasESIData) {
                         setMsgModal({ isOpen: true, title: 'Info', message: `There is no ESI Contribution data for ${globalMonth} ${globalYear}.`, type: 'info', onConfirm: null });
                         return;
@@ -608,6 +607,31 @@ const StatutoryReports: React.FC<StatutoryReportsProps> = ({
                         {yearOptions.map(y => (<option key={y} value={y}>{y}</option>))}
                     </select>
                 </div>
+            </div>
+
+            {/* Variance Audit Advisory Banner */}
+            <div className="bg-gradient-to-r from-indigo-950/60 via-slate-900 to-indigo-950/40 border border-indigo-500/30 rounded-xl p-4 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center gap-3.5">
+                    <div className="p-2.5 bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 rounded-xl shrink-0 shadow-inner">
+                        <ShieldAlert size={22} className="text-indigo-400 animate-pulse" />
+                    </div>
+                    <div>
+                        <p className="text-sm font-bold text-white">
+                            Variance Report is generated and present under <span className="text-indigo-400 underline decoration-indigo-400/50 underline-offset-2">MIS &gt; Audit Trail</span>
+                        </p>
+                        <p className="text-xs text-slate-300 mt-0.5">
+                            User may check that before filing statutory returns.
+                        </p>
+                    </div>
+                </div>
+                {onNavigate && (
+                    <button
+                        onClick={() => onNavigate(View.MIS, 'AUDIT_TRAIL')}
+                        className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-indigo-900/40 flex items-center gap-1.5 hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                        Open Audit Trail &rarr;
+                    </button>
+                )}
             </div>
 
             {/* Filter Report By Section */}

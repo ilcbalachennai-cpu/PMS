@@ -1,5 +1,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
+import { APP_PATCH_TIMESTAMP } from '../services/licenseService';
+import { parseDateTime } from '../utils/formatters';
 
 export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
   const [isAppDirectoryConfigured, setIsAppDirectoryConfigured] = useState<boolean | null>(null);
@@ -27,14 +29,14 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
                 'app_master_sites', 'app_employees', 'app_config', 'app_company_profile',
                 'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
                 'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo',
-                'app_active_patch_ts', 'app_latest_patch_timestamp', 'app_latest_version',
+                'app_active_patch_ts', 'app_pending_patch_ts', 'app_latest_patch_timestamp', 'app_latest_version',
                 'app_download_url', 'app_download_url_win7', 'app_launcher_url',
                 'app_update_hash', 'app_update_hash_win10', 'app_update_hash_win7',
                 'app_patch_skip_count', 'app_version_marker'
               ];
               const stringKeys = [
                 'app_license_secure', 'app_machine_id', 'app_setup_complete', 'app_data_size',
-                'app_active_company_id', 'app_active_patch_ts', 'app_latest_patch_timestamp',
+                'app_active_company_id', 'app_active_patch_ts', 'app_pending_patch_ts', 'app_latest_patch_timestamp',
                 'app_latest_version', 'app_download_url', 'app_download_url_win7',
                 'app_launcher_url', 'app_update_hash', 'app_update_hash_win10',
                 'app_update_hash_win7', 'app_patch_skip_count', 'app_version_marker'
@@ -76,6 +78,7 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
       try {
         const systemKeys = [
           'app_active_patch_ts', 
+          'app_pending_patch_ts',
           'app_latest_patch_timestamp', 
           'app_latest_version', 
           'app_patch_skip_count', 
@@ -86,7 +89,12 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
           // @ts-ignore
           const res = await window.electronAPI.dbGet(k);
           if (res.success && res.data !== null && res.data !== undefined) {
-             localStorage.setItem(k, String(res.data));
+             let val = String(res.data);
+             // Baseline enforcement: Elevate active patch timestamp if older than compiled baseline
+             if (k === 'app_active_patch_ts' && parseDateTime(val) < parseDateTime(APP_PATCH_TIMESTAMP)) {
+                val = APP_PATCH_TIMESTAMP;
+             }
+             localStorage.setItem(k, val);
           }
         }
       } catch (syncErr) {

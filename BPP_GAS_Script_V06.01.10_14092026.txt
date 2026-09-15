@@ -608,6 +608,7 @@ function handleStartupValidation(ss, params) {
                                     splDynamic: String(row[14]).trim() === 'Yes' || String(row[14]).trim() === 'true',
                                     splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
                                     latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, launcherUrl: config.launcherUrl,
+                                    patchTimestamp: config.patchTimestamp, updateHashWin10: config.updateHashWin10, updateHashWin7: config.updateHashWin7, sha256: config.sha256,
                                     adminUser: String(rowID_ColC).toUpperCase(), adminPass: row[3], 
                                     devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss),
                                     activeSignatures: activeSignaturesForApp // RETURN TO APP FOR RECONCILIATION
@@ -768,6 +769,7 @@ function handleStartupValidation(ss, params) {
                                     splMIS: String(row[15]).trim() === 'Yes' || String(row[15]).trim() === 'true',
                                     companyLimit: parseInt(row[16]) || 2,
                                     latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, launcherUrl: config.launcherUrl,
+                                    patchTimestamp: config.patchTimestamp, updateHashWin10: config.updateHashWin10, updateHashWin7: config.updateHashWin7, sha256: config.sha256,
                                     adminUser: rowID.toUpperCase(), adminPass: row[2], 
                                     devUser: devCreds.devUser, devPass: devCreds.devPass, licenceFee: getLicenceFeeData(ss) 
                                 }
@@ -1779,7 +1781,7 @@ function fetchLatestDeveloperMessages(ss) {
             else if (type === "ALERT" && !resp.loginAlert) resp.loginAlert = { message: data[i][2], date: data[i][1], enabled: data[i][7] !== "DISABLED" };
         }
     }
-    return jsonResponse({ success: true, messages: resp, latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, launcherUrl: config.launcherUrl, patchTimestamp: config.patchTimestamp });
+    return jsonResponse({ success: true, messages: resp, latestVersion: config.latestVersion, downloadUrl: config.downloadUrl, downloadUrlWin7: config.downloadUrlWin7, launcherUrl: config.launcherUrl, patchTimestamp: config.patchTimestamp, updateHashWin10: config.updateHashWin10, updateHashWin7: config.updateHashWin7, sha256: config.sha256 });
 }
 
 function handleUpdateMessages(ss, params) { const s = ss.getSheetByName('Developer_Message'); if (!s) return jsonResponse({ success: false }); const now = Utilities.formatDate(new Date(), "GMT+5:30", "dd-MM-yyyy HH:mm:ss"); s.appendRow([now, now, params.message, params.type, "ADMIN", params.header, params.alignment, params.key]); return jsonResponse({ success: true }); }

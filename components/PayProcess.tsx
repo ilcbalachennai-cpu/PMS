@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, CheckCircle2, ArrowRight, GitMerge, Lock, TrendingUp, UploadCloud, AlertCircle, RotateCw } from 'lucide-react';
+import { CalendarDays, Calculator, CalendarClock, Wallet, RefreshCw, Gavel, FileSpreadsheet, CheckCircle2, ArrowRight, GitMerge, Lock, TrendingUp, UploadCloud, AlertCircle, RotateCw, Landmark } from 'lucide-react';
 import * as XLSX from 'xlsx-js-style';
-import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord, View, LicenseData, SettingsTab } from '../types';
+import { Employee, Attendance, LeaveLedger, AdvanceLedger, PayrollResult, StatutoryConfig, LeavePolicy, CompanyProfile, User, FineRecord, ArrearBatch, OTRecord, VPFRecord, View, LicenseData, SettingsTab } from '../types';
 import { generateTemplateWorkbook, getStandardFileName } from '../services/reportService';
 import AttendanceManager from './AttendanceManager';
 import LedgerManager from './LedgerManager';
@@ -10,6 +10,7 @@ import PayCycleGateway from './PayCycleGateway';
 import FineManager from './FineManager';
 import ArrearManager from './ArrearManager';
 import OTManager from './OTManager';
+import VPFManager from './VPFManager';
 
 interface PayProcessProps {
     employees: Employee[];
@@ -38,6 +39,8 @@ interface PayProcessProps {
     setArrearHistory?: React.Dispatch<React.SetStateAction<ArrearBatch[]>>;
     otRecords: OTRecord[];
     setOTRecords: React.Dispatch<React.SetStateAction<OTRecord[]>>;
+    vpfRecords?: VPFRecord[];
+    setVpfRecords?: (records: VPFRecord[]) => void;
     showAlert: any;
     licenseInfo?: LicenseData;
     hasPreviousYearData?: boolean;
@@ -48,8 +51,18 @@ interface PayProcessProps {
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
 
 const PayProcess: React.FC<PayProcessProps> = (props) => {
-    const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'fines' | 'overtime' | 'arrears' | 'payroll'>('attendance');
-    const [isGatewayOpen, setIsGatewayOpen] = useState(true);
+    const [activeTab, setActiveTab] = useState<'attendance' | 'ledgers' | 'fines' | 'overtime' | 'arrears' | 'vpf_pf_adv' | 'payroll'>(() => {
+        const target = sessionStorage.getItem('pay_process_target_tab');
+        if (target === 'payroll') {
+            sessionStorage.removeItem('pay_process_target_tab');
+            return 'payroll';
+        }
+        return 'attendance';
+    });
+    const [isGatewayOpen, setIsGatewayOpen] = useState(() => {
+        const target = sessionStorage.getItem('pay_process_target_tab');
+        return target !== 'payroll';
+    });
     const [isImporting, setIsImporting] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const masterFileInputRef = useRef<HTMLInputElement>(null);
@@ -59,12 +72,14 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
     const [advanceJustSaved, setAdvanceJustSaved] = useState<boolean>(true);
     const [fineJustSaved, setFineJustSaved] = useState<boolean>(true);
     const [otJustSaved, setOtJustSaved] = useState<boolean>(true);
+    const [vpfJustSaved, setVpfJustSaved] = useState<boolean>(true);
 
     React.useEffect(() => {
         setAttendanceJustSaved(true);
         setAdvanceJustSaved(true);
         setFineJustSaved(true);
         setOtJustSaved(true);
+        setVpfJustSaved(true);
     }, [props.month, props.year, props.companyProfile?.id]);
 
     // Compute lock status
@@ -85,6 +100,27 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             payrollTabRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
     }, [activeTab]);
+
+    React.useEffect(() => {
+        const target = sessionStorage.getItem('pay_process_target_tab');
+        if (target === 'payroll') {
+            sessionStorage.removeItem('pay_process_target_tab');
+            setIsGatewayOpen(false);
+            setActiveTab('payroll');
+        }
+    }, [props.month, props.year, props.companyProfile?.id]);
+
+    React.useEffect(() => {
+        if (activeTab === 'overtime' && !props.config.enableOT) {
+            setActiveTab('attendance');
+        }
+        if (activeTab === 'arrears' && !props.config.enableArrearSalary) {
+            setActiveTab('attendance');
+        }
+        if (activeTab === 'vpf_pf_adv' && !props.config.enableVPF) {
+            setActiveTab('attendance');
+        }
+    }, [activeTab, props.config.enableOT, props.config.enableArrearSalary, props.config.enableVPF]);
 
     const TabButton = ({ id, label, icon: Icon, disabled = false }: { id: typeof activeTab, label: string, icon: any, disabled?: boolean }) => {
         const getDisabledMessage = () => {
@@ -118,7 +154,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             "Employee ID", "Name",
             "Present Days", "EL (Availed)", "EL Encash", "SL (Sick)", "CL (Casual)", "LOP",
             "Opening Advance", "New Advance", "Monthly EMI", "Adv Manual Pay",
-            "Income Tax", "Fine Amount", "Fine Reason", "OT Days", "OT Hours"
+            "Income Tax", "Fine Amount", "Fine Reason", "OT Days", "OT Hours",
+            "VPF", "PF_Adv_Repay"
         ];
 
         const activeEmps = props.employees.filter(e => !e.dol);
@@ -127,6 +164,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             const att = props.attendances.find(a => a.employeeId === emp.id && a.month === props.month && a.year === props.year);
             const adv = props.advanceLedgers.find(a => a.employeeId === emp.id);
             const fine = props.fines.find(f => f.employeeId === emp.id && f.month === props.month && f.year === props.year);
+            const vpfRec = (props.vpfRecords || []).find(v => v.employeeId === emp.id && v.month === props.month && v.year === props.year);
 
             return [
                 emp.id,
@@ -145,7 +183,9 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 fine?.amount || 0,
                 fine?.reason || '',
                 props.otRecords.find(r => r.employeeId === emp.id && r.month === props.month && r.year === props.year)?.otDays || 0,
-                props.otRecords.find(r => r.employeeId === emp.id && r.month === props.month && r.year === props.year)?.otHours || 0
+                props.otRecords.find(r => r.employeeId === emp.id && r.month === props.month && r.year === props.year)?.otHours || 0,
+                vpfRec?.vpfAmount || 0,
+                vpfRec?.pfAdvRepay || 0
             ];
         });
 
@@ -178,6 +218,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 const newAdvanceLedgers = [...props.advanceLedgers];
                 const newFines = props.fines.filter(f => !(f.month === props.month && f.year === props.year));
                 const newOTRecords = [...props.otRecords];
+                const newVPFRecords = [...(props.vpfRecords || [])];
 
                 const daysInMonth = new Date(props.year, ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].indexOf(props.month) + 1, 0).getDate();
 
@@ -321,6 +362,39 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                             tax: cleanTaxVal
                         });
                     }
+
+                    // 5. VPF & PF ADVANCE REFUND PROCESSING
+                    const vpfKeys = ['VPF', 'VPF Amount', 'vpf'];
+                    let vpfVal = 0;
+                    for (const k of vpfKeys) {
+                        if (row[k] !== undefined) {
+                            const val = Number(row[k]);
+                            if (!isNaN(val)) { vpfVal = Math.round(Math.max(0, val)); break; }
+                        }
+                    }
+
+                    const pfAdvKeys = ['PF_Adv_Repay', 'PF Adv Repay', 'PF Advance Repay', 'Advance Refund', 'PF_Adv_Refund', 'pfAdvRepay'];
+                    let pfAdvVal = 0;
+                    for (const k of pfAdvKeys) {
+                        if (row[k] !== undefined) {
+                            const val = Number(row[k]);
+                            if (!isNaN(val)) { pfAdvVal = Math.round(Math.max(0, val)); break; }
+                        }
+                    }
+
+                    if (vpfVal > 0 || pfAdvVal > 0) {
+                        const vpfIdx = newVPFRecords.findIndex(r => r.employeeId === empId && r.month === props.month && r.year === props.year);
+                        const vpfRec: VPFRecord = {
+                            companyId: props.companyProfile.id,
+                            employeeId: empId,
+                            month: props.month,
+                            year: props.year,
+                            vpfAmount: vpfVal,
+                            pfAdvRepay: pfAdvVal
+                        };
+                        if (vpfIdx >= 0) newVPFRecords[vpfIdx] = vpfRec;
+                        else newVPFRecords.push(vpfRec);
+                    }
                 });
 
                 if (updateCount === 0) {
@@ -333,6 +407,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 props.setAdvanceLedgers(newAdvanceLedgers);
                 props.setFines(newFines);
                 props.setOTRecords(newOTRecords);
+                if (props.setVpfRecords) props.setVpfRecords(newVPFRecords);
+                setVpfJustSaved(false);
 
                 setActiveTab('payroll');
                 setShowSuccessModal(true);
@@ -364,7 +440,13 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
             const newOT = props.otRecords.filter(r => !(String(r.month || '').trim().toLowerCase() === String(props.month || '').trim().toLowerCase() && Number(r.year) === Number(props.year)));
             props.setOTRecords(newOT);
 
-            // 4. Reset Arrears (if applicable)
+            // 4. Reset VPF & PF Adv
+            if (props.setVpfRecords && props.vpfRecords) {
+                const newVPF = props.vpfRecords.filter(v => !(String(v.month || '').trim().toLowerCase() === String(props.month || '').trim().toLowerCase() && Number(v.year) === Number(props.year)));
+                props.setVpfRecords(newVPF);
+            }
+
+            // 5. Reset Arrears (if applicable)
             if (props.setArrearHistory) {
                 const newArrears = (props.arrearHistory || []).filter(b => !(String(b.month || '').trim().toLowerCase() === String(props.month || '').trim().toLowerCase() && Number(b.year) === Number(props.year)));
                 props.setArrearHistory(newArrears);
@@ -500,7 +582,8 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     <TabButton id="fines" label="3. Tax & Fines" icon={Gavel} />
                     {props.config.enableOT && <TabButton id="overtime" label="4. Overtime" icon={CalendarClock} />}
                     {props.config.enableArrearSalary && <TabButton id="arrears" label="5. Arrear Salary" icon={TrendingUp} />}
-                    <TabButton id="payroll" label="6. Run Payroll" icon={Calculator} disabled={!hasAnyAttendance && !isLocked} />
+                    {props.config.enableVPF && <TabButton id="vpf_pf_adv" label="VPF & PF_Adv_Refund" icon={Landmark} />}
+                    <TabButton id="payroll" label="Run Payroll" icon={Calculator} disabled={!hasAnyAttendance && !isLocked} />
                 </div>
             </div>
 
@@ -623,6 +706,37 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                     )}
                 </div>
 
+                <div className={activeTab === 'vpf_pf_adv' ? 'block' : 'hidden'}>
+                    {props.config.enableVPF ? (
+                        <VPFManager
+                            employees={props.employees}
+                            vpfRecords={props.vpfRecords || []}
+                            setVpfRecords={props.setVpfRecords || (() => { })}
+                            month={props.month}
+                            year={props.year}
+                            savedRecords={props.savedRecords}
+                            companyProfile={props.companyProfile}
+                            config={props.config}
+                            justSaved={vpfJustSaved}
+                            setJustSaved={setVpfJustSaved}
+                        />
+                    ) : (
+                        <div className="flex flex-col items-center justify-center h-[50vh] bg-[#0f172a]/30 rounded-2xl border border-slate-800/50 backdrop-blur-sm text-center px-6">
+                            <div className="bg-amber-500/10 p-4 rounded-full mb-6 ring-8 ring-amber-500/5">
+                                <AlertCircle size={64} className="text-amber-500" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">VPF & PF Advance Repayment Module Not Activated</h3>
+                            <div className="flex flex-col gap-1 text-slate-400 max-w-md">
+                                <p className="text-sm">
+                                    Go to <span className="text-blue-400 font-bold">Configuration</span> → <span className="text-blue-400 font-bold">Statutory Rule</span> → <span className="text-blue-400 font-bold">VPF & PF Advance Repayment</span> to
+                                </p>
+                                <p className="text-sm">activate this module.</p>
+                                <p className="text-sm border-t border-slate-800 mt-4 pt-4 text-[11px] uppercase font-black tracking-widest text-amber-500 opacity-60">VPF & PF Advance Repayment</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
                 <div ref={payrollTabRef} className={activeTab === 'payroll' ? 'block' : 'hidden'}>
                     <PayrollProcessor
                         employees={props.employees}
@@ -646,6 +760,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         currentUser={props.currentUser}
                         fines={props.fines}
                         otRecords={props.otRecords}
+                        vpfRecords={props.vpfRecords}
                         arrearHistory={props.arrearHistory}
                         showAlert={props.showAlert}
                         licenseInfo={props.licenseInfo}
@@ -653,6 +768,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         advanceJustSaved={advanceJustSaved}
                         fineJustSaved={fineJustSaved}
                         otJustSaved={otJustSaved}
+                        vpfJustSaved={vpfJustSaved}
                         onSwitchTab={(tab) => setActiveTab(tab)}
                     />
                 </div>

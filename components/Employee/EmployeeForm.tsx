@@ -8,6 +8,7 @@ import {
 import { Employee, CompanyProfile, getBranchName } from '../../types';
 import { INDIAN_STATES } from '../../constants';
 import { formatIndianNumber } from '../../utils/formatters';
+import { calculateESICodeWage } from '../../services/payrollEngine';
 
 interface EmployeeFormProps {
     editingId: string | null;
@@ -110,6 +111,56 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
             }).catch(() => {});
         }
     }, [editingId]);
+
+    const hasShownESIAlertRef = useRef(false);
+
+    useEffect(() => {
+        hasShownESIAlertRef.current = false;
+    }, [editingId, newEmpForm.id]);
+
+    const handleSalaryBlur = () => {
+        const esiCodeWage = calculateESICodeWage(newEmpForm);
+        const ceiling = 21000;
+        if (esiCodeWage > ceiling) {
+            if (!editingId && !newEmpForm.isESIExempt) {
+                setNewEmpForm(prev => ({ ...prev, isESIExempt: true }));
+                if (!hasShownESIAlertRef.current) {
+                    hasShownESIAlertRef.current = true;
+                    showAlert?.(
+                        'info',
+                        'Statutory Compliance Notice: ESI Exemption Active',
+                        `New Employee's ESI Code Wage (₹${formatIndianNumber(esiCodeWage)}) exceeds the statutory wage ceiling of ₹${formatIndianNumber(ceiling)}.\n\nIn accordance with the ESI Act, ESI Exemption has been automatically set to Active from Date of Joining.`,
+                        undefined,
+                        undefined,
+                        'OK'
+                    );
+                }
+            } else if (editingId && !newEmpForm.isESIExempt) {
+                if (!hasShownESIAlertRef.current) {
+                    hasShownESIAlertRef.current = true;
+                    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                    const currentMonth = globalMonth || months[new Date().getMonth()];
+                    const mIdx = months.indexOf(currentMonth);
+                    const isPeriod1 = (mIdx >= 3 && mIdx <= 8); // Apr - Sep
+                    const periodEnd = isPeriod1 ? '30th September' : '31st March';
+                    const nextPeriodStart = isPeriod1 ? '1st October' : '1st April';
+
+                    showAlert?.(
+                        'info',
+                        'Statutory Notice: ESI Continued Coverage (Mid-Period)',
+                        `Employee's ESI Code Wage (₹${formatIndianNumber(esiCodeWage)}) exceeds the statutory ceiling (₹${formatIndianNumber(ceiling)}) due to salary revision.\n\nUnder Section 2(9) of the ESI Act, ESI contribution continues until the end of the current contribution period (${periodEnd}). The employee will automatically be transitioned to ESI Exempt effective ${nextPeriodStart}.`,
+                        undefined,
+                        undefined,
+                        'OK'
+                    );
+                }
+            }
+        } else {
+            if (!editingId && newEmpForm.isESIExempt && (newEmpForm.basicPay || 0) > 0) {
+                setNewEmpForm(prev => ({ ...prev, isESIExempt: false }));
+            }
+        }
+    };
 
     const handleClose = () => {
         const formChanged = isDirty || JSON.stringify(newEmpForm) !== initialFormSnapshot.current;
@@ -720,21 +771,34 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                     <div>
                         <FormSectionHeader icon={Briefcase} title="5. Salary Structure & Allowances" color="text-emerald-400" />
                         <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-                              <div className="space-y-1.5"><label htmlFor="basicPayInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Basic Pay</label><input id="basicPayInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Basic Pay Amount" aria-label="Basic Pay Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.basicPay} onChange={e => setNewEmpForm({ ...newEmpForm, basicPay: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="daInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">DA</label><input id="daInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="DA Amount" aria-label="DA Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.da} onChange={e => setNewEmpForm({ ...newEmpForm, da: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="retainingAllwInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Retaining Allow</label><input id="retainingAllwInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Retaining Allowance" aria-label="Retaining Allowance" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.retainingAllowance} onChange={e => setNewEmpForm({ ...newEmpForm, retainingAllowance: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="hraInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">HRA</label><input id="hraInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="HRA Amount" aria-label="HRA Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.hra} onChange={e => setNewEmpForm({ ...newEmpForm, hra: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="conveyanceInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Conveyance</label><input id="conveyanceInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Conveyance Amount" aria-label="Conveyance Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.conveyance} onChange={e => setNewEmpForm({ ...newEmpForm, conveyance: +e.target.value })} /></div>
+                              <div className="space-y-1.5"><label htmlFor="basicPayInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Basic Pay</label><input id="basicPayInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Basic Pay Amount" aria-label="Basic Pay Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.basicPay} onChange={e => setNewEmpForm({ ...newEmpForm, basicPay: +e.target.value })} onBlur={handleSalaryBlur} /></div>
+                            <div className="space-y-1.5"><label htmlFor="daInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">DA</label><input id="daInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="DA Amount" aria-label="DA Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.da} onChange={e => setNewEmpForm({ ...newEmpForm, da: +e.target.value })} onBlur={handleSalaryBlur} /></div>
+                            <div className="space-y-1.5"><label htmlFor="retainingAllwInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Retaining Allow</label><input id="retainingAllwInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Retaining Allowance" aria-label="Retaining Allowance" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.retainingAllowance} onChange={e => setNewEmpForm({ ...newEmpForm, retainingAllowance: +e.target.value })} onBlur={handleSalaryBlur} /></div>
+                            <div className="space-y-1.5"><label htmlFor="hraInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">HRA</label><input id="hraInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="HRA Amount" aria-label="HRA Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.hra} onChange={e => setNewEmpForm({ ...newEmpForm, hra: +e.target.value })} onBlur={handleSalaryBlur} /></div>
+                            <div className="space-y-1.5"><label htmlFor="conveyanceInput" className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Conveyance</label><input id="conveyanceInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Conveyance Amount" aria-label="Conveyance Amount" className="w-full bg-slate-900 border border-emerald-900/50 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-emerald-500" value={newEmpForm.conveyance} onChange={e => setNewEmpForm({ ...newEmpForm, conveyance: +e.target.value })} onBlur={handleSalaryBlur} /></div>
 
-                               <div className="space-y-1.5"><label htmlFor="washingInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Washing Allow</label><input id="washingInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Washing Allowance" aria-label="Washing Allowance" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.washing} onChange={e => setNewEmpForm({ ...newEmpForm, washing: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="attireInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Attire Allow</label><input id="attireInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Attire Allowance" aria-label="Attire Allowance" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.attire} onChange={e => setNewEmpForm({ ...newEmpForm, attire: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="special1Input" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{companyProfile?.specialAllowance1Name || 'Special Allow 1'}</label><input id="special1Input" tabIndex={isRejoining ? -1 : undefined} type="number" title={companyProfile?.specialAllowance1Name || 'Special Allowance 1'} aria-label={companyProfile?.specialAllowance1Name || 'Special Allowance 1'} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance1} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance1: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="special2Input" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{companyProfile?.specialAllowance2Name || 'Special Allow 2'}</label><input id="special2Input" tabIndex={isRejoining ? -1 : undefined} type="number" title={companyProfile?.specialAllowance2Name || 'Special Allowance 2'} aria-label={companyProfile?.specialAllowance2Name || 'Special Allowance 2'} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance2} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance2: +e.target.value })} /></div>
-                            <div className="space-y-1.5"><label htmlFor="special3Input" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{companyProfile?.specialAllowance3Name || 'Special Allow 3'}</label><input id="special3Input" tabIndex={isRejoining ? -1 : undefined} type="number" title={companyProfile?.specialAllowance3Name || 'Special Allowance 3'} aria-label={companyProfile?.specialAllowance3Name || 'Special Allowance 3'} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance3} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance3: +e.target.value })} /></div>
+                               <div className="space-y-1.5"><label htmlFor="washingInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Washing Allow</label><input id="washingInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Washing Allowance" aria-label="Washing Allowance" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.washing} onChange={e => setNewEmpForm({ ...newEmpForm, washing: +e.target.value })} onBlur={handleSalaryBlur} /></div>
+                            <div className="space-y-1.5"><label htmlFor="attireInput" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Attire Allow</label><input id="attireInput" tabIndex={isRejoining ? -1 : undefined} type="number" title="Attire Allowance" aria-label="Attire Allowance" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.attire} onChange={e => setNewEmpForm({ ...newEmpForm, attire: +e.target.value })} onBlur={handleSalaryBlur} /></div>
+                            <div className="space-y-1.5"><label htmlFor="special1Input" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{companyProfile?.specialAllowance1Name || 'Special Allow 1'}</label><input id="special1Input" tabIndex={isRejoining ? -1 : undefined} type="number" title={companyProfile?.specialAllowance1Name || 'Special Allowance 1'} aria-label={companyProfile?.specialAllowance1Name || 'Special Allowance 1'} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance1} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance1: +e.target.value })} onBlur={handleSalaryBlur} /></div>
+                            <div className="space-y-1.5"><label htmlFor="special2Input" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{companyProfile?.specialAllowance2Name || 'Special Allow 2'}</label><input id="special2Input" tabIndex={isRejoining ? -1 : undefined} type="number" title={companyProfile?.specialAllowance2Name || 'Special Allowance 2'} aria-label={companyProfile?.specialAllowance2Name || 'Special Allowance 2'} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance2} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance2: +e.target.value })} onBlur={handleSalaryBlur} /></div>
+                            <div className="space-y-1.5"><label htmlFor="special3Input" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{companyProfile?.specialAllowance3Name || 'Special Allow 3'}</label><input id="special3Input" tabIndex={isRejoining ? -1 : undefined} type="number" title={companyProfile?.specialAllowance3Name || 'Special Allowance 3'} aria-label={companyProfile?.specialAllowance3Name || 'Special Allowance 3'} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono outline-none focus:border-slate-500" value={newEmpForm.specialAllowance3} onChange={e => setNewEmpForm({ ...newEmpForm, specialAllowance3: +e.target.value })} onBlur={handleSalaryBlur} /></div>
                         </div>
-                        <div className="mt-4 p-4 bg-emerald-900/10 border border-emerald-500/20 rounded-xl flex justify-between items-center">
-                            <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Total Gross Salary</span>
-                            <span className="text-2xl font-black text-white font-mono">₹ {formatIndianNumber(calculateGrossWage(newEmpForm))}</span>
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="p-4 bg-emerald-900/10 border border-emerald-500/20 rounded-xl flex justify-between items-center">
+                                <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Total Gross Salary</span>
+                                <span className="text-2xl font-black text-white font-mono">₹ {formatIndianNumber(calculateGrossWage(newEmpForm))}</span>
+                            </div>
+                            <div className="p-4 bg-sky-900/10 border border-sky-500/20 rounded-xl flex justify-between items-center">
+                                <div>
+                                    <span className="text-xs font-bold text-sky-400 uppercase tracking-widest block">ESI Code Wage</span>
+                                    <span className="text-[10px] text-slate-400 font-medium">
+                                        {calculateESICodeWage(newEmpForm) > 21000 ? 'Exceeds Wage Ceiling (₹21,000)' : 'Within Wage Ceiling (₹21,000)'}
+                                    </span>
+                                </div>
+                                <span className={`text-2xl font-black font-mono ${calculateESICodeWage(newEmpForm) > 21000 ? 'text-amber-400' : 'text-white'}`}>
+                                    ₹ {formatIndianNumber(calculateESICodeWage(newEmpForm))}
+                                </span>
+                            </div>
                         </div>
                     </div>
                     <div>
@@ -781,7 +845,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                             }));
                                         }} 
                                     />
-                                    <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 ${newEmpForm.isDeferredPension || is7CActive || newEmpForm.isEPSEligible === 'Yes' ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                                    <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 ${!newEmpForm.isPFExempt ? 'opacity-50 grayscale' : ''} ${newEmpForm.isDeferredPension || is7CActive || newEmpForm.isEPSEligible === 'Yes' ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
                                 </label>
                             </div>
 
@@ -790,7 +854,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <h4 className="text-sm font-bold text-white">B. Deferred Pension Option (Age 58 to 60)</h4>
-                                        <p className="text-[10px] text-slate-400">Employee age is {age} (eligible for deferred pension up to 60 years).</p>
+                                        <p className="text-[10px] text-slate-400">Employee age is 58 (eligible for deferred pension up to 60 years).</p>
                                     </div>
                                     <label htmlFor="deferredPensionInput" className="relative inline-flex items-center cursor-pointer">
                                         <input 
@@ -813,7 +877,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                                 }));
                                             }} 
                                         />
-                                        <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600 ${newEmpForm.isPFExempt || !isAge58To60 ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                                        <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600 ${!newEmpForm.isDeferredPension ? 'opacity-50 grayscale' : ''} ${newEmpForm.isPFExempt || !isAge58To60 ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
                                     </label>
                                 </div>
 
@@ -855,7 +919,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                             <div className={`flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 ${(newEmpForm.isPFExempt || !isAge60OrAbove) ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
                                 <div>
                                     <h4 className="text-sm font-bold text-white">C. Employee Age Above 60 (Only PF Contribution Allowed)</h4>
-                                    <p className="text-[10px] text-slate-400">Employee age is {age} (&gt;= 60). No EPS contribution allowed, 100% EPF allocation active.</p>
+                                    <p className="text-[10px] text-slate-400">Employee age is &gt;= 60, then select option. (No EPS contribution allowed, 100% EPF allocation active.)</p>
                                 </div>
                                 <label htmlFor="pfAge60Input" className="relative inline-flex items-center cursor-pointer">
                                     <input 
@@ -879,7 +943,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                             }));
                                         }} 
                                     />
-                                    <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 ${newEmpForm.isPFExempt || !isAge60OrAbove ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                                    <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 ${(!newEmpForm.epsMaturityConfigured || newEmpForm.epsMaturityConfiguredAge !== 60) ? 'opacity-50 grayscale' : ''} ${newEmpForm.isPFExempt || !isAge60OrAbove ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
                                 </label>
                             </div>
 
@@ -887,7 +951,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                             <div className={`flex flex-col md:flex-row md:items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 gap-4 ${newEmpForm.isPFExempt || !!newEmpForm.isDeferredPension ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
                                 <div className="flex-1">
                                     <h4 className="text-sm font-bold text-white">D. Employee Eligible for EPS <span className="text-red-500">*</span></h4>
-                                    <p className="text-[10px] text-slate-400">Note: Employee Date of joining as member for the first time is on or after 01-09-2014 and PF Wages is above ₹15000.</p>
+                                    <p className="text-[10px] text-slate-400">Note: Employee Date of joining as member for the first time is on or after 01-09-2014 and PF Wages is above ₹15000, then select "No", Else "Yes".</p>
                                 </div>
                                 <div className="flex items-center gap-3">
                                     <select
@@ -897,7 +961,14 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                         required
                                         disabled={newEmpForm.isPFExempt || !!newEmpForm.isDeferredPension || (hasProcessedPayroll && !isEPSUnlocked)}
                                         value={newEmpForm.isPFExempt || newEmpForm.deferredPensionOption === 'WithoutEPS' ? 'No' : newEmpForm.deferredPensionOption === 'WithEPS' ? 'Yes' : (newEmpForm.isEPSEligible || '')}
-                                        onChange={e => setNewEmpForm({ ...newEmpForm, isEPSEligible: e.target.value as 'Yes' | 'No' })}
+                                        onChange={e => {
+                                            const val = e.target.value as 'Yes' | 'No';
+                                            setNewEmpForm(prev => ({
+                                                ...prev,
+                                                isEPSEligible: val,
+                                                isPFExempt: val === 'Yes' ? false : prev.isPFExempt
+                                            }));
+                                        }}
                                     >
                                         <option value="" disabled>Select Yes/No</option>
                                         <option value="Yes">Yes</option>
@@ -934,7 +1005,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <h4 className="text-sm font-bold text-amber-400">E. Enable Higher Pension Option (EPS 95)</h4>
-                                        <p className="text-[10px] text-slate-400">Apply for Higher Pension on Actual Wages (Joint Option).</p>
+                                        <p className="text-[10px] text-slate-400">Apply for Higher Pension on Actual Wages (Joint Option approved by EPFO).</p>
                                     </div>
                                      <label htmlFor="higherPensionToggle" className="relative inline-flex items-center cursor-pointer">
                                         <input 
@@ -993,7 +1064,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 </div>
                                  <label htmlFor="esiExemptInput" className="relative inline-flex items-center cursor-pointer">
                                     <input id="esiExemptInput" tabIndex={isRejoining ? -1 : undefined} title="ESI Exempted" aria-label="ESI Exempted" type="checkbox" className="sr-only peer" checked={newEmpForm.isESIExempt} onChange={e => setNewEmpForm({ ...newEmpForm, isESIExempt: e.target.checked })} />
-                                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                                    <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600 ${!newEmpForm.isESIExempt ? 'opacity-50 grayscale' : ''}`}></div>
                                 </label>
                             </div>
                         </div>

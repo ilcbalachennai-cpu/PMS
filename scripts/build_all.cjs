@@ -21,6 +21,13 @@ function run(command) {
     }
 }
 
+function killConflictingProcesses() {
+    console.log(`\n🛑 Terminating running Electron/BPP_APP processes to release native modules...`);
+    try {
+        execSync(`powershell -Command "Stop-Process -Name 'electron', 'BPP_APP' -Force -ErrorAction SilentlyContinue"`, { stdio: 'ignore' });
+    } catch (_) {}
+}
+
 function clearWinUnpacked() {
     const unpackedPath = path.join(__dirname, '..', 'release', 'win-unpacked');
     console.log(`\n🧹 Cleaning up ${unpackedPath} to prevent file locks...`);
@@ -35,6 +42,7 @@ function clearWinUnpacked() {
 }
 
 console.log('--- BPP Unified Build System ---');
+killConflictingProcesses();
 
 if (arg === 'both') {
     console.log('📝 Mode: Generating BOTH Windows 10 and Windows 7 executables sequentially...');

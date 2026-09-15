@@ -168,8 +168,9 @@ export const INITIAL_STATUTORY_CONFIG: StatutoryConfig = {
   bonusWagesComponents: { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false },
   gratuityWagesComponents: { basic: true, da: true, retaining: false, hra: false, conveyance: false, washing: false, attire: false, special1: false, special2: false, special3: false },
   enableArrearSalary: false,
+  enableVPF: false,
   enableDynamicPaySheet: false,
-  dynamicPaySheetColumns: ['empid', 'name', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'leaveEncashment', 'otAmount', 'totalEarnings', 'epf', 'vpf', 'esi', 'pt', 'it', 'lwf', 'advanceRecovery', 'fine', 'totalDeductions', 'netPay']
+  dynamicPaySheetColumns: ['empid', 'name', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'leaveEncashment', 'otAmount', 'totalEarnings', 'epf', 'vpf', 'pfAdvRepay', 'esi', 'pt', 'it', 'lwf', 'advanceRecovery', 'fine', 'totalDeductions', 'netPay']
 };
 
 export const DEFAULT_LEAVE_POLICY: LeavePolicy = {
@@ -295,7 +296,7 @@ export const getActivePaySheetColumns = (results: any[], config: any) => {
     hra: 'hra', conveyance: 'conveyance', washing: 'washing', attire: 'attire',
     special1: 'special1', special2: 'special2', special3: 'special3',
     leaveencashment: 'leaveEncashment', otamount: 'otAmount', totalearnings: 'totalEarnings',
-    epf: 'epf', vpf: 'vpf', esi: 'esi', pt: 'pt', it: 'it', lwf: 'lwf',
+    epf: 'epf', vpf: 'vpf', pfadvrepay: 'pfAdvRepay', pf_adv_repay: 'pfAdvRepay', esi: 'esi', pt: 'pt', it: 'it', lwf: 'lwf',
     advancerecovery: 'advanceRecovery', fine: 'fine', totaldeductions: 'totalDeductions', netpay: 'netPay'
   };
 
@@ -331,6 +332,7 @@ export const getActivePaySheetColumns = (results: any[], config: any) => {
 
       if (col === 'epf') return (r.deductions?.epf || 0) !== 0;
       if (col === 'vpf') return (r.deductions?.vpf || 0) !== 0;
+      if (col === 'pfAdvRepay') return (r.deductions?.pfAdvRepay || 0) !== 0;
       if (col === 'esi') return (r.deductions?.esi || 0) !== 0;
       if (col === 'advanceRecovery') return (r.deductions?.advanceRecovery || 0) !== 0;
       if (col === 'pt') return (r.deductions?.pt || 0) !== 0;
@@ -367,6 +369,7 @@ export const getActivePaySheetColumns = (results: any[], config: any) => {
     let activeDeductionsSum = 0;
     if (activeCols.includes('epf')) activeDeductionsSum += (r.deductions?.epf || 0);
     if (activeCols.includes('vpf')) activeDeductionsSum += (r.deductions?.vpf || 0);
+    if (activeCols.includes('pfAdvRepay')) activeDeductionsSum += (r.deductions?.pfAdvRepay || 0);
     if (activeCols.includes('esi')) activeDeductionsSum += (r.deductions?.esi || 0);
     if (activeCols.includes('advanceRecovery')) activeDeductionsSum += (r.deductions?.advanceRecovery || 0);
     if (activeCols.includes('pt')) activeDeductionsSum += (r.deductions?.pt || 0);
@@ -381,7 +384,7 @@ export const getActivePaySheetColumns = (results: any[], config: any) => {
   // 5. Build the final ordered columns list
   const finalOrdered: string[] = [];
   const earningsOrder = ['days', 'basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'leaveEncashment', 'otAmount'];
-  const deductionsOrder = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'it', 'lwf', 'fine'];
+  const deductionsOrder = ['epf', 'vpf', 'pfAdvRepay', 'esi', 'advanceRecovery', 'pt', 'it', 'lwf', 'fine'];
 
   earningsOrder.forEach(col => {
     if (activeCols.includes(col)) finalOrdered.push(col);

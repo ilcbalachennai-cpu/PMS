@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Save, RefreshCw, Lock, FileText, Eye, AlertCircle, AlertTriangle, X, CheckCircle, Download, Scale, HandCoins, Users, Calculator, Settings, Search } from 'lucide-react';
 import * as XLSX from 'xlsx-js-style';
-import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, FineRecord, OTRecord, ArrearBatch, View, SettingsTab, LicenseData } from '../types';
-import { calculatePayroll } from '../services/payrollEngine';
+import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, FineRecord, OTRecord, ArrearBatch, VPFRecord, View, SettingsTab, LicenseData } from '../types';
+import { calculatePayroll, calculateESICodeWage } from '../services/payrollEngine';
 import { numberToWords, formatDateInd, generateExcelWorkbook, getStandardFileName, openSavedReport, appendSummaryRowToExcelData } from '../services/reportService';
 import { formatIndianNumber, didConfigCalculationFieldsChange, didEmployeePayFieldsChange } from '../utils/formatters';
 import { ModalType } from './Shared/CustomModal';
@@ -27,6 +27,7 @@ interface PayrollProcessorProps {
     currentUser?: User;
     fines?: FineRecord[];
     otRecords?: OTRecord[];
+    vpfRecords?: VPFRecord[];
     arrearHistory?: ArrearBatch[];
     showAlert?: (type: ModalType, title: string, message: string, onConfirm?: () => void, onSecondary?: () => void, confirmLabel?: string, secondaryLabel?: string, cancelLabel?: string, autoCloseSecs?: number) => void;
     onNavigate?: (view: View) => void;
@@ -36,7 +37,8 @@ interface PayrollProcessorProps {
     advanceJustSaved?: boolean;
     fineJustSaved?: boolean;
     otJustSaved?: boolean;
-    onSwitchTab?: (tab: 'attendance' | 'ledgers' | 'fines' | 'overtime' | 'arrears' | 'payroll') => void;
+    vpfJustSaved?: boolean;
+    onSwitchTab?: (tab: 'attendance' | 'ledgers' | 'fines' | 'overtime' | 'arrears' | 'vpf_pf_adv' | 'payroll') => void;
     setEmployees?: React.Dispatch<React.SetStateAction<Employee[]>>;
 }
 
@@ -53,6 +55,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     year,
     fines = [],
     otRecords = [],
+    vpfRecords = [],
     arrearHistory = [],
     showAlert,
     onNavigate,
@@ -62,6 +65,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     advanceJustSaved,
     fineJustSaved,
     otJustSaved,
+    vpfJustSaved,
     onSwitchTab,
     setEmployees
 }) => {
@@ -70,6 +74,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     const [isSaved, setIsSaved] = useState(false);
     const [previewRecord, setPreviewRecord] = useState<PayrollResult | null>(null);
     const [masterDataChanged, setMasterDataChanged] = useState(false);
+    const [isBannerDismissed, setIsBannerDismissed] = useState(false);
     const [dataIsStale, setDataIsStale] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
 
@@ -77,7 +82,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         attendanceJustSaved === false ||
         advanceJustSaved === false ||
         fineJustSaved === false ||
-        (config.enableOT && otJustSaved === false);
+        (config.enableOT && otJustSaved === false) ||
+        vpfJustSaved === false;
 
     const handleNavigateToSettings = () => {
         localStorage.setItem('settings_initial_tab', SettingsTab.Statutory);
@@ -200,11 +206,52 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             }
 
             if (snapshot === null) {
-                localStorage.setItem(employeesKey, JSON.stringify(activeEmployees));
-                if (!localStorage.getItem(configKey)) {
-                    localStorage.setItem(configKey, JSON.stringify(config));
+                // If results exist but no snapshot in localStorage (e.g. freshly loaded draft or cleared session),
+                // verify whether active employees differ from existing calculated results
+                let differsFromResults = false;
+                if (activeEmployees.length !== results.length) {
+                    differsFromResults = true;
+                } else {
+                    for (const emp of activeEmployees) {
+                        const r = results.find(res => res.employeeId === emp.id);
+                        if (!r) {
+                            differsFromResults = true;
+                            break;
+                        }
+                        if (r.payableDays === r.daysInMonth && Math.round(emp.basicPay) !== Math.round(r.earnings.basic)) {
+                            differsFromResults = true;
+                            break;
+                        }
+                        if (emp.isPFExempt && (r.deductions.epf > 0 || r.employerContributions.epf > 0)) {
+                            differsFromResults = true;
+                            break;
+                        }
+                        if (emp.isESIExempt && (r.deductions.esi > 0 || r.employerContributions.esi > 0)) {
+                            differsFromResults = true;
+                            break;
+                        }
+                        if (emp.isPTExempt && r.deductions.pt > 0) {
+                            differsFromResults = true;
+                            break;
+                        }
+                        if (emp.isLWFExempt && (r.deductions.lwf > 0 || r.employerContributions.lwf > 0)) {
+                            differsFromResults = true;
+                            break;
+                        }
+                    }
                 }
-                setMasterDataChanged(false);
+
+                if (differsFromResults) {
+                    setMasterDataChanged(true);
+                    setIsBannerDismissed(false);
+                    setIsSaved(false);
+                } else {
+                    localStorage.setItem(employeesKey, JSON.stringify(activeEmployees));
+                    if (!localStorage.getItem(configKey)) {
+                        localStorage.setItem(configKey, JSON.stringify(config));
+                    }
+                    setMasterDataChanged(false);
+                }
             } else {
                 let payAffected = false;
                 for (const emp of activeEmployees) {
@@ -229,10 +276,12 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                     setIsSaved(false);
                 } else {
                     setMasterDataChanged(false);
+                    setIsBannerDismissed(false);
                 }
             }
         } else {
             setMasterDataChanged(false);
+            setIsBannerDismissed(false);
         }
     }, [activeEmployees, results.length, isLocked, companyProfile.id, month, year, config]);
 
@@ -240,6 +289,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     const prevAdvancesRef = React.useRef(advanceLedgers);
     const prevFinesRef = React.useRef(fines);
     const prevOtRecordsRef = React.useRef(otRecords);
+    const prevVpfRecordsRef = React.useRef(vpfRecords);
     const prevArrearHistoryRef = React.useRef(arrearHistory);
     const prevConfigRef = React.useRef(config);
     const prevPeriodContextRef = React.useRef(`${companyProfile.id}_${month}_${year}`);
@@ -252,6 +302,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             prevAdvancesRef.current = advanceLedgers;
             prevFinesRef.current = fines;
             prevOtRecordsRef.current = otRecords;
+            prevVpfRecordsRef.current = vpfRecords;
             prevArrearHistoryRef.current = arrearHistory;
             prevConfigRef.current = config;
             setDataIsStale(false);
@@ -279,6 +330,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 prevAdvancesRef.current !== advanceLedgers ||
                 prevFinesRef.current !== fines ||
                 prevOtRecordsRef.current !== otRecords ||
+                prevVpfRecordsRef.current !== vpfRecords ||
                 prevArrearHistoryRef.current !== arrearHistory ||
                 configChanged;
 
@@ -290,9 +342,10 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         prevAdvancesRef.current = advanceLedgers;
         prevFinesRef.current = fines;
         prevOtRecordsRef.current = otRecords;
+        prevVpfRecordsRef.current = vpfRecords;
         prevArrearHistoryRef.current = arrearHistory;
         prevConfigRef.current = config;
-    }, [attendances, advanceLedgers, fines, otRecords, arrearHistory, config, results.length, isLocked, companyProfile.id, month, year]);
+    }, [attendances, advanceLedgers, fines, otRecords, vpfRecords, arrearHistory, config, results.length, isLocked, companyProfile.id, month, year]);
 
 
 
@@ -384,7 +437,16 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         setIsProcessing(true);
         setTimeout(() => {
             try {
+                const isPeriodTransitionMonth = (month === 'October' || month === 'April');
+                const ceiling = config.esiCeiling || 21000;
                 const calculatedResults = activeEmployees.map(emp => {
+                    let calcEmp = emp;
+                    if (isPeriodTransitionMonth && config.enableESI !== false && !emp.isESIExempt) {
+                        const esiWage = calculateESICodeWage(emp, config);
+                        if (esiWage > ceiling) {
+                            calcEmp = { ...emp, isESIExempt: true };
+                        }
+                    }
                     const attendance = attendances.find(a => a.employeeId === emp.id && String(a?.month || '').trim().toLowerCase() === String(month || '').trim().toLowerCase() && Number(a?.year) === Number(year)) || { employeeId: emp.id, month, year, presentDays: 0, earnedLeave: 0, sickLeave: 0, casualLeave: 0, lopDays: 0 };
                     const leave = leaveLedgers.find(l => l.employeeId === emp.id) || { employeeId: emp.id, el: { opening: 0, eligible: 0, encashed: 0, availed: 0, balance: 0 }, sl: { eligible: 0, availed: 0, balance: 0 }, cl: { availed: 0, accumulation: 0, balance: 0 } };
                     const advance = advanceLedgers.find(a => a.employeeId === emp.id) || { employeeId: emp.id, opening: 0, totalAdvance: 0, monthlyInstallment: 0, paidAmount: 0, balance: 0, emiCount: 0, manualPayment: 0, recovery: 0 };
@@ -392,12 +454,13 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                     const shouldRestrict = restrictedMode && complianceConflicts.some(c => c.employeeId === emp.id);
                     const otRecord = otRecords.find(r => r.employeeId === emp.id && r.month === month && r.year === year) || null;
 
-                    return calculatePayroll(emp, config, attendance, leave, advance, month, year, { restrictTo50Percent: shouldRestrict }, fines, otRecord, 0, savedRecords);
+                    return calculatePayroll(calcEmp, config, attendance, leave, advance, month, year, { restrictTo50Percent: shouldRestrict }, fines, otRecord, 0, savedRecords, vpfRecords);
                 });
                 const isRecalc = results.length > 0;
                 setResults(calculatedResults);
                 setIsSaved(false);
                 setMasterDataChanged(false); // Clear the warning on successful calculation
+                setIsBannerDismissed(false);
                 setDataIsStale(false); // Reset stale state on successful calculation
 
                 const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
@@ -410,6 +473,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 prevAdvancesRef.current = advanceLedgers;
                 prevFinesRef.current = fines;
                 prevOtRecordsRef.current = otRecords;
+                prevVpfRecordsRef.current = vpfRecords;
                 prevArrearHistoryRef.current = arrearHistory;
                 prevConfigRef.current = config;
 
@@ -438,11 +502,12 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         if (isLocked || companyProfile.isReadOnly) return;
 
         if (hasAnyUnsavedTab) {
-            const unsavedTabs: { name: string; key: 'attendance' | 'ledgers' | 'fines' | 'overtime' }[] = [];
+            const unsavedTabs: { name: string; key: 'attendance' | 'ledgers' | 'fines' | 'overtime' | 'vpf_pf_adv' }[] = [];
             if (attendanceJustSaved === false) unsavedTabs.push({ name: '1. Attendance', key: 'attendance' });
             if (advanceJustSaved === false) unsavedTabs.push({ name: '2. Advances', key: 'ledgers' });
             if (fineJustSaved === false) unsavedTabs.push({ name: '3. Tax & Fines', key: 'fines' });
             if (config.enableOT && otJustSaved === false) unsavedTabs.push({ name: '4. Overtime', key: 'overtime' });
+            if (vpfJustSaved === false) unsavedTabs.push({ name: 'VPF & PF Advance Refund', key: 'vpf_pf_adv' });
 
             setModalState({
                 isOpen: true,
@@ -603,12 +668,44 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 }
             }
 
-            // Map over activeEmployees, overriding properties for restored ones so the current run is accurate
-            const processedActiveEmployees = activeEmployees.map(emp => {
-                if (employeesToRestore.some(e => e.id === emp.id)) {
-                    return { ...emp, leavingReason: '' };
+            // Check for Statutory ESI Period Transition (October & April)
+            const isPeriodTransitionMonth = (month === 'October' || month === 'April');
+            const esiTransitionedEmployees: { id: string; name: string; wage: number }[] = [];
+
+            if (isPeriodTransitionMonth && config.enableESI !== false) {
+                const ceiling = config.esiCeiling || 21000;
+                activeEmployees.forEach(emp => {
+                    if (!emp.isESIExempt) {
+                        const esiWage = calculateESICodeWage(emp, config);
+                        if (esiWage > ceiling) {
+                            esiTransitionedEmployees.push({ id: emp.id, name: emp.name, wage: esiWage });
+                        }
+                    }
+                });
+
+                if (esiTransitionedEmployees.length > 0) {
+                    const transitionedIds = new Set(esiTransitionedEmployees.map(e => e.id));
+                    if (setEmployees) {
+                        setEmployees(prev => prev.map(emp => {
+                            if (transitionedIds.has(emp.id)) {
+                                return { ...emp, isESIExempt: true };
+                            }
+                            return emp;
+                        }));
+                    }
                 }
-                return emp;
+            }
+
+            // Map over activeEmployees, overriding properties for restored and ESI-transitioned ones so the current run is accurate
+            const processedActiveEmployees = activeEmployees.map(emp => {
+                let updated = { ...emp };
+                if (employeesToRestore.some(e => e.id === emp.id)) {
+                    updated.leavingReason = '';
+                }
+                if (esiTransitionedEmployees.some(e => e.id === emp.id)) {
+                    updated.isESIExempt = true;
+                }
+                return updated;
             });
 
             const initialResults = processedActiveEmployees.map(emp => {
@@ -617,7 +714,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 const advance = advanceLedgers.find(a => a.employeeId === emp.id) || { employeeId: emp.id, opening: 0, totalAdvance: 0, monthlyInstallment: 0, paidAmount: 0, balance: 0, emiCount: 0, manualPayment: 0, recovery: 0 };
                 const otRecord = otRecords.find(r => r.employeeId === emp.id && r.month === month && r.year === year) || null;
 
-                return calculatePayroll(emp, config, attendance, leave, advance, month, year, { restrictTo50Percent: false }, fines, otRecord, 0, savedRecords);
+                return calculatePayroll(emp, config, attendance, leave, advance, month, year, { restrictTo50Percent: false }, fines, otRecord, 0, savedRecords, vpfRecords);
             });
 
             // CHECK CONDITION B: Advance > 50% of Code_Gross_Wages
@@ -651,6 +748,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 setResults(initialResults);
                 setIsSaved(false);
                 setMasterDataChanged(false); // Clear the warning on successful calculation
+                setIsBannerDismissed(false);
                 setDataIsStale(false); // Reset stale state on successful calculation
 
                 const configKey = `app_calc_config_${companyProfile.id}_${month}_${year}`;
@@ -663,19 +761,33 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 prevAdvancesRef.current = advanceLedgers;
                 prevFinesRef.current = fines;
                 prevOtRecordsRef.current = otRecords;
+                prevVpfRecordsRef.current = vpfRecords;
                 prevArrearHistoryRef.current = arrearHistory;
                 prevConfigRef.current = config;
 
                 setIsProcessing(false);
 
-                setModalState({
-                    isOpen: true,
-                    type: 'success',
-                    title: isRecalc ? 'Recalculation Applied Successfully' : 'Payroll Calculation Completed',
-                    message: isRecalc
-                        ? `Pay data for ${month} ${year} has been updated with the latest inputs and statutory configurations.`
-                        : `Payroll calculation for ${month} ${year} completed successfully.`
-                });
+                if (esiTransitionedEmployees.length > 0) {
+                    const ceiling = config.esiCeiling || 21000;
+                    showAlert?.(
+                        'info',
+                        'Statutory ESI Compliance: Period Transition',
+                        `In accordance with Section 2(9) of the ESI Act, the following employee(s) completed their contribution period with wages exceeding the statutory ceiling (₹${formatIndianNumber(ceiling)}). Their status has been automatically updated to ESI Exempt effective ${month} ${year}:\n\n` +
+                        esiTransitionedEmployees.map(e => `• ${e.name} (${e.id}) — ESI Code Wage: ₹${formatIndianNumber(e.wage)}`).join('\n'),
+                        undefined,
+                        undefined,
+                        'OK'
+                    );
+                } else {
+                    setModalState({
+                        isOpen: true,
+                        type: 'success',
+                        title: isRecalc ? 'Recalculation Applied Successfully' : 'Payroll Calculation Completed',
+                        message: isRecalc
+                            ? `Pay data for ${month} ${year} has been updated with the latest inputs and statutory configurations.`
+                            : `Payroll calculation for ${month} ${year} completed successfully.`
+                    });
+                }
             }
         }, 500);
     };
@@ -697,6 +809,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         setSavedRecords([...otherRecords, ...newRecords]);
         setIsSaved(true);
         setMasterDataChanged(false);
+        setIsBannerDismissed(false);
         setModalState({ isOpen: true, type: 'success', title: 'Draft Saved', message: `Payroll for ${month} ${year} saved successfully.` });
     };
 
@@ -733,6 +846,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 // Deductions
                 'PF (Employee)': r?.deductions?.epf || 0,
                 'VPF': r?.deductions?.vpf || 0,
+                'PF Adv Repay': r?.deductions?.pfAdvRepay || 0,
                 'ESI (Employee)': r?.deductions?.esi || 0,
                 'Professional Tax': r?.deductions?.pt || 0,
                 'Income Tax (TDS)': r?.deductions?.it || 0,
@@ -862,6 +976,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         totalEarnings: { label: 'Gross', className: 'text-right text-white font-black', value: (r: PayrollResult) => Math.round(r?.earnings?.total || 0) },
         epf: { label: 'PF', className: 'text-right text-blue-300', value: (r: PayrollResult) => Math.round(r?.deductions?.epf || 0) },
         vpf: { label: 'VPF', className: 'text-right text-blue-300', value: (r: PayrollResult) => Math.round(r?.deductions?.vpf || 0) },
+        pfAdvRepay: { label: 'PF Adv Repay', className: 'text-right text-purple-300', value: (r: PayrollResult) => Math.round(r?.deductions?.pfAdvRepay || 0) },
         esi: { label: 'ESI', className: 'text-right text-pink-300', value: (r: PayrollResult) => Math.round(r?.deductions?.esi || 0) },
         advanceRecovery: { label: 'ADV', className: 'text-right text-sky-300 font-black', value: (r: PayrollResult) => Math.round(r?.deductions?.advanceRecovery || 0) },
         pt_it: { label: 'PT/TDS', className: 'text-right text-amber-300', value: (r: PayrollResult) => Math.round((r?.deductions?.pt || 0) + (r?.deductions?.it || 0)) },
@@ -873,7 +988,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             label: 'Others',
             className: 'text-right text-purple-300',
             value: (r: PayrollResult) => {
-                const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
+                const deductionKeys = ['epf', 'vpf', 'pfAdvRepay', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
                 const displayedDeductionKeys = deductionKeys.filter(k => activeColumns.includes(k));
                 let sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => {
                     const val = r?.deductions?.[k as keyof typeof r.deductions] || 0;
@@ -931,7 +1046,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
     }, [results, activeColumns]);
 
     const earningsKeys = ['basic', 'da', 'retaining', 'hra', 'conveyance', 'washing', 'attire', 'special1', 'special2', 'special3', 'others', 'bonus', 'leaveEncashment', 'otAmount', 'arrears', 'totalEarnings'];
-    const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'it', 'lwf', 'fine', 'otherDeductions', 'totalDeductions'];
+    const deductionKeys = ['epf', 'vpf', 'pfAdvRepay', 'esi', 'advanceRecovery', 'pt', 'it', 'lwf', 'fine', 'otherDeductions', 'totalDeductions'];
 
     const earningsCount = activeColumns.filter(c => earningsKeys.includes(c)).length;
     const deductionCount = activeColumns.filter(c => deductionKeys.includes(c)).length;
@@ -942,18 +1057,32 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
-            {masterDataChanged && results.length > 0 && !isLocked && !companyProfile.isReadOnly && (
-                <div className="bg-amber-900/20 border border-amber-600/50 p-4 rounded-xl flex items-center justify-between gap-4 animate-pulse">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-amber-600 rounded-lg text-white shadow-lg shadow-amber-900/50">
-                            <AlertTriangle size={20} />
+            {masterDataChanged && results.length > 0 && !isLocked && !companyProfile.isReadOnly && !isBannerDismissed && (
+                <div className="bg-amber-950/40 border-2 border-amber-500/60 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg shadow-amber-950/50 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="flex items-center gap-3.5">
+                        <div className="p-2.5 bg-amber-500 text-slate-950 rounded-xl font-bold shadow-md shrink-0">
+                            <AlertTriangle size={22} className="stroke-[2.5]" />
                         </div>
                         <div>
-                            <h3 className="text-sm font-black text-white uppercase tracking-tight">Master Data Updated</h3>
-                            <p className="text-amber-200 text-[10px] font-bold uppercase tracking-wider">EMPLOYEE MASTER RECORDS HAVE BEEN CHANGED AFFECTING THE PAY SHEET. CLICK RECALCULATE TO APPLY THE CHANGES.</p>
+                            <div className="flex items-center gap-2">
+                                <h3 className="text-sm font-black text-amber-300 uppercase tracking-tight">Master Data Updated – Recalculation Required</h3>
+                                <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full animate-pulse">Action Needed</span>
+                            </div>
+                            <p className="text-slate-300 text-[11px] font-semibold mt-0.5 leading-relaxed">
+                                Changes detected in Employee Master affecting Pay Calculation or Statutory Contributions (PF, EPS, ESI, PT, LWF). Click <strong className="text-white">"ReCalculate Pay"</strong> to apply the updated wages and statutory rules.
+                            </p>
                         </div>
                     </div>
-                    <button onClick={() => setMasterDataChanged(false)} title="Dismiss Warning" aria-label="Dismiss Warning" className="text-amber-400 hover:text-white transition-colors"><X size={18} /></button>
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                        <button
+                            onClick={() => setIsBannerDismissed(true)}
+                            title="Dismiss Banner (Recalculate remains available)"
+                            aria-label="Dismiss Banner"
+                            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-colors"
+                        >
+                            <X size={18} />
+                        </button>
+                    </div>
                 </div>
             )}
             <div className={`bg-[#1e293b] p-3 rounded-xl border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 ${isLocked ? 'opacity-90' : ''}`}>
@@ -983,15 +1112,20 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                             const hasPendingChanges = hasAnyUnsavedTab || dataIsStale || masterDataChanged || isConfigStale;
                             const isCalculateDisabled = isProcessing || !hasAnyAttendance || (results.length > 0 && !hasPendingChanges) || companyProfile.isReadOnly;
                             const isSaveDraftDisabled = isSaved || !hasAnyAttendance || hasPendingChanges || results.length === 0 || companyProfile.isReadOnly;
+                            const isHighlightRecalc = masterDataChanged && !isCalculateDisabled && results.length > 0;
 
                             return (
                                 <>
                                     <button
                                         onClick={handleCalculate}
                                         disabled={isCalculateDisabled}
-                                        title={!hasAnyAttendance ? "No attendance data found for this period" : (results.length > 0 ? (isCalculateDisabled ? "Recalculation in inactive mode until new changes or modifications are initiated" : "Recalculate Payroll with updated changes") : "Calculate Payroll")}
+                                        title={!hasAnyAttendance ? "No attendance data found for this period" : (results.length > 0 ? (isCalculateDisabled ? "Recalculation in inactive mode until new changes or modifications are initiated" : (masterDataChanged ? "Employee Master changes detected affecting Pay or Statutory Contributions. Click to Recalculate." : "Recalculate Payroll with updated changes")) : "Calculate Payroll")}
                                         aria-label="Calculate Payroll"
-                                        className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[12px] rounded-lg transition-all shadow-lg shadow-blue-900/20 disabled:opacity-70 disabled:bg-slate-700 disabled:cursor-not-allowed"
+                                        className={`flex items-center gap-1.5 px-4 py-2 font-bold text-[12px] rounded-lg transition-all shadow-lg disabled:opacity-70 disabled:bg-slate-700 disabled:cursor-not-allowed ${
+                                            isHighlightRecalc
+                                                ? 'bg-amber-600 hover:bg-amber-500 text-white ring-2 ring-amber-400/50 shadow-amber-900/40 animate-pulse'
+                                                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20'
+                                        }`}
                                     >
                                         {isProcessing ? (
                                             <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
@@ -1342,7 +1476,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                                     <div className="flex justify-between"><span className="text-slate-500 font-bold uppercase">ESI No</span><span className="font-bold text-slate-900">{emp.esiNumber || 'N/A'}</span></div>
                                     <div className="flex justify-between"><span className="text-slate-500 font-bold uppercase">PAN No</span><span className="font-bold text-slate-900">{emp.pan || 'N/A'}</span></div>
                                 </div>
-                                    <div className="border border-slate-800"><div className="grid grid-cols-4 bg-slate-800 text-white text-xs font-bold uppercase text-center divide-x divide-slate-600"><div className="p-2">Earnings</div><div className="p-2">Amount (₹)</div><div className="p-2">Deductions</div><div className="p-2">Amount (₹)</div></div><div className="grid grid-cols-4 text-xs divide-x divide-slate-300"><div className="space-y-1 p-2"><div className="text-slate-600">Basic Pay</div><div className="text-slate-600">DA</div><div className="text-slate-600">Retaining Allw</div><div className="text-slate-600">HRA</div><div className="text-slate-600">Conveyance</div><div className="text-slate-600">Washing Allw</div><div className="text-slate-600">{companyProfile?.specialAllowance1Name || 'Special Allw 1'}</div><div className="text-slate-600">{companyProfile?.specialAllowance2Name || 'Special Allw 2'}</div><div className="text-slate-600">{companyProfile?.specialAllowance3Name || 'Special Allw 3'}</div><div className="text-slate-600">Overtime Pay</div><div className="text-slate-600">Leave Encash</div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.earnings?.basic || 0).toFixed(2)}</div><div>{(r?.earnings?.da || 0).toFixed(2)}</div><div>{(r?.earnings?.retainingAllowance || 0).toFixed(2)}</div><div>{(r?.earnings?.hra || 0).toFixed(2)}</div><div>{(r?.earnings?.conveyance || 0).toFixed(2)}</div><div>{other.toFixed(2)}</div><div>{(r?.earnings?.special1 || 0).toFixed(2)}</div><div>{(r?.earnings?.special2 || 0).toFixed(2)}</div><div>{(r?.earnings?.special3 || 0).toFixed(2)}</div><div className="font-bold text-blue-600">{(r?.earnings?.otAmount || 0).toFixed(2)}</div><div>{(r?.earnings?.leaveEncashment || 0).toFixed(2)}</div></div><div className="space-y-1 p-2"><div className="text-slate-600">Provident Fund {r.isCode88 ? '*' : ''}{isPropPFCapped ? <span className="text-[#000080] font-bold"> #</span> : ''}</div><div className="text-slate-600">ESI {r.isESICodeWagesUsed ? '**' : ''}</div><div className="text-slate-600">Professional Tax</div><div className="text-slate-600">Income Tax</div><div className="text-slate-600">VPF</div><div className="text-slate-600">LWF</div><div className="text-slate-600">Adv Recovery</div><div className="text-red-600 font-bold">Fine / Damages</div><div className="text-slate-600"></div><div className="text-slate-600"></div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.deductions?.epf || 0).toFixed(2)}</div><div>{(r?.deductions?.esi || 0).toFixed(2)}</div><div>{(r?.deductions?.pt || 0).toFixed(2)}</div><div>{(r?.deductions?.it || 0).toFixed(2)}</div><div>{(r?.deductions?.vpf || 0).toFixed(2)}</div><div>{(r?.deductions?.lwf || 0).toFixed(2)}</div><div>{(r?.deductions?.advanceRecovery || 0).toFixed(2)}</div><div className="text-red-600 font-bold">{(r?.deductions?.fine || 0).toFixed(2)}</div><div></div><div></div></div></div><div className="grid grid-cols-4 bg-slate-100 border-t border-slate-800 text-xs font-bold divide-x divide-slate-300"><div className="p-2 text-slate-800">Gross Earnings</div><div className="p-2 text-right text-slate-900">{(r?.earnings?.total || 0).toFixed(2)}</div><div className="p-2 text-slate-800">Total Deductions</div><div className="p-2 text-right text-slate-900">{(r?.deductions?.total || 0).toFixed(2)}</div></div></div>
+                                    <div className="border border-slate-800"><div className="grid grid-cols-4 bg-slate-800 text-white text-xs font-bold uppercase text-center divide-x divide-slate-600"><div className="p-2">Earnings</div><div className="p-2">Amount (₹)</div><div className="p-2">Deductions</div><div className="p-2">Amount (₹)</div></div><div className="grid grid-cols-4 text-xs divide-x divide-slate-300"><div className="space-y-1 p-2"><div className="text-slate-600">Basic Pay</div><div className="text-slate-600">DA</div><div className="text-slate-600">Retaining Allw</div><div className="text-slate-600">HRA</div><div className="text-slate-600">Conveyance</div><div className="text-slate-600">Washing Allw</div><div className="text-slate-600">{companyProfile?.specialAllowance1Name || 'Special Allw 1'}</div><div className="text-slate-600">{companyProfile?.specialAllowance2Name || 'Special Allw 2'}</div><div className="text-slate-600">{companyProfile?.specialAllowance3Name || 'Special Allw 3'}</div><div className="text-slate-600">Overtime Pay</div><div className="text-slate-600">Leave Encash</div></div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.earnings?.basic || 0).toFixed(2)}</div><div>{(r?.earnings?.da || 0).toFixed(2)}</div><div>{(r?.earnings?.retainingAllowance || 0).toFixed(2)}</div><div>{(r?.earnings?.hra || 0).toFixed(2)}</div><div>{(r?.earnings?.conveyance || 0).toFixed(2)}</div><div>{other.toFixed(2)}</div><div>{(r?.earnings?.special1 || 0).toFixed(2)}</div><div>{(r?.earnings?.special2 || 0).toFixed(2)}</div><div>{(r?.earnings?.special3 || 0).toFixed(2)}</div><div className="font-bold text-blue-600">{(r?.earnings?.otAmount || 0).toFixed(2)}</div><div>{(r?.earnings?.leaveEncashment || 0).toFixed(2)}</div></div><div className="space-y-1 p-2"><div className="text-slate-600">Provident Fund {r.isCode88 ? '*' : ''}{isPropPFCapped ? <span className="text-[#000080] font-bold"> #</span> : ''}</div><div className="text-slate-600">ESI {r.isESICodeWagesUsed ? '**' : ''}</div><div className="text-slate-600">Professional Tax</div><div className="text-slate-600">Income Tax</div><div className="text-slate-600">LWF</div><div className="text-slate-600">Adv Recovery</div><div className="text-red-600 font-bold">Fine / Damages</div>{(r?.deductions?.vpf || 0) > 0 && <div className="text-slate-600">VPF</div>}{(r?.deductions?.pfAdvRepay || 0) > 0 && <div className="text-slate-600">PF Adv Repay</div>}</div><div className="space-y-1 p-2 text-right font-mono text-slate-900"><div>{(r?.deductions?.epf || 0).toFixed(2)}</div><div>{(r?.deductions?.esi || 0).toFixed(2)}</div><div>{(r?.deductions?.pt || 0).toFixed(2)}</div><div>{(r?.deductions?.it || 0).toFixed(2)}</div><div>{(r?.deductions?.lwf || 0).toFixed(2)}</div><div>{(r?.deductions?.advanceRecovery || 0).toFixed(2)}</div><div className="text-red-600 font-bold">{(r?.deductions?.fine || 0).toFixed(2)}</div>{(r?.deductions?.vpf || 0) > 0 && <div>{(r?.deductions?.vpf || 0).toFixed(2)}</div>}{(r?.deductions?.pfAdvRepay || 0) > 0 && <div>{(r?.deductions?.pfAdvRepay || 0).toFixed(2)}</div>}</div></div><div className="grid grid-cols-4 bg-slate-100 border-t border-slate-800 text-xs font-bold divide-x divide-slate-300"><div className="p-2 text-slate-800">Gross Earnings</div><div className="p-2 text-right text-slate-900">{(r?.earnings?.total || 0).toFixed(2)}</div><div className="p-2 text-slate-800">Total Deductions</div><div className="p-2 text-right text-slate-900">{(r?.deductions?.total || 0).toFixed(2)}</div></div></div>
                                     <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 flex flex-col md:flex-row justify-between items-center gap-4"><div><p className="text-xs font-bold text-blue-800 uppercase tracking-widest">Net Salary Payable</p><p className="text-[10px] text-blue-600 italic mt-1 max-w-sm">{numberToWords(Math.round(r?.netPay || 0))} Rupees Only</p></div><div className="text-3xl font-black text-blue-900">₹ {formatIndianNumber(Math.round(r?.netPay || 0))}</div></div>
                                     <div className="text-[10px] text-slate-400 space-y-1 pt-4 border-t border-slate-200">{r.isCode88 && <p>* PF calculated on Code Wages (Social Security Code 2020)</p>}{r.isESICodeWagesUsed && <p>** ESI calculated on Code Wages (Social Security Code 2020)</p>}{isPropPFCapped && <p className="text-[#000080] font-bold italic"># Proportionate Wages(15000*days worked/actual days of the month) considered for PF Calculation due to Non Contribution Days (NCP)</p>}{r.esiRemark && <p className="text-amber-600 font-bold">{r.esiRemark}</p>}<p className="text-center italic mt-4">This is a computer-generated document and does not require a signature.</p></div></>
                                 );

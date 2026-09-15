@@ -1056,12 +1056,14 @@ const GLOBAL_KEYS = [
     'app_company_limit', 
     'app_logo',
     'app_active_patch_ts',
+    'app_pending_patch_ts',
     'app_patch_skip_count',
     'app_version_skip_count',
     'app_version_marker',
     'app_last_seen_version',
     'app_last_seen_patch_ts',
-    'heartbeat_debug_logs'
+    'heartbeat_debug_logs',
+    'app_gemini_api_key'
 ];
 
 async function performAutoRescue(rootDb: Database.Database, appPaths: any) {
@@ -2501,7 +2503,8 @@ ipcMain.handle('get-backup-periods', async (_, arg) => {
         const MONTHS_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December'];
         const transactionalPrefixes = [
             'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
-            'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+            'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records',
+            'app_vpf_records'
         ];
 
         const periods = new Set<string>();
@@ -2769,7 +2772,8 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
 
                 const transactionalPrefixes = [
                     'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
-                    'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+                    'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records',
+                    'app_vpf_records'
                 ];
 
                 const MONTHS_ORDER = ['january','february','march','april','may','june','july','august','september','october','november','december'];
@@ -3066,7 +3070,8 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
         // Transactional keys filtered by month/year range (attendance, payroll, ledgers, etc.)
         const TRANSACTIONAL_PREFIXES = [
             'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers',
-            'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+            'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records',
+            'app_vpf_records'
         ];
 
         // Filter a JSON array of transactional records by period range
@@ -3666,7 +3671,7 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
 
                             if (calculatedHash.toLowerCase() !== expectedHash.toLowerCase()) {
                                 console.error(`❌ Security Violation: Hash Mismatch!\nExpected: ${expectedHash}\nActual: ${calculatedHash}`);
-                                fs.unlinkSync(dest);
+                                try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch (e) {}
                                 isUpdateDownloading = false;
                                 resolve({ success: false, error: 'SECURITY_HASH_MISMATCH' });
                                 return;
@@ -3674,11 +3679,13 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
                             console.log('✅ Integrity Verified successfully.');
                         } catch (hashErr: any) {
                             console.error('❌ Hash calculation failed:', hashErr);
-                            fs.unlinkSync(dest);
+                            try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch (e) {}
                             isUpdateDownloading = false;
                             resolve({ success: false, error: 'Integrity check failed' });
                             return;
                         }
+                    } else {
+                        console.warn('⚠️ No SHA-256 hash provided for this update. Proceeding without cryptographic hash verification.');
                     }
 
                     BrowserWindow.getAllWindows().forEach(win => {
@@ -3770,11 +3777,12 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
                     const rootDbPath = path.join(paths.root, 'active_db.sqlite');
                     const rootDb = new Database(rootDbPath);
                     rootDb.exec('CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value TEXT)');
-                    rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)').run('app_active_patch_ts', JSON.stringify(options.newPatchTimestamp));
+                    // Note: Store as pending patch timestamp, NOT active patch timestamp!
+                    rootDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)').run('app_pending_patch_ts', JSON.stringify(options.newPatchTimestamp));
                     rootDb.close();
-                    console.log('✅ Safely persisted active patch timestamp to ROOT DB:', options.newPatchTimestamp);
+                    console.log('✅ Safely recorded pending patch timestamp to ROOT DB:', options.newPatchTimestamp);
                 } catch(e) {
-                    console.error('❌ Failed to persist patch timestamp to ROOT DB', e);
+                    console.error('❌ Failed to persist pending patch timestamp to ROOT DB', e);
                 }
             }
             if (db) {
@@ -3785,27 +3793,12 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
                 db = null;
             }
 
-            // A.5 Clean User Data Caches (sys_limit & Local Storage) for clean update
+            // A.5 Clean legacy sys_limit cache if needed (preserve Local Storage across updates!)
             try {
-                const markerPath = path.join(app.getPath('userData'), 'signature_patch_applied.marker');
-                
-                if (!fs.existsSync(markerPath)) {
-                    const sysLimitPath = path.join(app.getPath('userData'), 'sys_limit.bin');
-                    const localStoragePath = path.join(app.getPath('userData'), 'Local Storage');
-                    
-                    if (fs.existsSync(sysLimitPath)) {
-                        fs.unlinkSync(sysLimitPath);
-                        console.log('🧹 Deleted sys_limit.bin for clean update');
-                    }
-                    
-                    if (fs.existsSync(localStoragePath)) {
-                        fs.rmSync(localStoragePath, { recursive: true, force: true });
-                        console.log('🧹 Deleted Local Storage for clean update');
-                    }
-                    
-                    console.log('🧹 Signature patch cache wipe executed. Awaiting cloud sync for permanent marker.');
-                } else {
-                    console.log('⏩ Skipping cache wipe: Signature patch marker already exists.');
+                const sysLimitPath = path.join(app.getPath('userData'), 'sys_limit.bin');
+                if (fs.existsSync(sysLimitPath)) {
+                    fs.unlinkSync(sysLimitPath);
+                    console.log('🧹 Deleted sys_limit.bin for clean update');
                 }
             } catch (cleanErr) {
                 console.warn('⚠️ Failed to clean user data for update:', cleanErr);
@@ -3827,11 +3820,12 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
                 console.warn('⚠️ Safety backup skipped:', backupErr);
             }
 
-            // C. POWER LAUNCH: Wait 2s -> Kill BPP_APP -> Launch Installer
+            // C. POWER LAUNCH: Wait 2s -> Kill BPP_APP -> Launch Installer with Target Directory
             try {
                 const exeName = app.isPackaged ? 'BPP_APP.exe' : 'electron.exe';
                 const tempDir = app.getPath('temp');
                 const appExePath = process.execPath;
+                const appInstallDir = path.dirname(appExePath);
                 
                 // Write modern HTA message files to the temp directory
                 const silentHtaPath = path.join(tempDir, 'bpp_update_msg.hta');
@@ -3930,16 +3924,148 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
     return { success: true };
 });
 
+// ── BUILD INTEGRITY AUDIT IPC HANDLERS ──
+
+ipcMain.handle('get-app-build-audit-info', async () => {
+    try {
+        const appExePath = process.execPath;
+        const appInstallDir = path.dirname(appExePath);
+        let exeStats: any = null;
+        try {
+            if (fs.existsSync(appExePath)) {
+                const stat = fs.statSync(appExePath);
+                exeStats = {
+                    size: stat.size,
+                    mtime: stat.mtime.toISOString(),
+                    birthtime: stat.birthtime.toISOString()
+                };
+            }
+        } catch (_) {}
+
+        const installerPath = getInstallerPath();
+        let installerStats: any = null;
+        try {
+            if (fs.existsSync(installerPath)) {
+                const stat = fs.statSync(installerPath);
+                installerStats = {
+                    exists: true,
+                    path: installerPath,
+                    size: stat.size,
+                    mtime: stat.mtime.toISOString()
+                };
+            } else {
+                installerStats = { exists: false, path: installerPath };
+            }
+        } catch (_) {
+            installerStats = { exists: false, path: installerPath };
+        }
+
+        const tempDir = app.getPath('temp');
+        const statusFile = path.join(tempDir, 'bpp_update_status.json');
+        let updateStatus: any = null;
+        if (fs.existsSync(statusFile)) {
+            try {
+                updateStatus = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+            } catch (_) {}
+        }
+
+        const logFile = path.join(tempDir, 'bpp_update.log');
+        let updateLogLines: string[] = [];
+        if (fs.existsSync(logFile)) {
+            try {
+                const lines = fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean);
+                updateLogLines = lines.slice(-25);
+            } catch (_) {}
+        }
+
+        const pendingFile = path.join(tempDir, 'bpp_pending_update.json');
+        let pendingUpdate: any = null;
+        if (fs.existsSync(pendingFile)) {
+            try {
+                pendingUpdate = JSON.parse(fs.readFileSync(pendingFile, 'utf8'));
+            } catch (_) {}
+        }
+
+        return {
+            success: true,
+            isPackaged: app.isPackaged,
+            appVersion: app.getVersion(),
+            exePath: appExePath,
+            exeDir: appInstallDir,
+            exeStats,
+            installerStats,
+            updateStatus,
+            updateLogLines,
+            pendingUpdate,
+            platform: process.platform,
+            arch: process.arch
+        };
+    } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to fetch build audit info' };
+    }
+});
+
+ipcMain.handle('launch-installer-manually', async () => {
+    try {
+        const installerPath = getInstallerPath();
+        if (!fs.existsSync(installerPath)) {
+            return { success: false, error: `Installer file not found at "${installerPath}". Please download the update first.` };
+        }
+
+        // Close SQLite DB safely
+        if (db) {
+            try { 
+                db.pragma('wal_checkpoint(TRUNCATE)');
+                db.close(); 
+            } catch (_) {}
+            db = null;
+        }
+
+        // Launch installer directly as a detached process (native exe, 100% AV safe)
+        const child = spawn(installerPath, [], {
+            detached: true,
+            stdio: 'ignore'
+        });
+        child.unref();
+
+        // Destroy all windows and exit current app process cleanly so there are no running instances
+        BrowserWindow.getAllWindows().forEach(win => {
+            try { win.destroy(); } catch (_) {}
+        });
+
+        setTimeout(() => {
+            app.exit(0);
+        }, 150);
+
+        return { success: true };
+    } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to launch installer' };
+    }
+});
+
+ipcMain.handle('open-update-log', async () => {
+    try {
+        const logFile = path.join(app.getPath('temp'), 'bpp_update.log');
+        if (fs.existsSync(logFile)) {
+            shell.openPath(logFile);
+            return { success: true };
+        }
+        return { success: false, error: 'Update log file does not exist yet.' };
+    } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to open update log' };
+    }
+});
+
 function cleanupOldInstallers() {
     try {
         const dest = getInstallerPath();
         if (fs.existsSync(dest)) {
-            // Check if it's been there for more than a few minutes (avoid deleting during active download)
+            // Keep downloaded installer for 24 hours to support manual execution/recovery
             const stats = fs.statSync(dest);
             const ageMinutes = (Date.now() - stats.mtimeMs) / (1000 * 60);
-            if (ageMinutes > 5) {
+            if (ageMinutes > 1440) {
                 fs.unlinkSync(dest);
-                console.log('🧹 Cleaned up old installer file.');
+                console.log('🧹 Cleaned up old installer file (>24h).');
             }
         }
 

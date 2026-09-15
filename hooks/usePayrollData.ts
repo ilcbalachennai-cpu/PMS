@@ -3,7 +3,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   Employee, StatutoryConfig, CompanyProfile, PayrollResult, 
   Attendance, LeaveLedger, AdvanceLedger, FineRecord, 
-  ArrearBatch, LeavePolicy, OTRecord 
+  ArrearBatch, LeavePolicy, OTRecord, VPFRecord 
 } from '../types';
 import { 
   INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE, 
@@ -29,6 +29,7 @@ export interface PartialResetFilters {
     fines: boolean;
     arrears: boolean;
     otRecords: boolean;
+    vpfRecords?: boolean;
     employees: boolean;
   };
 }
@@ -127,7 +128,8 @@ export const usePayrollData = (showAlert: any) => {
     // Master data gets suffixed with ONLY Company ID.
     const transactionalKeys = [
       'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 
-      'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records'
+      'app_payroll_history', 'app_fines', 'app_arrear_history', 'app_ot_records',
+      'app_vpf_records'
     ];
     
     if (transactionalKeys.includes(key)) {
@@ -172,6 +174,7 @@ export const usePayrollData = (showAlert: any) => {
   const [fines, setFines] = useState<FineRecord[]>(() => getStoredInitial('app_fines', []));
   const [arrearHistory, setArrearHistory] = useState<ArrearBatch[]>(() => getStoredInitial('app_arrear_history', []));
   const [otRecords, setOTRecords] = useState<OTRecord[]>(() => getStoredInitial('app_ot_records', []));
+  const [vpfRecords, setVpfRecords] = useState<VPFRecord[]>(() => getStoredInitial('app_vpf_records', []));
   const [designations, setDesignations] = useState<string[]>(() => getStoredInitial('app_master_designations', ['Software Engineer', 'Project Manager', 'HR Manager', 'Accounts Executive', 'Peon']));
   const [divisions, setDivisions] = useState<string[]>(() => getStoredInitial('app_master_divisions', ['Head Office', 'Manufacturing', 'Sales', 'Marketing', 'Engineering']));
   const [branches, setBranches] = useState<any[]>(() => getStoredInitial('app_master_branches', ['Chennai', 'New Delhi', 'Mumbai', 'Bangalore']));
@@ -258,7 +261,7 @@ export const usePayrollData = (showAlert: any) => {
           if (dbRes.success && Array.isArray(dbRes.data)) {
             // V04.01.02: JIT Partitioning Bridge for Legacy Monolithic Keys
             let needsReFetch = false;
-            const legacyKeysToPartition = ['app_payroll_history', 'app_attendance', 'app_fines', 'app_arrear_history', 'app_ot_records'];
+            const legacyKeysToPartition = ['app_payroll_history', 'app_attendance', 'app_fines', 'app_arrear_history', 'app_ot_records', 'app_vpf_records'];
             for (const baseKey of legacyKeysToPartition) {
                const legacyItem = dbRes.data.find((item: any) => item.key === `${baseKey}_${activeCompanyId}` || item.key === baseKey);
                if (legacyItem) {
@@ -324,6 +327,7 @@ export const usePayrollData = (showAlert: any) => {
               app_leave_policy: getCKey('app_leave_policy'),
               app_arrear_history: getCKey('app_arrear_history'),
               app_ot_records: getCKey('app_ot_records'),
+              app_vpf_records: getCKey('app_vpf_records'),
               app_master_designations: getCKey('app_master_designations'),
               app_master_divisions: getCKey('app_master_divisions'),
               app_master_branches: getCKey('app_master_branches'),
@@ -354,6 +358,8 @@ export const usePayrollData = (showAlert: any) => {
                              hasRealData = parsed.some((r: any) => (r.otHours || 0) > 0 || (r.otAmount || 0) > 0);
                           } else if (key.startsWith('app_fines_FY')) {
                              hasRealData = parsed.some((r: any) => (r.amount || 0) > 0);
+                          } else if (key.startsWith('app_vpf_records_FY')) {
+                             hasRealData = parsed.some((r: any) => (r.vpfAmount || 0) > 0 || (r.pfAdvRepay || 0) > 0);
                           } else if (key.startsWith('app_advance_ledgers_FY') || key.startsWith('app_leave_ledgers_FY')) {
                              // Ledgers always have base records, so only consider them data if there's actual history/usage
                              hasRealData = parsed.some((r: any) => (r.history && r.history.length > 0) || r.usedEL > 0 || r.usedSL > 0 || r.usedCL > 0);
@@ -653,7 +659,7 @@ export const usePayrollData = (showAlert: any) => {
             const keysToKeep = [
                'app_active_company_id', 'app_companies', 'app_users', 'app_license_secure', 
                'app_machine_id', 'settings_initial_tab', 'app_active_financial_year', 'app_legal_agreed_date',
-               'app_active_patch_ts', 'app_latest_patch_timestamp', 'app_latest_version',
+               'app_active_patch_ts', 'app_pending_patch_ts', 'app_latest_patch_timestamp', 'app_latest_version',
                'app_download_url', 'app_download_url_win7', 'app_launcher_url',
                'app_update_hash', 'app_update_hash_win10', 'app_update_hash_win7',
                'app_patch_skip_count', 'app_version_skip_count', 'app_version_marker', 'app_update_ready'
@@ -713,6 +719,9 @@ export const usePayrollData = (showAlert: any) => {
                   if (fKey === 'app_advance_ledgers') setAdvanceLedgers(parsed);
                   if (fKey === 'app_fines') setFines(parsed);
                   if (fKey === 'app_leave_policy') setLeavePolicy(parsed);
+                  if (fKey === 'app_arrear_history') setArrearHistory(parsed);
+                  if (fKey === 'app_ot_records') setOTRecords(parsed);
+                  if (fKey === 'app_vpf_records') setVpfRecords(parsed);
                   if (fKey === 'app_master_designations') setDesignations(parsed);
                   if (fKey === 'app_master_divisions') setDivisions(parsed);
                   if (fKey === 'app_master_branches') setBranches(parsed);
@@ -819,6 +828,9 @@ export const usePayrollData = (showAlert: any) => {
             if (!siloData['app_leave_ledgers']) setLeaveLedgers([]);
             if (!siloData['app_advance_ledgers']) setAdvanceLedgers([]);
             if (!siloData['app_fines']) setFines([]);
+            if (!siloData['app_arrear_history']) setArrearHistory([]);
+            if (!siloData['app_ot_records']) setOTRecords([]);
+            if (!siloData['app_vpf_records']) setVpfRecords([]);
             if (!siloData['app_leave_policy']) setLeavePolicy(DEFAULT_LEAVE_POLICY);
           }
         }
@@ -1162,6 +1174,7 @@ export const usePayrollData = (showAlert: any) => {
     reloadState('app_fines', setFines, []);
     reloadState('app_arrear_history', setArrearHistory, []);
     reloadState('app_ot_records', setOTRecords, []);
+    reloadState('app_vpf_records', setVpfRecords, []);
     reloadState('app_master_designations', setDesignations, ['Software Engineer', 'Project Manager', 'HR Manager', 'Accounts Executive', 'Peon']);
     reloadState('app_master_divisions', setDivisions, ['Head Office', 'Manufacturing', 'Sales', 'Marketing', 'Engineering']);
     reloadState('app_master_branches', setBranches, ['Chennai', 'New Delhi', 'Mumbai', 'Bangalore']);
@@ -1215,7 +1228,7 @@ export const usePayrollData = (showAlert: any) => {
       'app_employees', 'app_config', 'app_company_profile',
       'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 
       'app_payroll_history', 'app_fines', 'app_leave_policy', 
-      'app_arrear_history', 'app_ot_records'
+      'app_arrear_history', 'app_ot_records', 'app_vpf_records'
     ];
     siloKeys.forEach(k => localStorage.removeItem(k));
 
@@ -1227,6 +1240,7 @@ export const usePayrollData = (showAlert: any) => {
     setFines([]);
     setArrearHistory([]);
     setOTRecords([]);
+    setVpfRecords([]);
     // masters reset to default
     setDesignations(['Software Engineer', 'Project Manager', 'HR Manager', 'Accounts Executive', 'Peon']);
     setDivisions(['Head Office', 'Manufacturing', 'Sales', 'Marketing', 'Engineering']);
@@ -1441,12 +1455,14 @@ export const usePayrollData = (showAlert: any) => {
 
       const nextFines = fines.filter(f => !(f.month === globalMonth && f.year === globalYear));
       const nextOTRecords = otRecords.filter(f => !(f.month === globalMonth && f.year === globalYear));
+      const nextVPFRecords = vpfRecords.filter(f => !(f.month === globalMonth && f.year === globalYear));
 
       setAttendances(nextAttendances);
       setAdvanceLedgers(nextAdvanceLedgers);
       setLeaveLedgers(nextLeaveLedgers);
       setFines(nextFines);
       setOTRecords(nextOTRecords);
+      setVpfRecords(nextVPFRecords);
 
       // V04.00.04: If rolling over from March to April, physically persist the carry-forwards to the NEW FY silo
       if (globalMonth === 'March' && nextMonth === 'April' && window.electronAPI?.dbSet) {
@@ -1458,6 +1474,7 @@ export const usePayrollData = (showAlert: any) => {
           await window.electronAPI.dbSet(overrideCKey('app_leave_ledgers'), nextLeaveLedgers);
           await window.electronAPI.dbSet(overrideCKey('app_fines'), nextFines);
           await window.electronAPI.dbSet(overrideCKey('app_ot_records'), nextOTRecords);
+          await window.electronAPI.dbSet(overrideCKey('app_vpf_records'), nextVPFRecords);
       }
       
       return { nextMonth, nextYear, backupRes, backupFileName };
@@ -1601,6 +1618,18 @@ export const usePayrollData = (showAlert: any) => {
       }
     }
 
+    // 6b. VPF Records
+    if (cats.vpfRecords) {
+      if (isAllMonths) {
+        await wipeDataset('app_vpf_records');
+        setVpfRecords([]);
+      } else {
+        const updated = vpfRecords.filter(rec => !isInResetRange(rec.month, rec.year));
+        await saveUpdatedDataset('app_vpf_records', updated);
+        setVpfRecords(updated);
+      }
+    }
+
     // 7. Employee Master Data (Wiped entirely if ALL months, or filtered by DOJ period if range reset)
     if (cats.employees) {
       if (isAllMonths) {
@@ -1688,7 +1717,7 @@ export const usePayrollData = (showAlert: any) => {
       const keysToWipe = [
         'app_employees', 'app_config', 'app_company_profile',
         'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
-        'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_ot_records', 'app_logo',
+        'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_ot_records', 'app_vpf_records', 'app_logo',
         'app_master_designations', 'app_master_divisions', 'app_master_branches', 'app_master_sites'
       ];
 
@@ -1784,6 +1813,7 @@ export const usePayrollData = (showAlert: any) => {
     setFines([]);
     setArrearHistory([]);
     setOTRecords([]);
+    setVpfRecords([]);
     setCompanies([]);
     setActiveCompanyId('default');
     
@@ -1805,6 +1835,7 @@ export const usePayrollData = (showAlert: any) => {
     fines, setFines,
     arrearHistory, setArrearHistory,
     otRecords, setOTRecords,
+    vpfRecords, setVpfRecords,
     designations, setDesignations,
     divisions, setDivisions,
     branches, setBranches,

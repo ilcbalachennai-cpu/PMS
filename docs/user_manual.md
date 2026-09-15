@@ -1,5 +1,5 @@
 # BharatPay Pro - Comprehensive User Manual
-*Version 06.01.10*
+*Version 06.01.11*
 
 Welcome to **BharatPay Pro**, a premium Payroll Management System designed for precision, security, and ease of use. This manual will guide you through every aspect of the software, including the advanced **Multi-Company Architecture** introduced in the V06 series.
 
@@ -372,7 +372,51 @@ The Mailing Service handles the automated distribution of secure, individual pay
 *   **Heartbeat Dispatch Queue**: The process runs in the background using an asynchronous mailing worker. The UI displays a live progress bar and heartbeat logs illustrating success rates, sent counts, and failure tracking. If a failure occurs (e.g. invalid email address), the system generates a downloadable failure report for immediate administrative correction.
 *   **SMTP Configuration**: Detailed step-by-step instructions on setting up your email SMTP server coordinates, port allocations, and SSL/TLS keys are available by clicking the **"Configure Mailing Credentials"** link directly inside the module settings.
 
-## 8. Statutory Reports & Compliance Portal
+#### 4. Payroll Audit Trail (Multi-Dimensional Variance & Statutory Reconciliation Engine)
+The **Payroll Audit Trail** is an executive-grade verification and anomaly detection engine located under **MIS > Audit Trail**. It enables HR administrators, compliance officers, and financial controllers to perform rigorous month-on-month cross-examinations before finalizing payroll, locking bank transfers, or filing EPFO/ESIC statutory returns.
+
+The engine compares a chosen **Current Month (Audit Period)** against a **Previous Month (Baseline Period)** across three specialized compliance dimensions:
+
+##### A. ECR Audit (EPF Electronic Challan-cum-Return Reconciliation)
+Compares month-on-month Provident Fund returns to ensure zero compliance gaps prior to EPFO portal upload:
+*   **Headcount & Aggregate Variance**: Computes net member count movements, total PF wages, and total statutory remittance variations across all 5 accounts (EE PF 12%, ER EPF 3.67% A/c 1, ER EPS 8.33% A/c 10, EDLI 0.50% A/c 21, and EPF Admin 0.50% A/c 2).
+*   **Intelligent Compliance Alerts & Heuristics**:
+    *   `EPS_DROPPED_ZERO` *(EPS Dropped to Zero)*: Instantly flags employees whose EPS contribution was active in the previous month but dropped to ₹0 in the current month. This highlights employees reaching 58 years of age or crossing wage thresholds, protecting the employer from EPFO inspection show-cause notices.
+    *   `VARIANCE_HIGH` *(High Wage Spike/Drop)*: Flags employees whose PF contribution wages shifted by more than 20%, catching data entry or attendance mistakes before challan generation.
+    *   `NEW_MEMBER` *(First-Time ECR Joiner)*: Isolates newly joined staff appearing in the ECR for the first time, ensuring UAN activation and member KYC compliance.
+    *   `DROPPED_MEMBER` *(Exited / Non-Contributing Member)*: Identifies employees absent from the current month's return. Captures Date of Leaving (DOL) and exit reason to ensure mandatory EPFO exit markings are filed on time.
+    *   `CONTRIB_CHANGED` & `NCP Days Variance`: Pinpoints changes in Non-Contributory Period (NCP) days, reconciling unpaid leaves directly against attendance sheets.
+*   **One-Click Formatted Excel Export**: Generates a color-coded ECR audit workbook with dedicated summary cards, percentage variance gauges, and granular employee schedules ready for PF auditor sign-off.
+
+##### B. ESI Audit (ESIC Monthly Contribution Reconciliation)
+Automates reconciliation of Employees' State Insurance returns across consecutive wage periods:
+*   **Aggregate Contribution Breakdown**: Tracks total Insured Persons (IPs), Gross Insurable Wages, Employee Share (0.75%), Employer Share (3.25%), and Total ESIC Remittance.
+*   **Crucial Statutory Ceilings & Coverage Flags**:
+    *   `CROSSED_CEILING` *(Statutory Wage Limit Warning)*: Alerts administrators when an employee's gross monthly remuneration crosses the statutory ₹21,000 ceiling. Under **ESIC Rule 50**, if an employee's wage crosses ₹21,000 during an active contribution period (April–September or October–March), deductions must continue until the end of that contribution period. This alert prevents accidental premature cessation of coverage.
+    *   `DROPPED_INTO_COVERAGE`: Identifies previously excluded employees whose gross wages dropped back below ₹21,000, bringing them back into mandatory insurance coverage.
+    *   `ZERO_CONTRIB`: Flags covered employees with zero worked days or nil earnings, ensuring medical leave or authorized leave without pay is correctly substantiated.
+    *   `NEW_IP` & `DROPPED_IP`: Segregates new registrations from exiting employees for streamlined portal declarations.
+*   **ESIC Audit Export**: Generates an audit-ready spreadsheet formatted to standard ESIC compliance audit requirements.
+
+##### C. Pay Audit (Gross-to-Net Variance & Payroll Signing Reconciliation)
+Delivers a comprehensive financial reconciliation comparing all earnings and deduction heads across the workforce:
+*   **Full Component Variance Tracking**: Analyzes changes across **Gross Earnings, Total Deductions, Net Payable Salary, Employer Cost-to-Company (CTC), Basic, HRA, DA, Special Allowances, TDS Recoveries, Advance/Loan EMIs, and Disciplinary Fines**.
+*   **Disbursement Anomaly Detection**:
+    *   Flags abnormal net salary spikes or sudden drops exceeding 15%.
+    *   Identifies zero-net pay scenarios where total deductions exhaust gross wages.
+    *   Monitors advance shortfall carry-forwards where loans could not be fully recovered due to excessive unpaid leave.
+*   **Executive Signing Workbook**: Exports an executive multi-tab Excel document featuring KPI summary badges, department-wise totals, and employee-level variance logs—providing CFOs and Directors with complete transparency before authorizing bank disbursement.
+
+##### Step-by-Step Workflow:
+1.  Navigate to **MIS > Audit Trail** from the sidebar.
+2.  Select your **Base Period** (Previous Month) and **Audit Period** (Current Month) from the top selector dropdowns.
+3.  Switch between the **ECR**, **ESI**, and **PAY** tabs to inspect respective statutory and financial metrics.
+4.  Use the Quick Filter pills (**All**, **Changes Only**, **Alerts Only**, **New**, **Dropped**) to instantly focus on anomalies.
+5.  Search any record by Employee ID, Name, UAN, or ESI Number.
+6.  Click **"Export Audit Sheet"** to download a styled, audit-ready Excel workbook saved directly to your organization's local reports folder.
+
+---
+
 
 BharatPay Pro features a fully integrated Statutory Compliance Engine that automates complex central and state government calculations. The portal generates error-free, portal-compliant files formatted precisely to match official upload specifications:
 

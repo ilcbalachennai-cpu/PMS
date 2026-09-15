@@ -355,7 +355,19 @@ export const parseEmployeeXLSX = async (
                         specialAllowance2: Number(getVal([companyProfile?.specialAllowance2Name || 'Special Allowance 2', 'Special Allowance 2', 'Special 2']) || 0),
                         specialAllowance3: Number(getVal([companyProfile?.specialAllowance3Name || 'Special Allowance 3', 'Special Allowance 3', 'Special 3']) || 0),
 
-                        isPFExempt: isTrue(getVal(['PF Exempt', 'PF Exempted'])),
+                        isPFExempt: (() => {
+                            const exempt = isTrue(getVal(['PF Exempt', 'PF Exempted', 'PF Exempt (Yes/No)']));
+                            return exempt;
+                        })(),
+                        isEPSEligible: (() => {
+                            const isExempt = isTrue(getVal(['PF Exempt', 'PF Exempted', 'PF Exempt (Yes/No)']));
+                            if (isExempt) return 'No';
+                            const val = getVal(['EPS Eligible (Yes/No)', 'EPS Eligible', 'isEPSEligible']);
+                            if (val !== null && val !== undefined && String(val).trim() !== '') {
+                                return isTrue(val) ? 'Yes' : 'No';
+                            }
+                            return 'Yes';
+                        })(),
                         isESIExempt: isTrue(getVal(['ESI Exempt', 'ESI Exempted'])),
 
                         pfHigherPension: {
@@ -646,7 +658,7 @@ export const generateEmployeeUpdateTemplateXLSX = async (employees: Employee[], 
 /**
  * Parses Employee Update XLSX and updates existing employees
  */
-export const parseEmployeeUpdateXLSX = async (file: File, existingEmployees: Employee[], companyProfile?: CompanyProfile): Promise<any> => {
+export const parseEmployeeUpdateXLSX = async (file: File, existingEmployees: Employee[], _companyProfile?: CompanyProfile): Promise<any> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
 
@@ -760,10 +772,20 @@ export const parseEmployeeUpdateXLSX = async (file: File, existingEmployees: Emp
                         conveyance: updateNum(['Conveyance'], existingEmp.conveyance),
                         washing: updateNum(['Washing Allowance'], existingEmp.washing),
                         attire: updateNum(['Attire Allowance'], existingEmp.attire),
-                        specialAllowance1: updateNum([companyProfile?.specialAllowance1Name || 'Special Allowance 1', 'Special Allowance 1'], existingEmp.specialAllowance1),
-                        specialAllowance2: updateNum([companyProfile?.specialAllowance2Name || 'Special Allowance 2', 'Special Allowance 2'], existingEmp.specialAllowance2),
-                        specialAllowance3: updateNum([companyProfile?.specialAllowance3Name || 'Special Allowance 3', 'Special Allowance 3'], existingEmp.specialAllowance3),
-                        isPFExempt: getVal(['PF Exempt (Yes/No)']) !== null && getVal(['PF Exempt (Yes/No)']) !== undefined && String(getVal(['PF Exempt (Yes/No)'])).trim() !== '' ? isTrue(getVal(['PF Exempt (Yes/No)'])) : existingEmp.isPFExempt,
+                        isPFExempt: (() => {
+                            const val = getVal(['PF Exempt (Yes/No)']);
+                            return (val !== null && val !== undefined && String(val).trim() !== '') ? isTrue(val) : existingEmp.isPFExempt;
+                        })(),
+                        isEPSEligible: (() => {
+                            const pfVal = getVal(['PF Exempt (Yes/No)']);
+                            const isExempt = (pfVal !== null && pfVal !== undefined && String(pfVal).trim() !== '') ? isTrue(pfVal) : existingEmp.isPFExempt;
+                            if (isExempt) return 'No';
+                            const epsVal = getVal(['EPS Eligible (Yes/No)', 'EPS Eligible']);
+                            if (epsVal !== null && epsVal !== undefined && String(epsVal).trim() !== '') {
+                                return isTrue(epsVal) ? 'Yes' : 'No';
+                            }
+                            return existingEmp.isEPSEligible || 'Yes';
+                        })(),
                         isESIExempt: getVal(['ESI Exempt (Yes/No)']) !== null && getVal(['ESI Exempt (Yes/No)']) !== undefined && String(getVal(['ESI Exempt (Yes/No)'])).trim() !== '' ? isTrue(getVal(['ESI Exempt (Yes/No)'])) : existingEmp.isESIExempt,
                         isPTExempt: getVal(['PT Exempt (Yes/No)']) !== null && getVal(['PT Exempt (Yes/No)']) !== undefined && String(getVal(['PT Exempt (Yes/No)'])).trim() !== '' ? isTrue(getVal(['PT Exempt (Yes/No)'])) : existingEmp.isPTExempt,
                         isLWFExempt: getVal(['LWF Exempt (Yes/No)']) !== null && getVal(['LWF Exempt (Yes/No)']) !== undefined && String(getVal(['LWF Exempt (Yes/No)'])).trim() !== '' ? isTrue(getVal(['LWF Exempt (Yes/No)'])) : existingEmp.isLWFExempt,

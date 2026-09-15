@@ -40,6 +40,15 @@ export interface FineRecord {
   tax?: number; // New field for Income Tax (TDS) Override
 }
 
+export interface VPFRecord {
+  companyId?: string;
+  employeeId: string;
+  month: string;
+  year: number;
+  vpfAmount: number;
+  pfAdvRepay: number;
+}
+
 export interface LeavePolicy {
   el: { maxPerYear: number; maxCarryForward: number; label: string };
   sl: { maxPerYear: number; maxCarryForward: number; label: string };
@@ -122,6 +131,7 @@ export interface StatutoryConfig {
   bonusWagesComponents: WageBasisComponents;
   gratuityWagesComponents: WageBasisComponents;
   enableArrearSalary: boolean;
+  enableVPF?: boolean;
   
   // NEW: Dynamic Pay Sheet Settings
   enableDynamicPaySheet?: boolean;
@@ -147,6 +157,7 @@ export interface CompanyProfile {
   lwfRegNo: string;
 
   // Granular Address
+  address?: string;
   doorNo: string;
   buildingName: string;
   street: string;
@@ -337,6 +348,7 @@ export interface PayrollResult {
     lwf: number;
     advanceRecovery: number;
     fine: number; // New field for Fine / Damages
+    pfAdvRepay?: number; // New field for PF Advance Repayment
     total: number;
   };
   employerContributions: {

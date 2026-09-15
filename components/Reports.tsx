@@ -1,11 +1,12 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, UserX, Save, TrendingUp, Eye, EyeOff, Database } from 'lucide-react';
+import { FileText, Download, Lock, Unlock, AlertTriangle, CheckCircle2, X, FileSpreadsheet, CreditCard, ClipboardList, Wallet, UserX, Save, TrendingUp, Eye, EyeOff, Database, ShieldAlert } from 'lucide-react';
 
 // Global OS Detection for UI refinement
 const isWin7 = /Windows NT 6.1/.test(window.navigator.userAgent);
 
-import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, ArrearBatch, BranchDetail } from '../types';
+import { Employee, PayrollResult, StatutoryConfig, CompanyProfile, Attendance, LeaveLedger, AdvanceLedger, User, ArrearBatch, BranchDetail, View } from '../types';
+import { calculateECRAudit, calculateESIAudit, ECRAuditSummary, ESIAuditSummary } from '../services/auditService';
 import {
     generateExcelReport,
     generateSimplePaySheetPDF,
@@ -93,9 +94,9 @@ const Reports: React.FC<ReportsProps> = ({
     // Resolve branch-specific profile overrides when branch filtering is active
     const effectiveCompanyProfile = useMemo((): CompanyProfile => {
         let branchName = '';
-        if (reportType === 'Pay Sheet' && paySheetFilter === 'branch' && paySheetFilterValue) {
+        if (paySheetFilter === 'branch' && paySheetFilterValue) {
             branchName = paySheetFilterValue;
-        } else if (reportType === 'Pay Slips' && paySlipFilter === 'branch' && paySlipFilterValue) {
+        } else if (paySlipFilter === 'branch' && paySlipFilterValue) {
             branchName = paySlipFilterValue;
         }
         if (!branchName || !branches || branches.length === 0) return companyProfile;
@@ -135,6 +136,14 @@ const Reports: React.FC<ReportsProps> = ({
     const [pinPurpose, setPinPurpose] = useState<'BEFORE_BACKUP' | 'FINAL_FREEZE'>('BEFORE_BACKUP');
     const [pinShow, setPinShow] = useState(false);
     const pinVerifyBtnRef = useRef<HTMLButtonElement>(null);
+
+    // Pre-Freeze Audit State
+    const [preFreezeAudit, setPreFreezeAudit] = useState<{
+        isOpen: boolean;
+        ecrAudit: ECRAuditSummary;
+        esiAudit: ESIAuditSummary;
+        onProceed: () => void;
+    } | null>(null);
 
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -300,8 +309,14 @@ const Reports: React.FC<ReportsProps> = ({
                 type: 'success',
                 title: 'Operation Successful',
                 message: (
-                    <div className="space-y-2 text-left">
-                        <p>Data Frozen and Locked Successfully.</p>
+                    <div className="space-y-3 text-left">
+                        <p className="font-bold text-emerald-400 text-sm">Data Frozen and Locked Successfully.</p>
+                        <div className="p-3 bg-indigo-950/40 border border-indigo-500/30 rounded-xl flex items-start gap-2.5 shadow-sm">
+                            <ShieldAlert className="text-indigo-400 shrink-0 mt-0.5" size={18} />
+                            <p className="text-xs text-indigo-200 leading-relaxed">
+                                Variance Report is generated and present under <strong className="text-white font-bold">MIS &gt; Audit Trail</strong>. User may check that before filing statutory returns.
+                            </p>
+                        </div>
                         <p className="text-[10px] text-slate-400 italic font-medium">Automatic backups (Before & After Confirmation) have been secured in the Data Backup folder.</p>
                     </div>
                 ),
@@ -634,16 +649,53 @@ const Reports: React.FC<ReportsProps> = ({
             return;
         }
 
-        setModalState({
-            isOpen: true,
-            type: 'backup_check',
-            title: 'Backup Verification Check',
-            message: 'Have you taken a full backup of the data before final freezing?',
-            onConfirm: () => {
-                setPinPurpose('BEFORE_BACKUP');
-                setShowPinModal(true);
+        const proceedToBackupCheck = () => {
+            setModalState({
+                isOpen: true,
+                type: 'backup_check',
+                title: 'Backup Verification Check',
+                message: 'Have you taken a full backup of the data before final freezing?',
+                onConfirm: () => {
+                    setPinPurpose('BEFORE_BACKUP');
+                    setShowPinModal(true);
+                }
+            });
+        };
+
+        // Pre-Freeze Compliance & Variance Audit
+        const mIdx = months.indexOf(month);
+        const prevM = mIdx === 0 ? 'December' : months[mIdx - 1];
+        const prevY = mIdx === 0 ? year - 1 : year;
+        const prevPeriodLabel = `${prevM} ${prevY}`;
+        const currPeriodLabel = `${month} ${year}`;
+
+        const prevFinalized = savedRecords.filter(r => r.month === prevM && r.year === prevY && r.status === 'Finalized');
+
+        if (prevFinalized.length > 0) {
+            const ecrAudit = calculateECRAudit(currentResults, prevFinalized, employees, currPeriodLabel, prevPeriodLabel);
+            const esiAudit = calculateESIAudit(currentResults, prevFinalized, employees, currPeriodLabel, prevPeriodLabel, config);
+
+            const hasZeroEPS = ecrAudit.zeroEPSAlerts.length > 0;
+            const hasMemberDrop = ecrAudit.memberDiff < 0 && Math.abs(ecrAudit.memberDiff) >= 3;
+            const hasTotalContribDrop = ecrAudit.totalContribDiff < 0 && Math.abs(ecrAudit.totalContribPercent) >= 15;
+            const hasEPSDrop = ecrAudit.erEPSDiff < 0 && Math.abs(ecrAudit.erEPSPercent) >= 20;
+            const hasHighPFFluctuation = Math.abs(ecrAudit.totalEPFPercent) >= 20;
+
+            if (hasZeroEPS || hasMemberDrop || hasTotalContribDrop || hasEPSDrop || hasHighPFFluctuation) {
+                setPreFreezeAudit({
+                    isOpen: true,
+                    ecrAudit,
+                    esiAudit,
+                    onProceed: () => {
+                        setPreFreezeAudit(null);
+                        proceedToBackupCheck();
+                    }
+                });
+                return;
             }
-        });
+        }
+
+        proceedToBackupCheck();
     };
 
 
@@ -1086,6 +1138,33 @@ const Reports: React.FC<ReportsProps> = ({
                     </button>
                 )}
             </div>
+
+            {/* Variance Audit Advisory Banner */}
+            {isLocked && (
+                <div className="bg-gradient-to-r from-indigo-950/60 via-slate-900 to-indigo-950/40 border border-indigo-500/30 rounded-xl p-4 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-3.5">
+                        <div className="p-2.5 bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 rounded-xl shrink-0 shadow-inner">
+                            <ShieldAlert size={22} className="text-indigo-400 animate-pulse" />
+                        </div>
+                        <div>
+                            <p className="text-sm font-bold text-white">
+                                Variance Report is generated and present under <span className="text-indigo-400 underline decoration-indigo-400/50 underline-offset-2">MIS &gt; Audit Trail</span>
+                            </p>
+                            <p className="text-xs text-slate-300 mt-0.5">
+                                User may check that before filing statutory returns.
+                            </p>
+                        </div>
+                    </div>
+                    {onNavigate && (
+                        <button
+                            onClick={() => onNavigate(View.MIS, 'AUDIT_TRAIL')}
+                            className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-indigo-900/40 flex items-center gap-1.5 hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                            Open Audit Trail &rarr;
+                        </button>
+                    )}
+                </div>
+            )}
 
             {/* Report Generation Section */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1713,6 +1792,231 @@ const Reports: React.FC<ReportsProps> = ({
                                     <Save size={16} /> Proceed to Freeze
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Pre-Freeze Audit & Variance Modal */}
+            {preFreezeAudit && preFreezeAudit.isOpen && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+                    <div className="bg-[#0f172a] border-2 border-amber-500/40 rounded-3xl p-6 max-w-2xl w-full shadow-2xl flex flex-col gap-5 max-h-[90vh] overflow-hidden">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                                    <ShieldAlert size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-black text-white uppercase tracking-tight">Pre-Freeze Compliance Audit Warning</h3>
+                                    <p className="text-xs text-slate-400">Variances detected between {preFreezeAudit.ecrAudit.prevPeriod} and {preFreezeAudit.ecrAudit.currPeriod}</p>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => setPreFreezeAudit(null)}
+                                className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-1">
+                            {/* Zero EPS Critical Alert */}
+                            {preFreezeAudit.ecrAudit.zeroEPSAlerts.length > 0 && (
+                                <div className="p-4 bg-red-950/40 border border-red-500/50 rounded-2xl space-y-3">
+                                    <div className="flex items-center gap-2 text-red-400 text-xs font-black uppercase tracking-wider">
+                                        <AlertTriangle size={16} />
+                                        CRITICAL: {preFreezeAudit.ecrAudit.zeroEPSAlerts.length} Employee(s) EPS Contribution is ₹0
+                                    </div>
+                                    <p className="text-xs text-red-200/80">
+                                        The following employee(s) contributed to EPS previously but have ₹0 EPS contribution in this month. Please check if &quot;7.A PF Exempted (Para 69)&quot; or &quot;7.D Employee Eligible for EPS&quot; is accidentally misconfigured:
+                                    </p>
+                                    <div className="space-y-2">
+                                        {preFreezeAudit.ecrAudit.zeroEPSAlerts.map(a => (
+                                            <div key={a.empId} className="bg-red-900/30 border border-red-500/30 p-2.5 rounded-xl text-xs flex items-center justify-between">
+                                                <div>
+                                                    <span className="font-bold text-white">{a.name}</span>
+                                                    <span className="text-[10px] text-red-300 font-mono ml-2">({a.empId})</span>
+                                                    <div className="text-[10px] text-red-300/80 mt-0.5">{a.alerts[0]}</div>
+                                                </div>
+                                                <div className="text-right font-mono text-xs">
+                                                    <span className="text-slate-400 line-through">₹{a.prevEREPS}</span>
+                                                    <span className="text-red-400 font-bold ml-1.5">₹0</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Member Drop Alert */}
+                            {preFreezeAudit.ecrAudit.memberDiff < 0 && Math.abs(preFreezeAudit.ecrAudit.memberDiff) >= 3 && (
+                                <div className="p-4 bg-amber-950/40 border border-amber-500/50 rounded-2xl space-y-3">
+                                    <div className="flex items-start gap-3">
+                                        <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
+                                        <div className="flex-1">
+                                            <div className="text-xs font-bold text-amber-300 uppercase tracking-wider">Significant Member Drop in ECR ({preFreezeAudit.ecrAudit.memberDiff} Members)</div>
+                                            <div className="text-xs text-slate-300 mt-1">
+                                                Contributing members changed from <span className="font-bold text-white">{preFreezeAudit.ecrAudit.prevMembers}</span> to <span className="font-bold text-white">{preFreezeAudit.ecrAudit.currMembers}</span> ({preFreezeAudit.ecrAudit.memberPercent}%).
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {preFreezeAudit.ecrAudit.droppedMembers.length > 0 && (
+                                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                                            {preFreezeAudit.ecrAudit.droppedMembers.map(a => (
+                                                <div key={a.empId} className="bg-amber-900/20 border border-amber-500/30 p-2.5 rounded-xl text-xs flex items-center justify-between">
+                                                    <div className="flex-1 pr-2">
+                                                        <span className="font-bold text-white">{a.name}</span>
+                                                        <span className="text-[10px] text-amber-300 font-mono ml-2">({a.empId})</span>
+                                                        <div className="text-[10px] text-amber-200/70 mt-0.5">
+                                                            {a.dol ? `Resigned on ${a.dol}${a.leavingReason ? ` (${a.leavingReason})` : ''}` : 'Dropped Member (No contribution)'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right font-mono text-xs shrink-0">
+                                                        <span className="text-slate-400 line-through">₹{a.prevTotalContrib.toLocaleString()}</span>
+                                                        <span className="text-red-400 font-bold ml-1.5">₹0</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Total Contribution Drop Alert */}
+                            {preFreezeAudit.ecrAudit.totalContribDiff < 0 && Math.abs(preFreezeAudit.ecrAudit.totalContribPercent) >= 15 && (
+                                <div className="p-4 bg-red-950/40 border border-red-500/50 rounded-2xl space-y-3">
+                                    <div className="flex items-start gap-3">
+                                        <AlertTriangle className="text-red-400 shrink-0 mt-0.5" size={18} />
+                                        <div className="flex-1">
+                                            <div className="text-xs font-bold text-red-300 uppercase tracking-wider">Total PF Remittance Drop &gt; 15%</div>
+                                            <div className="text-xs text-slate-300 mt-1">
+                                                Total statutory PF contribution (EE + ER + EDLI) dropped by <span className="font-bold text-red-400">{preFreezeAudit.ecrAudit.totalContribPercent}%</span> (₹{preFreezeAudit.ecrAudit.prevTotalContrib.toLocaleString()} ➔ ₹{preFreezeAudit.ecrAudit.currTotalContrib.toLocaleString()}).
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {preFreezeAudit.ecrAudit.totalContribDropBreakup && preFreezeAudit.ecrAudit.totalContribDropBreakup.length > 0 && (
+                                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                                            {preFreezeAudit.ecrAudit.totalContribDropBreakup.map(item => (
+                                                <div key={item.empId} className="bg-red-900/30 border border-red-500/30 p-2.5 rounded-xl text-xs flex items-center justify-between">
+                                                    <div className="flex-1 pr-2">
+                                                        <span className="font-bold text-white">{item.name}</span>
+                                                        <span className="text-[10px] text-red-300 font-mono ml-2">({item.empId})</span>
+                                                        <div className="text-[10px] text-red-300/80 mt-0.5">{item.reason}</div>
+                                                    </div>
+                                                    <div className="text-right font-mono text-xs shrink-0">
+                                                        <div>
+                                                            <span className="text-slate-400 line-through">₹{item.prevTotal.toLocaleString()}</span>
+                                                            <span className="text-red-400 font-bold ml-1.5">₹{item.currTotal.toLocaleString()}</span>
+                                                        </div>
+                                                        <div className="text-[10px] text-red-400 font-bold mt-0.5">
+                                                            {item.diff >= 0 ? '+' : ''}₹{item.diff.toLocaleString()} ({item.percent}%)
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* EPS Contribution Drop Alert */}
+                            {preFreezeAudit.ecrAudit.erEPSDiff < 0 && Math.abs(preFreezeAudit.ecrAudit.erEPSPercent) >= 20 && (
+                                <div className="p-4 bg-amber-950/40 border border-amber-500/50 rounded-2xl space-y-3">
+                                    <div className="flex items-start gap-3">
+                                        <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
+                                        <div className="flex-1">
+                                            <div className="text-xs font-bold text-amber-300 uppercase tracking-wider">Total EPS Contribution Drop &gt; 20%</div>
+                                            <div className="text-xs text-slate-300 mt-1">
+                                                Employer EPS (A/c 10) dropped by <span className="font-bold text-amber-400">{preFreezeAudit.ecrAudit.erEPSPercent}%</span> (₹{preFreezeAudit.ecrAudit.prevEREPS.toLocaleString()} ➔ ₹{preFreezeAudit.ecrAudit.currEREPS.toLocaleString()}).
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {preFreezeAudit.ecrAudit.epsDropBreakup && preFreezeAudit.ecrAudit.epsDropBreakup.length > 0 && (
+                                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                                            {preFreezeAudit.ecrAudit.epsDropBreakup.map(item => (
+                                                <div key={item.empId} className="bg-amber-900/20 border border-amber-500/30 p-2.5 rounded-xl text-xs flex items-center justify-between">
+                                                    <div className="flex-1 pr-2">
+                                                        <span className="font-bold text-white">{item.name}</span>
+                                                        <span className="text-[10px] text-amber-300 font-mono ml-2">({item.empId})</span>
+                                                        <div className="text-[10px] text-amber-200/70 mt-0.5">{item.reason}</div>
+                                                    </div>
+                                                    <div className="text-right font-mono text-xs shrink-0">
+                                                        <div>
+                                                            <span className="text-slate-400 line-through">₹{item.prevEPF.toLocaleString()}</span>
+                                                            <span className="text-amber-400 font-bold ml-1.5">₹{item.currEPF.toLocaleString()}</span>
+                                                        </div>
+                                                        <div className="text-[10px] text-red-400 font-bold mt-0.5">
+                                                            {item.diff >= 0 ? '+' : ''}₹{item.diff.toLocaleString()} ({item.percent}%)
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* EPF Fluctuation Alert */}
+                            {Math.abs(preFreezeAudit.ecrAudit.totalEPFPercent) >= 20 && (
+                                <div className="p-4 bg-amber-950/40 border border-amber-500/50 rounded-2xl space-y-3">
+                                    <div className="flex items-start gap-3">
+                                        <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
+                                        <div className="flex-1">
+                                            <div className="text-xs font-bold text-amber-300 uppercase tracking-wider">Total EPF (EE + ER) Shift &gt; 20%</div>
+                                            <div className="text-xs text-slate-300 mt-1">
+                                                Total EPF changed by <span className="font-bold text-amber-400">{preFreezeAudit.ecrAudit.totalEPFPercent > 0 ? '+' : ''}{preFreezeAudit.ecrAudit.totalEPFPercent}%</span> (₹{preFreezeAudit.ecrAudit.prevTotalEPF.toLocaleString()} ➔ ₹{preFreezeAudit.ecrAudit.currTotalEPF.toLocaleString()}).
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {preFreezeAudit.ecrAudit.epfVarianceBreakup && preFreezeAudit.ecrAudit.epfVarianceBreakup.length > 0 && (
+                                        <>
+                                            <div className="text-[11px] text-amber-200/80 font-medium">
+                                                Employee-wise breakup contributing to EPF variance ({preFreezeAudit.ecrAudit.epfVarianceBreakup.length} employee{preFreezeAudit.ecrAudit.epfVarianceBreakup.length !== 1 ? 's' : ''}):
+                                            </div>
+                                            <div className="space-y-2 max-h-52 overflow-y-auto pr-1 custom-scrollbar">
+                                                {preFreezeAudit.ecrAudit.epfVarianceBreakup.map(item => (
+                                                    <div key={item.empId} className="bg-amber-900/20 border border-amber-500/30 p-2.5 rounded-xl text-xs flex items-center justify-between hover:bg-amber-900/30 transition-colors">
+                                                        <div className="flex-1 pr-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-bold text-white">{item.name}</span>
+                                                                <span className="text-[10px] text-amber-300 font-mono">({item.empId})</span>
+                                                            </div>
+                                                            <div className="text-[10px] text-amber-200/70 mt-0.5">{item.reason}</div>
+                                                        </div>
+                                                        <div className="text-right font-mono text-xs shrink-0">
+                                                            <div>
+                                                                <span className="text-slate-400 line-through">₹{item.prevEPF.toLocaleString()}</span>
+                                                                <span className="text-white font-bold ml-1.5">₹{item.currEPF.toLocaleString()}</span>
+                                                            </div>
+                                                            <div className="text-[10px] text-amber-300/80 font-mono">
+                                                                (EE: ₹{item.currEEPF.toLocaleString()} + ER: ₹{item.currEREPF.toLocaleString()})
+                                                            </div>
+                                                            <div className={`text-[10px] font-bold mt-0.5 ${item.diff >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                                {item.diff >= 0 ? '+' : ''}₹{item.diff.toLocaleString()} ({item.percent >= 0 ? '+' : ''}{item.percent}%)
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex items-center justify-between border-t border-slate-800 pt-4">
+                            <button
+                                onClick={() => setPreFreezeAudit(null)}
+                                className="px-5 py-2.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors"
+                            >
+                                Cancel to Review Master
+                            </button>
+                            <button
+                                onClick={preFreezeAudit.onProceed}
+                                className="px-6 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-amber-900/40"
+                            >
+                                Proceed with Freezing Anyway
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -13,7 +13,7 @@ export const resolveBranchCompanyProfile = (companyProfile: any, branchName?: st
     if (!companyProfile) return companyProfile;
     if (!branchName || typeof branchName !== 'string' || !branchName.trim()) return companyProfile;
 
-    const cleanBranch = branchName.trim();
+    const cleanBranch = branchName.replace(/^Branch\s*:\s*/i, '').trim();
     const baseEstName = companyProfile.establishmentName || '';
     const branchEstName = baseEstName.includes(' - Branch : ') 
         ? baseEstName 
@@ -27,8 +27,9 @@ export const resolveBranchCompanyProfile = (companyProfile: any, branchName?: st
     }
 
     const targetBranch = branches.find((b: any) => {
-        const name = typeof b === 'string' ? b : b?.name;
-        return String(name || '').trim().toLowerCase() === cleanBranch.toLowerCase();
+        const name = String(typeof b === 'string' ? b : (b?.name || '')).trim().toLowerCase();
+        const target = cleanBranch.toLowerCase();
+        return name === target || name.replace(/\s*branch$/i, '') === target.replace(/\s*branch$/i, '');
     });
 
     if (!targetBranch || typeof targetBranch === 'string') {
@@ -38,17 +39,21 @@ export const resolveBranchCompanyProfile = (companyProfile: any, branchName?: st
         };
     }
 
+    const hasBranchAddress = Boolean(targetBranch.address && targetBranch.address.trim());
+    const branchAddress = hasBranchAddress ? targetBranch.address.trim() : '';
+
     return {
         ...companyProfile,
         establishmentName: branchEstName,
-        doorNo: '',
-        buildingName: '',
-        street: targetBranch.address?.trim() || companyProfile.street,
-        locality: '',
-        area: '',
-        city: '',
-        state: '',
-        pincode: '',
+        doorNo: hasBranchAddress ? '' : companyProfile.doorNo,
+        buildingName: hasBranchAddress ? '' : companyProfile.buildingName,
+        street: hasBranchAddress ? branchAddress : companyProfile.street,
+        locality: hasBranchAddress ? '' : companyProfile.locality,
+        area: hasBranchAddress ? '' : companyProfile.area,
+        city: hasBranchAddress ? '' : companyProfile.city,
+        state: hasBranchAddress ? '' : companyProfile.state,
+        pincode: hasBranchAddress ? '' : companyProfile.pincode,
+        address: hasBranchAddress ? branchAddress : (companyProfile.address || ''),
         pfCode: targetBranch.pfCode?.trim() || companyProfile.pfCode,
         esiCode: targetBranch.esiCode?.trim() || companyProfile.esiCode,
         ptTaxCode: targetBranch.ptTaxCode?.trim() || companyProfile.ptTaxCode,
@@ -966,6 +971,7 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
         { key: 'totalEarnings', label: 'GROSS', getValue: (r: any) => Math.round(r.earnings?.total || 0) },
         { key: 'epf', label: 'PF', getValue: (r: any) => activeCols.includes('vpf') ? Math.round(r.deductions?.epf || 0) : Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0)) },
         { key: 'vpf', label: 'VPF', getValue: (r: any) => Math.round(r.deductions?.vpf || 0) },
+        { key: 'pfAdvRepay', label: 'PF Adv Repay', getValue: (r: any) => Math.round(r.deductions?.pfAdvRepay || 0) },
         { key: 'esi', label: 'ESI', getValue: (r: any) => Math.round(r.deductions?.esi || 0) },
         { key: 'advanceRecovery', label: 'Adv', getValue: (r: any) => Math.round(r.deductions?.advanceRecovery || 0) },
         { key: 'pt', label: 'PT', getValue: (r: any) => Math.round(r.deductions?.pt || 0) },
@@ -976,7 +982,7 @@ export const generateSimplePaySheetPDF = async (results: PayrollResult[], employ
             key: 'otherDeductions', 
             label: 'Others', 
             getValue: (r: any) => {
-                const deductionKeys = ['epf', 'vpf', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
+                const deductionKeys = ['epf', 'vpf', 'pfAdvRepay', 'esi', 'advanceRecovery', 'pt', 'lwf', 'it', 'fine'];
                 const displayedDeductionKeys = deductionKeys.filter(k => activeCols.includes(k));
                 let sumOfDisplayed = displayedDeductionKeys.reduce((acc, k) => acc + (r.deductions?.[k] || 0), 0);
                 return Math.round((r.deductions?.total || 0) - sumOfDisplayed);
@@ -1132,18 +1138,32 @@ export const generatePaySlipsPDF = async (results: PayrollResult[], employees: E
             }
         }
 
-        const deductionsData = [
+        const deductionsData: [string, string][] = [
             [isPropPFCapped ? 'Provident Fund #' : 'Provident Fund', r.deductions.epf.toFixed(2)],
             ['ESI', r.deductions.esi.toFixed(2)],
             ['Professional Tax', r.deductions.pt.toFixed(2)],
             ['Income Tax', r.deductions.it.toFixed(2)],
-            ['VPF', r.deductions.vpf.toFixed(2)],
             ['LWF', r.deductions.lwf.toFixed(2)],
             ['Adv Recovery', r.deductions.advanceRecovery.toFixed(2)],
-            ['Fine / Damages', r.deductions.fine.toFixed(2)],
-            ['', ''] // Balanced empty row
+            ['Fine / Damages', r.deductions.fine.toFixed(2)]
         ];
-        const tableBody = earningsData.map((e, i) => [e[0], e[1], deductionsData[i]?.[0] || '', deductionsData[i]?.[1] || '']);
+        if (r.deductions.vpf && r.deductions.vpf > 0) {
+            deductionsData.push(['VPF', r.deductions.vpf.toFixed(2)]);
+        }
+        if (r.deductions.pfAdvRepay && r.deductions.pfAdvRepay > 0) {
+            deductionsData.push(['PF Adv Repay', r.deductions.pfAdvRepay.toFixed(2)]);
+        }
+
+        const maxRows = Math.max(earningsData.length, deductionsData.length);
+        const tableBody: any[][] = [];
+        for (let i = 0; i < maxRows; i++) {
+            tableBody.push([
+                earningsData[i]?.[0] || '',
+                earningsData[i]?.[1] || '',
+                deductionsData[i]?.[0] || '',
+                deductionsData[i]?.[1] || ''
+            ]);
+        }
         tableBody.push(['Gross Earnings', r.earnings.total.toFixed(2), 'Total Deductions', r.deductions.total.toFixed(2)]);
         autoTable(doc, { head: [['Earnings', 'Amount', 'Deductions', 'Amount']], body: tableBody, startY: y, theme: 'grid', headStyles: { fillColor: [20, 20, 20], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' }, columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 40, halign: 'right' }, 2: { cellWidth: 50 }, 3: { cellWidth: 40, halign: 'right' } } as any, styles: { fontSize: 9, cellPadding: 3, lineColor: [200, 200, 200] }, didParseCell: function (data) { if (data.row.index === tableBody.length - 1) { data.cell.styles.fontStyle = 'bold'; } if (data.section === 'body' && data.column.index === 2 && data.cell.text && data.cell.text.length > 0 && data.cell.text[0] === 'Provident Fund #') { data.cell.styles.textColor = [0, 0, 128]; } } });
         const finalY = (doc as any).lastAutoTable.finalY + 5;
@@ -1351,13 +1371,32 @@ export const generateAdvanceShortfallReport = async (data: any[], month: string,
 };
 
 export const generatePFECR = async (results: PayrollResult[], employees: Employee[], _config: StatutoryConfig, format: 'Excel' | 'Text', fileName: string, companyProfile: CompanyProfile): Promise<string | null> => {
+    const CALENDAR_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
     // Build one row per employee
     const allRows = results.map(r => {
         const emp = employees.find(e => e.id === r.employeeId);
-        const isOnLOP = (emp?.leavingReason || '').trim().toUpperCase() === 'ON LOP';
+
+        // Check actual frozen contributions from payroll record
+        const baseEE = Math.round(r.deductions?.epf || 0);
+        const vpfEE = Math.round(r.deductions?.vpf || 0);
+        const frozenER_EPS = Math.round(r.employerContributions?.eps || 0);
+        const frozenER_EPF = Math.round(r.employerContributions?.epf || 0);
+        const hasPFContribution = baseEE > 0 || frozenER_EPS > 0 || frozenER_EPF > 0;
+
+        // Check if employee was actively employed during this historical period
+        const mIdx = CALENDAR_MONTHS.indexOf(r.month);
+        const periodStart = (mIdx >= 0 && r.year) ? new Date(r.year, mIdx, 1) : null;
+        const periodEnd = (mIdx >= 0 && r.year) ? new Date(r.year, mIdx + 1, 0) : null;
+        const isEmployedInPeriod = (!emp?.doj || (periodEnd && new Date(emp.doj) <= periodEnd)) &&
+                                  (!emp?.dol || (periodStart && new Date(emp.dol) >= periodStart));
+
+        // ON LOP: Employed in this period, has UAN, payable days = 0, no PF contribution
+        const isHistoricalLOP = !hasPFContribution && r.payableDays === 0 && isEmployedInPeriod && 
+                               ((emp?.leavingReason || '').trim().toUpperCase() === 'ON LOP' || (!!emp?.uanc && !emp?.isPFExempt));
 
         // ON LOP: appear in ECR with all-zero wages, NCP = full days of month
-        if (isOnLOP) {
+        if (isHistoricalLOP) {
             const daysInMonth = r.daysInMonth || 30;
             return {
                 uan: emp?.uanc || '', name: emp?.name || '',
@@ -1368,52 +1407,56 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
             };
         }
 
-        const isNonContributing = emp?.isPFExempt || r.payableDays === 0;
+        const isNonContributing = !hasPFContribution || r.payableDays === 0;
 
         // Gross Wages: Actual total gross earnings of the employee
         const grossWages = isNonContributing ? 0 : Math.round(r.earnings.total || 0);
 
-        // EPF Wages: ceiling-capped wages back-calculated from EE contribution (÷12%)
+        // EPF Wages: ceiling-capped wages back-calculated from EE normal contribution (÷12%)
         // Must never exceed Gross Wages
-        const eeEPF = isNonContributing ? 0 : Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0));
-        const epfWagesRaw = isNonContributing ? 0 : (eeEPF > 0 ? Math.round(eeEPF / 0.12) : 0);
-        const epfWages = Math.min(epfWagesRaw, grossWages);
+        const eeEPF = baseEE + vpfEE; // Column 7: Employee PF + VPF
+        const epfWagesRaw = isNonContributing ? 0 : (baseEE > 0 ? Math.round(baseEE / 0.12) : 0);
+        const epfWages = Math.min(epfWagesRaw, grossWages || epfWagesRaw);
         
         // EDLI Wages: capped at 15000 max AND must not exceed Gross Wages
-        const edliWages = isNonContributing ? 0 : Math.min(15000, epfWages, grossWages);
+        const edliWages = isNonContributing ? 0 : Math.min(15000, epfWages, grossWages || epfWages);
         
-        // EPS Wages: restricted to 15000 IF Joint Option is NOT exercised.
-        // If 7.E (isEPSEligible) is 'No', then epsWages = 0. Must never exceed Gross Wages.
-        const isEPSEligible = emp?.isEPSEligible !== 'No';
-        const isHigherPension = emp?.pfHigherPension?.isHigherPensionOpted === 'Yes';
-        
+        // EPS Wages and ER EPS: Strictly derived from the frozen employer contributions
+        let erEPS = 0;
         let epsWages = 0;
-        if (!isNonContributing && isEPSEligible) {
-            epsWages = isHigherPension
-                ? Math.min(epfWages, grossWages)
-                : Math.min(15000, epfWages, grossWages);
+
+        if (!isNonContributing && frozenER_EPS > 0) {
+            erEPS = frozenER_EPS;
+            // If EPS contribution exceeds normal 15,000 cap rate (1250), higher pension was opted
+            if (frozenER_EPS > 1250 || (frozenER_EPS === Math.round(epfWages * 0.0833) && epfWages > 15000)) {
+                epsWages = Math.min(epfWages, grossWages || epfWages);
+            } else {
+                epsWages = Math.min(15000, epfWages, grossWages || epfWages);
+            }
+        } else {
+            erEPS = 0;
+            epsWages = 0;
         }
 
-        // ER EPS is strictly 8.33% of EPS Wages
-        const erEPS = (!isNonContributing && isEPSEligible) ? Math.round(epsWages * 0.0833) : 0;
-        
-        // ER EPF is the balance: (Total ER = EE PF) - ER EPS
-        const erEPF = isNonContributing ? 0 : (eeEPF - erEPS);
+        // ER EPF is either the frozen record or balance: (Total ER = EE base PF) - ER EPS
+        const erEPF = isNonContributing ? 0 : (frozenER_EPF > 0 ? frozenER_EPF : Math.max(0, baseEE - erEPS));
 
         // NCP Days: non-contributing days = daysInMonth − payableDays
         const ncpDays = isNonContributing
             ? (r.daysInMonth || 30)
             : Math.max(0, (r.daysInMonth || 30) - Math.round(r.payableDays));
 
+        const refund = Math.round(r.deductions?.pfAdvRepay || 0);
+
         return {
             uan: emp?.uanc || '', name: emp?.name || '',
             grossWages, epfWages, epsWages, edliWages,
-            eeEPF, erEPS, erEPF, ncpDays, refund: 0, isOnLOP: false,
+            eeEPF, erEPS, erEPF, ncpDays, refund, isOnLOP: false,
         };
     });
 
-    // Filter: include only employees with grossWages > 0 OR leavingReason = 'ON LOP'
-    const rows = allRows.filter(r => r.grossWages > 0 || r.isOnLOP);
+    // Filter: include only employees with grossWages > 0, active PF contribution, OR ON LOP
+    const rows = allRows.filter(r => r.grossWages > 0 || r.eeEPF > 0 || r.erEPF > 0 || r.erEPS > 0 || r.isOnLOP);
 
     if (format === 'Text') {
         // EPFO ECR2 text format:
@@ -1540,39 +1583,46 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
     return null; // Should not reach here
 };
 
-export const generatePFForm12A = async (results: PayrollResult[], employees: Employee[], _config: StatutoryConfig, companyProfile: CompanyProfile, month: string, year: number): Promise<string | null> => {
+export const generatePFForm12A = async (results: PayrollResult[], _employees: Employee[], _config: StatutoryConfig, companyProfile: CompanyProfile, month: string, year: number): Promise<string | null> => {
     // const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     // const mIdx = MONTHS.indexOf(month);
     // const daysInMonth = new Date(year, mIdx + 1, 0).getDate(); // available for future use
 
-    // ── Compute totals from payroll results (same logic as ECR) ──────────────
+    // ── Compute totals from payroll results (same frozen logic as ECR) ──────────────
     let totalGrossWages = 0, totalEPFWages = 0, totalEPSWages = 0, totalEDLIWages = 0;
     let totalEEShare = 0, totalERepsShare = 0, totalERepfShare = 0;
 
     results.forEach(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        const isOnLOP = (emp?.leavingReason || '').trim().toUpperCase() === 'ON LOP';
+        const baseEE = Math.round(r.deductions?.epf || 0);
+        const vpfEE = Math.round(r.deductions?.vpf || 0);
+        const frozenER_EPS = Math.round(r.employerContributions?.eps || 0);
+        const frozenER_EPF = Math.round(r.employerContributions?.epf || 0);
+        const hasPFContribution = baseEE > 0 || frozenER_EPS > 0 || frozenER_EPF > 0;
         
-        if (isOnLOP) return; // skip for totals in 12A
+        if (!hasPFContribution || r.payableDays === 0) return; // skip for totals in 12A
 
-        const isNonContributing = emp?.isPFExempt || r.payableDays === 0;
-        if (isNonContributing) return;
-
-        const gross = Math.round(r.earnings.total || 0);
-        const ee = Math.round((r.deductions.epf || 0) + (r.deductions.vpf || 0));
-        const epfWages = ee > 0 ? Math.round(ee / 0.12) : 0;
-        const edliWages = Math.min(15000, epfWages);
+        const gross = Math.round(r.earnings?.total || 0);
+        const ee = baseEE + vpfEE;
+        const epfWagesRaw = baseEE > 0 ? Math.round(baseEE / 0.12) : 0;
+        const epfWages = Math.min(epfWagesRaw, gross || epfWagesRaw);
+        const edliWages = Math.min(15000, epfWages, gross || epfWages);
         
-        const isEPSEligible = emp?.isEPSEligible !== 'No';
-        const isHigherPension = emp?.pfHigherPension?.isHigherPensionOpted === 'Yes';
-        
+        let erEPS = 0;
         let epsWages = 0;
-        if (isEPSEligible) {
-            epsWages = isHigherPension ? epfWages : Math.min(15000, epfWages);
+
+        if (frozenER_EPS > 0) {
+            erEPS = frozenER_EPS;
+            if (frozenER_EPS > 1250 || (frozenER_EPS === Math.round(epfWages * 0.0833) && epfWages > 15000)) {
+                epsWages = Math.min(epfWages, gross || epfWages);
+            } else {
+                epsWages = Math.min(15000, epfWages, gross || epfWages);
+            }
+        } else {
+            erEPS = 0;
+            epsWages = 0;
         }
 
-        const erEPS = isEPSEligible ? Math.round(epsWages * 0.0833) : 0;
-        const erEPF = ee - erEPS;
+        const erEPF = frozenER_EPF > 0 ? frozenER_EPF : Math.max(0, baseEE - erEPS);
 
         totalGrossWages += gross;
         totalEPFWages += epfWages;
@@ -1820,7 +1870,7 @@ export const generateForm16PartBPDF = async (
         doc.text('Name and address of the Employer', 16, y + 6);
         doc.setFont('helvetica', 'normal');
         doc.text(company.establishmentName || '', 16, y + 12);
-        const addr = `${company.doorNo || ''} ${company.street || ''}, ${company.city || ''}`;
+        const addr = [company.doorNo, company.street, company.city].filter(Boolean).join(', ') || company.street || company.address || '';
         doc.text(doc.splitTextToSize(addr, pageW / 2 - 10), 16, y + 18);
 
         doc.setFont('helvetica', 'bold');
@@ -3289,7 +3339,8 @@ export const generateESIForm5 = async (payrollHistory: PayrollResult[], employee
     payrollHistory.forEach(r => {
         if (monthsPeriod.includes(r.month) && r.year === getYearForMonth(r.month)) {
             const emp = employees.find(e => e.id === r.employeeId);
-            if (!emp || emp.isESIExempt) return;
+            const hasContribution = (r.deductions?.esi || 0) > 0 || (r.employerContributions?.esi || 0) > 0;
+            if (!hasContribution && (!emp || emp.isESIExempt)) return;
 
             // Recalculate ESI Wage base as done in payrollEngine 
             if (r.deductions.esi > 0 || r.payableDays > 0) {
@@ -3504,85 +3555,66 @@ export const generateESIForm5 = async (payrollHistory: PayrollResult[], employee
 // ==========================================
 
 export const generateESIReturn = async (results: PayrollResult[], employees: Employee[], format: 'Excel' | 'Text', fileName: string, _companyProfile: CompanyProfile, config: StatutoryConfig): Promise<string | null> => {
-    // Note: ESI is only applicable for employees not exempt. 
-    // The report normally shows all covered employees.
+    const CALENDAR_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
     const data = results
         .filter(r => {
-            const emp = employees.find(e => e.id === r.employeeId);
-            if (!emp || emp.isESIExempt) return false;
-
-            const hasContribution = (r.deductions.esi || 0) > 0 || (r.employerContributions.esi || 0) > 0;
+            const hasContribution = (r.deductions?.esi || 0) > 0 || (r.employerContributions?.esi || 0) > 0;
             if (hasContribution) return true;
 
-            // Calculate standard wage to see if <= ceiling
-            let standardESIWage = 0;
-            if (config.pfEsiCalculationBasis === 'LabourCode') {
-                const basic = emp.basicPay || 0;
-                const da = emp.da || 0;
-                const retaining = emp.retainingAllowance || 0;
-                const wageA = basic + da + retaining;
-                
-                const gross = (emp.basicPay || 0) + (emp.da || 0) + (emp.retainingAllowance || 0) + (emp.hra || 0) + (emp.conveyance || 0) + (emp.washing || 0) + (emp.attire || 0) + (emp.specialAllowance1 || 0) + (emp.specialAllowance2 || 0) + (emp.specialAllowance3 || 0);
-                const wageC = gross - wageA;
-                let wageD = 0;
-                if (gross > 0) {
-                    const allowancePercentage = wageC / gross;
-                    if (allowancePercentage > 0.50) {
-                        wageD = wageC - Math.round(gross * 0.50);
-                    }
-                }
-                standardESIWage = Math.round(wageA + wageD);
-            } else {
-                const comps = config.esiOriginalWagesComponents || { basic: true, da: true };
-                if (comps.basic) standardESIWage += (emp.basicPay || 0);
-                if (comps.da) standardESIWage += (emp.da || 0);
-                if (comps.retaining) standardESIWage += (emp.retainingAllowance || 0);
-                if (comps.hra) standardESIWage += (emp.hra || 0);
-                if (comps.conveyance) standardESIWage += (emp.conveyance || 0);
-                if (comps.washing) standardESIWage += (emp.washing || 0);
-                if (comps.attire) standardESIWage += (emp.attire || 0);
-                if (comps.special1) standardESIWage += (emp.specialAllowance1 || 0);
-                if (comps.special2) standardESIWage += (emp.specialAllowance2 || 0);
-                if (comps.special3) standardESIWage += (emp.specialAllowance3 || 0);
+            const emp = employees.find(e => e.id === r.employeeId);
+            const hasESINumber = !!(emp?.esiNumber && emp.esiNumber.trim().length > 0 && emp.esiNumber !== 'undefined' && emp.esiNumber !== 'null');
+            if (!hasESINumber) return false;
+
+            // Check if out of coverage in this period (saved remark in frozen payroll)
+            if (r.esiRemark === 'IP is out of coverage (Salary > Ceiling)') {
+                return true;
             }
 
-            const isAboveCeiling = standardESIWage > (config.esiCeiling || 21000);
+            // Check if on LOP in this period (payable days = 0, but employed)
+            const mIdx = CALENDAR_MONTHS.indexOf(r.month);
+            const periodStart = (mIdx >= 0 && r.year) ? new Date(r.year, mIdx, 1) : null;
+            const periodEnd = (mIdx >= 0 && r.year) ? new Date(r.year, mIdx + 1, 0) : null;
+            const isEmployedInPeriod = (!emp?.doj || (periodEnd && new Date(emp.doj) <= periodEnd)) &&
+                                      (!emp?.dol || (periodStart && new Date(emp.dol) >= periodStart));
 
-            if (!isAboveCeiling) {
-                return true; // Code wages <= 21000 (e.g. LOP)
-            } else {
-                const hasESINumber = !!(emp.esiNumber && emp.esiNumber.trim().length > 0 && emp.esiNumber !== 'undefined' && emp.esiNumber !== 'null');
-                const isOutOfCoverageRemark = r.esiRemark === 'IP is out of coverage (Salary > Ceiling)';
-                if (hasESINumber && isOutOfCoverageRemark) {
-                    return true;
-                }
+            if (r.payableDays === 0 && isEmployedInPeriod) {
+                return true;
             }
+
             return false;
         })
         .map(r => {
             const emp = employees.find(e => e.id === r.employeeId);
-            const isLeft = !!emp?.dol;
-            const isLOP = (emp?.leavingReason || '').trim().toUpperCase() === 'ON LOP';
-            const isOutOfCoverage = r.esiRemark === 'IP is out of coverage (Salary > Ceiling)' && !!(emp?.esiNumber && emp.esiNumber.trim().length > 0 && emp.esiNumber !== 'undefined' && emp.esiNumber !== 'null') && ((r.deductions.esi || 0) === 0);
+            const mIdx = CALENDAR_MONTHS.indexOf(r.month);
+            const reportYear = r.year;
+
+            // Only report Left Service if Date of Leaving falls strictly in THIS reporting month & year
+            let isLeftThisMonth = false;
+            let dolStr = '';
+            if (emp?.dol) {
+                const d = new Date(emp.dol);
+                if (d.getFullYear() === reportYear && d.getMonth() === mIdx) {
+                    isLeftThisMonth = true;
+                    const day = String(d.getDate()).padStart(2, '0');
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    const year = d.getFullYear();
+                    dolStr = `${day}-${month}-${year}`;
+                }
+            }
+
+            const isOutOfCoverage = r.esiRemark === 'IP is out of coverage (Salary > Ceiling)' && ((r.deductions?.esi || 0) === 0);
+            const isLOP = r.payableDays === 0 && !isLeftThisMonth && !isOutOfCoverage;
 
             let reason: number | string = 0;
-            let dolStr = '';
-
             if (isOutOfCoverage) {
                 reason = 4;
                 dolStr = '';
             } else if (isLOP) {
                 reason = 1;
                 dolStr = '';
-            } else if (isLeft) {
+            } else if (isLeftThisMonth) {
                 reason = 2;
-                if (emp?.dol) {
-                    const d = new Date(emp.dol);
-                    const day = String(d.getDate()).padStart(2, '0');
-                    const month = String(d.getMonth() + 1).padStart(2, '0');
-                    const year = d.getFullYear();
-                    dolStr = `${day}-${month}-${year}`;
-                }
             }
 
             let earnedESIWage = 0;
@@ -5397,7 +5429,7 @@ export const appendSummaryRowToExcelData = (data: any[]): any[] => {
 
 export const generateESIChallanPDF = async (
     payrollHistory: PayrollResult[],
-    employees: Employee[],
+    _employees: Employee[],
     config: StatutoryConfig,
     companyProfile: CompanyProfile,
     month: string,
@@ -5410,8 +5442,8 @@ export const generateESIChallanPDF = async (
     let totalER = 0;
 
     payrollHistory.forEach(r => {
-        const emp = employees.find(e => e.id === r.employeeId);
-        if (emp && !emp.isESIExempt && (r.deductions.esi > 0 || r.employerContributions.esi > 0)) {
+        const hasContribution = (r.deductions?.esi || 0) > 0 || (r.employerContributions?.esi || 0) > 0;
+        if (hasContribution) {
             totalEmployees++;
             
             // We calculate the exact earned ESI wages using the configuration
@@ -5504,7 +5536,9 @@ export const generateESIChallanPDF = async (
     setFontBold();
     doc.text(companyProfile.establishmentName, 15, y);
     y += 6;
-    const addressLine = [companyProfile.doorNo, companyProfile.buildingName, companyProfile.street, companyProfile.locality, companyProfile.city].filter(Boolean).join(', ') + (companyProfile.pincode ? ` - ${companyProfile.pincode}` : '');
+    const addressLine = (companyProfile.address && !companyProfile.doorNo && !companyProfile.city)
+        ? companyProfile.address
+        : [companyProfile.doorNo, companyProfile.buildingName, companyProfile.street, companyProfile.locality, companyProfile.city].filter(Boolean).join(', ') + (companyProfile.pincode ? ` - ${companyProfile.pincode}` : '');
     const addressLines = doc.splitTextToSize(addressLine, 100);
     doc.text(addressLines, 15, y);
     y += addressLines.length * 5 + 6;

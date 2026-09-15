@@ -1,5 +1,5 @@
 
-import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger, FineRecord, OTRecord } from '../types';
+import { Employee, StatutoryConfig, PayrollResult, Attendance, LeaveLedger, AdvanceLedger, FineRecord, OTRecord, VPFRecord } from '../types';
 import { PT_STATE_PRESETS } from '../constants';
 
 // Helper to map Branch/City to State for PT Compliance
@@ -48,7 +48,32 @@ const getComponentBasedWage = (employee: Employee, components: any, factor: numb
     return Math.round(base * factor);
 };
 
-const getESICoverageRemark = (employee: Employee, config: StatutoryConfig, month: string, year: number, payrollHistory: PayrollResult[], standardMonthlyGross: number): string | null => {
+export const calculateESICodeWage = (employee: Partial<Employee>, config?: StatutoryConfig): number => {
+    const stdBasic = Number(employee.basicPay) || 0;
+    const stdDA = Number(employee.da) || 0;
+    const stdRetaining = Number(employee.retainingAllowance) || 0;
+    const stdWageA = stdBasic + stdDA + stdRetaining;
+
+    if (config?.pfEsiCalculationBasis === 'OriginalWages' && config.esiOriginalWagesComponents) {
+        return getComponentBasedWage(employee as Employee, config.esiOriginalWagesComponents, 1);
+    }
+
+    const stdGross = (employee.basicPay || 0) + (employee.da || 0) + (employee.retainingAllowance || 0) +
+        (employee.hra || 0) + (employee.conveyance || 0) + (employee.washing || 0) + (employee.attire || 0) +
+        (employee.specialAllowance1 || 0) + (employee.specialAllowance2 || 0) + (employee.specialAllowance3 || 0);
+
+    const stdWageC = stdGross - stdWageA;
+    let stdWageD = 0;
+    if (stdGross > 0) {
+        const allowancePercentage = stdWageC / stdGross;
+        if (allowancePercentage > 0.50) {
+            stdWageD = stdWageC - Math.round(stdGross * 0.50);
+        }
+    }
+    return Math.round(stdWageA + stdWageD);
+};
+
+const getESICoverageRemark = (employee: Employee, config: StatutoryConfig, month: string, year: number, payrollHistory: PayrollResult[], _standardMonthlyGross?: number): string | null => {
     if (config.enableESI === false || employee.isESIExempt) {
         return null;
     }
@@ -57,22 +82,7 @@ const getESICoverageRemark = (employee: Employee, config: StatutoryConfig, month
     const stdDA = employee.da || 0;
     const stdRetaining = employee.retainingAllowance || 0;
     const stdWageA = stdBasic + stdDA + stdRetaining;
-    
-    let stdESIWageBase = stdWageA;
-    if (config.pfEsiCalculationBasis === 'OriginalWages') {
-        stdESIWageBase = getComponentBasedWage(employee, config.esiOriginalWagesComponents, 1);
-    } else {
-        const stdGross = standardMonthlyGross;
-        const stdWageC = stdGross - stdWageA;
-        let stdWageD = 0;
-        if (stdGross > 0) {
-            const allowancePercentage = stdWageC / stdGross;
-            if (allowancePercentage > 0.50) {
-                stdWageD = stdWageC - Math.round(stdGross * 0.50);
-            }
-        }
-        stdESIWageBase = stdWageA + stdWageD;
-    }
+    const stdESIWageBase = calculateESICodeWage(employee, config);
 
     const isAboveCeiling = (stdWageA > config.esiCeiling) || (stdESIWageBase > config.esiCeiling);
 
@@ -199,7 +209,8 @@ export const calculatePayroll = (
     fines: FineRecord[] = [],
     otRecord: OTRecord | null = null,
     arrearAmount: number = 0,
-    payrollHistory: PayrollResult[] = []
+    payrollHistory: PayrollResult[] = [],
+    vpfRecords: VPFRecord[] = []
 ): PayrollResult => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const monthIdx = months.indexOf(month);
@@ -270,7 +281,7 @@ export const calculatePayroll = (
                 special1: 0, special2: 0, special3: 0, bonus: 0, leaveEncashment: 0,
                 otAmount: 0, arrears: 0, total: 0
             },
-            deductions: { epf: 0, vpf: 0, esi: 0, pt: 0, it: 0, lwf: 0, advanceRecovery: 0, fine: 0, total: 0 },
+            deductions: { epf: 0, vpf: 0, esi: 0, pt: 0, it: 0, lwf: 0, advanceRecovery: 0, fine: 0, pfAdvRepay: 0, total: 0 },
             employerContributions: { epf: 0, eps: 0, esi: 0, lwf: 0 },
             gratuityAccrual: 0,
             netPay: 0,
@@ -505,7 +516,10 @@ export const calculatePayroll = (
 
         epfEmployee = Math.round(eeBasis * config.epfEmployeeRate);
 
-        if (employee.employeeVPFRate > 0) {
+        const vpfRec = vpfRecords.find(v => v.employeeId === employee.id && v.month === month && v.year === year);
+        if (vpfRec && vpfRec.vpfAmount !== undefined && vpfRec.vpfAmount !== null && Number(vpfRec.vpfAmount) > 0) {
+            vpfEmployee = Math.round(Number(vpfRec.vpfAmount));
+        } else if (employee.employeeVPFRate > 0) {
             vpfEmployee = Math.round(eeBasis * (employee.employeeVPFRate / 100));
         }
 
@@ -688,7 +702,10 @@ export const calculatePayroll = (
         }
     }
 
-    const totalDeductions = statutoryDeductions + fineAmount + advanceRecovery;
+    const vpfRecord = vpfRecords.find(v => v.employeeId === employee.id && v.month === month && v.year === year);
+    const pfAdvRepay = vpfRecord && vpfRecord.pfAdvRepay !== undefined && vpfRecord.pfAdvRepay !== null ? Math.round(Number(vpfRecord.pfAdvRepay)) : 0;
+
+    const totalDeductions = statutoryDeductions + fineAmount + advanceRecovery + pfAdvRepay;
 
         let gratuityBasisWage = codeWage;
         if (config.pfEsiCalculationBasis === 'OriginalWages') {
@@ -710,7 +727,7 @@ export const calculatePayroll = (
             },
             deductions: {
                 epf: epfEmployee, vpf: vpfEmployee, esi: esiEmployee, pt, it: incomeTax, lwf: lwfEmployee,
-                advanceRecovery, fine: fineAmount, total: totalDeductions
+                advanceRecovery, fine: fineAmount, pfAdvRepay, total: totalDeductions
             },
             employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer, lwf: lwfEmployer },
             gratuityAccrual: config.enableGratuity !== false ? Math.round(((gratuityBasisWage) * 15 / 26) / 12) : 0,
