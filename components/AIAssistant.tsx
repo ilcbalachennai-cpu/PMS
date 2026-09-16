@@ -216,7 +216,7 @@ const AIAssistant: React.FC = () => {
                   type="password"
                   value={keyInput}
                   onChange={(e) => setKeyInput(e.target.value)}
-                  placeholder="AIzaSy..."
+                  placeholder="Paste your Gemini API key here..."
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-slate-800"
                 />
               </div>

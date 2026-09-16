@@ -5,13 +5,17 @@ let cachedApiKey: string = '';
 export const getGeminiApiKey = async (): Promise<string> => {
   if (cachedApiKey) return cachedApiKey;
 
-  const LEGACY_REVOKED_KEY = 'AIzaSyAlSNRg4JUclqEPUZAOnM3Lgz749paKofM';
+  // Helper to filter out known legacy revoked key without hardcoding the raw API key literal
+  const isRevokedKey = (k: string): boolean => {
+    if (!k) return true;
+    return k.includes('SNRg4JUclqEPUZAOnM3Lgz');
+  };
 
   // 1. Try SQLite Global Store (shared across all users on this installation)
   try {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.dbGetGlobal) {
       const res = await (window as any).electronAPI.dbGetGlobal('app_gemini_api_key');
-      if (res?.data && typeof res.data === 'string' && res.data.trim() && res.data.trim() !== LEGACY_REVOKED_KEY) {
+      if (res?.data && typeof res.data === 'string' && res.data.trim() && !isRevokedKey(res.data.trim())) {
         cachedApiKey = res.data.trim();
         try { localStorage.setItem('bpp_gemini_api_key', cachedApiKey); } catch (_) {}
         return cachedApiKey;
@@ -22,7 +26,7 @@ export const getGeminiApiKey = async (): Promise<string> => {
   // 2. Try localStorage (current app instance)
   try {
     const local = localStorage.getItem('bpp_gemini_api_key');
-    if (local && local.trim() && local.trim() !== LEGACY_REVOKED_KEY) {
+    if (local && local.trim() && !isRevokedKey(local.trim())) {
       cachedApiKey = local.trim();
       if ((window as any).electronAPI?.dbSetGlobal) {
         (window as any).electronAPI.dbSetGlobal('app_gemini_api_key', cachedApiKey).catch(() => {});
@@ -33,7 +37,7 @@ export const getGeminiApiKey = async (): Promise<string> => {
 
   // 3. Fallback to bundled environment variable (from .env.local at build time)
   const envKey = (process.env.API_KEY || process.env.GEMINI_API_KEY || "").trim();
-  if (envKey && envKey !== 'undefined' && envKey !== LEGACY_REVOKED_KEY) {
+  if (envKey && envKey !== 'undefined' && !isRevokedKey(envKey)) {
     cachedApiKey = envKey;
     return cachedApiKey;
   }
