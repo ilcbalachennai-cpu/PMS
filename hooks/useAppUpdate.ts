@@ -181,6 +181,11 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
 
   const handleUpdateNow = useCallback(async (onInstall: () => Promise<void>) => {
     setShowUpdateNotice(false);
+    const isDevEnv = isDeveloper || !import.meta.env.PROD || (typeof window !== 'undefined' && window.location.hostname === 'localhost');
+    if (isDevEnv) {
+      showAlert('info', 'Developer Mode Active', 'Patch installations are for packaged production builds (BPP_APP.exe). You are running directly from source code in the PMS development directory.');
+      return;
+    }
     // @ts-ignore
     if (window.electronAPI) {
       try {
@@ -297,6 +302,20 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
               }
            }
         }
+
+        // 🛡️ Record pending installer SHA-256 hash for dual-factor verification
+        try {
+           const osVer = (window as any).electronAPI?.getOSVersion ? await (window as any).electronAPI.getOSVersion() : '';
+           const isLegacy = String(osVer).startsWith('6.');
+           const targetPendingHash = isLegacy 
+              ? localStorage.getItem('app_update_hash_win7') 
+              : (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || sha256);
+           if (targetPendingHash) {
+              localStorage.setItem('app_pending_installer_hash', targetPendingHash);
+              const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+              if (dbSetFn) dbSetFn('app_pending_installer_hash', targetPendingHash).catch(() => {});
+           }
+        } catch (_) {}
 
         localStorage.removeItem('app_update_ready');
         // @ts-ignore - Pass silent flag for patches
@@ -455,10 +474,41 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
                     dbSetFn('app_active_patch_ts', pendingTs).catch(() => {});
                     dbSetFn('app_pending_patch_ts', null).catch(() => {});
                 }
+
+                // 🛡️ Promote pending installer SHA-256 hash to active
+                let promotedHash = localStorage.getItem('app_pending_installer_hash');
+                if (!promotedHash) {
+                    const isLegacy = String(auditInfo?.osVersion || '').startsWith('6.');
+                    promotedHash = isLegacy 
+                        ? localStorage.getItem('app_update_hash_win7')
+                        : (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash'));
+                }
+                if (promotedHash) {
+                    localStorage.setItem('app_active_installer_hash', promotedHash);
+                    localStorage.removeItem('app_pending_installer_hash');
+                    if (dbSetFn) {
+                        dbSetFn('app_active_installer_hash', promotedHash).catch(() => {});
+                        dbSetFn('app_pending_installer_hash', null).catch(() => {});
+                    }
+                }
             } else if (auditInfo?.updateStatus && auditInfo.updateStatus.exitCode !== 0) {
                 console.warn(`⚠️ [PostUpdateVerification] Update failed with exit code ${auditInfo.updateStatus.exitCode} for target patch (${pendingTs}).`);
                 localStorage.removeItem('app_pending_patch_ts');
+                localStorage.removeItem('app_pending_installer_hash');
                 showAlert?.('warning', 'Update Incomplete', `The automatic update did not complete installation (Exit code: ${auditInfo.updateStatus.exitCode}). The installer is saved on your computer—you can run it manually from Settings -> License Management.`);
+            }
+        }
+
+        // 🛡️ Self-heal active installer hash if updateStatus was 0 and hash is not yet set
+        if (auditInfo?.updateStatus?.exitCode === 0 && !localStorage.getItem('app_active_installer_hash')) {
+            const isLegacy = String(auditInfo?.osVersion || '').startsWith('6.');
+            const currentHash = isLegacy 
+                ? localStorage.getItem('app_update_hash_win7')
+                : (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash'));
+            if (currentHash) {
+                localStorage.setItem('app_active_installer_hash', currentHash);
+                const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+                if (dbSetFn) dbSetFn('app_active_installer_hash', currentHash).catch(() => {});
             }
         }
     };
@@ -486,9 +536,10 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
   }, []);
 
   useEffect(() => {
-    //  [V02.02.23] DEVELOPER BYPASS
-    if (import.meta.env.DEV || isDeveloper) {
-       console.log(" [UpdateSync] System updates and patches are suppressed in Developer Environment.");
+    // 🛡️ [V02.02.23] DEVELOPER BYPASS
+    const isDevEnv = isDeveloper || !import.meta.env.PROD || (typeof window !== 'undefined' && window.location.hostname === 'localhost');
+    if (isDevEnv) {
+       console.log("🛡️ [UpdateSync] System updates and patches are suppressed in Developer Environment.");
        setShowUpdateNotice(false);
        setIsPatchNotice(false);
        setUpdateDownloaded(false);
@@ -579,6 +630,24 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
        cond3: isPostLogin && (now >= (actualStartTime + delayMs) || isForced)
     };
 
+    // 🛡️ SHA-256 Dual-Factor Guardrail:
+    // If the active installed package SHA-256 matches the cloud target hash for this machine,
+    // the system is mathematically proven to be running this exact release build.
+    // Suppress patch notices to protect against accidental Column F timestamps in Google Sheets.
+    const activeInstalledHash = (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase();
+    const cloudWin10Hash = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+    const cloudWin7Hash = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+    const isExactSamePackage = activeInstalledHash && (activeInstalledHash === cloudWin10Hash || activeInstalledHash === cloudWin7Hash);
+
+    if (isExactSamePackage && !isForced) {
+        console.log("🛡️ [PatchSync] Cloud installer SHA-256 matches active installed package. Suppressing patch update.");
+        setIsPatchNotice(false);
+        if (!latestAppVersion || !isVersionHigher(latestAppVersion, APP_VERSION)) {
+           setShowUpdateNotice(false);
+        }
+        return;
+    }
+
     // Check if patch is newer AND if the 5-minute grace period has passed post-login
     if (latestTs > activeTs && (!isDismissed || patchSkipCount >= 3 || isForced)) {
        if (!isPostLogin && !isForced) {
@@ -603,14 +672,19 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
           setShowUpdateNotice(false);
        }
     }
-  }, [latestAppVersion, latestPatchTimestamp, activePatchTs, isSessionDismissed, patchSkipCount, versionSkipCount, updateDownloaded, now]);
+  }, [latestAppVersion, latestPatchTimestamp, activePatchTs, isSessionDismissed, patchSkipCount, versionSkipCount, updateDownloaded, now, isDeveloper]);
 
   const triggerUpdateModal = useCallback(() => {
+    const isDevEnv = isDeveloper || !import.meta.env.PROD || (typeof window !== 'undefined' && window.location.hostname === 'localhost');
+    if (isDevEnv) {
+      showAlert('info', 'Developer Mode Active', 'Software updates and installer patches are bypassed in developer mode. Your local workspace runs live code directly from the PMS project folder.');
+      return;
+    }
     sessionStorage.setItem('force_patch_update', 'true');
     setIsPatchNotice(true);
     setIsPatchMandatory(true);
     setShowUpdateNotice(true);
-  }, []);
+  }, [isDeveloper, showAlert]);
 
   useEffect(() => {
     // @ts-ignore

@@ -595,6 +595,10 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
   const [isRetryingSync, setIsRetryingSync] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const { isAppDirectoryConfigured, isBootSyncComplete } = useAppInitialization(verifyLicense);
+  const isDeveloper = currentUser?.role === 'Developer' || 
+    currentUser?.email === 'developer@bharatpay.com' || 
+    currentUser?.username === 'VRANGA' || 
+    (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
 
   const { 
     latestAppVersion, setLatestAppVersion, 
@@ -611,7 +615,7 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
     deploymentStep,
     handleUpdateNow, handleUpdateLater,
     triggerUpdateModal 
-  } = useAppUpdate(showAlert, currentUser?.role === 'Developer', currentUser?.username, currentUser?.email, isBootSyncComplete);
+  } = useAppUpdate(showAlert, isDeveloper, currentUser?.username, currentUser?.email, isBootSyncComplete);
 
   const [isInstalling, setIsInstalling] = useState(false);
   const [isAddingNewCompany, setIsAddingNewCompany] = useState(false);
@@ -2275,7 +2279,6 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
     return availableFinancialYears.some(fy => parseFY(fy) < currentVal);
   }, [activeFinancialYear, availableFinancialYears]);
 
-  const isDeveloper = currentUser?.role === 'Developer' || currentUser?.email === 'developer@bharatpay.com' || (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
   const visibleCompanies = isDeveloper 
     ? companies 
     : companies.filter(c => {
@@ -3465,7 +3468,7 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
                 {activeView === View.SSCode && <SocialSecurityCode payrollHistory={payrollHistory} employees={employees} config={config} companyProfile={companyProfile} globalMonth={globalMonth} setGlobalMonth={setGlobalMonth} globalYear={globalYear} setGlobalYear={setGlobalYear} showAlert={showAlert} activeFinancialYear={activeFinancialYear} />}
                 {activeView === View.Utilities && <Utilities designations={designations} setDesignations={setDesignations} divisions={divisions} setDivisions={setDivisions} branches={branches} setBranches={setBranches} sites={sites} setSites={setSites} showAlert={showAlert} />}
                 {activeView === View.PFCalculator && <PFCalculator employees={employees} payrollHistory={payrollHistory} config={config} companyProfile={companyProfile} month={globalMonth} setMonth={setGlobalMonth} year={globalYear} setYear={setGlobalYear} activeFinancialYear={activeFinancialYear} showAlert={showAlert} />}
-                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { window.location.reload(); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onClaimCompany={() => handleClaimCompany(companyProfile)} availableSlots={Math.max(0, (licenseInfo?.companyLimit || 3) - companies.filter(c => !c.isReadOnly).length)} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} onNavigate={safeNavigate} onTriggerUpdate={triggerUpdateModal} />}
+                {activeView === View.Settings && isSettingsAccessible && <Settings config={config} setConfig={setConfig} companyProfile={companyProfile} setCompanyProfile={setCompanyProfile} companies={companies} currentLogo={logoUrl} setLogo={handleUpdateLogo} leavePolicy={leavePolicy} setLeavePolicy={setLeavePolicy} onRestore={() => { window.location.reload(); }} initialTab={settingsTab} setSettingsTab={setSettingsTab} userRole={effectiveUser?.role} currentUser={effectiveUser} isSetupMode={employees.length === 0} onSkipSetupRedirect={() => { setSkipSetupRedirect(true); safeNavigate(View.Dashboard); }} onPayrollReset={handlePayrollReset} onDeepReset={handleDeepReset} onNuclearReset={handleNuclearReset} onRescueOrganizations={rescueOrganizations} onInitiateSecureDelete={handleInitiateSecureDelete} onClaimCompany={() => handleClaimCompany(companyProfile)} availableSlots={Math.max(0, (licenseInfo?.companyLimit || 3) - companies.filter(c => !c.isReadOnly).length)} onDirtyChange={setIsSettingsDirty} showAlert={showAlert} verifyLicense={verifyLicense} activeCompanyId={activeCompanyId} onOpenGate={() => { setIsCompanyGateOpen(true); setIsPurgeMode(true); }} globalMonth={globalMonth} globalYear={globalYear} activeFinancialYear={activeFinancialYear} latestPatchTimestamp={latestPatchTimestamp} onNavigate={safeNavigate} onTriggerUpdate={triggerUpdateModal} />}
                 {activeView === View.AI_Assistant && <AIAssistant />}
               </div>
 
@@ -3658,10 +3661,11 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
 
 
       <UpdatePortal 
-        isOpen={((showUpdateNotice || isPatchNotice || isUpdatePreparing || showBackgroundNotice || updateDownloaded || updateError === 'SECURITY_VIOLATION' || isInstalling) && (!isSessionDismissed || isPatchMandatory)) || updateError === 'SECURITY_VIOLATION' || isInstalling}
+        isOpen={!isDeveloper && (((showUpdateNotice || isPatchNotice || isUpdatePreparing || showBackgroundNotice || updateDownloaded || updateError === 'SECURITY_VIOLATION' || updateError === 'DOWNLOAD_FAILED' || isInstalling) && (!isSessionDismissed || isPatchMandatory)) || updateError === 'SECURITY_VIOLATION' || updateError === 'DOWNLOAD_FAILED' || isInstalling)}
         state={
           isInstalling ? 'INSTALLING' :
           updateError === 'SECURITY_VIOLATION' ? 'VIOLATION' :
+          updateError === 'DOWNLOAD_FAILED' ? 'DOWNLOAD_FAILED' :
           isPatchNotice ? 'PATCH' : 
           updateDownloaded ? 'READY' :
           isUpdatePreparing ? 'PREPARING' :
@@ -3676,6 +3680,23 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
         versionSkipCount={versionSkipCount}
         deploymentStep={deploymentStep}
         isVersionUpdate={!isPatchNotice}
+        onLaunchBootstrap={async () => {
+          if ((window as any).electronAPI?.launchBootstrapInstaller) {
+            const res = await (window as any).electronAPI.launchBootstrapInstaller();
+            if (res && res.notFound) {
+              const launcherUrl = localStorage.getItem('app_launcher_url');
+              if ((window as any).electronAPI?.openBootstrapLink) {
+                await (window as any).electronAPI.openBootstrapLink(launcherUrl);
+              }
+            }
+          }
+        }}
+        onOpenBrowserDownload={async () => {
+          const launcherUrl = localStorage.getItem('app_launcher_url');
+          if ((window as any).electronAPI?.openBootstrapLink) {
+            await (window as any).electronAPI.openBootstrapLink(launcherUrl);
+          }
+        }}
         onUpdateNow={() => handleUpdateNow(async () => {
           setIsInstalling(true);
           // Pre-install persistence

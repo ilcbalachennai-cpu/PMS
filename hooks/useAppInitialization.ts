@@ -79,6 +79,7 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
         const systemKeys = [
           'app_active_patch_ts', 
           'app_pending_patch_ts',
+          'app_active_installer_hash',
           'app_latest_patch_timestamp', 
           'app_latest_version', 
           'app_patch_skip_count', 

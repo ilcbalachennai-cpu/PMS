@@ -97,7 +97,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     generateDiagnostics: (uiState: any) => ipcRenderer.invoke('generate-diagnostics', uiState),
     getAppBuildAuditInfo: () => ipcRenderer.invoke('get-app-build-audit-info'),
     launchInstallerManually: () => ipcRenderer.invoke('launch-installer-manually'),
-    openUpdateLog: () => ipcRenderer.invoke('open-update-log')
+    openUpdateLog: () => ipcRenderer.invoke('open-update-log'),
+    launchBootstrapInstaller: () => ipcRenderer.invoke('launch-bootstrap-installer'),
+    openBootstrapLink: (url?: string) => ipcRenderer.invoke('open-bootstrap-link', url)
 });
 
 console.log("EB: Electron Bridge (electronAPI) Initialized");

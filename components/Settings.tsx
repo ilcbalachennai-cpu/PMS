@@ -27,6 +27,7 @@ interface SettingsProps {
     setConfig: (config: StatutoryConfig) => void;
     companyProfile: CompanyProfile;
     setCompanyProfile: (profile: CompanyProfile) => void;
+    companies?: CompanyProfile[];
     currentLogo: string;
     setLogo: (url: string) => void;
     leavePolicy: LeavePolicy;
@@ -75,7 +76,7 @@ const UsageTimeClock = () => {
 };
 
 const Settings: React.FC<SettingsProps> = ({
-    config, setConfig, companyProfile, setCompanyProfile, currentLogo, setLogo,
+    config, setConfig, companyProfile, setCompanyProfile, companies, currentLogo, setLogo,
     leavePolicy, setLeavePolicy, onRestore, onNuclearReset, onPayrollReset, onDeepReset, initialTab = SettingsTab.Company,
     setSettingsTab,
     userRole, currentUser, isSetupMode = false, onSkipSetupRedirect, onDirtyChange,
@@ -84,6 +85,7 @@ const Settings: React.FC<SettingsProps> = ({
     latestPatchTimestamp, onNavigate, onTriggerUpdate
 }) => {
     const isReadOnly = companyProfile?.isReadOnly === true;
+    const isDeveloperUser = userRole === 'Developer' || currentUser?.role === 'Developer';
     const getCKey = (key: string) => activeCompanyId === 'default' ? key : `${key}_${activeCompanyId}`;
     const getPermission = (key: keyof UserPermissions): boolean => {
         if (!currentUser) return false;
@@ -295,6 +297,44 @@ const Settings: React.FC<SettingsProps> = ({
         } catch (e) { }
         return globalLimit - totalOtherQuota;
     }, [licenseInfo, profileData.id]);
+
+    // Compute effective registered company count with multi-source fallback
+    const effectiveRegisteredCount = useMemo(() => {
+        // 1. Direct from companies prop
+        if (companies && Array.isArray(companies) && companies.length > 0) {
+            const activeComps = companies.filter(c => !c.isReadOnly && c.companySignature && c.companySignature.trim() !== '');
+            if (activeComps.length > 0) return activeComps.length;
+            const nonReadOnly = companies.filter(c => !c.isReadOnly);
+            if (nonReadOnly.length > 0) return nonReadOnly.length;
+        }
+
+        // 2. Direct from localStorage app_companies
+        try {
+            const raw = localStorage.getItem('app_companies');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    const activeComps = parsed.filter((c: any) => !c.isReadOnly && c.companySignature && c.companySignature.trim() !== '');
+                    if (activeComps.length > 0) return activeComps.length;
+                    const nonReadOnly = parsed.filter((c: any) => !c.isReadOnly);
+                    if (nonReadOnly.length > 0) return nonReadOnly.length;
+                }
+            }
+        } catch (e) {}
+
+        // 3. From licenseInfo.cloudSignatures
+        if (licenseInfo?.cloudSignatures && Array.isArray(licenseInfo.cloudSignatures) && licenseInfo.cloudSignatures.length > 0) {
+            return licenseInfo.cloudSignatures.length;
+        }
+
+        // 4. Fallback to registeredSiloCount if IPC returned > 0
+        if (registeredSiloCount !== null && registeredSiloCount > 0) {
+            return registeredSiloCount;
+        }
+
+        return 0;
+    }, [companies, licenseInfo?.cloudSignatures, registeredSiloCount]);
+
     const [newLicenseKey, setNewLicenseKey] = useState('');
     const [newUserName, setNewUserName] = useState(licenseInfo?.userName || '');
     const [newRegEmail, setNewRegEmail] = useState(licenseInfo?.registeredTo || '');
@@ -709,6 +749,39 @@ const Settings: React.FC<SettingsProps> = ({
             }).catch(() => {});
         }
     }, []);
+
+    // Auto-heal sys_limit.bin: sync active, non-read-only company signatures into activated silos
+    useEffect(() => {
+        const healSilos = async () => {
+            if (!(window as any).electronAPI?.registerActivatedSilo) return;
+            const targetCompanies = companies && companies.length > 0 ? companies : (() => {
+                try {
+                    const raw = localStorage.getItem('app_companies');
+                    return raw ? JSON.parse(raw) : [];
+                } catch { return []; }
+            })();
+            if (!Array.isArray(targetCompanies)) return;
+            for (const c of targetCompanies) {
+                if (!c.isReadOnly && c.companySignature && c.companySignature.trim() !== '') {
+                    try {
+                        await (window as any).electronAPI.registerActivatedSilo(c.companySignature);
+                    } catch (e) {
+                        console.warn('[AutoHeal] Failed to register silo signature:', c.companySignature, e);
+                    }
+                }
+            }
+            if ((window as any).electronAPI?.getActivatedSilos) {
+                try {
+                    const res = await (window as any).electronAPI.getActivatedSilos();
+                    if (res?.success && Array.isArray(res.silos)) {
+                        const activeOnly = res.silos.filter((s: string) => !s.startsWith("REVOKE:"));
+                        setRegisteredSiloCount(activeOnly.length);
+                    }
+                } catch (e) {}
+            }
+        };
+        healSilos();
+    }, [companies]);
 
     useEffect(() => {
         if (progressRef.current) {
@@ -5866,8 +5939,8 @@ const Settings: React.FC<SettingsProps> = ({
                                             </div>
                                             <div className="flex justify-between items-center py-1.5 border-t border-white/5">
                                                 <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Companies Registered</span>
-                                                <span className={`text-sm font-black font-mono px-4 py-1 rounded-lg border ${registeredSiloCount != null && registeredSiloCount >= (licenseInfo?.companyLimit || 1) ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'}`}>
-                                                    {registeredSiloCount !== null ? `${registeredSiloCount} / ${licenseInfo?.companyLimit || 1}` : '...'}
+                                                <span className={`text-sm font-black font-mono px-4 py-1 rounded-lg border ${effectiveRegisteredCount >= (licenseInfo?.companyLimit || 1) ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'}`}>
+                                                    {effectiveRegisteredCount} / {licenseInfo?.companyLimit || 1}
                                                 </span>
                                             </div>
                                             <div className="flex justify-between items-center py-1.5 border-t border-white/5">
@@ -6057,6 +6130,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         </div>
                                     </div>
 
+                                    {isDeveloperUser && (
                                     <div className="flex items-center gap-2">
                                         <button
                                             onClick={fetchBuildAudit}
@@ -6128,6 +6202,7 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                             View Log
                                         </button>
                                     </div>
+                                    )}
                                 </div>
 
                                 <div className="p-6 space-y-5">
@@ -6241,15 +6316,16 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                                     <span className="text-fuchsia-400 font-mono font-bold text-[10px]"><UsageTimeClock /></span>
                                                 </div>
                                                 <div className="flex justify-between items-center">
-                                                    <span className="text-slate-500">Package Hash:</span>
-                                                    <span className="text-slate-400 font-mono text-[9px] truncate max-w-[120px]" title={localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || 'N/A'}>
-                                                        {(localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || 'Verified').slice(0, 16)}...
-                                                    </span>
-                                                </div>
-                                                <div className="flex justify-between items-center">
                                                     <span className="text-slate-500">Evaluation:</span>
                                                     <span className="text-slate-300 font-bold text-[10px]">
-                                                        {parseDateTime(latestPatchTimestamp) > parseDateTime(localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP) ? '⚡ Patch Pending' : '✓ Matching'}
+                                                        {(() => {
+                                                            const activeHash = (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase();
+                                                            const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+                                                            const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+                                                            const isExactHash = activeHash && (activeHash === cloudWin10 || activeHash === cloudWin7);
+                                                            const isPending = !isExactHash && (parseDateTime(latestPatchTimestamp) > parseDateTime(localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP));
+                                                            return isPending ? '⚡ Patch Pending' : '✓ Matching';
+                                                        })()}
                                                     </span>
                                                 </div>
                                             </div>
@@ -6292,18 +6368,40 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                                 </div>
                                             </div>
                                             {buildAuditInfo?.installerStats?.exists && (
-                                                <button
-                                                    onClick={async () => {
-                                                        if ((window as any).electronAPI?.launchInstallerManually) {
-                                                            showAlert('confirm', 'Run Installer Manually', 'BharatPay Pro will now close automatically to allow the installer to update application files without conflicts. Do you wish to continue?', async () => {
-                                                                await (window as any).electronAPI.launchInstallerManually();
-                                                            });
-                                                        }
-                                                    }}
-                                                    className="w-full mt-1 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
-                                                >
-                                                    <ExternalLink size={12} /> Run Installer Manually
-                                                </button>
+                                                (() => {
+                                                    const activeHash = (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase();
+                                                    const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+                                                    const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+                                                    const isExactHash = activeHash && (activeHash === cloudWin10 || activeHash === cloudWin7);
+                                                    const isUpToDate = (buildAuditInfo?.updateStatus?.exitCode === 0 || isExactHash) && (parseDateTime(latestPatchTimestamp) <= parseDateTime(localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP) || isExactHash);
+
+                                                    return (
+                                                        <button
+                                                            onClick={async () => {
+                                                                if ((window as any).electronAPI?.launchInstallerManually) {
+                                                                    showAlert(
+                                                                        'confirm', 
+                                                                        isUpToDate ? 'Re-run Installer (Repair)' : 'Run Installer Manually', 
+                                                                        isUpToDate 
+                                                                            ? 'Your software is already verified and up to date. Running the setup wizard will perform a repair installation. BharatPay Pro will now close automatically. Do you wish to continue?' 
+                                                                            : 'BharatPay Pro will now close automatically to allow the installer to update application files without conflicts. Do you wish to continue?', 
+                                                                        async () => {
+                                                                            await (window as any).electronAPI.launchInstallerManually();
+                                                                        }
+                                                                    );
+                                                                }
+                                                            }}
+                                                            className={`w-full mt-1 py-1.5 font-black text-[9px] uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer ${
+                                                                isUpToDate 
+                                                                    ? 'bg-slate-700/80 hover:bg-slate-600 text-slate-300 border border-slate-600/50' 
+                                                                    : 'bg-sky-600 hover:bg-sky-500 text-white'
+                                                            }`}
+                                                        >
+                                                            {isUpToDate ? <CheckCircle2 size={12} className="text-emerald-400" /> : <ExternalLink size={12} />}
+                                                            {isUpToDate ? 'Build Up To Date (Re-run Repair)' : 'Run Installer Manually'}
+                                                        </button>
+                                                    );
+                                                })()
                                             )}
                                         </div>
                                     </div>

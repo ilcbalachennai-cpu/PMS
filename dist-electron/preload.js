@@ -107,6 +107,8 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     generateDiagnostics: function (uiState) { return electron_1.ipcRenderer.invoke('generate-diagnostics', uiState); },
     getAppBuildAuditInfo: function () { return electron_1.ipcRenderer.invoke('get-app-build-audit-info'); },
     launchInstallerManually: function () { return electron_1.ipcRenderer.invoke('launch-installer-manually'); },
-    openUpdateLog: function () { return electron_1.ipcRenderer.invoke('open-update-log'); }
+    openUpdateLog: function () { return electron_1.ipcRenderer.invoke('open-update-log'); },
+    launchBootstrapInstaller: function () { return electron_1.ipcRenderer.invoke('launch-bootstrap-installer'); },
+    openBootstrapLink: function (url) { return electron_1.ipcRenderer.invoke('open-bootstrap-link', url); }
 });
 console.log("EB: Electron Bridge (electronAPI) Initialized");

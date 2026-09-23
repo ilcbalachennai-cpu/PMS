@@ -3,12 +3,13 @@ import {
   RefreshCw, Loader2, ShieldAlert, 
   ArrowRight, Wrench,
   Database, Download, CheckCircle2,
-  Zap, Hash, Shield
+  Zap, Hash, Shield, AlertTriangle,
+  ShieldCheck, ExternalLink
 } from 'lucide-react';
 
 interface UpdatePortalProps {
   isOpen: boolean;
-  state: 'TOAST' | 'PREPARING' | 'BACKGROUND' | 'READY' | 'VIOLATION' | 'PATCH' | 'INSTALLING';
+  state: 'TOAST' | 'PREPARING' | 'BACKGROUND' | 'READY' | 'VIOLATION' | 'PATCH' | 'INSTALLING' | 'DOWNLOAD_FAILED';
   version: string | null;
   onUpdateNow: () => void;
   onUpdateLater: () => void;
@@ -21,6 +22,8 @@ interface UpdatePortalProps {
   versionSkipCount?: number;
   deploymentStep?: number;
   isVersionUpdate?: boolean;
+  onLaunchBootstrap?: () => void;
+  onOpenBrowserDownload?: () => void;
 }
 
 const UpdatePortal: React.FC<UpdatePortalProps> = ({
@@ -37,7 +40,9 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
   patchSkipCount = 0,
   versionSkipCount = 0,
   deploymentStep: externalStep,
-  isVersionUpdate = false
+  isVersionUpdate = false,
+  onLaunchBootstrap,
+  onOpenBrowserDownload
 }) => {
 
   const [installStep, setInstallStep] = React.useState(3);
@@ -437,6 +442,87 @@ const UpdatePortal: React.FC<UpdatePortalProps> = ({
                    </div>
                    <button onClick={onUpdateNow} className="w-full py-4 bg-red-600 text-white font-black uppercase tracking-widest rounded-lg text-[10px] shadow-lg">Initiate Repair</button>
                    <button onClick={onClose} className="w-full py-2 text-slate-500 font-bold uppercase tracking-widest text-[8px]">Terminate</button>
+                </div>
+            </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── RENDER: DOWNLOAD_FAILED (RECOVERY PORTAL) ──
+  if (state === 'DOWNLOAD_FAILED') {
+    return (
+      <div className="fixed inset-0 bg-[#020617]/95 backdrop-blur-2xl z-[20000] flex items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-300">
+        <div className="w-full max-w-md">
+            <div className="glass-panel-amber-glow rounded-[2rem] p-7 relative overflow-hidden border border-amber-500/30 shadow-[0_0_80px_rgba(245,158,11,0.15)] bg-slate-950/95 text-left">
+                
+                {/* Header with Icon */}
+                <div className="flex items-center gap-3.5 mb-5">
+                   <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
+                      <AlertTriangle size={24} />
+                   </div>
+                   <div>
+                      <h3 className="text-lg font-black text-white uppercase tracking-tight">Update Download Interrupted</h3>
+                      <p className="text-amber-400/80 text-[10px] font-bold uppercase tracking-wider">Antivirus Browsing Protection or Network Restriction</p>
+                   </div>
+                </div>
+
+                {/* 100% Data Protection Guarantee */}
+                <div className="mb-5 p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3">
+                   <ShieldCheck size={20} className="text-emerald-400 shrink-0 mt-0.5" />
+                   <div className="text-[11px] text-emerald-200/90 leading-relaxed font-medium">
+                      <strong className="text-emerald-300 block font-bold mb-0.5">100% Data & Config Preserved</strong>
+                      Your employee records, payroll data, company databases, and licenses are stored securely outside the application folder and remain completely safe and untouched.
+                   </div>
+                </div>
+
+                <p className="text-slate-300 text-[11px] leading-relaxed mb-5">
+                   Background binary streaming was blocked by your browser or antivirus (such as Quick Heal). You can easily use the standalone <strong className="text-white">Launch_BPP_Installer.exe</strong> in your BharatPayRoll folder to update fresh:
+                </p>
+
+                {/* Action Buttons */}
+                <div className="space-y-2.5">
+                   {onLaunchBootstrap && (
+                     <button 
+                         onClick={onLaunchBootstrap} 
+                         className="w-full py-3.5 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black uppercase tracking-wider rounded-xl shadow-lg transition-all active:scale-[0.98] flex items-center justify-between group text-[11px]"
+                     >
+                         <div className="flex items-center gap-2.5">
+                            <Zap size={16} strokeWidth={3} className="text-slate-950" />
+                            <span>Run Bootstrap Installer (Launch_BPP_Installer.exe)</span>
+                         </div>
+                         <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                     </button>
+                   )}
+
+                   {onOpenBrowserDownload && (
+                     <button 
+                         onClick={onOpenBrowserDownload} 
+                         className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold uppercase tracking-wider rounded-xl border border-slate-700 hover:border-slate-600 transition-all flex items-center justify-between text-[11px]"
+                     >
+                         <div className="flex items-center gap-2.5">
+                            <ExternalLink size={15} className="text-slate-400" />
+                            <span>Download Fresh Installer in Browser</span>
+                         </div>
+                         <Download size={14} className="text-slate-400" />
+                     </button>
+                   )}
+
+                   <div className="flex items-center gap-2 pt-1">
+                      <button 
+                          onClick={onUpdateNow} 
+                          className="flex-1 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 font-bold uppercase tracking-wider rounded-xl text-[10px] transition-all flex items-center justify-center gap-1.5"
+                      >
+                          <RefreshCw size={12} />
+                          Retry In-App
+                      </button>
+                      <button 
+                          onClick={onClose} 
+                          className="flex-1 py-2.5 bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 font-bold uppercase tracking-wider rounded-xl text-[10px] transition-all"
+                      >
+                          Continue Using Current
+                      </button>
+                   </div>
                 </div>
             </div>
         </div>

@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
 import * as crypto from 'crypto';
+import * as https from 'https';
+import * as http from 'http';
 
 import { spawn, execSync, exec } from 'child_process';
 import * as os from 'os';
@@ -438,10 +440,6 @@ function createWindow() {
         isWindowRevealed = true;
         if (mainWindow && !mainWindow.isDestroyed()) {
             bringWindowToFront(mainWindow);
-            // Instantly kill transition HTA popup (bpp_launch_msg.hta) as soon as main window appears
-            try {
-                exec('taskkill /F /IM mshta.exe /T');
-            } catch (_) {}
         }
     };
 
@@ -460,6 +458,9 @@ function createWindow() {
 
     ipcMain.handle('app-initialization-complete', async () => {
         console.log('[IPC] App initialization & Login loading complete. Releasing always-on-top.');
+        try {
+            exec('taskkill /F /IM mshta.exe /T');
+        } catch (_) {}
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.setAlwaysOnTop(false);
             mainWindow.focus();
@@ -1057,6 +1058,8 @@ const GLOBAL_KEYS = [
     'app_logo',
     'app_active_patch_ts',
     'app_pending_patch_ts',
+    'app_active_installer_hash',
+    'app_pending_installer_hash',
     'app_patch_skip_count',
     'app_version_skip_count',
     'app_version_marker',
@@ -3607,117 +3610,169 @@ ipcMain.handle('start-update-download', async (_, downloadUrl: string, expectedH
     return new Promise((resolve) => {
         try {
             const dest = getInstallerPath();
-            const file = fs.createWriteStream(dest);
+            let lastEmittedProgress = -1;
 
-            const request = net.request({
-                url: downloadUrl,
-                redirect: 'follow'
-            });
-            
-            request.on('response', (response) => {
-                const totalBytes = parseInt(response.headers['content-length'] as string, 10) || 0;
-                let downloadedBytes = 0;
-                let lastEmittedProgress = -1;
-
-                response.on('data', (chunk) => {
-                    file.write(chunk);
-                    downloadedBytes += chunk.length;
-                    
-                    if (totalBytes > 0) {
-                        const progress = Math.round((downloadedBytes / totalBytes) * 100);
-                        if (progress !== lastEmittedProgress) {
-                            lastEmittedProgress = progress;
-                            BrowserWindow.getAllWindows().forEach(win => {
-                                win.webContents.send('update-download-progress', progress);
-                            });
-                        }
-                    }
-                });
-                
-                response.on('end', async () => {
-                    file.end();
-                    console.log('✅ Update downloaded to:', dest);
-
-                    // --- V02.02.40: BINARY INTEGRITY CHECK ---
-                    // Verify the file is actually a Windows Executable (MZ Header)
-                    try {
-                        const buffer = new Uint8Array(2);
-                        const fd = fs.openSync(dest, 'r');
-                        fs.readSync(fd, buffer, 0, 2, 0);
-                        fs.closeSync(fd);
-                        if (String.fromCharCode(buffer[0], buffer[1]) !== 'MZ') {
-                            console.error('❌ Security Violation: Downloaded file is not a valid Windows Executable.');
-                            fs.unlinkSync(dest);
-                            isUpdateDownloading = false;
-                            resolve({ success: false, error: 'INVALID_BINARY_TYPE' });
-                            return;
-                        }
-                    } catch (e) {
-                        console.error('❌ Failed to verify binary header:', e);
-                    }
-
-                    // ── SHA-256 INTEGRITY VERIFICATION ──
-                    if (expectedHash && expectedHash.trim() !== "") {
-                        console.log('🛡️ Verifying SHA-256 integrity...');
-                        try {
-                            const hash = crypto.createHash('sha256');
-                            const input = fs.createReadStream(dest);
-                            
-                            const calculatedHash = await new Promise<string>((res, rej) => {
-                                input.on('data', chunk => hash.update(chunk as any));
-                                input.on('end', () => res(hash.digest('hex')));
-                                input.on('error', err => rej(err));
-                            });
-
-                            if (calculatedHash.toLowerCase() !== expectedHash.toLowerCase()) {
-                                console.error(`❌ Security Violation: Hash Mismatch!\nExpected: ${expectedHash}\nActual: ${calculatedHash}`);
-                                try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch (e) {}
-                                isUpdateDownloading = false;
-                                resolve({ success: false, error: 'SECURITY_HASH_MISMATCH' });
-                                return;
-                            }
-                            console.log('✅ Integrity Verified successfully.');
-                        } catch (hashErr: any) {
-                            console.error('❌ Hash calculation failed:', hashErr);
-                            try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch (e) {}
-                            isUpdateDownloading = false;
-                            resolve({ success: false, error: 'Integrity check failed' });
-                            return;
-                        }
-                    } else {
-                        console.warn('⚠️ No SHA-256 hash provided for this update. Proceeding without cryptographic hash verification.');
-                    }
-
+            const emitProgress = (progress: number) => {
+                if (progress !== lastEmittedProgress) {
+                    lastEmittedProgress = progress;
                     BrowserWindow.getAllWindows().forEach(win => {
-                        win.webContents.send('update-download-complete');
+                        win.webContents.send('update-download-progress', progress);
                     });
-                    isUpdateDownloading = false;
-                    console.log(`✅ Update download finished. Total Bytes: ${fs.statSync(dest).size}`);
-                    resolve({ success: true, path: dest });
-                    if (closeRequested) app.quit();
-                });
-                response.on('error', (err: any) => {
-                    file.end();
-                    fs.unlink(dest, () => { });
-                    console.error('❌ Update download stream failed:', err);
-                    isUpdateDownloading = false;
-                    resolve({ success: false, error: err.message });
-                    if (closeRequested) app.quit();
-                });
-            });
+                }
+            };
 
-            request.on('error', (err: any) => {
-                file.end();
-                fs.unlink(dest, () => { });
-                console.error('❌ Update request failed:', err);
-                isUpdateDownloading = false;
-                resolve({ success: false, error: err.message });
-                if (closeRequested) app.quit();
-            });
-            
-            request.end();
+            const downloadStream = (targetUrl: string, originalCookies: string[] = []) => {
+                try {
+                    // Auto-convert Google Drive viewer/share links: /file/d/<id>/view -> uc?export=download&id=<id>
+                    const gdriveViewMatch = targetUrl.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+                    if (gdriveViewMatch) {
+                        targetUrl = `https://drive.google.com/uc?export=download&id=${gdriveViewMatch[1]}`;
+                    }
 
+                    const parsedUrl = new URL(targetUrl);
+                    const client = parsedUrl.protocol === 'http:' ? http : https;
+
+                    const cookieHeader = originalCookies.length > 0
+                        ? originalCookies.map(c => c.split(';')[0]).join('; ')
+                        : '';
+
+                    const req = client.get(targetUrl, {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+                            ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
+                        }
+                    }, (res) => {
+                        // Handle 3xx Redirects
+                        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                            const nextUrl = new URL(res.headers.location, targetUrl).toString();
+                            const newCookies = [...originalCookies, ...(res.headers['set-cookie'] || [])];
+                            return downloadStream(nextUrl, newCookies);
+                        }
+
+                        const contentType = (res.headers['content-type'] as string) || '';
+                        const allCookies = [...originalCookies, ...(res.headers['set-cookie'] || [])];
+
+                        // Detect Google Drive large-file HTML warning page ("too large for Google to scan for viruses")
+                        if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+                            let html = '';
+                            res.on('data', chunk => { html += chunk; });
+                            res.on('end', () => {
+                                const uuidMatch = html.match(/name="uuid"\s+value="([^"]+)"/);
+                                const idMatch = html.match(/name="id"\s+value="([^"]+)"/) || targetUrl.match(/[?&]id=([^&]+)/);
+                                if (uuidMatch && idMatch) {
+                                    const uuid = uuidMatch[1];
+                                    const id = idMatch[1];
+                                    const confirmedUrl = `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t&uuid=${uuid}`;
+                                    console.log('🔄 Detected Google Drive large-file warning. Auto-requesting confirmed binary stream...');
+                                    return downloadStream(confirmedUrl, allCookies);
+                                } else {
+                                    // Not a valid binary and not a Google Drive warning form
+                                    isUpdateDownloading = false;
+                                    resolve({ success: false, error: 'INVALID_BINARY_TYPE' });
+                                }
+                            });
+                            return;
+                        }
+
+                        // Stream binary file
+                        const totalBytes = parseInt(res.headers['content-length'] as string, 10) || 0;
+                        let downloadedBytes = 0;
+                        const file = fs.createWriteStream(dest);
+
+                        res.on('data', (chunk) => {
+                            file.write(chunk);
+                            downloadedBytes += chunk.length;
+                            if (totalBytes > 0) {
+                                emitProgress(Math.round((downloadedBytes / totalBytes) * 100));
+                            }
+                        });
+
+                        res.on('end', async () => {
+                            file.end();
+                            console.log('✅ Update downloaded to:', dest);
+
+                            // --- V02.02.40: BINARY INTEGRITY CHECK ---
+                            try {
+                                const buffer = new Uint8Array(2);
+                                const fd = fs.openSync(dest, 'r');
+                                fs.readSync(fd, buffer, 0, 2, 0);
+                                fs.closeSync(fd);
+                                if (String.fromCharCode(buffer[0], buffer[1]) !== 'MZ') {
+                                    console.error('❌ Security Violation: Downloaded file is not a valid Windows Executable.');
+                                    fs.unlinkSync(dest);
+                                    isUpdateDownloading = false;
+                                    resolve({ success: false, error: 'INVALID_BINARY_TYPE' });
+                                    return;
+                                }
+                            } catch (e) {
+                                console.error('❌ Failed to verify binary header:', e);
+                            }
+
+                            // ── SHA-256 INTEGRITY VERIFICATION ──
+                            if (expectedHash && expectedHash.trim() !== "") {
+                                console.log('🛡️ Verifying SHA-256 integrity...');
+                                try {
+                                    const hash = crypto.createHash('sha256');
+                                    const input = fs.createReadStream(dest);
+                                    const calculatedHash = await new Promise<string>((resHash, rejHash) => {
+                                        input.on('data', chunk => hash.update(chunk as any));
+                                        input.on('end', () => resHash(hash.digest('hex')));
+                                        input.on('error', err => rejHash(err));
+                                    });
+
+                                    if (calculatedHash.toLowerCase() !== expectedHash.toLowerCase()) {
+                                        console.error(`❌ Security Violation: Hash Mismatch!\nExpected: ${expectedHash}\nActual: ${calculatedHash}`);
+                                        try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch (_) {}
+                                        isUpdateDownloading = false;
+                                        resolve({ success: false, error: 'SECURITY_HASH_MISMATCH' });
+                                        return;
+                                    }
+                                    console.log('✅ Integrity Verified successfully.');
+                                } catch (hashErr: any) {
+                                    console.error('❌ Hash calculation failed:', hashErr);
+                                    try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch (_) {}
+                                    isUpdateDownloading = false;
+                                    resolve({ success: false, error: 'Integrity check failed' });
+                                    return;
+                                }
+                            }
+
+                            BrowserWindow.getAllWindows().forEach(win => {
+                                win.webContents.send('update-download-complete');
+                            });
+                            isUpdateDownloading = false;
+                            console.log(`✅ Update download finished. Total Bytes: ${fs.statSync(dest).size}`);
+                            resolve({ success: true, path: dest });
+                            if (closeRequested) app.quit();
+                        });
+
+                        res.on('error', (err: any) => {
+                            file.end();
+                            fs.unlink(dest, () => {});
+                            console.error('❌ Update download stream failed:', err);
+                            isUpdateDownloading = false;
+                            resolve({ success: false, error: err.message });
+                            if (closeRequested) app.quit();
+                        });
+                    });
+
+                    req.on('error', (err: any) => {
+                        fs.unlink(dest, () => {});
+                        console.error('❌ Update request failed:', err);
+                        isUpdateDownloading = false;
+                        resolve({ success: false, error: err.message });
+                        if (closeRequested) app.quit();
+                    });
+                } catch (streamErr: any) {
+                    console.error('❌ Update stream error:', streamErr);
+                    isUpdateDownloading = false;
+                    resolve({ success: false, error: streamErr.message });
+                }
+            };
+
+            downloadStream(downloadUrl);
         } catch (e: any) {
+            isUpdateDownloading = false;
             resolve({ success: false, error: e.message });
         }
     });
@@ -3752,6 +3807,14 @@ ipcMain.handle('clear-patch-marker', async () => {
 });
 
 ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchTimestamp?: string }) => {
+    if (!app.isPackaged) {
+        console.warn('⚠️ [Update] backup-and-install skipped in development mode (app.isPackaged is false).');
+        return { 
+            success: false, 
+            error: 'Development Environment: Patch updates are designed for packaged standalone builds (BPP_APP.exe). You are running directly from source code in the development workspace.' 
+        };
+    }
+
     const isSilent = options?.silent ?? false;
     const installerPath = getInstallerPath();
 
@@ -3893,10 +3956,10 @@ ipcMain.handle('backup-and-install', (_, options?: { silent?: boolean, newPatchT
                 // Chain: Single HTA Window -> Delay -> Taskkill old app -> Start Installer /S (WAIT) -> Relaunch App
                 let command = '';
                 if (isSilent) {
-                    command = `start mshta "${silentHtaPath}" & timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start /wait "" "${installerPath}" /S & start "" "${appExePath}"`;
+                    command = `start mshta "${silentHtaPath}" & timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start /wait "" "${installerPath}" /S /D=${appInstallDir} & start "" "${appExePath}"`;
                 } else {
-                    // Interactive Mode: Run installer directly
-                    command = `timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}"`;
+                    // Interactive Mode: Run installer directly targeting active install directory
+                    command = `timeout /t 2 /nobreak && taskkill /F /IM ${exeName} /T & timeout /t 1 /nobreak & start "" "${installerPath}" /D=${appInstallDir}`;
                 }
                 
                 spawn('cmd', ['/c', command], {
@@ -4007,6 +4070,14 @@ ipcMain.handle('get-app-build-audit-info', async () => {
 
 ipcMain.handle('launch-installer-manually', async () => {
     try {
+        if (!app.isPackaged) {
+            console.warn('⚠️ [Update] launch-installer-manually skipped in development mode.');
+            return { 
+                success: false, 
+                error: 'Development Environment: Running the packaged installer will update the installed desktop build, not this source development environment.' 
+            };
+        }
+
         const installerPath = getInstallerPath();
         if (!fs.existsSync(installerPath)) {
             return { success: false, error: `Installer file not found at "${installerPath}". Please download the update first.` };
@@ -4021,8 +4092,11 @@ ipcMain.handle('launch-installer-manually', async () => {
             db = null;
         }
 
-        // Launch installer directly as a detached process (native exe, 100% AV safe)
-        const child = spawn(installerPath, [], {
+        const appExePath = process.execPath;
+        const appInstallDir = path.dirname(appExePath);
+
+        // Launch installer directly as a detached process (native exe, 100% AV safe) targeting active install directory
+        const child = spawn(installerPath, [`/D=${appInstallDir}`], {
             detached: true,
             stdio: 'ignore'
         });
@@ -4053,6 +4127,78 @@ ipcMain.handle('open-update-log', async () => {
         return { success: false, error: 'Update log file does not exist yet.' };
     } catch (err: any) {
         return { success: false, error: err?.message || 'Failed to open update log' };
+    }
+});
+
+ipcMain.handle('launch-bootstrap-installer', async () => {
+    try {
+        // Look for Launch_BPP_Installer.exe in parent folder BharatPayRoll (outside BPP_APP)
+        const appDir = path.dirname(process.execPath); // e.g. E:\BharatPayRoll\BPP_APP
+        const parentDir = path.join(appDir, '..');     // e.g. E:\BharatPayRoll
+        const candidates = [
+            path.join(parentDir, 'Launch_BPP_Installer.exe'),
+            path.join(process.cwd(), '..', 'Launch_BPP_Installer.exe'),
+            path.join(app.getAppPath(), '..', '..', 'Launch_BPP_Installer.exe'),
+            path.join(process.cwd(), 'Launch_BPP_Installer.exe'),
+            path.join(appDir, 'Launch_BPP_Installer.exe')
+        ];
+
+        let targetLauncher: string | null = null;
+        for (const cand of candidates) {
+            if (fs.existsSync(cand)) {
+                targetLauncher = cand;
+                break;
+            }
+        }
+
+        if (!targetLauncher) {
+            console.warn('⚠️ Launch_BPP_Installer.exe not found in parent directory or local paths.');
+            return { success: false, notFound: true };
+        }
+
+        console.log(`🚀 Launching Bootstrap Installer from: ${targetLauncher}`);
+
+        // Safely close SQLite DB
+        if (db) {
+            try {
+                db.pragma('wal_checkpoint(TRUNCATE)');
+                db.close();
+            } catch (_) {}
+            db = null;
+        }
+
+        // Spawn detached with --update flag
+        const child = spawn(targetLauncher, ['--update'], {
+            detached: true,
+            stdio: 'ignore'
+        });
+        child.unref();
+
+        // Close all windows and exit cleanly
+        BrowserWindow.getAllWindows().forEach(win => {
+            try { win.destroy(); } catch (_) {}
+        });
+
+        setTimeout(() => {
+            app.exit(0);
+        }, 150);
+
+        return { success: true };
+    } catch (err: any) {
+        console.error('❌ Failed to launch bootstrap installer:', err);
+        return { success: false, error: err?.message || 'Failed to launch bootstrap installer' };
+    }
+});
+
+ipcMain.handle('open-bootstrap-link', async (_, customUrl?: string) => {
+    try {
+        const urlToOpen = customUrl || 'https://github.com/ilcbalachennai-cpu/BPP_Version_Update/releases/download/V06.01.11/Launch_BPP_Installer.exe';
+        console.log(`🌐 Opening external bootstrap launcher download: ${urlToOpen}`);
+        await shell.openExternal(urlToOpen);
+        return { success: true };
+    } catch (err: any) {
+        console.error('❌ Failed to open bootstrap link in browser:', err);
+        return { success: false, error: err?.message || 'Failed to open link' };
     }
 });
 
