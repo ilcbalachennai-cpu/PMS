@@ -28,18 +28,11 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
                 'app_master_designations', 'app_master_divisions', 'app_master_branches',
                 'app_master_sites', 'app_employees', 'app_config', 'app_company_profile',
                 'app_attendance', 'app_leave_ledgers', 'app_advance_ledgers', 'app_payroll_history',
-                'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo',
-                'app_active_patch_ts', 'app_pending_patch_ts', 'app_latest_patch_timestamp', 'app_latest_version',
-                'app_download_url', 'app_download_url_win7', 'app_launcher_url',
-                'app_update_hash', 'app_update_hash_win10', 'app_update_hash_win7',
-                'app_patch_skip_count', 'app_version_marker'
+                'app_fines', 'app_leave_policy', 'app_arrear_history', 'app_logo'
               ];
               const stringKeys = [
                 'app_license_secure', 'app_machine_id', 'app_setup_complete', 'app_data_size',
-                'app_active_company_id', 'app_active_patch_ts', 'app_pending_patch_ts', 'app_latest_patch_timestamp',
-                'app_latest_version', 'app_download_url', 'app_download_url_win7',
-                'app_launcher_url', 'app_update_hash', 'app_update_hash_win10',
-                'app_update_hash_win7', 'app_patch_skip_count', 'app_version_marker'
+                'app_active_company_id'
               ];
               for (const k of keysToRecover) {
                  // @ts-ignore
@@ -91,12 +84,58 @@ export const useAppInitialization = (verifyLicense: () => Promise<void>) => {
           const res = await window.electronAPI.dbGet(k);
           if (res.success && res.data !== null && res.data !== undefined) {
              let val = String(res.data);
-             // Baseline enforcement: Elevate active patch timestamp if older than compiled baseline
-             if (k === 'app_active_patch_ts' && parseDateTime(val) < parseDateTime(APP_PATCH_TIMESTAMP)) {
-                val = APP_PATCH_TIMESTAMP;
+             // Baseline enforcement: Active patch timestamp can NEVER be older than compiled software baseline
+             // and NEVER downgraded by an old database value or stale backup!
+             if (k === 'app_active_patch_ts') {
+                 const currentLocal = localStorage.getItem('app_active_patch_ts') || '';
+                 const localHashes = [
+                     localStorage.getItem('app_active_installer_hash'),
+                     localStorage.getItem('app_pending_installer_hash')
+                 ].filter(Boolean).map(h => (h || '').trim().toLowerCase());
+                 const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+                 const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+                 const cloudTs = localStorage.getItem('app_latest_patch_timestamp') || '';
+                 const isExactHash = localHashes.some(h => h && (h === cloudWin10 || h === cloudWin7));
+
+                 let finalTs = (isExactHash && cloudTs) ? cloudTs : APP_PATCH_TIMESTAMP;
+                 if (val && parseDateTime(val) >= parseDateTime(finalTs)) {
+                    finalTs = val;
+                 }
+                 if (currentLocal && parseDateTime(currentLocal) >= parseDateTime(finalTs)) {
+                    finalTs = currentLocal;
+                 }
+                 val = finalTs;
+                 const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+                 if (dbSetFn) dbSetFn(k, val).catch(() => {});
+              }
+             if (k === 'app_active_installer_hash' && (!val || val === 'null' || val === 'undefined')) {
+                const currentLocalHash = localStorage.getItem('app_active_installer_hash');
+                if (currentLocalHash) {
+                   val = currentLocalHash;
+                   const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+                   if (dbSetFn) dbSetFn(k, val).catch(() => {});
+                }
              }
              localStorage.setItem(k, val);
-          }
+          } else if (k === 'app_active_patch_ts') {
+              const currentLocal = localStorage.getItem('app_active_patch_ts') || '';
+              const localHashes = [
+                  localStorage.getItem('app_active_installer_hash'),
+                  localStorage.getItem('app_pending_installer_hash')
+              ].filter(Boolean).map(h => (h || '').trim().toLowerCase());
+              const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+              const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+              const cloudTs = localStorage.getItem('app_latest_patch_timestamp') || '';
+              const isExactHash = localHashes.some(h => h && (h === cloudWin10 || h === cloudWin7));
+
+              let finalTs = (isExactHash && cloudTs) ? cloudTs : APP_PATCH_TIMESTAMP;
+              if (currentLocal && parseDateTime(currentLocal) >= parseDateTime(finalTs)) {
+                 finalTs = currentLocal;
+              }
+              localStorage.setItem('app_active_patch_ts', finalTs);
+              const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+              if (dbSetFn) dbSetFn('app_active_patch_ts', finalTs).catch(() => {});
+           }
         }
       } catch (syncErr) {
         console.warn("System update boot sync failed:", syncErr);

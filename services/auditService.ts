@@ -1,5 +1,6 @@
-import { PayrollResult, Employee, StatutoryConfig, CompanyProfile } from '../types';
-import { generateTemplateWorkbook, getStandardFileName } from './reportService';
+import * as XLSX from 'xlsx-js-style';
+import { PayrollResult, Employee, StatutoryConfig, CompanyProfile, ConfigChangeLog } from '../types';
+import { generateExcelWorkbook, getStandardFileName } from './reportService';
 
 export interface ECRAuditRow {
   empId: string;
@@ -237,7 +238,7 @@ export interface PayAuditSummary {
 /**
  * Helper to compute single employee ECR figures directly from processed PayrollResult
  */
-const computeECRFigures = (r: PayrollResult | undefined, emp: Employee | undefined) => {
+const computeECRFigures = (r: PayrollResult | undefined, emp: Employee | undefined, config?: StatutoryConfig) => {
   if (!r) {
     return {
       grossWages: 0,
@@ -279,13 +280,47 @@ const computeECRFigures = (r: PayrollResult | undefined, emp: Employee | undefin
   const vpfEE = Math.round(r.deductions?.vpf || 0);
   const eeEPF = baseEE + vpfEE;
 
-  // EPF Wages back-calculated from EE normal PF (÷ 12%)
-  const epfWagesRaw = baseEE > 0 ? Math.round(baseEE / 0.12) : 0;
-  const epfWages = Math.min(epfWagesRaw, grossWages > 0 ? grossWages : epfWagesRaw);
+  const isFrozen = (r.status === 'Finalized');
 
-  // EDLI Wages: capped at 15000 max & EDLI Contribution (0.50% A/c 21)
-  const edliWages = baseEE > 0 ? Math.min(15000, epfWages, grossWages > 0 ? grossWages : 15000) : 0;
-  const edliContrib = Math.round(edliWages * 0.005);
+  // EPF Wages: In frozen records, strictly respect the frozen epfWage; fallback only if missing
+  const epfWagesRaw = baseEE > 0 ? Math.round(baseEE / 0.12) : 0;
+  const epfWages = (r.epfWage !== undefined && r.epfWage > 0)
+    ? r.epfWage
+    : Math.min(epfWagesRaw, grossWages > 0 ? grossWages : epfWagesRaw);
+
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const mIdx = r.month ? MONTHS.indexOf(r.month) : -1;
+  const isSep2026Transition = (r.month === 'September' && r.year === 2026);
+  const isFromSep2026 = (r.year > 2026 || (r.year === 2026 && mIdx >= 8));
+
+  // EDLI Wages: If data is frozen (Finalized), Audit Trail must STRICTLY use the frozen r.edliWage!
+  // Only for Draft records or legacy uncalculated records, compute based on transition/statutory rules.
+  let edliWages = 0;
+  if (baseEE > 0) {
+    if (isFrozen && r.edliWage !== undefined && r.edliWage > 0) {
+      edliWages = r.edliWage;
+    } else if (r.edliWage !== undefined && r.edliWage > 0 && !isSep2026Transition && !isFromSep2026) {
+      edliWages = r.edliWage;
+    } else {
+      const isScenarioA = emp?.epfEnrolmentStatus === 'EnrolledFrom17Sep2026' ||
+        emp?.epfMembershipDate === '2026-09-17' || emp?.epfMembershipDate === '17-09-2026';
+
+      if (isSep2026Transition) {
+        const sepEDLICap = isScenarioA
+          ? Math.min(11667, epfWages)
+          : (epfWages > 15000
+              ? 15000 + Math.round(((Math.min(25000, epfWages) - 15000) * 14) / 30)
+              : epfWages);
+        edliWages = Math.min(sepEDLICap, epfWages, grossWages > 0 ? grossWages : sepEDLICap);
+      } else {
+        const maxEDLICeiling = isFromSep2026 ? Number(config?.epfCeiling2 || 25000) : Number(config?.epfCeiling1 || 15000);
+        edliWages = Math.min(maxEDLICeiling, epfWages, grossWages > 0 ? grossWages : maxEDLICeiling);
+      }
+    }
+  }
+  const edliContrib = (isFrozen && r.edliCharges !== undefined)
+    ? Math.round(r.edliCharges)
+    : Math.round(edliWages * 0.005);
 
   // Employer contributions: Primary source is the actual stored record in PayrollResult
   let erEPS = 0;
@@ -301,17 +336,41 @@ const computeECRFigures = (r: PayrollResult | undefined, emp: Employee | undefin
     const isHigherPension = emp?.pfHigherPension?.isHigherPensionOpted === 'Yes';
     let fallbackEPSWage = 0;
     if (!isNonContributing && isEPSEligible) {
-      fallbackEPSWage = isHigherPension ? epfWages : Math.min(15000, epfWages);
+      if (isHigherPension) {
+        fallbackEPSWage = epfWages;
+      } else if (isSep2026Transition) {
+        fallbackEPSWage = Math.min(19667, epfWages);
+      } else {
+        fallbackEPSWage = Math.min(isFromSep2026 ? 25000 : 15000, epfWages);
+      }
     }
     erEPS = (!isNonContributing && isEPSEligible) ? Math.round(fallbackEPSWage * 0.0833) : 0;
     erEPF = isNonContributing ? 0 : Math.max(0, baseEE - erEPS);
   }
 
-  // EPS Wages
+  // EPS Wages: If data is frozen (Finalized), Audit Trail must STRICTLY use the frozen r.epsWage!
   let epsWages = 0;
   if (erEPS > 0) {
-    const isHigherPension = emp?.pfHigherPension?.isHigherPensionOpted === 'Yes';
-    epsWages = isHigherPension ? epfWages : Math.min(15000, epfWages);
+    if (isFrozen && r.epsWage !== undefined && r.epsWage > 0) {
+      epsWages = r.epsWage;
+    } else {
+      const isHigherPension = emp?.pfHigherPension?.isHigherPensionOpted === 'Yes';
+      if (isHigherPension) {
+        epsWages = epfWages;
+      } else if (erEPS === 1638) {
+        epsWages = 19667;
+      } else if (r.epsWage !== undefined && r.epsWage > 0) {
+        epsWages = r.epsWage;
+      } else if (isSep2026Transition) {
+        epsWages = Math.min(19667, epfWages);
+      } else if (isFromSep2026) {
+        const maxEPSC = Number(config?.epfCeiling2 || 25000);
+        epsWages = Math.min(maxEPSC, epfWages);
+      } else {
+        const maxEPSC = Number(config?.epfCeiling1 || 15000);
+        epsWages = Math.min(maxEPSC, epfWages);
+      }
+    }
   }
 
   // Total PF / ECR deposit for this member: EE (A/c 1) + ER EPF (A/c 1) + ER EPS (A/c 10) + EDLI (A/c 21)
@@ -341,7 +400,8 @@ export const calculateECRAudit = (
   prevResults: PayrollResult[],
   employees: Employee[],
   currPeriod: string,
-  prevPeriod: string
+  prevPeriod: string,
+  config?: StatutoryConfig
 ): ECRAuditSummary => {
   const allEmpIds = Array.from(new Set([
     ...currResults.map(r => r.employeeId),
@@ -371,8 +431,8 @@ export const calculateECRAudit = (
 
     if (!emp) continue;
 
-    const currFig = computeECRFigures(currR, emp);
-    const prevFig = computeECRFigures(prevR, emp);
+    const currFig = computeECRFigures(currR, emp, config);
+    const prevFig = computeECRFigures(prevR, emp, config);
 
     const isPrevActive = prevFig.eeEPF > 0 || prevFig.erEPS > 0 || prevFig.erEPF > 0;
     const isCurrActive = currFig.eeEPF > 0 || currFig.erEPS > 0 || currFig.erEPF > 0;
@@ -486,6 +546,7 @@ export const calculateECRAudit = (
       currFig.erEPF !== prevFig.erEPF ||
       currFig.epfWages !== prevFig.epfWages ||
       currFig.epsWages !== prevFig.epsWages ||
+      currFig.edliWages !== prevFig.edliWages ||
       currFig.ncpDays !== prevFig.ncpDays ||
       status !== 'Normal' ||
       alerts.length > 0;
@@ -520,12 +581,8 @@ export const calculateECRAudit = (
     });
   }
 
-  // Sort: alerts first, then name
-  rows.sort((a, b) => {
-    if (a.alerts.length > 0 && b.alerts.length === 0) return -1;
-    if (a.alerts.length === 0 && b.alerts.length > 0) return 1;
-    return a.name.localeCompare(b.name);
-  });
+  // Sort by EMP ID naturally (numeric-aware)
+  rows.sort((a, b) => (a.empId || '').localeCompare(b.empId || '', undefined, { numeric: true, sensitivity: 'base' }));
 
   const memberDiff = currContributors - prevContributors;
   const memberPercent = prevContributors > 0 ? Math.round((memberDiff / prevContributors) * 100 * 10) / 10 : 0;
@@ -748,6 +805,49 @@ export const calculateECRAudit = (
 };
 
 /**
+ * Compute the earned ESI Wage for an employee's payroll result.
+ * Correlates directly with ESI contribution (IP Share 0.75% and ER Share 3.25%).
+ */
+export const computeEarnedESIWage = (
+  r: PayrollResult | undefined,
+  config?: StatutoryConfig
+): number => {
+  if (!r) return 0;
+  const ip = Math.round(r.deductions?.esi || 0);
+  const er = Math.round(r.employerContributions?.esi || 0);
+  if (ip === 0 && er === 0) return 0;
+
+  if (config?.pfEsiCalculationBasis === 'OriginalWages' && config.esiOriginalWagesComponents) {
+    const comps = config.esiOriginalWagesComponents;
+    let base = 0;
+    if (comps.basic) base += (r.earnings?.basic || 0);
+    if (comps.da) base += (r.earnings?.da || 0);
+    if (comps.retaining) base += (r.earnings?.retainingAllowance || 0);
+    if (comps.hra) base += (r.earnings?.hra || 0);
+    if (comps.conveyance) base += (r.earnings?.conveyance || 0);
+    if (comps.washing) base += (r.earnings?.washing || 0);
+    if (comps.attire) base += (r.earnings?.attire || 0);
+    if (comps.special1) base += (r.earnings?.special1 || 0);
+    if (comps.special2) base += (r.earnings?.special2 || 0);
+    if (comps.special3) base += (r.earnings?.special3 || 0);
+    return Math.round(base);
+  }
+
+  // Labour Code basis (default):
+  const wageA = (r.earnings?.basic || 0) + (r.earnings?.da || 0) + (r.earnings?.retainingAllowance || 0);
+  const gross = (r.earnings?.total || 0);
+  const wageC = gross - wageA;
+  let wageD = 0;
+  if (gross > 0) {
+    const allowancePercentage = wageC / gross;
+    if (allowancePercentage > 0.50) {
+      wageD = wageC - Math.round(gross * 0.50);
+    }
+  }
+  return Math.round(wageA + wageD);
+};
+
+/**
  * 2. Calculate ESI Month-over-Month Audit
  */
 export const calculateESIAudit = (
@@ -787,8 +887,11 @@ export const calculateESIAudit = (
     const prevERVal = Math.round(prevR?.employerContributions?.esi || 0);
     const currERVal = Math.round(currR?.employerContributions?.esi || 0);
 
-    const prevWage = Math.round(prevR?.earnings?.total || 0);
-    const currWage = Math.round(currR?.earnings?.total || 0);
+    const prevGross = Math.round(prevR?.earnings?.total || 0);
+    const currGross = Math.round(currR?.earnings?.total || 0);
+
+    const prevWage = computeEarnedESIWage(prevR, config);
+    const currWage = computeEarnedESIWage(currR, config);
 
     const prevDays = Math.round(prevR?.payableDays || 0);
     const currDays = Math.round(currR?.payableDays || 0);
@@ -816,7 +919,7 @@ export const calculateESIAudit = (
     let status: ESIAuditRow['status'] = 'Normal';
 
     if (prevIPVal > 0 && currIPVal === 0) {
-      if (currWage > ceiling) {
+      if (currGross > ceiling) {
         status = 'CROSSED_CEILING';
         alerts.push(`Salary crossed ESI ceiling (> ₹${ceiling}): ESI ceased`);
       } else if (effectiveDOL) {
@@ -833,7 +936,7 @@ export const calculateESIAudit = (
         alerts.push('IP contribution stopped (₹' + prevIPVal + ' ➔ ₹0)');
       }
     } else if (prevIPVal === 0 && currIPVal > 0) {
-      if (prevWage > ceiling && currWage <= ceiling) {
+      if (prevGross > ceiling && currGross <= ceiling) {
         status = 'DROPPED_INTO_COVERAGE';
         alerts.push(`Salary dropped below ceiling (<= ₹${ceiling}): Re-entered ESI coverage`);
       } else {
@@ -872,11 +975,8 @@ export const calculateESIAudit = (
     });
   }
 
-  rows.sort((a, b) => {
-    if (a.alerts.length > 0 && b.alerts.length === 0) return -1;
-    if (a.alerts.length === 0 && b.alerts.length > 0) return 1;
-    return a.name.localeCompare(b.name);
-  });
+  // Sort by EMP ID naturally (numeric-aware)
+  rows.sort((a, b) => (a.empId || '').localeCompare(b.empId || '', undefined, { numeric: true, sensitivity: 'base' }));
 
   const ipDiff = currIP - prevIP;
   const ipPercent = prevIP > 0 ? Math.round((ipDiff / prevIP) * 100 * 10) / 10 : 0;
@@ -1058,11 +1158,8 @@ export const calculatePayAudit = (
     });
   }
 
-  rows.sort((a, b) => {
-    if (a.alerts.length > 0 && b.alerts.length === 0) return -1;
-    if (a.alerts.length === 0 && b.alerts.length > 0) return 1;
-    return a.name.localeCompare(b.name);
-  });
+  // Sort by EMP ID naturally (numeric-aware)
+  rows.sort((a, b) => (a.empId || '').localeCompare(b.empId || '', undefined, { numeric: true, sensitivity: 'base' }));
 
   const grossDiff = currGross - prevGross;
   const grossPercent = prevGross > 0 ? Math.round((grossDiff / prevGross) * 100 * 10) / 10 : 0;
@@ -1093,113 +1190,1404 @@ export const calculatePayAudit = (
 };
 
 /**
- * Export ECR Audit to Excel
+ * Format a difference number cleanly: returns the numeric difference
+ */
+const calcDiff = (curr: number, prev: number): number => {
+  const c = isNaN(curr) || curr === undefined || curr === null ? 0 : curr;
+  const p = isNaN(prev) || prev === undefined || prev === null ? 0 : prev;
+  return Math.round((c - p) * 100) / 100;
+};
+
+/**
+ * Human-readable status badges for Audit Reports
+ */
+const formatECRStatus = (status: string, alerts: string[]): string => {
+  switch (status) {
+    case 'EPS_DROPPED_ZERO': return 'EPS Dropped to ₹0';
+    case 'NEW_MEMBER': return 'New Member';
+    case 'DROPPED_MEMBER': return 'Exited / Resigned';
+    case 'VARIANCE_HIGH': return 'High Variance';
+    case 'CONTRIB_CHANGED': return 'Contribution Shift';
+    case 'RESUMED_FROM_LOP': return 'Resumed from LOP';
+    case 'ON_LOP': return 'On LOP';
+    case 'Normal':
+    default:
+      return alerts && alerts.length > 0 ? 'Variance Flagged' : 'Verified Match';
+  }
+};
+
+const formatESIStatus = (status: string, alerts: string[]): string => {
+  switch (status) {
+    case 'NEW_IP':
+    case 'NEW_MEMBER': return 'New Contributing IP';
+    case 'DROPPED_IP':
+    case 'DROPPED_MEMBER': return 'Exited / Resigned';
+    case 'CROSSED_CEILING':
+    case 'EXEMPTED_CEILING': return 'Salary Crossed Ceiling';
+    case 'DROPPED_INTO_COVERAGE': return 'Re-entered Coverage';
+    case 'ZERO_CONTRIB': return 'Zero Contribution';
+    case 'VARIANCE_HIGH': return 'High Variance';
+    case 'DAYS_VARIANCE': return 'Days Variance';
+    case 'WAGE_VARIANCE': return 'Wage Variance';
+    case 'CONTRIB_CHANGED': return 'Contribution Shift';
+    case 'Normal':
+    default:
+      return alerts && alerts.length > 0 ? 'Variance Flagged' : 'Verified Match';
+  }
+};
+
+const formatPayStatus = (status: string, alerts: string[]): string => {
+  switch (status) {
+    case 'HIGH_VARIANCE': return 'High Variance';
+    case 'ZERO_BASIC': return 'Zero Basic Anomaly';
+    case 'NEW_JOINER': return 'New Joiner';
+    case 'EXITED': return 'Exited / Resigned';
+    case 'PAY_CHANGED': return 'Pay Shift';
+    case 'Normal':
+    default:
+      return alerts && alerts.length > 0 ? 'Variance Flagged' : 'Verified Match';
+  }
+};
+
+const formatAuditNote = (alerts: string[]): string => {
+  if (!alerts || alerts.length === 0) return 'Verified Match';
+  return alerts.join(' | ');
+};
+
+/**
+ * Apply Premium Professional Styling to MoM Audit Comparison Sheets
+ * Matches exact format, colors, and styling from user specification:
+ * - Header Row: Navy Blue (#002060) background with Bold White text and centered/proper alignment
+ * - Data Rows: Crisp borders, centered codes/dates, left-aligned names, right-aligned numbers
+ * - Variance Rows: Full Light Sky Blue fill (#BDD7EE) across all columns without gaps, bold black text/numbers
+ * - Totals Rows: Soft Gray-Blue fill (#D9E1F2) for month totals, Accent Blue (#BDD7EE) with Navy Bold text and double bottom border for Total Variance
+ */
+const applyMoMTableStyles = (
+  ws: XLSX.WorkSheet,
+  colCount: number,
+  rowCount: number
+) => {
+  // Freeze Header Row
+  (ws as any)['!freeze'] = { xSplit: 0, ySplit: 1 };
+  (ws as any)['!views'] = [{ state: 'frozen', ySplit: 1, activeCell: 'A2' }];
+
+  // Set explicit row heights (26px for header, 20px for data & variance)
+  const rowHeights: { hpx: number }[] = [];
+  for (let r = 0; r < rowCount; r++) {
+    rowHeights.push({ hpx: r === 0 ? 26 : 20 });
+  }
+  ws['!rows'] = rowHeights;
+
+  // Extract header names to identify columns
+  const headerNames: string[] = [];
+  for (let c = 0; c < colCount; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c });
+    headerNames.push(String(ws[addr]?.v || '').trim());
+  }
+
+  // Iterate through all cells
+  for (let r = 0; r < rowCount; r++) {
+    // Determine row category
+    let isVarianceRow = false;
+    let isTotalPeriodRow = false;
+    let isTotalVarianceRow = false;
+
+    for (let c = 0; c < colCount; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const cellVal = String(ws[addr]?.v || '').trim();
+      if (cellVal === 'Variance') {
+        isVarianceRow = true;
+        break;
+      } else if (cellVal === 'Total Variance') {
+        isTotalVarianceRow = true;
+        break;
+      } else if (cellVal.startsWith('Total ')) {
+        isTotalPeriodRow = true;
+        break;
+      }
+    }
+
+    for (let c = 0; c < colCount; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) {
+        ws[addr] = { t: 's', v: '' };
+      }
+      const cell = ws[addr];
+      const colHeader = headerNames[c] || '';
+      const isTextCol = ['Month', 'Year', 'Emp ID', 'UAN', 'ESI Number', 'Employee Name', 'Designation', 'Audit Status', 'Audit Note'].includes(colHeader);
+      const isCenterCol = ['Month', 'Year', 'Emp ID', 'Audit Status'].includes(colHeader);
+      const isCodeCol = ['UAN', 'ESI Number', 'Emp ID'].includes(colHeader);
+
+      // Force string type on code columns to prevent Excel scientific notation
+      if (isCodeCol && cell.v !== '' && cell.v !== null && cell.v !== undefined) {
+        cell.t = 's';
+        cell.v = String(cell.v);
+      }
+
+      // Format numbers
+      if (!isTextCol && typeof cell.v === 'number') {
+        cell.t = 'n';
+      }
+
+      if (r === 0) {
+        // 1. HEADER ROW: Navy Blue #002060 with Bold White Text
+        cell.s = {
+          fill: { fgColor: { rgb: '002060' }, patternType: 'solid' },
+          font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
+          alignment: {
+            horizontal: (isCenterCol || isCodeCol) ? 'center' : (isTextCol ? 'left' : 'right'),
+            vertical: 'center',
+            wrapText: true
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: '001A4E' } },
+            bottom: { style: 'thin', color: { rgb: '001A4E' } },
+            left: { style: 'thin', color: { rgb: '001A4E' } },
+            right: { style: 'thin', color: { rgb: '001A4E' } }
+          }
+        };
+      } else if (isVarianceRow) {
+        // 2. VARIANCE ROW: Light Sky Blue #BDD7EE across ALL columns
+        const isVarianceLabel = cell.v === 'Variance';
+        const isNumeric = typeof cell.v === 'number';
+
+        cell.s = {
+          fill: { fgColor: { rgb: 'BDD7EE' }, patternType: 'solid' },
+          font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: '000000' } },
+          alignment: {
+            horizontal: isVarianceLabel ? 'left' : (isNumeric ? 'right' : (colHeader === 'Audit Status' ? 'center' : (colHeader === 'Audit Note' ? 'left' : 'center'))),
+            vertical: 'center',
+            wrapText: colHeader === 'Audit Note'
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: '9BC2E6' } },
+            bottom: { style: 'thin', color: { rgb: '9BC2E6' } },
+            left: { style: 'thin', color: { rgb: '9BC2E6' } },
+            right: { style: 'thin', color: { rgb: '9BC2E6' } }
+          },
+          numFmt: isNumeric ? (Number.isInteger(cell.v) ? '0' : '0.00') : undefined
+        };
+      } else if (isTotalVarianceRow) {
+        // 3. TOTAL VARIANCE ROW: Light Blue #BDD7EE with Bold Navy #002060 and Double Bottom Border
+        const isLabel = typeof cell.v === 'string' && cell.v.includes('Total');
+        const isNumeric = typeof cell.v === 'number';
+
+        cell.s = {
+          fill: { fgColor: { rgb: 'BDD7EE' }, patternType: 'solid' },
+          font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: '002060' } },
+          alignment: {
+            horizontal: isLabel ? 'left' : (isNumeric ? 'right' : 'center'),
+            vertical: 'center'
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: '002060' } },
+            bottom: { style: 'double', color: { rgb: '002060' } },
+            left: { style: 'thin', color: { rgb: '9BC2E6' } },
+            right: { style: 'thin', color: { rgb: '9BC2E6' } }
+          },
+          numFmt: isNumeric ? (Number.isInteger(cell.v) ? '0' : '0.00') : undefined
+        };
+      } else if (isTotalPeriodRow) {
+        // 4. TOTAL PERIOD ROW: Soft Gray-Blue #D9E1F2 with Bold Black Text
+        const isLabel = typeof cell.v === 'string' && cell.v.includes('Total');
+        const isNumeric = typeof cell.v === 'number';
+
+        cell.s = {
+          fill: { fgColor: { rgb: 'D9E1F2' }, patternType: 'solid' },
+          font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: '000000' } },
+          alignment: {
+            horizontal: isLabel ? 'left' : (isNumeric ? 'right' : 'center'),
+            vertical: 'center'
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: 'B4C6E7' } },
+            bottom: { style: 'thin', color: { rgb: 'B4C6E7' } },
+            left: { style: 'thin', color: { rgb: 'B4C6E7' } },
+            right: { style: 'thin', color: { rgb: 'B4C6E7' } }
+          },
+          numFmt: isNumeric ? (Number.isInteger(cell.v) ? '0' : '0.00') : undefined
+        };
+      } else {
+        // 5. DATA ROW: White background, subtle borders, proper alignment
+        const isNumeric = typeof cell.v === 'number';
+
+        cell.s = {
+          fill: { fgColor: { rgb: 'FFFFFF' }, patternType: 'solid' },
+          font: { name: 'Calibri', sz: 11, bold: false, color: { rgb: '000000' } },
+          alignment: {
+            horizontal: (isCenterCol || isCodeCol) ? 'center' : (isNumeric ? 'right' : 'left'),
+            vertical: 'center',
+            wrapText: colHeader === 'Audit Note'
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: 'D9D9D9' } },
+            bottom: { style: 'thin', color: { rgb: 'D9D9D9' } },
+            left: { style: 'thin', color: { rgb: 'D9D9D9' } },
+            right: { style: 'thin', color: { rgb: 'D9D9D9' } }
+          },
+          numFmt: isNumeric ? (Number.isInteger(cell.v) ? '0' : '0.00') : undefined
+        };
+      }
+    }
+  }
+};
+
+/**
+ * Export ECR Audit to Excel with Stacked Employee Rows (Baseline, Current, Variance)
+ * Styled with Navy Blue header, Light Blue variance fill, NCP Days last, and Audit Status & Note
  */
 export const exportECRAuditExcel = async (
   summary: ECRAuditSummary,
   company?: CompanyProfile
 ): Promise<string | null> => {
-  const XLSX = await import('xlsx');
+  const [prevM, prevYStr] = summary.prevPeriod.split(' ');
+  const [currM, currYStr] = summary.currPeriod.split(' ');
+  const prevMonthShort = prevM.substring(0, 3);
+  const currMonthShort = currM.substring(0, 3);
+  const prevYear = parseInt(prevYStr, 10) || 2026;
+  const currYear = parseInt(currYStr, 10) || 2026;
+
   const headers = [
-    'Emp ID', 'UAN', 'Employee Name',
-    `${summary.prevPeriod} EPF Wages`, `${summary.currPeriod} EPF Wages`,
-    `${summary.prevPeriod} EPS Wages`, `${summary.currPeriod} EPS Wages`,
-    `${summary.prevPeriod} NCP Days`, `${summary.currPeriod} NCP Days`, 'NCP Diff',
-    `${summary.prevPeriod} EDLI Wages`, `${summary.currPeriod} EDLI Wages`,
-    `${summary.prevPeriod} EE PF`, `${summary.currPeriod} EE PF`, 'EE PF Diff',
-    `${summary.prevPeriod} ER EPS`, `${summary.currPeriod} ER EPS`, 'ER EPS Diff',
-    `${summary.prevPeriod} ER EPF`, `${summary.currPeriod} ER EPF`, 'ER EPF Diff',
-    `${summary.prevPeriod} EDLI (0.5%)`, `${summary.currPeriod} EDLI (0.5%)`, 'EDLI Diff',
-    `${summary.prevPeriod} Total Contrib`, `${summary.currPeriod} Total Contrib`, 'Total Diff',
-    'Audit Status', 'Audit Notes / Alerts'
+    'Month', 'Year', 'Emp ID', 'UAN', 'Employee Name',
+    'EPF Wages', 'EPS Wages', 'EDLI Wages',
+    'EE PF', 'ER EPS', 'ER EPF', 'EDLI (0.5%)', 'Total Contrib', 'NCP Days',
+    'Audit Status', 'Audit Note'
   ];
 
-  const dataRows = summary.rows.map(r => [
-    r.empId, r.uan, r.name,
-    r.prevEPFWage, r.currEPFWage,
-    r.prevEPSWage, r.currEPSWage,
-    r.prevNCPDays, r.currNCPDays, r.currNCPDays - r.prevNCPDays,
-    r.prevEDLIWage, r.currEDLIWage,
-    r.prevEEPF, r.currEEPF, r.currEEPF - r.prevEEPF,
-    r.prevEREPS, r.currEREPS, r.currEREPS - r.prevEREPS,
-    r.prevEREPF, r.currEREPF, r.currEREPF - r.prevEREPF,
-    r.prevEDLI, r.currEDLI, r.currEDLI - r.prevEDLI,
-    r.prevTotalContrib, r.currTotalContrib, r.currTotalContrib - r.prevTotalContrib,
-    r.status, r.alerts.join('; ')
+  const rows: any[][] = [headers];
+  const sortedRows = [...summary.rows].sort((a, b) => (a.empId || '').localeCompare(b.empId || '', undefined, { numeric: true, sensitivity: 'base' }));
+  sortedRows.forEach(r => {
+    // 1. Baseline Row (e.g. Aug 2026)
+    rows.push([
+      prevMonthShort,
+      prevYear,
+      r.empId,
+      r.uan,
+      r.name,
+      r.prevEPFWage,
+      r.prevEPSWage,
+      r.prevEDLIWage,
+      r.prevEEPF,
+      r.prevEREPS,
+      r.prevEREPF,
+      r.prevEDLI,
+      r.prevTotalContrib,
+      r.prevNCPDays,
+      '',
+      ''
+    ]);
+
+    // 2. Current Row (e.g. Sep 2026)
+    rows.push([
+      currMonthShort,
+      currYear,
+      r.empId,
+      r.uan,
+      r.name,
+      r.currEPFWage,
+      r.currEPSWage,
+      r.currEDLIWage,
+      r.currEEPF,
+      r.currEREPS,
+      r.currEREPF,
+      r.currEDLI,
+      r.currTotalContrib,
+      r.currNCPDays,
+      '',
+      ''
+    ]);
+
+    // 3. Variance Row
+    rows.push([
+      '',
+      '',
+      '',
+      '',
+      'Variance',
+      calcDiff(r.currEPFWage, r.prevEPFWage),
+      calcDiff(r.currEPSWage, r.prevEPSWage),
+      calcDiff(r.currEDLIWage, r.prevEDLIWage),
+      calcDiff(r.currEEPF, r.prevEEPF),
+      calcDiff(r.currEREPS, r.prevEREPS),
+      calcDiff(r.currEREPF, r.prevEREPF),
+      calcDiff(r.currEDLI, r.prevEDLI),
+      calcDiff(r.currTotalContrib, r.prevTotalContrib),
+      calcDiff(r.currNCPDays, r.prevNCPDays),
+      formatECRStatus(r.status, r.alerts),
+      formatAuditNote(r.alerts)
+    ]);
+  });
+
+  // Summary Totals at bottom
+  rows.push([
+    '', '', '', '', `Total ${prevMonthShort} ${prevYear}`,
+    summary.rows.reduce((s, r) => s + (r.prevEPFWage || 0), 0),
+    summary.rows.reduce((s, r) => s + (r.prevEPSWage || 0), 0),
+    summary.rows.reduce((s, r) => s + (r.prevEDLIWage || 0), 0),
+    summary.prevEEPF || 0,
+    summary.prevEREPS || 0,
+    summary.prevEREPF || 0,
+    summary.prevEDLI || 0,
+    summary.prevTotalContrib || 0,
+    summary.rows.reduce((s, r) => s + (r.prevNCPDays || 0), 0),
+    '',
+    ''
+  ]);
+  rows.push([
+    '', '', '', '', `Total ${currMonthShort} ${currYear}`,
+    summary.rows.reduce((s, r) => s + (r.currEPFWage || 0), 0),
+    summary.rows.reduce((s, r) => s + (r.currEPSWage || 0), 0),
+    summary.rows.reduce((s, r) => s + (r.currEDLIWage || 0), 0),
+    summary.currEEPF || 0,
+    summary.currEREPS || 0,
+    summary.currEREPF || 0,
+    summary.currEDLI || 0,
+    summary.currTotalContrib || 0,
+    summary.rows.reduce((s, r) => s + (r.currNCPDays || 0), 0),
+    '',
+    ''
+  ]);
+  rows.push([
+    '', '', '', '', 'Total Variance',
+    summary.rows.reduce((s, r) => s + ((r.currEPFWage || 0) - (r.prevEPFWage || 0)), 0),
+    summary.rows.reduce((s, r) => s + ((r.currEPSWage || 0) - (r.prevEPSWage || 0)), 0),
+    summary.rows.reduce((s, r) => s + ((r.currEDLIWage || 0) - (r.prevEDLIWage || 0)), 0),
+    summary.eePFDiff || 0,
+    summary.erEPSDiff || 0,
+    summary.erEPFDiff || 0,
+    summary.edliDiff || 0,
+    summary.totalContribDiff || 0,
+    summary.rows.reduce((s, r) => s + ((r.currNCPDays || 0) - (r.prevNCPDays || 0)), 0),
+    '',
+    ''
   ]);
 
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'ECR_Audit');
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [
+    { wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 28 },
+    { wch: 14 }, { wch: 14 }, { wch: 14 },
+    { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 16 },
+    { wch: 12 },
+    { wch: 22 }, // Audit Status
+    { wch: 45 }  // Audit Note
+  ];
 
-  const fileName = getStandardFileName('ECR_Audit_Variance', company || {} as any, summary.currPeriod.split(' ')[0], Number(summary.currPeriod.split(' ')[1]) || 2026);
-  return await generateTemplateWorkbook(wb, fileName, company?.establishmentName);
+  // Apply visual formatting matching user specification
+  applyMoMTableStyles(ws, headers.length, rows.length);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'ECR_MoM_Comparison');
+
+  const fileName = getStandardFileName('ECR_MoM_Comparison', company || {} as any, currM, currYear);
+  const subfolder = company ? `${company.establishmentName}___${company.id || ''}___AuditTrailReports` : undefined;
+  return await generateExcelWorkbook(wb, fileName, subfolder);
 };
 
 /**
- * Export ESI Audit to Excel
+ * Export ESI Audit to Excel with Stacked Employee Rows (Baseline, Current, Variance)
+ * Styled with Navy Blue header, Light Blue variance fill, and Audit Status & Note
  */
 export const exportESIAuditExcel = async (
   summary: ESIAuditSummary,
   company?: CompanyProfile
 ): Promise<string | null> => {
-  const XLSX = await import('xlsx');
+  const [prevM, prevYStr] = summary.prevPeriod.split(' ');
+  const [currM, currYStr] = summary.currPeriod.split(' ');
+  const prevMonthShort = prevM.substring(0, 3);
+  const currMonthShort = currM.substring(0, 3);
+  const prevYear = parseInt(prevYStr, 10) || 2026;
+  const currYear = parseInt(currYStr, 10) || 2026;
+
   const headers = [
-    'Emp ID', 'ESI Number', 'Employee Name',
-    `${summary.prevPeriod} Days`, `${summary.currPeriod} Days`,
-    `${summary.prevPeriod} Wages`, `${summary.currPeriod} Wages`,
-    `${summary.prevPeriod} IP Share`, `${summary.currPeriod} IP Share`, 'IP Diff',
-    `${summary.prevPeriod} ER Share`, `${summary.currPeriod} ER Share`, 'ER Diff',
-    'Audit Status', 'Audit Notes / Alerts'
+    'Month', 'Year', 'Emp ID', 'ESI Number', 'Employee Name',
+    'Payable Days', 'ESI Wages', 'IP Share (0.75%)', 'ER Share (3.25%)', 'Total ESI',
+    'Audit Status', 'Audit Note'
   ];
 
-  const dataRows = summary.rows.map(r => [
-    r.empId, r.esiNo, r.name,
-    r.prevDays, r.currDays,
-    r.prevWage, r.currWage,
-    r.prevIP, r.currIP, r.currIP - r.prevIP,
-    r.prevER, r.currER, r.currER - r.prevER,
-    r.status, r.alerts.join('; ')
+  const rows: any[][] = [headers];
+  const sortedRows = [...summary.rows].sort((a, b) => (a.empId || '').localeCompare(b.empId || '', undefined, { numeric: true, sensitivity: 'base' }));
+  sortedRows.forEach(r => {
+    // 1. Baseline Row
+    rows.push([
+      prevMonthShort,
+      prevYear,
+      r.empId,
+      r.esiNo,
+      r.name,
+      r.prevDays,
+      r.prevWage,
+      r.prevIP,
+      r.prevER,
+      r.prevIP + r.prevER,
+      '',
+      ''
+    ]);
+
+    // 2. Current Row
+    rows.push([
+      currMonthShort,
+      currYear,
+      r.empId,
+      r.esiNo,
+      r.name,
+      r.currDays,
+      r.currWage,
+      r.currIP,
+      r.currER,
+      r.currIP + r.currER,
+      '',
+      ''
+    ]);
+
+    // 3. Variance Row
+    rows.push([
+      '',
+      '',
+      '',
+      '',
+      'Variance',
+      calcDiff(r.currDays, r.prevDays),
+      calcDiff(r.currWage, r.prevWage),
+      calcDiff(r.currIP, r.prevIP),
+      calcDiff(r.currER, r.prevER),
+      calcDiff(r.currIP + r.currER, r.prevIP + r.prevER),
+      formatESIStatus(r.status, r.alerts),
+      formatAuditNote(r.alerts)
+    ]);
+  });
+
+  // Summary Totals
+  rows.push([
+    '', '', '', '', `Total ${prevMonthShort} ${prevYear}`,
+    summary.rows.reduce((s, r) => s + (r.prevDays || 0), 0),
+    summary.rows.reduce((s, r) => s + (r.prevWage || 0), 0),
+    summary.prevIP || 0,
+    summary.prevER || 0,
+    (summary.prevIP || 0) + (summary.prevER || 0),
+    '',
+    ''
+  ]);
+  rows.push([
+    '', '', '', '', `Total ${currMonthShort} ${currYear}`,
+    summary.rows.reduce((s, r) => s + (r.currDays || 0), 0),
+    summary.rows.reduce((s, r) => s + (r.currWage || 0), 0),
+    summary.currIP || 0,
+    summary.currER || 0,
+    (summary.currIP || 0) + (summary.currER || 0),
+    '',
+    ''
+  ]);
+  rows.push([
+    '', '', '', '', 'Total Variance',
+    summary.rows.reduce((s, r) => s + ((r.currDays || 0) - (r.prevDays || 0)), 0),
+    summary.rows.reduce((s, r) => s + ((r.currWage || 0) - (r.prevWage || 0)), 0),
+    summary.ipDiff || 0,
+    summary.erDiff || 0,
+    ((summary.currIP || 0) + (summary.currER || 0)) - ((summary.prevIP || 0) + (summary.prevER || 0)),
+    '',
+    ''
   ]);
 
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'ESI_Audit');
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [
+    { wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 28 },
+    { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 16 },
+    { wch: 22 }, // Audit Status
+    { wch: 45 }  // Audit Note
+  ];
 
-  const fileName = getStandardFileName('ESI_Audit_Variance', company || {} as any, summary.currPeriod.split(' ')[0], Number(summary.currPeriod.split(' ')[1]) || 2026);
-  return await generateTemplateWorkbook(wb, fileName, company?.establishmentName);
+  // Apply visual formatting matching user specification
+  applyMoMTableStyles(ws, headers.length, rows.length);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'ESI_MoM_Comparison');
+
+  const fileName = getStandardFileName('ESI_MoM_Comparison', company || {} as any, currM, currYear);
+  const subfolder = company ? `${company.establishmentName}___${company.id || ''}___AuditTrailReports` : undefined;
+  return await generateExcelWorkbook(wb, fileName, subfolder);
 };
 
 /**
- * Export Pay Audit to Excel
+ * Export Pay Audit to Excel with Stacked Employee Rows (Baseline, Current, Variance)
+ * Styled with Navy Blue header, Light Blue variance fill, and Audit Status & Note
  */
 export const exportPayAuditExcel = async (
   summary: PayAuditSummary,
   company?: CompanyProfile
 ): Promise<string | null> => {
-  const XLSX = await import('xlsx');
+  const [prevM, prevYStr] = summary.prevPeriod.split(' ');
+  const [currM, currYStr] = summary.currPeriod.split(' ');
+  const prevMonthShort = prevM.substring(0, 3);
+  const currMonthShort = currM.substring(0, 3);
+  const prevYear = parseInt(prevYStr, 10) || 2026;
+  const currYear = parseInt(currYStr, 10) || 2026;
+
   const headers = [
-    'Emp ID', 'Employee Name', 'Designation',
-    `${summary.prevPeriod} Days`, `${summary.currPeriod} Days`,
-    `${summary.prevPeriod} Basic`, `${summary.currPeriod} Basic`, 'Basic Diff',
-    `${summary.prevPeriod} Gross`, `${summary.currPeriod} Gross`, 'Gross Diff', 'Gross % Shift',
-    `${summary.prevPeriod} Net Pay`, `${summary.currPeriod} Net Pay`, 'Net Diff',
-    'Audit Status', 'Audit Notes / Alerts'
+    'Month', 'Year', 'Emp ID', 'Employee Name', 'Designation',
+    'Payable Days', 'Basic Pay', 'Gross Salary', 'Net Pay',
+    'Audit Status', 'Audit Note'
   ];
 
-  const dataRows = summary.rows.map(r => [
-    r.empId, r.name, r.designation,
-    r.prevDays, r.currDays,
-    r.prevBasic, r.currBasic, r.basicDiff,
-    r.prevGross, r.currGross, r.grossDiff, `${r.grossPercent}%`,
-    r.prevNet, r.currNet, r.netDiff,
-    r.status, r.alerts.join('; ')
+  const rows: any[][] = [headers];
+  const sortedRows = [...summary.rows].sort((a, b) => (a.empId || '').localeCompare(b.empId || '', undefined, { numeric: true, sensitivity: 'base' }));
+  sortedRows.forEach(r => {
+    // 1. Baseline Row
+    rows.push([
+      prevMonthShort,
+      prevYear,
+      r.empId,
+      r.name,
+      r.designation,
+      r.prevDays,
+      r.prevBasic,
+      r.prevGross,
+      r.prevNet,
+      '',
+      ''
+    ]);
+
+    // 2. Current Row
+    rows.push([
+      currMonthShort,
+      currYear,
+      r.empId,
+      r.name,
+      r.designation,
+      r.currDays,
+      r.currBasic,
+      r.currGross,
+      r.currNet,
+      '',
+      ''
+    ]);
+
+    // 3. Variance Row
+    rows.push([
+      '',
+      '',
+      '',
+      'Variance',
+      '',
+      calcDiff(r.currDays, r.prevDays),
+      calcDiff(r.currBasic, r.prevBasic),
+      calcDiff(r.currGross, r.prevGross),
+      calcDiff(r.currNet, r.prevNet),
+      formatPayStatus(r.status, r.alerts),
+      formatAuditNote(r.alerts)
+    ]);
+  });
+
+  // Summary Totals
+  rows.push([
+    '', '', '', `Total ${prevMonthShort} ${prevYear}`, '',
+    summary.rows.reduce((s, r) => s + (r.prevDays || 0), 0),
+    summary.rows.reduce((s, r) => s + (r.prevBasic || 0), 0),
+    summary.prevGross || 0,
+    summary.prevNet || 0,
+    '',
+    ''
+  ]);
+  rows.push([
+    '', '', '', `Total ${currMonthShort} ${currYear}`, '',
+    summary.rows.reduce((s, r) => s + (r.currDays || 0), 0),
+    summary.rows.reduce((s, r) => s + (r.currBasic || 0), 0),
+    summary.currGross || 0,
+    summary.currNet || 0,
+    '',
+    ''
+  ]);
+  rows.push([
+    '', '', '', 'Total Variance', '',
+    summary.rows.reduce((s, r) => s + ((r.currDays || 0) - (r.prevDays || 0)), 0),
+    summary.rows.reduce((s, r) => s + ((r.currBasic || 0) - (r.prevBasic || 0)), 0),
+    summary.grossDiff || 0,
+    summary.netDiff || 0,
+    '',
+    ''
   ]);
 
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Pay_Audit');
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [
+    { wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 28 }, { wch: 20 },
+    { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 18 },
+    { wch: 22 }, // Audit Status
+    { wch: 45 }  // Audit Note
+  ];
 
-  const fileName = getStandardFileName('Employee_Pay_Audit', company || {} as any, summary.currPeriod.split(' ')[0], Number(summary.currPeriod.split(' ')[1]) || 2026);
-  return await generateTemplateWorkbook(wb, fileName, company?.establishmentName);
+  // Apply visual formatting matching user specification
+  applyMoMTableStyles(ws, headers.length, rows.length);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Salary_MoM_Comparison');
+
+  const fileName = getStandardFileName('Employee_Salary_MoM_Comparison', company || {} as any, currM, currYear);
+  const subfolder = company ? `${company.establishmentName}___${company.id || ''}___AuditTrailReports` : undefined;
+  return await generateExcelWorkbook(wb, fileName, subfolder);
+};
+
+/**
+ * Consolidated Month-over-Month Comparison Excel Export
+ * Contains sheets for ECR, ESI, and Pay with stacked employee rows and column variance
+ * Formatted exactly as shown in user specification (Image 2) with Navy headers, Light Blue variance fill, and Audit Status & Note
+ */
+export const exportAuditMoMStackedExcel = async (
+  ecrSummary: ECRAuditSummary,
+  esiSummary: ESIAuditSummary,
+  paySummary: PayAuditSummary,
+  company?: CompanyProfile,
+  activeTab: 'ECR' | 'ESI' | 'PAY' = 'ECR'
+): Promise<string | null> => {
+  const wb = XLSX.utils.book_new();
+
+  const [prevM, prevYStr] = ecrSummary.prevPeriod.split(' ');
+  const [currM, currYStr] = ecrSummary.currPeriod.split(' ');
+  const prevMonthShort = prevM.substring(0, 3);
+  const currMonthShort = currM.substring(0, 3);
+  const prevYear = parseInt(prevYStr, 10) || 2026;
+  const currYear = parseInt(currYStr, 10) || 2026;
+
+  // 1. ECR Sheet Construction
+  const ecrHeaders = [
+    'Month', 'Year', 'Emp ID', 'UAN', 'Employee Name',
+    'EPF Wages', 'EPS Wages', 'EDLI Wages',
+    'EE PF', 'ER EPS', 'ER EPF', 'EDLI (0.5%)', 'Total Contrib', 'NCP Days',
+    'Audit Status', 'Audit Note'
+  ];
+  const ecrRows: any[][] = [ecrHeaders];
+  const sortedECRRows = [...ecrSummary.rows].sort((a, b) => (a.empId || '').localeCompare(b.empId || '', undefined, { numeric: true, sensitivity: 'base' }));
+  sortedECRRows.forEach(r => {
+    ecrRows.push([
+      prevMonthShort, prevYear, r.empId, r.uan, r.name,
+      r.prevEPFWage, r.prevEPSWage, r.prevEDLIWage,
+      r.prevEEPF, r.prevEREPS, r.prevEREPF, r.prevEDLI, r.prevTotalContrib,
+      r.prevNCPDays,
+      '',
+      ''
+    ]);
+    ecrRows.push([
+      currMonthShort, currYear, r.empId, r.uan, r.name,
+      r.currEPFWage, r.currEPSWage, r.currEDLIWage,
+      r.currEEPF, r.currEREPS, r.currEREPF, r.currEDLI, r.currTotalContrib,
+      r.currNCPDays,
+      '',
+      ''
+    ]);
+    ecrRows.push([
+      '', '', '', '', 'Variance',
+      calcDiff(r.currEPFWage, r.prevEPFWage),
+      calcDiff(r.currEPSWage, r.prevEPSWage),
+      calcDiff(r.currEDLIWage, r.prevEDLIWage),
+      calcDiff(r.currEEPF, r.prevEEPF),
+      calcDiff(r.currEREPS, r.prevEREPS),
+      calcDiff(r.currEREPF, r.prevEREPF),
+      calcDiff(r.currEDLI, r.prevEDLI),
+      calcDiff(r.currTotalContrib, r.prevTotalContrib),
+      calcDiff(r.currNCPDays, r.prevNCPDays),
+      formatECRStatus(r.status, r.alerts),
+      formatAuditNote(r.alerts)
+    ]);
+  });
+
+  ecrRows.push([
+    '', '', '', '', `Total ${prevMonthShort} ${prevYear}`,
+    ecrSummary.rows.reduce((s, r) => s + (r.prevEPFWage || 0), 0),
+    ecrSummary.rows.reduce((s, r) => s + (r.prevEPSWage || 0), 0),
+    ecrSummary.rows.reduce((s, r) => s + (r.prevEDLIWage || 0), 0),
+    ecrSummary.prevEEPF || 0,
+    ecrSummary.prevEREPS || 0,
+    ecrSummary.prevEREPF || 0,
+    ecrSummary.prevEDLI || 0,
+    ecrSummary.prevTotalContrib || 0,
+    ecrSummary.rows.reduce((s, r) => s + (r.prevNCPDays || 0), 0),
+    '',
+    ''
+  ]);
+  ecrRows.push([
+    '', '', '', '', `Total ${currMonthShort} ${currYear}`,
+    ecrSummary.rows.reduce((s, r) => s + (r.currEPFWage || 0), 0),
+    ecrSummary.rows.reduce((s, r) => s + (r.currEPSWage || 0), 0),
+    ecrSummary.rows.reduce((s, r) => s + (r.currEDLIWage || 0), 0),
+    ecrSummary.currEEPF || 0,
+    ecrSummary.currEREPS || 0,
+    ecrSummary.currEREPF || 0,
+    ecrSummary.currEDLI || 0,
+    ecrSummary.currTotalContrib || 0,
+    ecrSummary.rows.reduce((s, r) => s + (r.currNCPDays || 0), 0),
+    '',
+    ''
+  ]);
+  ecrRows.push([
+    '', '', '', '', 'Total Variance',
+    ecrSummary.rows.reduce((s, r) => s + ((r.currEPFWage || 0) - (r.prevEPFWage || 0)), 0),
+    ecrSummary.rows.reduce((s, r) => s + ((r.currEPSWage || 0) - (r.prevEPSWage || 0)), 0),
+    ecrSummary.rows.reduce((s, r) => s + ((r.currEDLIWage || 0) - (r.prevEDLIWage || 0)), 0),
+    ecrSummary.eePFDiff || 0,
+    ecrSummary.erEPSDiff || 0,
+    ecrSummary.erEPFDiff || 0,
+    ecrSummary.edliDiff || 0,
+    ecrSummary.totalContribDiff || 0,
+    ecrSummary.rows.reduce((s, r) => s + ((r.currNCPDays || 0) - (r.prevNCPDays || 0)), 0),
+    '',
+    ''
+  ]);
+
+  const wsECR = XLSX.utils.aoa_to_sheet(ecrRows);
+  wsECR['!cols'] = [
+    { wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 28 },
+    { wch: 14 }, { wch: 14 }, { wch: 14 },
+    { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 16 },
+    { wch: 12 },
+    { wch: 22 }, // Audit Status
+    { wch: 45 }  // Audit Note
+  ];
+  applyMoMTableStyles(wsECR, ecrHeaders.length, ecrRows.length);
+
+  // 2. ESI Sheet Construction
+  const esiHeaders = [
+    'Month', 'Year', 'Emp ID', 'ESI Number', 'Employee Name',
+    'Payable Days', 'ESI Wages', 'IP Share (0.75%)', 'ER Share (3.25%)', 'Total ESI',
+    'Audit Status', 'Audit Note'
+  ];
+  const esiRows: any[][] = [esiHeaders];
+  const sortedESIRows = [...esiSummary.rows].sort((a, b) => (a.empId || '').localeCompare(b.empId || '', undefined, { numeric: true, sensitivity: 'base' }));
+  sortedESIRows.forEach(r => {
+    esiRows.push([
+      prevMonthShort, prevYear, r.empId, r.esiNo, r.name,
+      r.prevDays, r.prevWage, r.prevIP, r.prevER, r.prevIP + r.prevER,
+      '',
+      ''
+    ]);
+    esiRows.push([
+      currMonthShort, currYear, r.empId, r.esiNo, r.name,
+      r.currDays, r.currWage, r.currIP, r.currER, r.currIP + r.currER,
+      '',
+      ''
+    ]);
+    esiRows.push([
+      '', '', '', '', 'Variance',
+      calcDiff(r.currDays, r.prevDays),
+      calcDiff(r.currWage, r.prevWage),
+      calcDiff(r.currIP, r.prevIP),
+      calcDiff(r.currER, r.prevER),
+      calcDiff(r.currIP + r.currER, r.prevIP + r.prevER),
+      formatESIStatus(r.status, r.alerts),
+      formatAuditNote(r.alerts)
+    ]);
+  });
+
+  esiRows.push([
+    '', '', '', '', `Total ${prevMonthShort} ${prevYear}`,
+    esiSummary.rows.reduce((s, r) => s + (r.prevDays || 0), 0),
+    esiSummary.rows.reduce((s, r) => s + (r.prevWage || 0), 0),
+    esiSummary.prevIP || 0,
+    esiSummary.prevER || 0,
+    (esiSummary.prevIP || 0) + (esiSummary.prevER || 0),
+    '',
+    ''
+  ]);
+  esiRows.push([
+    '', '', '', '', `Total ${currMonthShort} ${currYear}`,
+    esiSummary.rows.reduce((s, r) => s + (r.currDays || 0), 0),
+    esiSummary.rows.reduce((s, r) => s + (r.currWage || 0), 0),
+    esiSummary.currIP || 0,
+    esiSummary.currER || 0,
+    (esiSummary.currIP || 0) + (esiSummary.currER || 0),
+    '',
+    ''
+  ]);
+  esiRows.push([
+    '', '', '', '', 'Total Variance',
+    esiSummary.rows.reduce((s, r) => s + ((r.currDays || 0) - (r.prevDays || 0)), 0),
+    esiSummary.rows.reduce((s, r) => s + ((r.currWage || 0) - (r.prevWage || 0)), 0),
+    esiSummary.ipDiff || 0,
+    esiSummary.erDiff || 0,
+    ((esiSummary.currIP || 0) + (esiSummary.currER || 0)) - ((esiSummary.prevIP || 0) + (esiSummary.prevER || 0)),
+    '',
+    ''
+  ]);
+
+  const wsESI = XLSX.utils.aoa_to_sheet(esiRows);
+  wsESI['!cols'] = [
+    { wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 28 },
+    { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 16 },
+    { wch: 22 }, // Audit Status
+    { wch: 45 }  // Audit Note
+  ];
+  applyMoMTableStyles(wsESI, esiHeaders.length, esiRows.length);
+
+  // 3. Salary Sheet Construction
+  const payHeaders = [
+    'Month', 'Year', 'Emp ID', 'Employee Name', 'Designation',
+    'Payable Days', 'Basic Pay', 'Gross Salary', 'Net Pay',
+    'Audit Status', 'Audit Note'
+  ];
+  const payRows: any[][] = [payHeaders];
+  const sortedPayRows = [...paySummary.rows].sort((a, b) => (a.empId || '').localeCompare(b.empId || '', undefined, { numeric: true, sensitivity: 'base' }));
+  sortedPayRows.forEach(r => {
+    payRows.push([
+      prevMonthShort, prevYear, r.empId, r.name, r.designation,
+      r.prevDays, r.prevBasic, r.prevGross, r.prevNet,
+      '',
+      ''
+    ]);
+    payRows.push([
+      currMonthShort, currYear, r.empId, r.name, r.designation,
+      r.currDays, r.currBasic, r.currGross, r.currNet,
+      '',
+      ''
+    ]);
+    payRows.push([
+      '', '', '', 'Variance', '',
+      calcDiff(r.currDays, r.prevDays),
+      calcDiff(r.currBasic, r.prevBasic),
+      calcDiff(r.currGross, r.prevGross),
+      calcDiff(r.currNet, r.prevNet),
+      formatPayStatus(r.status, r.alerts),
+      formatAuditNote(r.alerts)
+    ]);
+  });
+
+  payRows.push([
+    '', '', '', `Total ${prevMonthShort} ${prevYear}`, '',
+    paySummary.rows.reduce((s, r) => s + (r.prevDays || 0), 0),
+    paySummary.rows.reduce((s, r) => s + (r.prevBasic || 0), 0),
+    paySummary.prevGross || 0,
+    paySummary.prevNet || 0,
+    '',
+    ''
+  ]);
+  payRows.push([
+    '', '', '', `Total ${currMonthShort} ${currYear}`, '',
+    paySummary.rows.reduce((s, r) => s + (r.currDays || 0), 0),
+    paySummary.rows.reduce((s, r) => s + (r.currBasic || 0), 0),
+    paySummary.currGross || 0,
+    paySummary.currNet || 0,
+    '',
+    ''
+  ]);
+  payRows.push([
+    '', '', '', 'Total Variance', '',
+    paySummary.rows.reduce((s, r) => s + ((r.currDays || 0) - (r.prevDays || 0)), 0),
+    paySummary.rows.reduce((s, r) => s + ((r.currBasic || 0) - (r.prevBasic || 0)), 0),
+    paySummary.grossDiff || 0,
+    paySummary.netDiff || 0,
+    '',
+    ''
+  ]);
+
+  const wsPay = XLSX.utils.aoa_to_sheet(payRows);
+  wsPay['!cols'] = [
+    { wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 28 }, { wch: 20 },
+    { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 18 },
+    { wch: 22 }, // Audit Status
+    { wch: 45 }  // Audit Note
+  ];
+  applyMoMTableStyles(wsPay, payHeaders.length, payRows.length);
+
+  // Append sheets prioritizing the active tab
+  if (activeTab === 'ECR') {
+    XLSX.utils.book_append_sheet(wb, wsECR, 'ECR_MoM_Comparison');
+    XLSX.utils.book_append_sheet(wb, wsESI, 'ESI_MoM_Comparison');
+    XLSX.utils.book_append_sheet(wb, wsPay, 'Salary_MoM_Comparison');
+  } else if (activeTab === 'ESI') {
+    XLSX.utils.book_append_sheet(wb, wsESI, 'ESI_MoM_Comparison');
+    XLSX.utils.book_append_sheet(wb, wsECR, 'ECR_MoM_Comparison');
+    XLSX.utils.book_append_sheet(wb, wsPay, 'Salary_MoM_Comparison');
+  } else {
+    XLSX.utils.book_append_sheet(wb, wsPay, 'Salary_MoM_Comparison');
+    XLSX.utils.book_append_sheet(wb, wsECR, 'ECR_MoM_Comparison');
+    XLSX.utils.book_append_sheet(wb, wsESI, 'ESI_MoM_Comparison');
+  }
+
+  const fileName = getStandardFileName('MoM_Comparison_Audit', company || {} as any, currM, currYear);
+  const subfolder = company ? `${company.establishmentName}___${company.id || ''}___AuditTrailReports` : undefined;
+  return await generateExcelWorkbook(wb, fileName, subfolder);
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIG CHANGE AUDIT TRAIL (Company Profile & Statutory Rules)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ConfigChangeDiff {
+  category: 'Company Profile' | 'Statutory Configuration';
+  field: string;
+  fieldKey: string;
+  oldValue: string;
+  newValue: string;
+}
+
+export const COMPANY_PROFILE_FIELD_LABELS: Record<string, string> = {
+  establishmentName: 'Establishment Name',
+  tradeName: 'Trade / Brand Name',
+  cin: 'CIN (Corporate Identity No)',
+  lin: 'LIN (Labour Identification No)',
+  pfCode: 'PF Establishment Code',
+  esiCode: 'ESI Registration Code',
+  gstNo: 'GSTIN',
+  pan: 'PAN Number',
+  tan: 'TAN Number',
+  ptNo: 'PT Registration No',
+  lwfRegNo: 'LWF Registration No',
+  doorNo: 'Door / Flat No',
+  buildingName: 'Building Name',
+  street: 'Street / Road',
+  locality: 'Locality',
+  area: 'Area',
+  city: 'City',
+  state: 'State',
+  pincode: 'PIN Code',
+  mobile: 'Official Mobile Number',
+  telephone: 'Telephone / Landline',
+  email: 'Official Email Address',
+  website: 'Website URL',
+  natureOfBusiness: 'Nature of Business',
+  allocatedDataSize: 'Allocated Employee Quota',
+  dashboardPassword: 'Company Access Password',
+  securityPin: 'Payroll Freeze Security PIN',
+  smtpHost: 'SMTP Host',
+  smtpPort: 'SMTP Port',
+  smtpSecurity: 'SMTP Security Protocol',
+  smtpUser: 'SMTP User',
+  senderEmail: 'SMTP Sender Email',
+  senderName: 'SMTP Sender Name',
+  specialAllowance1Name: 'Special Allowance 1 Label',
+  specialAllowance2Name: 'Special Allowance 2 Label',
+  specialAllowance3Name: 'Special Allowance 3 Label',
+  flashNews: 'Ticker Flash News',
+  loginAlertMessage: 'Login Alert Message',
+  loginAlertEnabled: 'Login Alert Enabled'
+};
+
+export const STATUTORY_CONFIG_FIELD_LABELS: Record<string, string> = {
+  enablePF: 'Enable EPF Compliance',
+  enableESI: 'Enable ESI Compliance',
+  enableBonus: 'Enable Bonus Calculation',
+  enableGratuity: 'Enable Gratuity Calculation',
+  epfCeiling: 'EPF Wage Ceiling (₹)',
+  epfCeiling1: 'EPF Baseline Ceiling (₹)',
+  epfCeilingDate1: 'EPF Baseline Effective Date',
+  epfCeiling2: 'EPF Revised Ceiling (₹)',
+  epfCeilingDate2: 'EPF Revised Effective Date',
+  epfEmployeeRate: 'EPF Employee Rate (%)',
+  epfEmployerRate: 'EPF Employer Rate (%)',
+  esiCeiling: 'ESI Wage Ceiling (₹)',
+  esiCeiling1: 'ESI Baseline Ceiling (₹)',
+  esiCeilingDate1: 'ESI Baseline Effective Date',
+  esiCeiling2: 'ESI Revised Ceiling (₹)',
+  esiCeilingDate2: 'ESI Revised Effective Date',
+  esiEmployeeRate: 'ESI Employee Rate (%)',
+  esiEmployerRate: 'ESI Employer Rate (%)',
+  enableProfessionalTax: 'Enable Professional Tax (PT)',
+  ptDeductionCycle: 'PT Deduction Cycle',
+  ptSlabs: 'PT Slabs Configuration',
+  enableLWF: 'Enable Labour Welfare Fund (LWF)',
+  lwfDeductionCycle: 'LWF Deduction Cycle',
+  lwfEmployeeContribution: 'LWF Employee Contribution (₹)',
+  lwfEmployerContribution: 'LWF Employer Contribution (₹)',
+  incomeTaxCalculationType: 'Income Tax Calculation Mode',
+  bonusRate: 'Statutory Bonus Rate (%)',
+  pfComplianceType: 'PF Compliance Type',
+  enableHigherContribution: 'Enable Higher PF Contribution',
+  higherContributionType: 'Higher PF Contribution Scope',
+  higherContributionComponents: 'Higher Contribution Wage Components',
+  leaveWagesComponents: 'Leave Wages Components',
+  enableOT: 'Enable Overtime (OT)',
+  otCalculationFactor: 'OT Multiplier Factor',
+  otComponents: 'OT Wage Components',
+  pfEsiCalculationBasis: 'PF & ESI Calculation Basis',
+  pfOriginalWagesComponents: 'PF Original Wages Components',
+  esiOriginalWagesComponents: 'ESI Original Wages Components',
+  bonusWagesComponents: 'Bonus Wage Components',
+  gratuityWagesComponents: 'Gratuity Wage Components',
+  enableArrearSalary: 'Enable Arrear Salary',
+  enableVPF: 'Enable Voluntary PF (VPF)',
+  enableDynamicPaySheet: 'Enable Dynamic Pay Sheet',
+  dynamicPaySheetColumns: 'Dynamic Pay Sheet Columns'
+};
+
+/**
+ * Format any configuration value into a concise, human-readable string representation
+ */
+export const formatConfigValue = (val: any): string => {
+  if (val === undefined || val === null || val === '') return '(Blank)';
+  if (typeof val === 'boolean') return val ? 'Enabled' : 'Disabled';
+  if (typeof val === 'number') return String(val);
+  if (Array.isArray(val)) {
+    if (val.length === 0) return '(None)';
+    if (typeof val[0] === 'object') {
+      return `${val.length} Slabs Configured`;
+    }
+    return val.join(', ');
+  }
+  if (typeof val === 'object') {
+    // If it's a WageBasisComponents object (basic: true, da: true...)
+    const activeKeys = Object.entries(val)
+      .filter(([_, isTrue]) => !!isTrue)
+      .map(([k]) => {
+        if (k === 'basic') return 'Basic';
+        if (k === 'da') return 'DA';
+        if (k === 'retaining') return 'Retaining';
+        if (k === 'hra') return 'HRA';
+        if (k === 'conveyance') return 'Conveyance';
+        if (k === 'washing') return 'Washing';
+        if (k === 'attire') return 'Attire';
+        if (k === 'special1') return 'Spl 1';
+        if (k === 'special2') return 'Spl 2';
+        if (k === 'special3') return 'Spl 3';
+        return k;
+      });
+    return activeKeys.length > 0 ? activeKeys.join(', ') : '(None)';
+  }
+  return String(val).trim();
+};
+
+/**
+ * Detect field-level differences between original and modified Company Profile
+ */
+export const getCompanyProfileDiffs = (
+  oldProfile: Partial<CompanyProfile> | null | undefined,
+  newProfile: Partial<CompanyProfile> | null | undefined
+): ConfigChangeDiff[] => {
+  if (!oldProfile || !newProfile) return [];
+  const diffs: ConfigChangeDiff[] = [];
+
+  const allKeys = Array.from(new Set([
+    ...Object.keys(COMPANY_PROFILE_FIELD_LABELS),
+    ...Object.keys(oldProfile),
+    ...Object.keys(newProfile)
+  ]));
+
+  for (const key of allKeys) {
+    // Skip internal/volatile keys
+    if (['id', 'companySignature', 'isReadOnly'].includes(key)) continue;
+
+    const oldRaw = (oldProfile as any)[key];
+    const newRaw = (newProfile as any)[key];
+
+    const oldStr = formatConfigValue(oldRaw);
+    const newStr = formatConfigValue(newRaw);
+
+    if (oldStr !== newStr) {
+      const fieldLabel = COMPANY_PROFILE_FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase());
+      diffs.push({
+        category: 'Company Profile',
+        field: fieldLabel,
+        fieldKey: key,
+        oldValue: oldStr,
+        newValue: newStr
+      });
+    }
+  }
+
+  return diffs;
+};
+
+/**
+ * Detect field-level differences between original and modified Statutory Configuration
+ */
+export const getStatutoryConfigDiffs = (
+  oldConfig: Partial<StatutoryConfig> | null | undefined,
+  newConfig: Partial<StatutoryConfig> | null | undefined
+): ConfigChangeDiff[] => {
+  if (!oldConfig || !newConfig) return [];
+  const diffs: ConfigChangeDiff[] = [];
+
+  const allKeys = Array.from(new Set([
+    ...Object.keys(STATUTORY_CONFIG_FIELD_LABELS),
+    ...Object.keys(oldConfig),
+    ...Object.keys(newConfig)
+  ]));
+
+  for (const key of allKeys) {
+    const oldRaw = (oldConfig as any)[key];
+    const newRaw = (newConfig as any)[key];
+
+    const oldStr = formatConfigValue(oldRaw);
+    const newStr = formatConfigValue(newRaw);
+
+    if (oldStr !== newStr) {
+      const fieldLabel = STATUTORY_CONFIG_FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase());
+      diffs.push({
+        category: 'Statutory Configuration',
+        field: fieldLabel,
+        fieldKey: key,
+        oldValue: oldStr,
+        newValue: newStr
+      });
+    }
+  }
+
+  return diffs;
+};
+
+/**
+ * Persist config change audit log entries to LocalStorage and Electron SQLite DB
+ */
+export const logConfigChanges = async (
+  logs: ConfigChangeLog[],
+  companyId: string = 'default'
+): Promise<void> => {
+  if (!logs || logs.length === 0) return;
+
+  try {
+    // 1. Company-specific log key
+    const scopedKey = companyId === 'default' ? 'app_config_change_audit_trail' : `app_config_change_audit_trail_${companyId}`;
+    const existingRaw = localStorage.getItem(scopedKey);
+    let existingLogs: ConfigChangeLog[] = [];
+    if (existingRaw) {
+      try {
+        existingLogs = JSON.parse(existingRaw);
+      } catch (e) {
+        existingLogs = [];
+      }
+    }
+    const updatedScoped = [...logs, ...existingLogs];
+    localStorage.setItem(scopedKey, JSON.stringify(updatedScoped));
+
+    if (window.electronAPI?.dbSet) {
+      await window.electronAPI.dbSet(scopedKey, updatedScoped).catch(() => {});
+    }
+
+    // 2. Global unified log key for MIS multi-company view
+    if (companyId !== 'default') {
+      const globalKey = 'app_config_change_audit_trail';
+      const globalRaw = localStorage.getItem(globalKey);
+      let globalLogs: ConfigChangeLog[] = [];
+      if (globalRaw) {
+        try {
+          globalLogs = JSON.parse(globalRaw);
+        } catch (e) {
+          globalLogs = [];
+        }
+      }
+      const updatedGlobal = [...logs, ...globalLogs];
+      localStorage.setItem(globalKey, JSON.stringify(updatedGlobal));
+      if (window.electronAPI?.dbSetGlobal) {
+        await window.electronAPI.dbSetGlobal(globalKey, updatedGlobal).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.error('Failed to log config changes:', err);
+  }
+};
+
+/**
+ * Retrieve configuration change audit logs from LocalStorage / Electron DB
+ */
+export const getConfigChangeLogs = async (
+  companyId?: string
+): Promise<ConfigChangeLog[]> => {
+  try {
+    let logs: ConfigChangeLog[] = [];
+    const key = (companyId && companyId !== 'default' && companyId !== 'all')
+      ? `app_config_change_audit_trail_${companyId}`
+      : 'app_config_change_audit_trail';
+
+    // Try Electron DB first
+    if (window.electronAPI?.dbGet) {
+      try {
+        const res = await window.electronAPI.dbGet(key);
+        if (res && res.success && res.data) {
+          logs = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        }
+      } catch (e) {}
+    }
+
+    // Fallback to localStorage
+    if (!logs || logs.length === 0) {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        logs = JSON.parse(raw);
+      }
+    }
+
+    // Fallback to global logs filtered by company if scoped was empty
+    if ((!logs || logs.length === 0) && companyId && companyId !== 'default' && companyId !== 'all') {
+      const globalRaw = localStorage.getItem('app_config_change_audit_trail');
+      if (globalRaw) {
+        const parsed = JSON.parse(globalRaw);
+        if (Array.isArray(parsed)) {
+          logs = parsed.filter(l => l.companyId === companyId);
+        }
+      }
+    }
+
+    if (!Array.isArray(logs)) return [];
+
+    // Sort newest first
+    return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  } catch (err) {
+    console.error('Failed to load config change logs:', err);
+    return [];
+  }
+};
+
+/**
+ * Export Config Change Audit Trail to an Excel Workbook formatted with Navy Blue header
+ */
+export const exportConfigChangeExcel = async (
+  logs: ConfigChangeLog[],
+  company?: CompanyProfile
+): Promise<string | null> => {
+  const wb = XLSX.utils.book_new();
+
+  const headers = [
+    'Sl No',
+    'Date & Time',
+    'Category',
+    'Configuration Field',
+    'Previous Value',
+    'New Value',
+    'Changed By',
+    'Approved By (Admin OTP)',
+    'Status'
+  ];
+
+  const rows: any[][] = [];
+
+  // Title rows
+  const companyTitle = company?.establishmentName || 'COMPANY CONFIGURATION';
+  rows.push([companyTitle.toUpperCase()]);
+  rows.push(['CONFIG CHANGE AUDIT TRAIL (MIS REPORT)']);
+  rows.push([`Generated On: ${new Date().toLocaleString('en-IN')} | Total Records: ${logs.length}`]);
+  rows.push([]); // blank separator
+  rows.push(headers);
+
+  // Data rows
+  logs.forEach((log, index) => {
+    const formattedDate = new Date(log.timestamp).toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    rows.push([
+      index + 1,
+      formattedDate,
+      log.category,
+      log.field,
+      log.oldValue,
+      log.newValue,
+      log.changedBy,
+      log.approvedBy,
+      log.otpVerified ? 'Approved & Verified' : 'Pending'
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Set column widths
+  ws['!cols'] = [
+    { wch: 8 },  // Sl No
+    { wch: 22 }, // Date & Time
+    { wch: 26 }, // Category
+    { wch: 34 }, // Field
+    { wch: 28 }, // Old Value
+    { wch: 28 }, // New Value
+    { wch: 24 }, // Changed By
+    { wch: 36 }, // Approved By
+    { wch: 20 }  // Status
+  ];
+
+  // Apply Styles
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:I1');
+  const headerRowIdx = 4; // 0-indexed: row 5 is headers
+
+  for (let r = 0; r <= range.e.r; r++) {
+    for (let c = 0; c <= range.e.c; c++) {
+      const cellRef = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[cellRef];
+      if (!cell) continue;
+
+      if (r === 0) {
+        // Company Name Banner
+        cell.s = {
+          font: { name: 'Calibri', sz: 14, bold: true, color: { rgb: '002060' } },
+          alignment: { horizontal: 'left', vertical: 'center' }
+        };
+      } else if (r === 1) {
+        // Report Title
+        cell.s = {
+          font: { name: 'Calibri', sz: 12, bold: true, color: { rgb: '1E293B' } },
+          alignment: { horizontal: 'left', vertical: 'center' }
+        };
+      } else if (r === 2) {
+        // Meta Subtitle
+        cell.s = {
+          font: { name: 'Calibri', sz: 10, italic: true, color: { rgb: '64748B' } },
+          alignment: { horizontal: 'left', vertical: 'center' }
+        };
+      } else if (r === headerRowIdx) {
+        // Header Row: Navy Blue #002060, Bold White Text
+        cell.s = {
+          fill: { fgColor: { rgb: '002060' }, patternType: 'solid' },
+          font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
+          alignment: {
+            horizontal: c === 0 || c === 1 || c === 8 ? 'center' : 'left',
+            vertical: 'center',
+            wrapText: true
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: '001A4E' } },
+            bottom: { style: 'thin', color: { rgb: '001A4E' } },
+            left: { style: 'thin', color: { rgb: '001A4E' } },
+            right: { style: 'thin', color: { rgb: '001A4E' } }
+          }
+        };
+      } else if (r > headerRowIdx) {
+        // Data Rows: Alternating zebra styling and clear borders
+        const isEven = (r - headerRowIdx) % 2 === 0;
+        const bgRgb = isEven ? 'F8FAFC' : 'FFFFFF';
+
+        let textColor = '0F172A';
+        let isBold = false;
+
+        if (c === 4) {
+          // Old Value (Muted reddish)
+          textColor = '991B1B';
+        } else if (c === 5) {
+          // New Value (Vibrant Greenish)
+          textColor = '166534';
+          isBold = true;
+        } else if (c === 8) {
+          // Status (Verified Emerald)
+          textColor = '047857';
+          isBold = true;
+        } else if (c === 3) {
+          // Field
+          isBold = true;
+        }
+
+        cell.s = {
+          fill: { fgColor: { rgb: bgRgb }, patternType: 'solid' },
+          font: { name: 'Calibri', sz: 10, bold: isBold, color: { rgb: textColor } },
+          alignment: {
+            horizontal: c === 0 || c === 1 || c === 8 ? 'center' : 'left',
+            vertical: 'center',
+            wrapText: true
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: 'E2E8F0' } },
+            bottom: { style: 'thin', color: { rgb: 'E2E8F0' } },
+            left: { style: 'thin', color: { rgb: 'E2E8F0' } },
+            right: { style: 'thin', color: { rgb: 'E2E8F0' } }
+          }
+        };
+      }
+    }
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Config_Change_Log');
+
+  const now = new Date();
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const currentMonth = months[now.getMonth()];
+  const currentYear = now.getFullYear();
+  const fileName = getStandardFileName('Config_Change_Audit_Trail', company || {} as any, currentMonth, currentYear);
+  const subfolder = company ? `${company.establishmentName}___${company.id || ''}___AuditTrailReports` : undefined;
+
+  return await generateExcelWorkbook(wb, fileName, subfolder);
 };

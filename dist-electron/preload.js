@@ -9,6 +9,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     saveTemplate: function (fileName, data, type, subfolder) {
         return electron_1.ipcRenderer.invoke('save-template', { fileName: fileName, data: data, type: type, subfolder: subfolder });
     },
+    saveTempReport: function (fileName, data, type) {
+        return electron_1.ipcRenderer.invoke('save-temp-report', { fileName: fileName, data: data, type: type });
+    },
     dbSet: function (key, value) {
         return electron_1.ipcRenderer.invoke('db-set', { key: key, value: value });
     },
@@ -106,8 +109,10 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     wipeCompanyData: function (companyId) { return electron_1.ipcRenderer.invoke('wipe-company-data', companyId); },
     generateDiagnostics: function (uiState) { return electron_1.ipcRenderer.invoke('generate-diagnostics', uiState); },
     getAppBuildAuditInfo: function () { return electron_1.ipcRenderer.invoke('get-app-build-audit-info'); },
+    saveAppPatchRecord: function (record) { return electron_1.ipcRenderer.invoke('save-app-patch-record', record); },
     launchInstallerManually: function () { return electron_1.ipcRenderer.invoke('launch-installer-manually'); },
     openUpdateLog: function () { return electron_1.ipcRenderer.invoke('open-update-log'); },
+    clearUpdateStatus: function () { return electron_1.ipcRenderer.invoke('clear-update-status'); },
     launchBootstrapInstaller: function () { return electron_1.ipcRenderer.invoke('launch-bootstrap-installer'); },
     openBootstrapLink: function (url) { return electron_1.ipcRenderer.invoke('open-bootstrap-link', url); }
 });

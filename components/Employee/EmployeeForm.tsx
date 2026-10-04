@@ -1056,7 +1056,41 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({
                                 )}
                             </div>
 
-                            {/* F. ESI Exempted */}
+                            {/* F. EPF Wage Ceiling Transition Status (September 2026 Revision) */}
+                            <div className={`flex flex-col md:flex-row md:items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 gap-4 ${newEmpForm.isPFExempt && newEmpForm.epfEnrolmentStatus !== 'EnrolledFrom17Sep2026' ? 'opacity-60' : ''}`}>
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                        <h4 className="text-sm font-bold text-sky-400">F. EPF Transition Status (17-09-2026 Revision)</h4>
+                                        <span className="text-[9px] px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-semibold">EPFO FAQ</span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 mt-0.5">
+                                        Select the applicable scenario for mid-month wage ceiling increase (₹15,000 to ₹25,000 w.e.f. 17-09-2026).
+                                    </p>
+                                </div>
+                                <div className="w-full md:w-80">
+                                    <select
+                                        id="epfEnrolmentStatusSelect"
+                                        title="EPF Transition / Enrolment Status"
+                                        aria-label="EPF Transition / Enrolment Status"
+                                        className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-xs text-white outline-none focus:ring-1 focus:ring-sky-500"
+                                        value={newEmpForm.epfEnrolmentStatus || 'Regular'}
+                                        onChange={e => {
+                                             const val = e.target.value as 'Regular' | 'EnrolledFrom17Sep2026' | 'EPSOnlyFrom17Sep2026';
+                                             setNewEmpForm(prev => ({
+                                                 ...prev,
+                                                 epfEnrolmentStatus: val,
+                                                 isPFExempt: val === 'EnrolledFrom17Sep2026' ? false : prev.isPFExempt
+                                             }));
+                                        }}
+                                    >
+                                        <option value="Regular">Scenario C: Regular Capped Member (₹15k to ₹25k cap)</option>
+                                        <option value="EnrolledFrom17Sep2026">Scenario A: Newly Enrolled Member w.e.f. 17-09-2026 (Excluded earlier)</option>
+                                        <option value="EPSOnlyFrom17Sep2026">Scenario B: Existing Member, EPS enrolled w.e.f. 17-09-2026 (EPS was Nil)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* G. ESI Exempted */}
                             <div className="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700">
                                 <div>
                                     <h4 className="text-sm font-bold text-white">F. ESI Exempted</h4>

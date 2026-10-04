@@ -196,6 +196,9 @@ const saveTextContent = (text: string, fileName: string, res: { success: boolean
 export const openSavedReport = async (path: string | undefined | null) => {
     if (path && (window as any).electronAPI) {
         try {
+            if ((window as any).electronAPI.openItemLocation) {
+                await (window as any).electronAPI.openItemLocation(path);
+            }
             if ((window as any).electronAPI.openItemPath) {
                 await (window as any).electronAPI.openItemPath(path);
             }
@@ -205,9 +208,55 @@ export const openSavedReport = async (path: string | undefined | null) => {
     }
 };
 
-const electronSaveReport = async (fileName: string, data: Uint8Array, type: string, subfolder?: string): Promise<{ success: boolean; path?: string; error?: string }> => {
+let _isPreviewMode = false;
+
+export const setReportPreviewMode = (preview: boolean) => {
+    _isPreviewMode = preview;
+};
+
+export const isReportPreviewMode = () => _isPreviewMode;
+
+const electronSaveReport = async (fileName: string, data: Uint8Array, type: string, subfolder?: string, isPreview?: boolean): Promise<{ success: boolean; path?: string; error?: string }> => {
+    const preview = isPreview !== undefined ? isPreview : _isPreviewMode;
+
     if (typeof window !== 'undefined') {
         (window as any).lastGeneratedFileName = `${fileName}.${type}`;
+    }
+
+    if (preview) {
+        // Handle Temporary Preview Mode - Avoid saving to permanent storage
+        // @ts-ignore
+        if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.saveTempReport) {
+            try {
+                // @ts-ignore
+                const res = await window.electronAPI.saveTempReport(fileName, data, type);
+                if (res.success) {
+                    console.log(`[Preview] Temp report saved to ${res.path}`);
+                    return { success: true, path: res.path };
+                } else {
+                    return { success: false, error: res.error || 'Temporary preview save failed' };
+                }
+            } catch (e: any) {
+                console.error('[Preview] Electron saveTempReport failed:', e);
+                return { success: false, error: e.message };
+            }
+        }
+
+        // Web fallback: Open Blob in a new tab
+        try {
+            const mimeType = type.toLowerCase() === 'pdf'
+                ? 'application/pdf'
+                : type.toLowerCase() === 'xlsx'
+                    ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    : 'text/plain';
+            const blob = new Blob([data], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+            return { success: true, path: url };
+        } catch (e: any) {
+            console.error('[Preview] Browser preview failed:', e);
+            return { success: false, error: 'Preview failed: ' + e.message };
+        }
     }
     
     let finalSubfolder = subfolder;
@@ -252,7 +301,9 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
             let category = 'OtherReports';
             
             if (categoryOverride) {
-                category = categoryOverride;
+                category = categoryOverride.toLowerCase().includes('audit') ? 'AuditTrailReports' : categoryOverride.replace(/\s+/g, '');
+            } else if (cleanFileNameLower.includes('audit') || cleanFileNameLower.includes('mom comparison') || cleanFileNameLower.includes('mom_comparison')) {
+                category = 'AuditTrailReports';
             } else if (cleanFileNameLower.includes('statereg')) {
                 category = 'StatutoryReports/StateReg';
             } else if (cleanFileNameLower.includes('pay sheet') || cleanFileNameLower.includes('payroll') || cleanFileNameLower.includes('bank statement') || cleanFileNameLower.includes('cash statement') || cleanFileNameLower.includes('payslip') || cleanFileNameLower.includes('pay slip') || cleanFileNameLower.includes('leave')) {
@@ -280,7 +331,12 @@ const electronSaveReport = async (fileName: string, data: Uint8Array, type: stri
             
             finalSubfolder = `${companyFolder}/${monthFolder}/${category}`;
         } else {
-            finalSubfolder = companyFolder;
+            if (categoryOverride) {
+                const cleanCat = categoryOverride.toLowerCase().includes('audit') ? 'AuditTrailReports' : categoryOverride.replace(/\s+/g, '');
+                finalSubfolder = `${companyFolder}/${cleanCat}`;
+            } else {
+                finalSubfolder = companyFolder;
+            }
         }
     }
 
@@ -449,6 +505,24 @@ const electronSaveTemplate = async (fileName: string, data: Uint8Array, type: st
     if (typeof window !== 'undefined') {
         (window as any).lastGeneratedFileName = `${fileName}.${type}`;
     }
+
+    if (_isPreviewMode) {
+        // @ts-ignore
+        if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.saveTempReport) {
+            try {
+                // @ts-ignore
+                const res = await window.electronAPI.saveTempReport(fileName, data, type);
+                if (res.success) {
+                    return { success: true, path: res.path };
+                } else {
+                    return { success: false, error: res.error || 'Temporary preview save failed' };
+                }
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        }
+    }
+
     // @ts-ignore
     if (window.electronAPI && window.electronAPI.saveTemplate) {
         try {
@@ -493,8 +567,8 @@ export const generateTemplateWorkbook = async (wb: XLSX.WorkBook, fileName: stri
         return null;
     }
 
-    // Auto-open the Templates folder so user can see it
-    if (res.path && (window as any).electronAPI?.openItemLocation) {
+    // Auto-open the Templates folder so user can see it (only if not in preview mode)
+    if (!_isPreviewMode && res.path && (window as any).electronAPI?.openItemLocation) {
         (window as any).electronAPI.openItemLocation(res.path);
     }
 
@@ -1416,10 +1490,36 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
         // Must never exceed Gross Wages
         const eeEPF = baseEE + vpfEE; // Column 7: Employee PF + VPF
         const epfWagesRaw = isNonContributing ? 0 : (baseEE > 0 ? Math.round(baseEE / 0.12) : 0);
-        const epfWages = Math.min(epfWagesRaw, grossWages || epfWagesRaw);
+        const epfWages = isNonContributing ? 0 : (r.epfWage !== undefined && r.epfWage > 0 ? r.epfWage : Math.min(epfWagesRaw, grossWages || epfWagesRaw));
         
-        // EDLI Wages: capped at 15000 max AND must not exceed Gross Wages
-        const edliWages = isNonContributing ? 0 : Math.min(15000, epfWages, grossWages || epfWages);
+        const isSep2026Transition = (r.month === 'September' && r.year === 2026);
+        const isFromSep2026 = (r.year > 2026 || (r.year === 2026 && mIdx >= 8));
+        const isFrozen = (r.status === 'Finalized');
+
+        // EDLI Wages: If data is frozen (Finalized), strictly use the stored r.edliWage!
+        let edliWages = 0;
+        if (!isNonContributing) {
+            if (isFrozen && r.edliWage !== undefined && r.edliWage > 0) {
+                edliWages = r.edliWage;
+            } else if (r.edliWage !== undefined && r.edliWage > 0 && !isSep2026Transition && !isFromSep2026) {
+                edliWages = r.edliWage;
+            } else {
+                const isScenarioA = emp?.epfEnrolmentStatus === 'EnrolledFrom17Sep2026' ||
+                    emp?.epfMembershipDate === '2026-09-17' || emp?.epfMembershipDate === '17-09-2026';
+
+                if (isSep2026Transition) {
+                    const sepEDLICap = isScenarioA
+                        ? Math.min(11667, epfWages)
+                        : (epfWages > 15000
+                            ? 15000 + Math.round(((Math.min(25000, epfWages) - 15000) * 14) / 30)
+                            : epfWages);
+                    edliWages = Math.min(sepEDLICap, epfWages, grossWages || sepEDLICap);
+                } else {
+                    const maxEDLICeiling = isFromSep2026 ? Number(_config?.epfCeiling2 || 25000) : Number(_config?.epfCeiling1 || 15000);
+                    edliWages = Math.min(maxEDLICeiling, epfWages, grossWages || maxEDLICeiling);
+                }
+            }
+        }
         
         // EPS Wages and ER EPS: Strictly derived from the frozen employer contributions
         let erEPS = 0;
@@ -1427,9 +1527,16 @@ export const generatePFECR = async (results: PayrollResult[], employees: Employe
 
         if (!isNonContributing && frozenER_EPS > 0) {
             erEPS = frozenER_EPS;
-            // If EPS contribution exceeds normal 15,000 cap rate (1250), higher pension was opted
-            if (frozenER_EPS > 1250 || (frozenER_EPS === Math.round(epfWages * 0.0833) && epfWages > 15000)) {
-                epsWages = Math.min(epfWages, grossWages || epfWages);
+            if (isFrozen && r.epsWage !== undefined && r.epsWage > 0) {
+                epsWages = r.epsWage;
+            } else if (frozenER_EPS === 1638) {
+                epsWages = 19667;
+            } else if (r.epsWage !== undefined && r.epsWage > 0) {
+                epsWages = r.epsWage;
+            } else if (isSep2026Transition) {
+                epsWages = Math.min(19667, epfWages);
+            } else if (isFromSep2026) {
+                epsWages = Math.min(Number(_config?.epfCeiling2 || 25000), epfWages, grossWages || epfWages);
             } else {
                 epsWages = Math.min(15000, epfWages, grossWages || epfWages);
             }
@@ -1604,16 +1711,54 @@ export const generatePFForm12A = async (results: PayrollResult[], _employees: Em
         const gross = Math.round(r.earnings?.total || 0);
         const ee = baseEE + vpfEE;
         const epfWagesRaw = baseEE > 0 ? Math.round(baseEE / 0.12) : 0;
-        const epfWages = Math.min(epfWagesRaw, gross || epfWagesRaw);
-        const edliWages = Math.min(15000, epfWages, gross || epfWages);
+        const epfWages = (r.epfWage !== undefined && r.epfWage > 0) ? r.epfWage : Math.min(epfWagesRaw, gross || epfWagesRaw);
+
+        const emp = _employees.find(e => e.id === r.employeeId);
+        const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const mIdx = r.month ? MONTHS.indexOf(r.month) : -1;
+        const isSep2026Transition = (r.month === 'September' && r.year === 2026);
+        const isFromSep2026 = (r.year > 2026 || (r.year === 2026 && mIdx >= 8));
+
+        const isFrozen = (r.status === 'Finalized');
+
+        // EDLI Wages: If data is frozen (Finalized), strictly use the stored r.edliWage!
+        let edliWages = 0;
+        if (isFrozen && r.edliWage !== undefined && r.edliWage > 0) {
+            edliWages = r.edliWage;
+        } else if (r.edliWage !== undefined && r.edliWage > 0 && !isSep2026Transition && !isFromSep2026) {
+            edliWages = r.edliWage;
+        } else {
+            const isScenarioA = emp?.epfEnrolmentStatus === 'EnrolledFrom17Sep2026' ||
+                emp?.epfMembershipDate === '2026-09-17' || emp?.epfMembershipDate === '17-09-2026';
+
+            if (isSep2026Transition) {
+                const sepEDLICap = isScenarioA
+                    ? Math.min(11667, epfWages)
+                    : (epfWages > 15000
+                        ? 15000 + Math.round(((Math.min(25000, epfWages) - 15000) * 14) / 30)
+                        : epfWages);
+                edliWages = Math.min(sepEDLICap, epfWages, gross || sepEDLICap);
+            } else {
+                const maxEDLICeiling = isFromSep2026 ? Number(_config?.epfCeiling2 || 25000) : Number(_config?.epfCeiling1 || 15000);
+                edliWages = Math.min(maxEDLICeiling, epfWages, gross || maxEDLICeiling);
+            }
+        }
         
         let erEPS = 0;
         let epsWages = 0;
 
         if (frozenER_EPS > 0) {
             erEPS = frozenER_EPS;
-            if (frozenER_EPS > 1250 || (frozenER_EPS === Math.round(epfWages * 0.0833) && epfWages > 15000)) {
-                epsWages = Math.min(epfWages, gross || epfWages);
+            if (isFrozen && r.epsWage !== undefined && r.epsWage > 0) {
+                epsWages = r.epsWage;
+            } else if (frozenER_EPS === 1638) {
+                epsWages = 19667;
+            } else if (r.epsWage !== undefined && r.epsWage > 0) {
+                epsWages = r.epsWage;
+            } else if (isSep2026Transition) {
+                epsWages = Math.min(19667, epfWages);
+            } else if (isFromSep2026) {
+                epsWages = Math.min(Number(_config?.epfCeiling2 || 25000), epfWages, gross || epfWages);
             } else {
                 epsWages = Math.min(15000, epfWages, gross || epfWages);
             }
@@ -5486,181 +5631,265 @@ export const generateESIChallanPDF = async (
     const totalAmount = totalEE + totalER;
     const doc = new jsPDF('p', 'mm', 'a4');
     const pageW = doc.internal.pageSize.getWidth();
-    let y = 15;
+    let y = 14;
 
-    // Fonts & Styles
-    const setFontTitle = () => { doc.setFont('helvetica', 'bold'); doc.setFontSize(14); };
-    const setFontNormal = () => { doc.setFont('helvetica', 'normal'); doc.setFontSize(10); };
-    const setFontBold = () => { doc.setFont('helvetica', 'bold'); doc.setFontSize(10); };
+    doc.setDrawColor(0, 0, 0);
+    doc.setTextColor(0, 0, 0);
+    doc.setLineWidth(0.2);
 
     // --- Header ---
-    setFontTitle();
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
     doc.text('E.S.I.C.', pageW / 2, y, { align: 'center' });
-    y += 7;
-    doc.text('EMPLOYEES\' STATE INSURANCE CORPORATION', pageW / 2, y, { align: 'center' });
-    y += 7;
+    y += 5.5;
+    doc.setFontSize(12);
+    doc.text("EMPLOYEES' STATE INSURANCE CORPORATION", pageW / 2, y, { align: 'center' });
+    y += 5.5;
+    doc.setFontSize(11);
     doc.text('CHALLAN FORM FOR DEPOSIT IN A/C NO.1', pageW / 2, y, { align: 'center' });
-    y += 15;
+    y += 11;
 
     // --- Employer Code & Date ---
-    setFontNormal();
-    doc.text('Employer\'s Code :', 15, y);
-    setFontBold();
-    doc.text(companyProfile.esiCode || '', 55, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.text("Employer's Code :", 15, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(companyProfile.esiCode || '', 48, y);
 
-    setFontNormal();
-    doc.text('Date', 130, y - 5);
-    doc.text('Month', 150, y - 5);
-    doc.text('Year', 170, y - 5);
+    // Date / Month / Year header (top right)
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text('Date', 135, y - 5);
+    doc.text('Month', 156, y - 5);
+    doc.text('Year', 178, y - 5);
     
     const today = new Date();
-    doc.text(String(today.getDate()).padStart(2, '0'), 130, y);
-    doc.text(today.toLocaleString('en-US', { month: 'short' }), 150, y);
-    doc.text(String(today.getFullYear()), 170, y);
+    doc.text(String(today.getDate()).padStart(2, '0'), 135, y);
+    doc.text(today.toLocaleString('en-US', { month: 'short' }), 156, y);
+    doc.text(String(today.getFullYear()), 178, y);
 
-    y += 12;
+    y += 9;
 
-    // --- Factory Name & Address ---
+    // --- Factory Name & Address & Bank Branch Code ---
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
     doc.text('Name of The Factory / Establishment', 15, y);
-    doc.text('Bank Branch Code:', 125, y + 4);
-    
-    // Draw 3 blank boxes for bank branch code
-    doc.rect(155, y, 10, 6);
-    doc.rect(167, y, 10, 6);
-    doc.rect(179, y, 10, 6);
+    doc.text('Bank Branch Code:', 130, y + 2);
+    doc.rect(162, y - 2.5, 7, 5);
+    doc.rect(171, y - 2.5, 7, 5);
+    doc.rect(180, y - 2.5, 7, 5);
 
-    y += 6;
+    y += 4.5;
     doc.text('and Addresses :', 15, y);
-    y += 8;
-
-    setFontBold();
-    doc.text(companyProfile.establishmentName, 15, y);
     y += 6;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(companyProfile.establishmentName || '', 15, y);
+    y += 5.5;
+
+    doc.setFontSize(9.5);
     const addressLine = (companyProfile.address && !companyProfile.doorNo && !companyProfile.city)
         ? companyProfile.address
         : [companyProfile.doorNo, companyProfile.buildingName, companyProfile.street, companyProfile.locality, companyProfile.city].filter(Boolean).join(', ') + (companyProfile.pincode ? ` - ${companyProfile.pincode}` : '');
-    const addressLines = doc.splitTextToSize(addressLine, 100);
+    const addressLines = doc.splitTextToSize(addressLine, 115);
     doc.text(addressLines, 15, y);
-    y += addressLines.length * 5 + 6;
+    y += addressLines.length * 4.5 + 4;
 
     // --- Mode of Payment ---
-    setFontNormal();
-    doc.text('Mode of Payment : [ Tick (   ) mode used ]', 15, y);
-    doc.text('Cash', 120, y);
-    doc.rect(130, y - 4, 10, 5); // Cash box
-    doc.text('Cheque', 145, y);
-    doc.rect(160, y - 4, 10, 5); // Cheque box
-    doc.text('D.D', 175, y);
-    doc.rect(185, y - 4, 10, 5); // D.D box
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text('Mode of Payment :     [ Tick (   ) mode used ]', 15, y);
+    doc.text('Cash', 132, y);
+    doc.rect(142, y - 3.5, 6, 4.5);
+    doc.text('Chequ', 154, y);
+    doc.rect(167, y - 3.5, 6, 4.5);
+    doc.text('D. D', 178, y);
+    doc.rect(187, y - 3.5, 6, 4.5);
 
-    y += 12;
+    y += 7.5;
 
-    // --- Cheque / DD Details ---
+    // --- Cheque No / DD No & Dated ---
     doc.text('Cheque No / DD No', 15, y);
-    doc.line(50, y + 1, 110, y + 1);
-    
-    doc.text('Dated', 125, y);
-    // 3 small boxes for date
-    doc.rect(140, y - 4, 8, 5);
-    doc.rect(150, y - 4, 8, 5);
-    doc.rect(160, y - 4, 8, 5);
+    doc.line(48, y + 1, 95, y + 1);
 
-    y += 12;
+    doc.text('Dated', 132, y);
+    doc.rect(154, y - 3.5, 6, 4.5);
+    doc.rect(162, y - 3.5, 6, 4.5);
+    doc.rect(170, y - 3.5, 6, 4.5);
 
-    // --- Drawn No & Contribution Period ---
+    y += 7.5;
+
+    // --- Drawn No & Period of Contribution ---
     doc.text('Drawn No :', 15, y);
-    doc.text('Period of', 125, y);
-    doc.text('Month', 145, y);
-    doc.text('Year', 170, y);
-    
-    y += 6;
-    doc.text('( Name of the Bank)', 15, y);
-    doc.line(45, y + 1, 110, y + 1);
-    
-    doc.text('Contribution:', 125, y);
-    setFontBold();
-    doc.text(month.substring(0, 3), 145, y);
-    doc.text(String(year), 170, y);
+    doc.text('Period of', 132, y);
+    doc.text('Month', 154, y);
+    doc.text('Year', 175, y);
+
+    y += 4.5;
+    doc.text('( Name of the Ban)_', 15, y);
+    doc.line(48, y + 1, 115, y + 1);
+
+    doc.text('Contribution:', 132, y);
+    doc.setFont('helvetica', 'bold');
+    doc.text(month.substring(0, 3), 154, y);
+    doc.text(String(year), 175, y);
+
+    y += 6.5;
+
+    // --- Details of Payment ---
+    doc.line(15, y, 195, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.text('Details of Payment : [Tick (   ) mode used', 15, y);
+    doc.text('Regular', 98, y - 2);
+    doc.text('Contribution', 95, y + 2);
+    doc.rect(116, y - 3, 6, 4.5);
+
+    doc.text('Interest', 128, y);
+    doc.rect(142, y - 3, 6, 4.5);
+
+    doc.text('Damages', 154, y);
+    doc.rect(170, y - 3, 6, 4.5);
+
+    doc.text('Others', 180, y);
+    doc.rect(191, y - 3, 6, 4.5);
+
+    y += 5;
+    doc.line(15, y, 195, y);
 
     y += 8;
 
-    // --- Details of Payment ---
-    doc.line(15, y, 195, y); // Top border
-    y += 6;
-    setFontNormal();
-    doc.text('Details of Payment : [Tick (   ) mode used]', 15, y);
-    
-    doc.text('Regular', 90, y - 2);
-    doc.text('Contribution', 87, y + 2);
-    doc.rect(107, y - 3, 10, 5); // Regular box
-
-    doc.text('Interest', 122, y);
-    doc.rect(136, y - 3, 10, 5); // Interest box
-
-    doc.text('Damages', 151, y);
-    doc.rect(168, y - 3, 10, 5); // Damages box
-
-    doc.text('Others', 182, y);
-    doc.rect(195, y - 3, 10, 5); // Others box
-
-    y += 5;
-    doc.line(15, y, 205, y); // Bottom border
-
-    y += 15;
-
-    // --- Financial Summary Table ---
-    // Number of Employees & Total Wages
+    // --- Number of Employees & TOTAL Wages ---
+    doc.setFont('helvetica', 'normal');
     doc.text('Number of Employees :', 15, y);
-    doc.rect(60, y - 4, 15, 6);
-    doc.text(String(totalEmployees), 67.5, y + 0.5, { align: 'center' });
+    doc.rect(58, y - 4, 18, 5.5);
+    doc.text(String(totalEmployees), 67, y, { align: 'center' });
 
     doc.text('TOTAL Wages :', 100, y);
-    doc.rect(135, y - 4, 40, 6);
-    doc.text(String(totalWages), 173, y + 0.5, { align: 'right' });
+    doc.rect(135, y - 4, 38, 5.5);
+    doc.text(String(totalWages), 171, y, { align: 'right' });
 
-    y += 12;
+    y += 9;
 
-    // Helpers for rows
-    const drawDots = (startX: number, endX: number, currY: number) => {
+    // Dot leader helper
+    const drawDotLeader = (startX: number, endX: number, currY: number) => {
         let x = startX;
         while (x < endX) {
             doc.text('.', x, currY);
-            x += 1.5;
+            x += 1.8;
         }
     };
 
-    const addFinancialRow = (label: string, amount: string | number, currentY: number) => {
+    const addChallanRow = (label: string, amount: string | number, currentY: number, isBold: boolean = false) => {
+        if (isBold) {
+            doc.setFont('helvetica', 'bold');
+        } else {
+            doc.setFont('helvetica', 'normal');
+        }
         doc.text(label, 15, currentY);
-        const labelWidth = doc.getTextWidth(label) + 15;
-        drawDots(labelWidth + 2, 130, currentY);
-        doc.rect(135, currentY - 4, 40, 6);
+        const labelW = doc.getTextWidth(label) + 15;
+        drawDotLeader(labelW + 2, 132, currentY);
+        doc.text('..', 133, currentY);
+        doc.rect(140, currentY - 4, 33, 5.5);
         if (amount !== '') {
-            doc.text(String(amount), 173, currentY + 0.5, { align: 'right' });
+            doc.text(String(amount), 171, currentY, { align: 'right' });
         }
     };
 
-    addFinancialRow("Employee's Contribution", totalEE, y);
-    y += 10;
-    addFinancialRow("Employer's Contribution", totalER, y);
-    y += 10;
-    addFinancialRow("# Interest", "", y);
-    y += 10;
-    addFinancialRow("# Damages", "", y);
-    y += 10;
-    addFinancialRow("# Others", "", y);
-    y += 10;
-    
-    setFontBold();
-    doc.text('TOTAL', 15, y);
-    drawDots(30, 130, y);
-    doc.rect(135, y - 4, 40, 6);
-    doc.text(String(totalAmount), 173, y + 0.5, { align: 'right' });
+    addChallanRow("Employee's Contribution", totalEE, y);
+    y += 7;
+    addChallanRow("Employer's Contribution", totalER, y);
+    y += 7;
+    addChallanRow("# Interest", '', y);
+    y += 7;
+    addChallanRow("# Damages", '', y);
+    y += 7;
+    addChallanRow("# Others", '', y);
+    y += 7;
+    addChallanRow("TOTAL", totalAmount, y, true);
 
-    y += 15;
+    y += 9.5;
 
-    // --- Amount in words ---
-    const words = numberToWords(totalAmount);
-    doc.text(`TOTAL amount ( in words ) ${words.replace(/Only$/i, '')} Rupees Only`, 15, y);
+    // --- Total Amount in Words ---
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    const amountWords = numberToWords(totalAmount).replace(/Only$/i, '').trim() + ' Rupees Only';
+    doc.text('TOTAL amount ( in words )', 15, y);
+    const textStart = 15 + doc.getTextWidth('TOTAL amount ( in words )') + 2;
+    doc.setFont('helvetica', 'normal');
+    doc.text(amountWords, textStart, y);
+    doc.line(textStart + doc.getTextWidth(amountWords) + 2, y + 0.5, 195, y + 0.5);
+
+    y += 7.5;
+
+    // --- RO Demand Letter ---
+    doc.setFont('helvetica', 'bold');
+    doc.text('# R.O. Demand letter No.  Date :', 15, y);
+    doc.line(65, y + 0.5, 125, y + 0.5);
+
+    y += 7.5;
+
+    // --- Designation & Signature ---
+    doc.text('Name Designation :', 15, y);
+    doc.line(48, y + 0.5, 125, y + 0.5);
+    drawDotLeader(152, 185, y);
+
+    y += 7.5;
+    doc.text('Seal of the Authorised Signatory :', 15, y);
+    doc.line(67, y + 0.5, 125, y + 0.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Signature', 165, y, { align: 'center' });
+
+    y += 6;
+    doc.line(15, y, 195, y);
+
+    y += 6.5;
+
+    // --- Bottom Section: Acknowledgement & Bank Box ---
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text('( to be filled by Depositer )', 15, y);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('ACKNOWLEDGEMEN', 88, y);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text('For use in Bank', 165, y, { align: 'center' });
+
+    // Bank Box on Right
+    doc.rect(145, y + 2, 50, 26);
+    doc.setFontSize(8);
+    doc.text('Bank Scroll No: __________', 147, y + 6);
+    doc.text('Date : ___________________', 147, y + 11);
+    doc.text('Authorised Signature Seal of', 147, y + 17);
+    doc.text('the Receiving Bank', 147, y + 22);
+
+    // Left lines for Depositor
+    y += 6;
+    doc.setFontSize(8.5);
+    doc.text('Received Rs.', 15, y);
+    doc.line(33, y + 0.5, 140, y + 0.5);
+
+    y += 5.5;
+    doc.line(15, y + 0.5, 140, y + 0.5);
+
+    y += 5.5;
+    doc.text('In Cash / by Cheque / DD No.', 15, y);
+    doc.line(54, y + 0.5, 96, y + 0.5);
+    doc.text('Dated', 98, y);
+    doc.line(106, y + 0.5, 140, y + 0.5);
+
+    y += 5.5;
+    doc.text('(Subject to Realisation ) drawn on', 15, y);
+    doc.line(58, y + 0.5, 125, y + 0.5);
+    doc.text('(Bank in', 127, y);
+
+    y += 5;
+    doc.text('favour of ESIC  A/c No 1)', 15, y);
 
     // Save
     const u8 = new Uint8Array(doc.output('arraybuffer'));

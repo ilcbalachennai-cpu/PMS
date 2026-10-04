@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { Mail, FileBarChart, PieChart, Info, Plus, FileText, Settings2, Trash2, Calendar, Layers, CheckCircle2, Lock, ChevronUp, ChevronDown, Play, Loader2, ShieldAlert } from 'lucide-react';
+import { Mail, FileBarChart, PieChart, Info, Plus, FileText, Settings2, Trash2, Calendar, Layers, CheckCircle2, Lock, ChevronUp, ChevronDown, Play, Loader2, ShieldAlert, History } from 'lucide-react';
 import { PayrollResult, Employee, CompanyProfile } from '../../types';
 import { generateDynamicReportPDF, openSavedReport } from '../../services/reportService';
 import { sendPayslipEmail } from '../../services/mailService';
 import PayrollAuditTrail from './PayrollAuditTrail';
+import ConfigChangeAuditTrail from './ConfigChangeAuditTrail';
 
 interface ColumnDef {
   id: string;
@@ -115,7 +116,7 @@ interface MISDashboardProps {
   onNavigate?: (view: any) => void;
   globalMonth?: string;
   globalYear?: number;
-  initialTab?: 'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT' | 'AUDIT_TRAIL';
+  initialTab?: 'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT' | 'AUDIT_TRAIL' | 'CONFIG_CHANGE';
 }
 
 const MISDashboard: React.FC<MISDashboardProps> = ({ 
@@ -130,7 +131,7 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
   globalYear,
   initialTab
 }) => {
-  const [activeTab, setActiveTab] = useState<'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT' | 'AUDIT_TRAIL'>(() => initialTab || 'DYNAMIC_REPORT');
+  const [activeTab, setActiveTab] = useState<'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT' | 'AUDIT_TRAIL' | 'CONFIG_CHANGE'>(() => initialTab || 'DYNAMIC_REPORT');
 
   React.useEffect(() => {
     if (initialTab) {
@@ -1006,6 +1007,12 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${activeTab === 'AUDIT_TRAIL' ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-900/50 font-black' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
           >
             <ShieldAlert size={16} /> Audit Trail
+          </button>
+          <button 
+            onClick={() => setActiveTab('CONFIG_CHANGE')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${activeTab === 'CONFIG_CHANGE' ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/50 font-black' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+          >
+            <History size={16} /> Config Change
           </button>
         </div>
         
@@ -2055,6 +2062,14 @@ const MISDashboard: React.FC<MISDashboardProps> = ({
                 showAlert={showAlert}
                 globalMonth={reportMonth}
                 globalYear={reportYear}
+                onNavigate={onNavigate}
+              />
+            )}
+            {activeTab === 'CONFIG_CHANGE' && (
+              <ConfigChangeAuditTrail
+                companyProfile={companyProfile}
+                showAlert={showAlert}
+                activeCompanyId={companyProfile?.id || 'default'}
                 onNavigate={onNavigate}
               />
             )}

@@ -73,10 +73,220 @@ export const calculateESICodeWage = (employee: Partial<Employee>, config?: Statu
     return Math.round(stdWageA + stdWageD);
 };
 
+export interface PFCeilingInfo {
+    isTransitionMonth: boolean;
+    daysInMonth: number;
+    daysP1: number;
+    daysP2: number;
+    ceilingP1: number;
+    ceilingP2: number;
+    capP1: number;
+    capP2: number;
+    activeCeiling: number;
+}
+
+export const getPFCeilingInfo = (
+    config: StatutoryConfig,
+    month: string,
+    year: number,
+    daysInMonth: number
+): PFCeilingInfo => {
+    const ceiling1 = Number(config.epfCeiling1 || 15000);
+    const ceiling2 = Number(config.epfCeiling2 || config.epfCeiling || 25000);
+    const dateStr2 = config.epfCeilingDate2 || '17-09-2026';
+
+    let effYear = 2026;
+    let effMonthIdx = 8; // September (0-indexed)
+    let effDay = 17;
+
+    if (dateStr2) {
+        const clean = dateStr2.trim();
+        if (clean.includes('-')) {
+            const parts = clean.split('-');
+            if (parts[0].length === 4) {
+                effYear = parseInt(parts[0], 10);
+                effMonthIdx = parseInt(parts[1], 10) - 1;
+                effDay = parseInt(parts[2], 10);
+            } else {
+                effDay = parseInt(parts[0], 10);
+                effMonthIdx = parseInt(parts[1], 10) - 1;
+                effYear = parseInt(parts[2], 10);
+            }
+        }
+    }
+
+    const monthList = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    const monthIdx = monthList.indexOf(month);
+
+    // Transition Month (e.g. September 2026)
+    if (year === effYear && monthIdx === effMonthIdx) {
+        const daysP1 = Math.max(0, effDay - 1);
+        const daysP2 = Math.max(0, daysInMonth - effDay + 1);
+        const capP1 = (ceiling1 * daysP1) / daysInMonth;
+        const capP2 = (ceiling2 * daysP2) / daysInMonth;
+
+        return {
+            isTransitionMonth: true,
+            daysInMonth,
+            daysP1,
+            daysP2,
+            ceilingP1: ceiling1,
+            ceilingP2: ceiling2,
+            capP1,
+            capP2,
+            activeCeiling: ceiling2
+        };
+    }
+
+    // Prior to revision date
+    if (year < effYear || (year === effYear && monthIdx < effMonthIdx)) {
+        return {
+            isTransitionMonth: false,
+            daysInMonth,
+            daysP1: daysInMonth,
+            daysP2: 0,
+            ceilingP1: ceiling1,
+            ceilingP2: ceiling1,
+            capP1: ceiling1,
+            capP2: 0,
+            activeCeiling: ceiling1
+        };
+    }
+
+    // After revision month
+    return {
+        isTransitionMonth: false,
+        daysInMonth,
+        daysP1: 0,
+        daysP2: daysInMonth,
+        ceilingP1: ceiling2,
+        ceilingP2: ceiling2,
+        capP1: 0,
+        capP2: ceiling2,
+        activeCeiling: ceiling2
+    };
+};
+
+export interface ESICeilingInfo {
+    isTransitionMonth: boolean;
+    daysInMonth: number;
+    daysP1: number;
+    daysP2: number;
+    ceilingP1: number;
+    ceilingP2: number;
+    capP1: number;
+    capP2: number;
+    activeCeiling: number;
+}
+
+export const getESICeilingInfo = (
+    config: StatutoryConfig,
+    month: string,
+    year: number,
+    daysInMonth: number
+): ESICeilingInfo => {
+    const ceiling1 = Number(config.esiCeiling1 || config.esiCeiling || 21000);
+    const ceiling2 = Number(config.esiCeiling2 || config.esiCeiling || 21000);
+    const dateStr2 = config.esiCeilingDate2 || '';
+
+    // If ceilings are identical or no revision date specified, no transition active
+    if (ceiling1 === ceiling2 || !dateStr2.trim()) {
+        return {
+            isTransitionMonth: false,
+            daysInMonth,
+            daysP1: daysInMonth,
+            daysP2: 0,
+            ceilingP1: ceiling1,
+            ceilingP2: ceiling2,
+            capP1: ceiling1,
+            capP2: 0,
+            activeCeiling: ceiling2
+        };
+    }
+
+    let effYear = 2026;
+    let effMonthIdx = 8; // September default if 17-09-2026
+    let effDay = 17;
+
+    const clean = dateStr2.trim();
+    if (clean.includes('-')) {
+        const parts = clean.split('-');
+        if (parts[0].length === 4) {
+            effYear = parseInt(parts[0], 10);
+            effMonthIdx = parseInt(parts[1], 10) - 1;
+            effDay = parseInt(parts[2], 10);
+        } else {
+            effDay = parseInt(parts[0], 10);
+            effMonthIdx = parseInt(parts[1], 10) - 1;
+            effYear = parseInt(parts[2], 10);
+        }
+    }
+
+    const monthList = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    const monthIdx = monthList.indexOf(month);
+
+    // Transition Month
+    if (year === effYear && monthIdx === effMonthIdx) {
+        const daysP1 = Math.max(0, effDay - 1);
+        const daysP2 = Math.max(0, daysInMonth - effDay + 1);
+        const capP1 = (ceiling1 * daysP1) / daysInMonth;
+        const capP2 = (ceiling2 * daysP2) / daysInMonth;
+
+        return {
+            isTransitionMonth: true,
+            daysInMonth,
+            daysP1,
+            daysP2,
+            ceilingP1: ceiling1,
+            ceilingP2: ceiling2,
+            capP1,
+            capP2,
+            activeCeiling: ceiling2
+        };
+    }
+
+    // Prior to revision date
+    if (year < effYear || (year === effYear && monthIdx < effMonthIdx)) {
+        return {
+            isTransitionMonth: false,
+            daysInMonth,
+            daysP1: daysInMonth,
+            daysP2: 0,
+            ceilingP1: ceiling1,
+            ceilingP2: ceiling1,
+            capP1: ceiling1,
+            capP2: 0,
+            activeCeiling: ceiling1
+        };
+    }
+
+    // After revision month
+    return {
+        isTransitionMonth: false,
+        daysInMonth,
+        daysP1: 0,
+        daysP2: daysInMonth,
+        ceilingP1: ceiling2,
+        ceilingP2: ceiling2,
+        capP1: 0,
+        capP2: ceiling2,
+        activeCeiling: ceiling2
+    };
+};
+
 const getESICoverageRemark = (employee: Employee, config: StatutoryConfig, month: string, year: number, payrollHistory: PayrollResult[], _standardMonthlyGross?: number): string | null => {
     if (config.enableESI === false || employee.isESIExempt) {
         return null;
     }
+
+    const esiCeilingInfo = getESICeilingInfo(config, month, year, 30);
+    const activeESICeiling = esiCeilingInfo.activeCeiling;
 
     const stdBasic = employee.basicPay || 0;
     const stdDA = employee.da || 0;
@@ -84,7 +294,7 @@ const getESICoverageRemark = (employee: Employee, config: StatutoryConfig, month
     const stdWageA = stdBasic + stdDA + stdRetaining;
     const stdESIWageBase = calculateESICodeWage(employee, config);
 
-    const isAboveCeiling = (stdWageA > config.esiCeiling) || (stdESIWageBase > config.esiCeiling);
+    const isAboveCeiling = (stdWageA > activeESICeiling) || (stdESIWageBase > activeESICeiling);
 
     const getESIPeriodStart = (m: string, y: number): { month: string; year: number } => {
         const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -323,8 +533,9 @@ export const calculatePayroll = (
 
     // --- PF Calculation Logic ---
 
-    // 1. PF Ceiling (We no longer use proportional ceiling calculation)
-    const proratedCeiling = config.epfCeiling;
+    // 1. PF Ceiling
+    const ceilingInfo = getPFCeilingInfo(config, month, year, daysInMonth);
+    const proratedCeiling = ceilingInfo.activeCeiling;
 
     // 2. Calculate Code Wages (As per Code on Wages 2020 - Clause 88)
     const wageA = basic + da + retaining; // Basic Wage
@@ -367,6 +578,23 @@ export const calculatePayroll = (
     let isProportionatePFCapped = false;
 
     const isHigherContribApplicable = config.enableHigherContribution;
+    const isEmployeeHigher = isHigherContribApplicable || !!employee.isPFHigherWages;
+
+    const hc = config.higherContributionComponents || {};
+    let higherWageBase = 0;
+    if (hc.basic) higherWageBase += basic;
+    if (hc.da) higherWageBase += da;
+    if (hc.retaining) higherWageBase += retaining;
+    if (hc.hra) higherWageBase += hra;
+    if (hc.conveyance) higherWageBase += conveyance;
+    if (hc.washing) higherWageBase += washing;
+    if (hc.attire) higherWageBase += attire;
+    if (hc.special1) higherWageBase += special1;
+    if (hc.special2) higherWageBase += special2;
+    if (hc.special3) higherWageBase += special3;
+
+    higherWageBase = Math.round(higherWageBase);
+    if (higherWageBase === 0) higherWageBase = wageA;
 
     if (config.enablePF === false) {
         basePFWage = 0;
@@ -376,40 +604,30 @@ export const calculatePayroll = (
         // If Higher Contribution is enabled, we use the sum of configured components (Actual Wage),
         // effectively treating it as "Higher Wages" opted.
 
-        const hc = config.higherContributionComponents || {};
-        let higherWageBase = 0;
-        if (hc.basic) higherWageBase += basic;
-        if (hc.da) higherWageBase += da;
-        if (hc.retaining) higherWageBase += retaining;
-        if (hc.hra) higherWageBase += hra;
-        if (hc.conveyance) higherWageBase += conveyance;
-        if (hc.washing) higherWageBase += washing;
-        if (hc.attire) higherWageBase += attire;
-        if (hc.special1) higherWageBase += special1;
-        if (hc.special2) higherWageBase += special2;
-        if (hc.special3) higherWageBase += special3;
+        const floorCeiling = Math.round(Number(config.epfCeiling1 || 15000) * factor);
 
-        higherWageBase = Math.round(higherWageBase);
-
-        const hcCeiling = Math.round((config.epfCeiling || 15000) * factor);
-
-        if (higherWageBase < hcCeiling) {
-            let baseVal = higherWageBase;
-            if (grossEarnings > hcCeiling) {
-                baseVal = hcCeiling;
-            }
+        if (higherWageBase < floorCeiling && grossEarnings > floorCeiling) {
+            let baseVal = floorCeiling;
 
             if (config.pfEsiCalculationBasis === 'OriginalWages') {
                 basePFWage = baseVal;
                 isCode88 = false;
             } else {
-                const codeBasisCapped = Math.min(codeWage, hcCeiling);
+                const codeBasisCapped = Math.min(codeWage, floorCeiling);
                 basePFWage = Math.max(baseVal, codeBasisCapped);
                 isCode88 = (basePFWage === codeBasisCapped && wageD > 0);
             }
         } else {
-            basePFWage = higherWageBase;
-            isCode88 = false;
+            // If Labour Code applies and Code Wage > higherWageBase, ensure statutory code wage up to active ceiling
+            if (config.pfEsiCalculationBasis === 'LabourCode' && codeWage > higherWageBase) {
+                const activeCeil = ceilingInfo.isTransitionMonth ? (config.epfCeiling1 || 15000) : ceilingInfo.activeCeiling;
+                const cappedCodeWage = Math.min(codeWage, Math.round(Number(activeCeil || 25000) * factor));
+                basePFWage = Math.max(higherWageBase, cappedCodeWage);
+                isCode88 = (basePFWage === cappedCodeWage && wageD > 0);
+            } else {
+                basePFWage = higherWageBase;
+                isCode88 = false;
+            }
         }
 
     } else {
@@ -430,6 +648,9 @@ export const calculatePayroll = (
     let vpfEmployee = 0;
     let epfEmployer = 0;
     let epsEmployer = 0;
+    let finalEPFWage = 0;
+    let finalEPSWage = 0;
+    let finalEDLIWage = 0;
 
     // Calculate employee age at processing month
     let age = 0;
@@ -448,7 +669,7 @@ export const calculatePayroll = (
     const isAge60OrAbove = age >= 60;
 
     let isPFActive = false;
-    if (config.enablePF !== false && !employee.isPFExempt) {
+    if (config.enablePF !== false && (!employee.isPFExempt || employee.epfEnrolmentStatus === 'EnrolledFrom17Sep2026')) {
         if (isAge58To60) {
             isPFActive = !!employee.isDeferredPension && employee.deferredPensionOption !== 'OptOut';
         } else if (isAge60OrAbove) {
@@ -471,85 +692,298 @@ export const calculatePayroll = (
         const isPost2014 = B5_Date && B5_Date >= CUTOFF_2014;
         const isPre2014 = B5_Date && B5_Date < CUTOFF_2014;
 
-        // Determine Wages for Split (EPF vs EPS)
-        let J5_EPFWage = 0;
+        // Arrived PF Wage (respects Higher Contribution configuration when selected)
+        const pfWagesArrived = isEmployeeHigher ? basePFWage : pfStandardBasisWage;
+        const fullMonthlyArrived = factor > 0 ? (pfWagesArrived / factor) : pfWagesArrived;
+        const ceiling2 = Number(ceilingInfo.ceilingP2 || config.epfCeiling2 || 25000);
+        const isAbove25000 = Math.round(fullMonthlyArrived) > ceiling2;
 
-        // If Employer is contributing Higher, use the full basePFWage
-        if (D5 === 'Higher' || (config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer')) {
-            J5_EPFWage = basePFWage;
-        } else {
-            // If Employer is Regular, cap the wage used for their split logic at Ceiling
-            if (C5 === 'Regular') {
-                J5_EPFWage = Math.min(basePFWage, config.epfCeiling);
+        if (ceilingInfo.isTransitionMonth) {
+            // --- SEPTEMBER 2026 TRANSITION MONTH DUAL-PERIOD CALCULATION ---
+            let p1_EPFWage = 0;
+            let p1_EPSWage = 0;
+            let p2_EPFWage = 0;
+            let p2_EPSWage = 0;
+
+            let p1_ER_EPF = 0;
+            let p1_ER_EPS = 0;
+            let p2_ER_EPF = 0;
+            let p2_ER_EPS = 0;
+
+            // Check if employee was excluded from EPS prior to 17-09-2026 (wage > 15,000, 100% ER to EPF)
+            const augRecord = payrollHistory.find(p => p.employeeId === employee.id && p.month === 'August' && p.year === 2026);
+            const wasExcludedFromEPSInAugust = employee.epfEnrolmentStatus === 'EPSOnlyFrom17Sep2026' ||
+                (augRecord && (augRecord.employerContributions?.eps === 0 || augRecord.employerContributions?.eps === undefined) && (augRecord.earnings?.total || 0) > ceilingInfo.ceilingP1) ||
+                (!A5 && isPost2014 && fullMonthlyArrived > ceilingInfo.ceilingP1);
+
+            const isScenarioA = employee.epfEnrolmentStatus === 'EnrolledFrom17Sep2026' ||
+                employee.epfMembershipDate === '2026-09-17' ||
+                employee.epfMembershipDate === '17-09-2026';
+
+            if (!isEmployeeHigher) {
+                // =========================================================================
+                // LOGIC SET 1: WITHOUT HIGHER CONTRIBUTION (STANDARD EPFO 3 SCENARIOS)
+                // =========================================================================
+                const targetWage = pfStandardBasisWage;
+                const wageP1_earned = targetWage * (ceilingInfo.daysP1 / daysInMonth);
+                const wageP2_earned = targetWage * (ceilingInfo.daysP2 / daysInMonth);
+
+                const isScenarioB = wasExcludedFromEPSInAugust && !isScenarioA;
+
+                if (isScenarioA) {
+                    // SCENARIO A: Newly Enrolled Member w.e.f. 17-09-2026 (Excluded earlier because wage > ₹15,000)
+                    p1_EPFWage = 0;
+                    p1_EPSWage = 0;
+                    p2_EPFWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+                    p2_EPSWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+
+                    p1_ER_EPF = 0;
+                    p1_ER_EPS = 0;
+                    p2_ER_EPS = p2_EPSWage * 0.0833;
+                    p2_ER_EPF = (p2_EPFWage * config.epfEmployerRate) - p2_ER_EPS;
+                } else if (isScenarioB) {
+                    // SCENARIO B: Existing Member, EPS enrolled w.e.f. 17-09-2026 (EPS was Nil earlier)
+                    p1_EPFWage = Math.min(wageP1_earned, ceilingInfo.capP1);
+                    p1_EPSWage = 0; // Excluded from EPS during Period 1
+                    p2_EPFWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+                    p2_EPSWage = Math.min(wageP2_earned, ceilingInfo.capP2); // Enrolled into EPS from 17-09-2026
+
+                    p1_ER_EPF = p1_EPFWage * config.epfEmployerRate; // Full 12% to EPF in Period 1
+                    p1_ER_EPS = 0;
+                    p2_ER_EPS = p2_EPSWage * 0.0833;
+                    p2_ER_EPF = (p2_EPFWage * config.epfEmployerRate) - p2_ER_EPS; // Balance to EPF in Period 2
+                } else {
+                    // SCENARIO C: Standard Statutory Capped Member (16 days @ 15k cap, 14 days @ 25k cap)
+                    p1_EPFWage = Math.min(wageP1_earned, ceilingInfo.capP1);
+                    p1_EPSWage = Math.min(wageP1_earned, ceilingInfo.capP1);
+                    p2_EPFWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+                    p2_EPSWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+
+                    p1_ER_EPS = p1_EPSWage * 0.0833;
+                    p1_ER_EPF = (p1_EPFWage * config.epfEmployerRate) - p1_ER_EPS;
+                    p2_ER_EPS = p2_EPSWage * 0.0833;
+                    p2_ER_EPF = (p2_EPFWage * config.epfEmployerRate) - p2_ER_EPS;
+                }
             } else {
-                // If Employee is Higher but Employer Regular, base is full, but split calculation handles the cap below
+                // =========================================================================
+                // LOGIC SET 2: WITH HIGHER CONTRIBUTION SELECTED
+                // =========================================================================
+                // Period 1: Uses higherWageBase (e.g. Basic ₹22,440) — NOT capped down to ₹15,000
+                const p1_target = higherWageBase;
+                const wageP1_earned = p1_target * (ceilingInfo.daysP1 / daysInMonth);
+
+                // Period 2: Statutory ceiling expanded to ₹25,000; Code wage applies up to ₹25,000
+                const p2_target = Math.max(higherWageBase, pfStandardBasisWage);
+                const wageP2_earned = p2_target * (ceilingInfo.daysP2 / daysInMonth);
+
+                const isNaturalHigherContrib = Math.round(p2_target / (factor || 1)) > ceiling2 || isAbove25000;
+                const isScenarioB = wasExcludedFromEPSInAugust && !isScenarioA;
+
+                if (isScenarioA) {
+                    // Newly enrolled w.e.f. 17-09-2026
+                    p1_EPFWage = 0;
+                    p1_EPSWage = 0;
+                    p2_EPFWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+                    p2_EPSWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+
+                    p1_ER_EPF = 0;
+                    p1_ER_EPS = 0;
+                    p2_ER_EPS = p2_EPSWage * 0.0833;
+                    p2_ER_EPF = (p2_EPFWage * config.epfEmployerRate) - p2_ER_EPS;
+                } else if (isNaturalHigherContrib) {
+                    // Natural Higher Contribution (Wage > ₹25,000)
+                    p1_EPFWage = wageP1_earned;
+                    p2_EPFWage = wageP2_earned;
+
+                    const isEligibleHigherEPS = employee.isEPSEligible === 'Yes' && A5 && E5 && isPre2014;
+                    if (isScenarioB || (!A5 && isPost2014)) {
+                        // Excluded from EPS in Period 1 (wage > 15k post-2014)
+                        p1_EPSWage = 0;
+                        p2_EPSWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+                    } else if (isEligibleHigherEPS) {
+                        p1_EPSWage = wageP1_earned;
+                        p2_EPSWage = wageP2_earned;
+                    } else {
+                        p1_EPSWage = Math.min(wageP1_earned, ceilingInfo.capP1);
+                        p2_EPSWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+                    }
+
+                    if (config.higherContributionType === 'By Employee & Employer' || employee.isEmployerPFHigher) {
+                        p1_ER_EPS = p1_EPSWage * 0.0833;
+                        p1_ER_EPF = (p1_EPFWage * config.epfEmployerRate) - p1_ER_EPS;
+                        p2_ER_EPS = p2_EPSWage * 0.0833;
+                        p2_ER_EPF = (p2_EPFWage * config.epfEmployerRate) - p2_ER_EPS;
+                    } else {
+                        // 'By Employee' only: ER liability capped at statutory ceilings
+                        const p1_ER_liability = Math.min(p1_EPFWage, ceilingInfo.capP1) * config.epfEmployerRate;
+                        const p2_ER_liability = Math.min(p2_EPFWage, ceilingInfo.capP2) * config.epfEmployerRate;
+                        p1_ER_EPS = p1_EPSWage * 0.0833;
+                        p1_ER_EPF = p1_ER_liability - p1_ER_EPS;
+                        p2_ER_EPS = p2_EPSWage * 0.0833;
+                        p2_ER_EPF = p2_ER_liability - p2_ER_EPS;
+                    }
+                } else if (isScenarioB) {
+                    // Scenario B under Higher Contribution (Wage <= 25,000, EPS was Nil in August)
+                    // Period 1 EPF maintains Higher Contribution wage; Period 1 EPS is 0 (full 12% to EPF)
+                    // Period 2 EPS is enrolled w.e.f. 17-09-2026 up to capP2!
+                    p1_EPFWage = wageP1_earned;
+                    p1_EPSWage = 0; // Excluded from EPS during Period 1
+                    p2_EPFWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+                    p2_EPSWage = Math.min(wageP2_earned, ceilingInfo.capP2); // Enrolled into EPS from 17-09-2026!
+
+                    if (config.higherContributionType === 'By Employee & Employer' || employee.isEmployerPFHigher) {
+                        p1_ER_EPS = 0;
+                        p1_ER_EPF = p1_EPFWage * config.epfEmployerRate; // Full 12% to EPF in Period 1
+                        p2_ER_EPS = p2_EPSWage * 0.0833;
+                        p2_ER_EPF = (p2_EPFWage * config.epfEmployerRate) - p2_ER_EPS;
+                    } else {
+                        const p1_ER_liability = Math.min(p1_EPFWage, ceilingInfo.capP1) * config.epfEmployerRate;
+                        const p2_ER_liability = Math.min(p2_EPFWage, ceilingInfo.capP2) * config.epfEmployerRate;
+                        p1_ER_EPS = 0;
+                        p1_ER_EPF = p1_ER_liability;
+                        p2_ER_EPS = p2_EPSWage * 0.0833;
+                        p2_ER_EPF = p2_ER_liability - p2_ER_EPS;
+                    }
+                    if (wageD > 0 && p2_target === codeWage) {
+                        isCode88 = true;
+                    }
+                } else {
+                    // Standard Higher Contribution Member with Wage <= 25,000 (e.g. EMP0012)
+                    // Covered under EPS in Period 1 (up to 15k cap) and Period 2 (up to 25k cap)
+                    p1_EPFWage = wageP1_earned;
+                    p1_EPSWage = Math.min(wageP1_earned, ceilingInfo.capP1);
+                    p2_EPFWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+                    p2_EPSWage = Math.min(wageP2_earned, ceilingInfo.capP2);
+
+                    if (config.higherContributionType === 'By Employee & Employer' || employee.isEmployerPFHigher) {
+                        p1_ER_EPS = p1_EPSWage * 0.0833;
+                        p1_ER_EPF = (p1_EPFWage * config.epfEmployerRate) - p1_ER_EPS;
+                        p2_ER_EPS = p2_EPSWage * 0.0833;
+                        p2_ER_EPF = (p2_EPFWage * config.epfEmployerRate) - p2_ER_EPS;
+                    } else {
+                        // 'By Employee' only: ER liability capped at statutory ceilings
+                        const p1_ER_liability = Math.min(p1_EPFWage, ceilingInfo.capP1) * config.epfEmployerRate;
+                        const p2_ER_liability = Math.min(p2_EPFWage, ceilingInfo.capP2) * config.epfEmployerRate;
+                        p1_ER_EPS = p1_EPSWage * 0.0833;
+                        p1_ER_EPF = p1_ER_liability - p1_ER_EPS;
+                        p2_ER_EPS = p2_EPSWage * 0.0833;
+                        p2_ER_EPF = p2_ER_liability - p2_ER_EPS;
+                    }
+                    if (wageD > 0 && p2_target === codeWage) {
+                        isCode88 = true;
+                    }
+                }
+            }
+
+            finalEPFWage = p1_EPFWage + p2_EPFWage;
+            finalEPSWage = p1_EPSWage + p2_EPSWage;
+
+            if (isScenarioA) {
+                finalEDLIWage = p2_EPFWage;
+            } else {
+                // EDLI wage is based on EPF wages, always restricted to the statutory wage ceiling.
+                // In transition month: calculated in two stages:
+                // Stage 1 (up to 16-09-2026): capped at capP1 (15,000 * 16/30 = 8,000)
+                // Stage 2 (from 17-09-2026): capped at capP2 (25,000 * 14/30 = 11,666.67)
+                // e.g. for EPF wages >= 25,000: 8,000 + 11,666.67 = 19,667
+                const p1_edli = Math.min(p1_EPFWage, ceilingInfo.capP1);
+                const p2_edli = Math.min(p2_EPFWage, ceilingInfo.capP2);
+                finalEDLIWage = Math.round(p1_edli + p2_edli);
+            }
+
+            basePFWage = Math.round(finalEPFWage);
+            epfEmployee = Math.round(finalEPFWage * config.epfEmployeeRate);
+            epsEmployer = Math.round(p1_ER_EPS + p2_ER_EPS);
+            epfEmployer = Math.round(p1_ER_EPF + p2_ER_EPF);
+
+            const vpfRec = vpfRecords.find(v => v.employeeId === employee.id && v.month === month && v.year === year);
+            if (vpfRec && vpfRec.vpfAmount !== undefined && vpfRec.vpfAmount !== null && Number(vpfRec.vpfAmount) > 0) {
+                vpfEmployee = Math.round(Number(vpfRec.vpfAmount));
+            } else if (employee.employeeVPFRate > 0) {
+                vpfEmployee = Math.round(finalEPFWage * (employee.employeeVPFRate / 100));
+            }
+
+            const isWithoutEPS = isAge60OrAbove || (isAge58To60 && employee.deferredPensionOption === 'WithoutEPS') || employee.isEPSEligible === 'No';
+            if (isWithoutEPS) {
+                const totalER = epfEmployer + epsEmployer;
+                epfEmployer = totalER;
+                epsEmployer = 0;
+            }
+        } else {
+            // --- STANDARD MONTH (BEFORE OR AFTER SEPTEMBER 2026) ---
+            const activeCeiling = ceilingInfo.activeCeiling;
+
+            let J5_EPFWage = 0;
+            if (D5 === 'Higher' || (config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer')) {
                 J5_EPFWage = basePFWage;
+            } else {
+                if (C5 === 'Regular') {
+                    J5_EPFWage = Math.min(basePFWage, activeCeiling);
+                } else {
+                    J5_EPFWage = basePFWage;
+                }
             }
-        }
 
-        let K5_EPSWage = 0;
-        // EPS Logic
-        const isGlobalHigherContribBoth = config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer';
-        const isEmployerHigher = D5 === 'Higher' || isGlobalHigherContribBoth;
-        
-        // Employee must meet all these conditions for EPS wages to go above ceiling
-        const isEligibleForHigherEPS = 
-            employee.isEPSEligible === 'Yes' &&
-            A5 === true &&
-            C5 === 'Higher' &&
-            isEmployerHigher &&
-            E5 === true &&
-            isPre2014;
+            let K5_EPSWage = 0;
+            const isGlobalHigherContribBoth = config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer';
+            const isEmployerHigher = D5 === 'Higher' || isGlobalHigherContribBoth;
 
-        if (!A5 && isPost2014 && basePFWage > config.epfCeiling) {
-            K5_EPSWage = 0; // No EPS for new members > 15k
-        } else if (isEligibleForHigherEPS) {
-            K5_EPSWage = J5_EPFWage; // EPS equals EPF wages
-        } else {
-            // Otherwise, cap EPS at Ceiling
-            K5_EPSWage = Math.min(J5_EPFWage, config.epfCeiling);
-        }
+            const isEligibleForHigherEPS = 
+                employee.isEPSEligible === 'Yes' &&
+                A5 === true &&
+                C5 === 'Higher' &&
+                isEmployerHigher &&
+                E5 === true &&
+                isPre2014;
 
-        // Employee Share Calculation
-        // Use full basePFWage if Higher Contribution is enabled
-        let eeBasis = basePFWage;
-
-        epfEmployee = Math.round(eeBasis * config.epfEmployeeRate);
-
-        const vpfRec = vpfRecords.find(v => v.employeeId === employee.id && v.month === month && v.year === year);
-        if (vpfRec && vpfRec.vpfAmount !== undefined && vpfRec.vpfAmount !== null && Number(vpfRec.vpfAmount) > 0) {
-            vpfEmployee = Math.round(Number(vpfRec.vpfAmount));
-        } else if (employee.employeeVPFRate > 0) {
-            vpfEmployee = Math.round(eeBasis * (employee.employeeVPFRate / 100));
-        }
-
-        // Employer Share Calculation
-        if (!E5) {
-            if (K5_EPSWage === 0) epsEmployer = 0;
-            else {
-                const basis = Math.min(basePFWage, config.epfCeiling);
-                epsEmployer = Math.round(basis * 0.0833);
+            if (!A5 && isPost2014 && basePFWage > activeCeiling) {
+                K5_EPSWage = 0;
+            } else if (isEligibleForHigherEPS) {
+                K5_EPSWage = J5_EPFWage;
+            } else {
+                K5_EPSWage = Math.min(J5_EPFWage, activeCeiling);
             }
-        } else {
-            epsEmployer = Math.round(K5_EPSWage * 0.0833);
-        }
 
-        if (K5_EPSWage === 0) {
-            epfEmployer = Math.round(J5_EPFWage * config.epfEmployerRate);
-        } else if (D5 === 'Higher' || (config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer')) {
-            const totalLiability = Math.round(J5_EPFWage * config.epfEmployerRate);
-            epfEmployer = totalLiability - epsEmployer;
-        } else {
-            const totalLiability = Math.round(K5_EPSWage * config.epfEmployerRate);
-            epfEmployer = totalLiability - epsEmployer;
-        }
+            let eeBasis = basePFWage;
+            epfEmployee = Math.round(eeBasis * config.epfEmployeeRate);
 
-        // If employee is 60+ OR (58-60 and WithoutEPS opted) OR NOT EPS Eligible, then EPS = 0 and entire Employer share goes to EPF
-        const isWithoutEPS = isAge60OrAbove || (isAge58To60 && employee.deferredPensionOption === 'WithoutEPS') || employee.isEPSEligible === 'No';
-        if (isWithoutEPS) {
-            const totalER = epfEmployer + epsEmployer;
-            epfEmployer = totalER;
-            epsEmployer = 0;
+            const vpfRec = vpfRecords.find(v => v.employeeId === employee.id && v.month === month && v.year === year);
+            if (vpfRec && vpfRec.vpfAmount !== undefined && vpfRec.vpfAmount !== null && Number(vpfRec.vpfAmount) > 0) {
+                vpfEmployee = Math.round(Number(vpfRec.vpfAmount));
+            } else if (employee.employeeVPFRate > 0) {
+                vpfEmployee = Math.round(eeBasis * (employee.employeeVPFRate / 100));
+            }
+
+            if (!E5) {
+                if (K5_EPSWage === 0) epsEmployer = 0;
+                else {
+                    const basis = Math.min(basePFWage, activeCeiling);
+                    epsEmployer = Math.round(basis * 0.0833);
+                }
+            } else {
+                epsEmployer = Math.round(K5_EPSWage * 0.0833);
+            }
+
+            if (K5_EPSWage === 0) {
+                epfEmployer = Math.round(J5_EPFWage * config.epfEmployerRate);
+            } else if (D5 === 'Higher' || (config.enableHigherContribution && config.higherContributionType === 'By Employee & Employer')) {
+                const totalLiability = Math.round(J5_EPFWage * config.epfEmployerRate);
+                epfEmployer = totalLiability - epsEmployer;
+            } else {
+                const totalLiability = Math.round(K5_EPSWage * config.epfEmployerRate);
+                epfEmployer = totalLiability - epsEmployer;
+            }
+
+            const isWithoutEPS = isAge60OrAbove || (isAge58To60 && employee.deferredPensionOption === 'WithoutEPS') || employee.isEPSEligible === 'No';
+            if (isWithoutEPS) {
+                const totalER = epfEmployer + epsEmployer;
+                epfEmployer = totalER;
+                epsEmployer = 0;
+            }
+
+            finalEPFWage = J5_EPFWage;
+            finalEPSWage = K5_EPSWage;
+            finalEDLIWage = Math.min(finalEPFWage, activeCeiling);
         }
     } else {
         basePFWage = 0;
@@ -558,6 +992,9 @@ export const calculatePayroll = (
         vpfEmployee = 0;
         epfEmployer = 0;
         epsEmployer = 0;
+        finalEPFWage = 0;
+        finalEPSWage = 0;
+        finalEDLIWage = 0;
     }
 
     // --- ESI Calculation ---
@@ -565,6 +1002,8 @@ export const calculatePayroll = (
     let esiEmployer = 0;
     let isESICodeWagesUsed = false;
     let esiRemark = exitRemark || baseESIRemark || '';
+
+    const esiCeilingInfo = getESICeilingInfo(config, month, year, daysInMonth);
 
     if (config.enableESI !== false && !employee.isESIExempt) {
         const esiWageBase = esiStandardBasisWage;
@@ -577,6 +1016,11 @@ export const calculatePayroll = (
             esiEmployee = 0;
             esiEmployer = 0;
             isESICodeWagesUsed = false;
+        } else if (esiCeilingInfo.isTransitionMonth && (employee.esiEnrolmentStatus === 'EnrolledFromRevisionDate' || (wageA > esiCeilingInfo.ceilingP1 && wageA <= esiCeilingInfo.ceilingP2))) {
+            // Future-ready mid-month ESI transition: Period 1 was above old ceiling, Period 2 is covered under revised ceiling
+            const p2Wages = Math.round(esiWageBase * (esiCeilingInfo.daysP2 / daysInMonth));
+            esiEmployee = Math.round(p2Wages * config.esiEmployeeRate);
+            esiEmployer = Math.round(p2Wages * config.esiEmployerRate);
         } else {
             esiEmployee = Math.round(esiWageBase * config.esiEmployeeRate);
             esiEmployer = Math.round(esiWageBase * config.esiEmployerRate);
@@ -712,6 +1156,9 @@ export const calculatePayroll = (
             gratuityBasisWage = getComponentBasedWage(employee, config.gratuityWagesComponents, factor);
         }
 
+        const edliCharges = +(finalEDLIWage * 0.005).toFixed(2);
+        const adminCharges = +(finalEPFWage * 0.005).toFixed(2);
+
         return {
             employeeId: employee.id,
             month,
@@ -731,12 +1178,17 @@ export const calculatePayroll = (
             },
             employerContributions: { epf: epfEmployer, eps: epsEmployer, esi: esiEmployer, lwf: lwfEmployer },
             gratuityAccrual: config.enableGratuity !== false ? Math.round(((gratuityBasisWage) * 15 / 26) / 12) : 0,
-        netPay: (grossEarnings + (otRecord?.otAmount || 0) + arrearAmount) - totalDeductions,
-        isProportionatePFCapped,
-        isCode88,
-        isESICodeWagesUsed,
-        esiRemark: esiRemark,
-        fineReason: fineReason,
-        leaveSnapshot: leaveSnapshot
-    };
+            netPay: (grossEarnings + (otRecord?.otAmount || 0) + arrearAmount) - totalDeductions,
+            epfWage: Math.round(finalEPFWage),
+            epsWage: Math.round(finalEPSWage),
+            edliWage: Math.round(finalEDLIWage),
+            edliCharges,
+            adminCharges,
+            isProportionatePFCapped,
+            isCode88,
+            isESICodeWagesUsed,
+            esiRemark: esiRemark,
+            fineReason: fineReason,
+            leaveSnapshot: leaveSnapshot
+        };
 };

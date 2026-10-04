@@ -383,7 +383,8 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
     if (!isBootSyncComplete) return;
 
     const versionMarker = localStorage.getItem('app_version_marker');
-    const localActiveTs = localStorage.getItem('app_active_patch_ts') || '00-00-0000 00:00:00';
+    const rawLocalActiveTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
+    const localActiveTs = parseDateTime(rawLocalActiveTs) < parseDateTime(APP_PATCH_TIMESTAMP) ? APP_PATCH_TIMESTAMP : rawLocalActiveTs;
     
     // We detect if this is a fresh boot of a new version, a fresh install, or if the compiled baseline is simply newer than our local active timestamp
     const isCompiledNewer = parseDateTime(APP_PATCH_TIMESTAMP) > parseDateTime(localActiveTs);
@@ -444,24 +445,27 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
 
         // 2. Fallback: check pendingUpdate descriptor written by electron in %TEMP%
         if (!pendingTs && auditInfo?.pendingUpdate?.targetTimestamp) {
-            pendingTs = auditInfo.pendingUpdate.targetTimestamp;
+            // Verify that pendingUpdate descriptor is legitimate and newer than the current binary baseline
+            if (parseDateTime(auditInfo.pendingUpdate.targetTimestamp) > parseDateTime(APP_PATCH_TIMESTAMP)) {
+                pendingTs = auditInfo.pendingUpdate.targetTimestamp;
+            }
         }
 
-        // 3. Additional Fallback: if installer succeeded with exit code 0, align with latestPatchTimestamp
-        if (!pendingTs && auditInfo?.updateStatus?.exitCode === 0 && latestPatchTimestamp && parseDateTime(latestPatchTimestamp) > parseDateTime(activePatchTs)) {
-            pendingTs = latestPatchTimestamp;
-        }
+        // NOTE: Never synthesize pendingTs from cloud release or old exit codes!
 
         if (pendingTs) {
             let isVerified = false;
-            // 1. Check if electron recorded a successful installer exit code 0
-            if (auditInfo?.updateStatus?.exitCode === 0) {
-                isVerified = true;
-            }
-            
-            // 2. Or if running binary baseline satisfies pendingTs
+            // 1. Running binary baseline satisfies pendingTs (app was replaced and relaunched)
             if (parseDateTime(APP_PATCH_TIMESTAMP) >= parseDateTime(pendingTs)) {
                 isVerified = true;
+            }
+            // 2. Or if electron recorded a successful installer exit code 0 specifically for this update
+            else if (auditInfo?.updateStatus?.exitCode === 0 && auditInfo?.updateStatus?.timestamp) {
+                const statusDate = parseDateTime(auditInfo.updateStatus.timestamp);
+                const pendingDate = parseDateTime(pendingTs);
+                if (Math.abs(statusDate - pendingDate) <= 24 * 60 * 60 * 1000) {
+                    isVerified = true;
+                }
             }
 
             if (isVerified) {
@@ -475,14 +479,8 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
                     dbSetFn('app_pending_patch_ts', null).catch(() => {});
                 }
 
-                // 🛡️ Promote pending installer SHA-256 hash to active
-                let promotedHash = localStorage.getItem('app_pending_installer_hash');
-                if (!promotedHash) {
-                    const isLegacy = String(auditInfo?.osVersion || '').startsWith('6.');
-                    promotedHash = isLegacy 
-                        ? localStorage.getItem('app_update_hash_win7')
-                        : (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash'));
-                }
+                // 🛡️ Promote pending installer SHA-256 hash to active ONLY IF a pending hash was genuinely downloaded & stored
+                const promotedHash = localStorage.getItem('app_pending_installer_hash');
                 if (promotedHash) {
                     localStorage.setItem('app_active_installer_hash', promotedHash);
                     localStorage.removeItem('app_pending_installer_hash');
@@ -491,25 +489,73 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
                         dbSetFn('app_pending_installer_hash', null).catch(() => {});
                     }
                 }
+
+                // Clean up update status files from %TEMP% so they are never reused
+                if ((window as any).electronAPI?.clearUpdateStatus) {
+                    (window as any).electronAPI.clearUpdateStatus().catch(() => {});
+                }
             } else if (auditInfo?.updateStatus && auditInfo.updateStatus.exitCode !== 0) {
                 console.warn(`⚠️ [PostUpdateVerification] Update failed with exit code ${auditInfo.updateStatus.exitCode} for target patch (${pendingTs}).`);
                 localStorage.removeItem('app_pending_patch_ts');
                 localStorage.removeItem('app_pending_installer_hash');
                 showAlert?.('warning', 'Update Incomplete', `The automatic update did not complete installation (Exit code: ${auditInfo.updateStatus.exitCode}). The installer is saved on your computer—you can run it manually from Settings -> License Management.`);
+                
+                if ((window as any).electronAPI?.clearUpdateStatus) {
+                    (window as any).electronAPI.clearUpdateStatus().catch(() => {});
+                }
+            }
+        } else {
+            // No update was pending. If a stale updateStatus file exists in %TEMP%, clear it!
+            if (auditInfo?.updateStatus && (window as any).electronAPI?.clearUpdateStatus) {
+                (window as any).electronAPI.clearUpdateStatus().catch(() => {});
             }
         }
 
-        // 🛡️ Self-heal active installer hash if updateStatus was 0 and hash is not yet set
-        if (auditInfo?.updateStatus?.exitCode === 0 && !localStorage.getItem('app_active_installer_hash')) {
-            const isLegacy = String(auditInfo?.osVersion || '').startsWith('6.');
-            const currentHash = isLegacy 
-                ? localStorage.getItem('app_update_hash_win7')
-                : (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash'));
-            if (currentHash) {
-                localStorage.setItem('app_active_installer_hash', currentHash);
-                const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
-                if (dbSetFn) dbSetFn('app_active_installer_hash', currentHash).catch(() => {});
+        // 🛡️ USER RULE: If SHA256 of local app (or local installer) and cloud column G/H matches,
+        // then auto update time stamp in local to avoid any false trigger of update!
+        const cloudWin10Hash = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+        const cloudWin7Hash = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+        
+        const candidateHashes = [
+            (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase(),
+            (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase(),
+            (auditInfo?.installerStats?.sha256 || '').trim().toLowerCase(),
+            (auditInfo?.patchRecord?.sha256 || '').trim().toLowerCase()
+        ].filter(Boolean);
+
+        const matchedHash = candidateHashes.find(h => h === cloudWin10Hash || h === cloudWin7Hash);
+
+        if (matchedHash) {
+            console.log(`🛡️ [SHA256 Match] Local app/installer SHA-256 (${matchedHash}) matches Cloud Column G/H. Auto-updating local timestamp to match cloud: ${latestPatchTimestamp}`);
+            if (localStorage.getItem('app_active_installer_hash') !== matchedHash) {
+                localStorage.setItem('app_active_installer_hash', matchedHash);
             }
+            localStorage.removeItem('app_pending_installer_hash');
+            localStorage.removeItem('app_pending_patch_ts');
+
+            const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+            if (dbSetFn) {
+                dbSetFn('app_active_installer_hash', matchedHash).catch(() => {});
+                dbSetFn('app_pending_installer_hash', null).catch(() => {});
+                dbSetFn('app_pending_patch_ts', null).catch(() => {});
+            }
+
+            if (latestPatchTimestamp && localStorage.getItem('app_active_patch_ts') !== latestPatchTimestamp) {
+                localStorage.setItem('app_active_patch_ts', latestPatchTimestamp);
+                setActivePatchTs(latestPatchTimestamp);
+                if (dbSetFn) dbSetFn('app_active_patch_ts', latestPatchTimestamp).catch(() => {});
+            }
+
+            if ((window as any).electronAPI?.saveAppPatchRecord) {
+                (window as any).electronAPI.saveAppPatchRecord({ timestamp: latestPatchTimestamp || APP_PATCH_TIMESTAMP, sha256: matchedHash, version: APP_VERSION }).catch(() => {});
+            }
+
+            if ((window as any).electronAPI?.clearUpdateStatus) {
+                (window as any).electronAPI.clearUpdateStatus().catch(() => {});
+            }
+
+            setIsPatchNotice(false);
+            setShowUpdateNotice(false);
         }
     };
     checkPostUpdateVerification();
@@ -522,7 +568,8 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
 
     const cloudVer = localStorage.getItem('app_latest_version');
     const cloudPatchTs = localStorage.getItem('app_latest_patch_timestamp');
-    const localPatchTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
+    const rawLocalPatchTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
+    const localPatchTs = parseDateTime(rawLocalPatchTs) < parseDateTime(APP_PATCH_TIMESTAMP) ? APP_PATCH_TIMESTAMP : rawLocalPatchTs;
 
     const isVerHigher = cloudVer ? isVersionHigher(cloudVer, APP_VERSION) : false;
     const isPatchNewer = cloudPatchTs ? parseDateTime(cloudPatchTs) > parseDateTime(localPatchTs) : false;
@@ -634,13 +681,34 @@ export const useAppUpdate = (showAlert: any, isDeveloper: boolean = false, usern
     // If the active installed package SHA-256 matches the cloud target hash for this machine,
     // the system is mathematically proven to be running this exact release build.
     // Suppress patch notices to protect against accidental Column F timestamps in Google Sheets.
-    const activeInstalledHash = (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase();
+    const localHashes = [
+        (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase(),
+        (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase()
+    ].filter(Boolean);
     const cloudWin10Hash = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
     const cloudWin7Hash = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
-    const isExactSamePackage = activeInstalledHash && (activeInstalledHash === cloudWin10Hash || activeInstalledHash === cloudWin7Hash);
+    // 🛡️ USER RULE: If SHA256 of local app and cloud column G/H matches, auto update time stamp in local to avoid any false trigger of update
+    const matchedPackageHash = localHashes.find(h => h && (h === cloudWin10Hash || h === cloudWin7Hash));
+    const isExactSamePackage = Boolean(matchedPackageHash);
 
     if (isExactSamePackage && !isForced) {
-        console.log("🛡️ [PatchSync] Cloud installer SHA-256 matches active installed package. Suppressing patch update.");
+        console.log(`🛡️ [PatchSync] Cloud installer SHA-256 matches local package (${matchedPackageHash}). Suppressing patch update & syncing timestamp.`);
+        
+        // 🛡️ Auto-update local timestamp to match cloud to avoid false trigger of update
+        if (latestPatchTimestamp && localStorage.getItem('app_active_patch_ts') !== latestPatchTimestamp) {
+            console.log(`🛡️ [HashSync] Synchronizing active patch timestamp to cloud Live Patch TS: ${latestPatchTimestamp}`);
+            localStorage.setItem('app_active_patch_ts', latestPatchTimestamp);
+            setActivePatchTs(latestPatchTimestamp);
+            const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+            if (dbSetFn) dbSetFn('app_active_patch_ts', latestPatchTimestamp).catch(() => {});
+        }
+
+        if (matchedPackageHash && localStorage.getItem('app_active_installer_hash') !== matchedPackageHash) {
+            localStorage.setItem('app_active_installer_hash', matchedPackageHash);
+            const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+            if (dbSetFn) dbSetFn('app_active_installer_hash', matchedPackageHash).catch(() => {});
+        }
+
         setIsPatchNotice(false);
         if (!latestAppVersion || !isVersionHigher(latestAppVersion, APP_VERSION)) {
            setShowUpdateNotice(false);

@@ -100,10 +100,20 @@ const PFCalculator: React.FC<PFCalculatorProps> = ({
             // ── Derive ceiling-capped wages from the engine's outputs ──────────
             // (same back-calculation as reportService.ts — keeps both in sync)
             const eeEPF = Math.round((r.deductions?.epf || 0) + (r.deductions?.vpf || 0));
-            const epfWage = eeEPF > 0 ? Math.round(eeEPF / 0.12) : 0;
+            const epfWage = r.epfWage !== undefined ? r.epfWage : (eeEPF > 0 ? Math.round(eeEPF / 0.12) : 0);
             const erEPS = Math.round(r.employerContributions?.eps || 0);
-            const epsWage = erEPS > 0 ? Math.round(erEPS / 0.0833) : 0;
-            const edliWage = Math.min(epfWage, config.epfCeiling);   // EDLI capped at ceiling
+            const epsWage = r.epsWage !== undefined ? r.epsWage : (erEPS > 0 ? Math.round(erEPS / 0.0833) : 0);
+            const isFrozen = (r.status === 'Finalized');
+            const isSep2026Transition = (r.month === 'September' && r.year === 2026);
+            let edliWage = 0;
+            if (isFrozen && r.edliWage !== undefined && r.edliWage > 0) {
+                edliWage = r.edliWage;
+            } else if (isSep2026Transition) {
+                const sepEDLICap = epfWage > 15000 ? 15000 + Math.round(((Math.min(25000, epfWage) - 15000) * 14) / 30) : epfWage;
+                edliWage = Math.min(sepEDLICap, epfWage);
+            } else {
+                edliWage = r.edliWage !== undefined ? r.edliWage : Math.min(epfWage, config.epfCeiling);
+            }
             const erEPF = Math.round(r.employerContributions?.epf || 0);
 
             totalGrossWages += grossWages;

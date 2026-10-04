@@ -75,6 +75,7 @@ const AVAILABLE_COLUMNS = [
     { key: 'pfHigherPension_employeeContribution', label: 'HP: EE Contrib (Regular/Higher)' },
     { key: 'pfHigherPension_employerContribution', label: 'HP: ER Contrib (Regular/Higher)' },
     { key: 'pfHigherPension_isHigherPensionOpted', label: 'HP: Joint Option (Yes/No)' },
+    { key: 'epfEnrolmentStatus', label: 'EPF Transition Status (Regular/EnrolledFrom17Sep2026/EPSOnlyFrom17Sep2026)' },
     { key: 'initialOpeningBalances_el', label: 'EL Opening Balance' },
     { key: 'initialOpeningBalances_sl', label: 'SL Opening Balance' },
     { key: 'initialOpeningBalances_cl', label: 'CL Opening Balance' },
@@ -189,6 +190,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         bankAccount: '', ifsc: '', bankName: '', bankBranch: '',
         basicPay: 0, da: 0, hra: 0, conveyance: 0, washing: 0, attire: 0,
         specialAllowance1: 0, specialAllowance2: 0, specialAllowance3: 0,
+        epfEnrolmentStatus: 'Regular',
         pfHigherPension: { enabled: false, isHigherPensionOpted: 'No', contributedBefore2014: 'No', employeeContribution: 'Regular', employerContribution: 'Regular', dojImpact: '' },
         employeeDocuments: {}
     };
@@ -401,10 +403,15 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                 data.isESIExempt = true;
             }
         }
-        if (data.isPFExempt) {
+        if (data.isPFExempt && data.epfEnrolmentStatus !== 'EnrolledFrom17Sep2026') {
             data.isEPSEligible = 'No';
             if (data.pfHigherPension) {
                 data.pfHigherPension.enabled = false;
+            }
+        } else if (data.epfEnrolmentStatus === 'EnrolledFrom17Sep2026') {
+            data.isPFExempt = false;
+            if (!data.isEPSEligible) {
+                data.isEPSEligible = 'Yes';
             }
         }
         if (data.dob) {

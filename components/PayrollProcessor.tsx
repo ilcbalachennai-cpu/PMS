@@ -83,7 +83,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
         advanceJustSaved === false ||
         fineJustSaved === false ||
         (config.enableOT && otJustSaved === false) ||
-        vpfJustSaved === false;
+        (config.enableVPF && vpfJustSaved === false);
 
     const handleNavigateToSettings = () => {
         localStorage.setItem('settings_initial_tab', SettingsTab.Statutory);
@@ -329,8 +329,8 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
                 prevAttendancesRef.current !== attendances ||
                 prevAdvancesRef.current !== advanceLedgers ||
                 prevFinesRef.current !== fines ||
-                prevOtRecordsRef.current !== otRecords ||
-                prevVpfRecordsRef.current !== vpfRecords ||
+                (config.enableOT ? prevOtRecordsRef.current !== otRecords : false) ||
+                (config.enableVPF ? prevVpfRecordsRef.current !== vpfRecords : false) ||
                 prevArrearHistoryRef.current !== arrearHistory ||
                 configChanged;
 
@@ -507,7 +507,7 @@ const PayrollProcessor: React.FC<PayrollProcessorProps> = ({
             if (advanceJustSaved === false) unsavedTabs.push({ name: '2. Advances', key: 'ledgers' });
             if (fineJustSaved === false) unsavedTabs.push({ name: '3. Tax & Fines', key: 'fines' });
             if (config.enableOT && otJustSaved === false) unsavedTabs.push({ name: '4. Overtime', key: 'overtime' });
-            if (vpfJustSaved === false) unsavedTabs.push({ name: 'VPF & PF Advance Refund', key: 'vpf_pf_adv' });
+            if (config.enableVPF && vpfJustSaved === false) unsavedTabs.push({ name: 'VPF & PF Advance Refund', key: 'vpf_pf_adv' });
 
             setModalState({
                 isOpen: true,

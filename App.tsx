@@ -640,7 +640,7 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
     isSetupComplete, setIsSetupComplete
   } = useUIState(activeCompanyId, employees.length);
 
-  const [misTab, setMisTab] = useState<'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT' | 'AUDIT_TRAIL'>('DYNAMIC_REPORT');
+  const [misTab, setMisTab] = useState<'MAILING' | 'DYNAMIC_REPORT' | 'MIS_REPORT' | 'AUDIT_TRAIL' | 'CONFIG_CHANGE'>('DYNAMIC_REPORT');
 
   // --- V03.01.02: SMART GATE INITIALIZATION ---
   // Start with the selection gate closed to directly load the Dashboard of the active company
@@ -1008,9 +1008,10 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
         return;
       }
 
-      let email = secureDeleteEmail || currentUser.email || licenseInfo?.registeredTo || companyProfile.email || "";
-      if (currentUser.role === 'Developer' || email === 'developer@bharatpay.com') {
-        email = 'ilcbala.bharatpayroll@gmail.com';
+      const storedLicense = licenseInfo || getStoredLicense();
+      let email = secureDeleteEmail || storedLicense?.registeredTo || currentUser.email || companyProfile.email || "";
+      if (!email || email === 'developer@bharatpay.com') {
+        email = storedLicense?.registeredTo || 'bala68.chennai@gmail.com';
       }
       
       if (!email) {
@@ -1019,11 +1020,10 @@ const PayrollShell: FC<{ onRefresh?: () => void }> = () => {
         return;
       }
 
-
-
       const targetCompany = companies.find(c => c.id === secureDeleteTargetId);
       const companyName = targetCompany ? targetCompany.establishmentName : "Unknown Company";
-      const res = await requestResetOTP(email, currentUser.username, companyName);
+      const targetUserId = storedLicense?.userID || currentUser.username || 'VRANGA';
+      const res = await requestResetOTP(email, targetUserId, companyName);
       if (res.success) {
         setSecureDeleteStep('OTP');
         setSecureDeleteTimer(90); // 90 Seconds countdown

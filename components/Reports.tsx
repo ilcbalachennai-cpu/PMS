@@ -21,7 +21,8 @@ import {
     openSavedReport,
     generateTemplateWorkbook,
     getMonthAbbr,
-    resolveBranchCompanyProfile
+    resolveBranchCompanyProfile,
+    setReportPreviewMode
 } from '../services/reportService';
 import { formatIndianNumber, getCompanyBackupFolder } from '../utils/formatters';
 import { getActivePaySheetColumns } from '../constants';
@@ -78,6 +79,7 @@ const Reports: React.FC<ReportsProps> = ({
     const [reportType, setReportType] = useState<string>('Pay Sheet');
     const [format, setFormat] = useState<'PDF' | 'Excel'>('PDF');
     const [isGenerating, setIsGenerating] = useState(false);
+    const [isPreviewActive, setIsPreviewActive] = useState(false);
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
     const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('all');
 
@@ -672,7 +674,7 @@ const Reports: React.FC<ReportsProps> = ({
         const prevFinalized = savedRecords.filter(r => r.month === prevM && r.year === prevY && r.status === 'Finalized');
 
         if (prevFinalized.length > 0) {
-            const ecrAudit = calculateECRAudit(currentResults, prevFinalized, employees, currPeriodLabel, prevPeriodLabel);
+            const ecrAudit = calculateECRAudit(currentResults, prevFinalized, employees, currPeriodLabel, prevPeriodLabel, config);
             const esiAudit = calculateESIAudit(currentResults, prevFinalized, employees, currPeriodLabel, prevPeriodLabel, config);
 
             const hasZeroEPS = ecrAudit.zeroEPSAlerts.length > 0;
@@ -699,9 +701,10 @@ const Reports: React.FC<ReportsProps> = ({
     };
 
 
-    const generateReport = async () => {
+    const generateReport = async (isPreview: boolean = false) => {
         // Exception for Arrear Report: It relies on History, not Lock state
-        if (reportType !== 'Arrear Report' && !isLocked) {
+        // For Download Report, data must be frozen; for Preview Report, draft data can also be previewed if available
+        if (!isPreview && reportType !== 'Arrear Report' && !isLocked) {
             setModalState({
                 isOpen: true,
                 type: 'error', // use the Alert design
@@ -712,6 +715,8 @@ const Reports: React.FC<ReportsProps> = ({
         }
 
         setIsGenerating(true);
+        setIsPreviewActive(isPreview);
+        setReportPreviewMode(isPreview);
         try {
             if ((reportType === 'Pay Sheet' || reportType === 'Pay Slips' || reportType === 'Bank Statement') && currentResults.length === 0) {
                 throw new Error("No payroll data found for this period. Please run & save payroll in Pay Process first.");
@@ -1053,26 +1058,32 @@ const Reports: React.FC<ReportsProps> = ({
             }
 
             if (savedPath) {
-                _showAlert(
-                    'success',
-                    'Report Generated Successfully',
-                    `The ${reportType} has been saved to your reports folder.`,
-                    () => openSavedReport(savedPath),
-                    undefined,
-                    'Open Report & Folder',
-                    undefined,
-                    undefined,
-                    2
-                );
+                if (isPreview) {
+                    await openSavedReport(savedPath);
+                } else {
+                    _showAlert(
+                        'success',
+                        'Report Generated Successfully',
+                        `The ${reportType} has been saved to your reports folder.`,
+                        () => openSavedReport(savedPath),
+                        undefined,
+                        'Open Report & Folder',
+                        undefined,
+                        undefined,
+                        2
+                    );
+                }
             } else {
                 const filename = (window as any).lastGeneratedFileName || 'the file';
-                _showAlert('error', 'Generation Failed', `Similar file is already open, close "${filename}" to generate the new report`);
+                _showAlert('error', isPreview ? 'Preview Failed' : 'Generation Failed', `Similar file is already open, close "${filename}" to ${isPreview ? 'preview' : 'generate'} the report`);
             }
 
         } catch (e: any) {
-            setModalState({ isOpen: true, type: 'error', title: 'Generation Failed', message: e.message });
+            setModalState({ isOpen: true, type: 'error', title: isPreview ? 'Preview Failed' : 'Generation Failed', message: e.message });
         } finally {
             setIsGenerating(false);
+            setIsPreviewActive(false);
+            setReportPreviewMode(false);
         }
     };
 
@@ -1424,13 +1435,16 @@ const Reports: React.FC<ReportsProps> = ({
                                 </div>
                             )}
 
-                            <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                            <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800 space-y-1.5">
                                 <p className="text-xs text-slate-400 leading-relaxed">
                                     Generating <b>{reportType}</b> in <b>{format}</b> format
                                     {reportType === 'Arrear Report' && arrearSelectedPeriod ?
                                         ` for selected batch.` :
                                         ` for ${month} ${year}.`
                                     }
+                                </p>
+                                <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                                    <span className="text-cyan-400 font-semibold">Preview</span> opens as a temporary file without saving to permanent storage.
                                 </p>
                             </div>
 
@@ -1456,30 +1470,54 @@ const Reports: React.FC<ReportsProps> = ({
                         </div>
                     </div>
 
-                    <button
-                        onClick={generateReport}
-                        disabled={isGenerating}
-                        title={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
-                        aria-label={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
-                        className={`w-full py-4 font-black rounded-xl shadow-lg flex items-center justify-center gap-3 transition-all mt-6 ${!isLocked
-                            ? 'bg-slate-800 hover:bg-slate-700 text-amber-500 border border-slate-600'
-                            : (isWin7
-                                ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl border border-white/20'
-                                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20')
+                    <div className="space-y-3 mt-6">
+                        <button
+                            onClick={() => generateReport(true)}
+                            disabled={isGenerating || (!hasData && reportType !== 'Arrear Report')}
+                            title={isGenerating ? "Generating Preview..." : "Preview Report (Temporary File - Not saved to storage)"}
+                            aria-label={isGenerating ? "Generating Preview..." : "Preview Report (Temporary File - Not saved to storage)"}
+                            className={`w-full py-3.5 font-bold rounded-xl shadow-md flex items-center justify-center gap-2.5 transition-all text-sm tracking-wide ${
+                                isGenerating && isPreviewActive
+                                    ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                                    : (!hasData && reportType !== 'Arrear Report')
+                                        ? 'bg-slate-800/60 text-slate-500 border border-slate-800 cursor-not-allowed'
+                                        : 'bg-slate-800 hover:bg-slate-700/80 text-cyan-400 hover:text-cyan-300 border border-cyan-500/40 hover:border-cyan-400 shadow-lg shadow-cyan-950/20 active:scale-[0.99] cursor-pointer'
                             }`}
-                    >
-                        {isGenerating ? (
-                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" />
-                        ) : !isLocked ? (
-                            <>
-                                <Lock size={20} /> LOCK PAYROLL TO DOWNLOAD (CLICK HERE)
-                            </>
-                        ) : (
-                            <>
-                                <Download size={20} /> DOWNLOAD REPORT
-                            </>
-                        )}
-                    </button>
+                        >
+                            {isGenerating && isPreviewActive ? (
+                                <div className="animate-spin rounded-full h-5 w-5 border-2 border-cyan-400/30 border-t-cyan-400" />
+                            ) : (
+                                <>
+                                    <Eye size={19} className="text-cyan-400" /> PREVIEW REPORT
+                                </>
+                            )}
+                        </button>
+
+                        <button
+                            onClick={() => generateReport(false)}
+                            disabled={isGenerating}
+                            title={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
+                            aria-label={isGenerating ? "Generating Report..." : "Generate and Download Selection"}
+                            className={`w-full py-4 font-black rounded-xl shadow-lg flex items-center justify-center gap-3 transition-all ${!isLocked
+                                ? 'bg-slate-800 hover:bg-slate-700 text-amber-500 border border-slate-600'
+                                : (isWin7
+                                    ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl border border-white/20'
+                                    : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20 active:scale-[0.99]')
+                                }`}
+                        >
+                            {isGenerating && !isPreviewActive ? (
+                                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" />
+                            ) : !isLocked ? (
+                                <>
+                                    <Lock size={20} /> LOCK PAYROLL TO DOWNLOAD (CLICK HERE)
+                                </>
+                            ) : (
+                                <>
+                                    <Download size={20} /> DOWNLOAD REPORT
+                                </>
+                            )}
+                        </button>
+                    </div>
                 </div>
             </div>
 

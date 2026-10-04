@@ -4,7 +4,7 @@ import { LicenseData } from '../types';
 // Replace this with your deployed Google Apps Script Web App URL
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzE10qkCCczPH-_eCQ_cJBRGpu28viV8zhNRCw2iD0Rha3y_1HIuWNPGAjHBrqsHeEB/exec";
 export const APP_VERSION = "06.01.11";
-export const APP_PATCH_TIMESTAMP = "21-09-2026 21:30:25"; // Format: dd-MM-yyyy HH:mm:ss
+export const APP_PATCH_TIMESTAMP = "02-10-2026 20:22:00"; // Format: dd-MM-yyyy HH:mm:ss
 const AUTH_SECRET = "BPP-ULTIMATE-V2-SECURE";
 
 export interface ActivationResult {
@@ -487,18 +487,38 @@ const fetchFromApi = async (url: string, options: any) => {
       if (!options.headers) {
         options.headers = {};
       }
-      options.headers['Content-Type'] = 'application/json';
+      options.headers['Content-Type'] = 'application/json; charset=utf-8';
       try {
         const bodyObj = JSON.parse(options.body);
         bodyObj.version = APP_VERSION; // Version identification
         bodyObj.authSecret = AUTH_SECRET; // Inject secret BEFORE signing for master verification
 
+        // Ensure all string values in bodyObj are ASCII-safe so GAS and Google HTTP proxy never mangle encoding
+        const sanitizeForSigning = (val: any): any => {
+          if (typeof val === 'string') {
+            return val.replace(/[₹]/g, 'Rs.').replace(/[^\x20-\x7E]/g, '');
+          }
+          if (Array.isArray(val)) {
+            return val.map(sanitizeForSigning);
+          }
+          if (val !== null && typeof val === 'object') {
+            const clean: any = {};
+            for (const [k, v] of Object.entries(val)) {
+              clean[k] = sanitizeForSigning(v);
+            }
+            return clean;
+          }
+          return val;
+        };
+
+        const sanitizedObj = sanitizeForSigning(bodyObj);
+
         // Generate SHA-256 Signature (HAS 256 Unique Code)
         // This ensures the request is authentic and hasn't been tampered with.
-        const signature = CryptoJS.HmacSHA256(JSON.stringify(bodyObj), AUTH_SECRET).toString();
-        bodyObj.signature = signature;
+        const signature = CryptoJS.HmacSHA256(JSON.stringify(sanitizedObj), AUTH_SECRET).toString();
+        sanitizedObj.signature = signature;
 
-        options.body = JSON.stringify(bodyObj);
+        options.body = JSON.stringify(sanitizedObj);
       } catch (e) {
         console.warn("API Security Injection failed: Body is not JSON.");
       }
@@ -1901,6 +1921,31 @@ export const validateLicenseStartup = async (
                 if (cloudData.updateHashWin7) dbSetFn('app_update_hash_win7', cloudData.updateHashWin7).catch(() => {});
                 if (cloudData.sha256) dbSetFn('app_update_hash', cloudData.sha256).catch(() => {});
               }
+
+              // 🛡️ USER RULE: If SHA256 of local app and cloud column G/H matches,
+              // then auto update time stamp in local to avoid any false trigger of update!
+              const cloudWin10 = (cloudData.updateHashWin10 || cloudData.sha256 || '').trim().toLowerCase();
+              const cloudWin7 = (cloudData.updateHashWin7 || '').trim().toLowerCase();
+              const activeLocalHash = (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase();
+              const pendingLocalHash = (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase();
+              
+              const matchedHash = [activeLocalHash, pendingLocalHash].find(h => h && (h === cloudWin10 || h === cloudWin7));
+              if (matchedHash && cloudData.patchTimestamp) {
+                console.log(`🛡️ [SHA256 Match] Local hash (${matchedHash}) matches Cloud Column G/H. Auto-updating local timestamp to: ${cloudData.patchTimestamp}`);
+                localStorage.setItem('app_active_patch_ts', cloudData.patchTimestamp);
+                localStorage.setItem('app_active_installer_hash', matchedHash);
+                localStorage.removeItem('app_pending_patch_ts');
+                localStorage.removeItem('app_pending_installer_hash');
+                if (dbSetFn) {
+                  dbSetFn('app_active_patch_ts', cloudData.patchTimestamp).catch(() => {});
+                  dbSetFn('app_active_installer_hash', matchedHash).catch(() => {});
+                  dbSetFn('app_pending_patch_ts', null).catch(() => {});
+                  dbSetFn('app_pending_installer_hash', null).catch(() => {});
+                }
+                if (api?.saveAppPatchRecord) {
+                  api.saveAppPatchRecord({ timestamp: cloudData.patchTimestamp, sha256: matchedHash, version: APP_VERSION }).catch(() => {});
+                }
+              }
             }
 
             // 4. Smart Admin Recovery & Sync
@@ -2041,13 +2086,14 @@ export const verifyRegistrationOTP = async (email: string, mobile: string, otp: 
  */
 export const requestResetOTP = async (email: string, userID: string, companyName?: string): Promise<ActivationResult> => {
   try {
+    const cleanCompanyName = companyName ? companyName.replace(/[₹]/g, 'Rs.').replace(/[^\x20-\x7E]/g, '') : undefined;
     const result = await fetchFromApi(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({
         action: 'REQUEST_OTP_RESET',
         email,
         userID,
-        companyName
+        companyName: cleanCompanyName
       })
     });
     return result;
@@ -2383,6 +2429,30 @@ export const fetchLatestMessages = async (force: boolean = false): Promise<{
           if (result.updateHashWin10) dbSetFn('app_update_hash_win10', result.updateHashWin10).catch(() => {});
           if (result.updateHashWin7) dbSetFn('app_update_hash_win7', result.updateHashWin7).catch(() => {});
           if (result.sha256) dbSetFn('app_update_hash', result.sha256).catch(() => {});
+        }
+
+        // 🛡️ USER RULE: If SHA256 of local app and cloud column G/H matches, auto update timestamp in local
+        const cloudWin10 = (result.updateHashWin10 || result.sha256 || '').trim().toLowerCase();
+        const cloudWin7 = (result.updateHashWin7 || '').trim().toLowerCase();
+        const activeLocalHash = (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase();
+        const pendingLocalHash = (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase();
+        
+        const matchedHash = [activeLocalHash, pendingLocalHash].find(h => h && (h === cloudWin10 || h === cloudWin7));
+        if (matchedHash && result.patchTimestamp) {
+          console.log(`🛡️ [SHA256 Match] Local hash (${matchedHash}) matches Cloud Column G/H. Auto-updating local timestamp to: ${result.patchTimestamp}`);
+          localStorage.setItem('app_active_patch_ts', result.patchTimestamp);
+          localStorage.setItem('app_active_installer_hash', matchedHash);
+          localStorage.removeItem('app_pending_patch_ts');
+          localStorage.removeItem('app_pending_installer_hash');
+          if (dbSetFn) {
+            dbSetFn('app_active_patch_ts', result.patchTimestamp).catch(() => {});
+            dbSetFn('app_active_installer_hash', matchedHash).catch(() => {});
+            dbSetFn('app_pending_patch_ts', null).catch(() => {});
+            dbSetFn('app_pending_installer_hash', null).catch(() => {});
+          }
+          if (api?.saveAppPatchRecord) {
+            api.saveAppPatchRecord({ timestamp: result.patchTimestamp, sha256: matchedHash, version: APP_VERSION }).catch(() => {});
+          }
         }
       }
 

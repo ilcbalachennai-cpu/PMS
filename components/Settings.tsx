@@ -8,8 +8,9 @@ import {
     ChevronRight, Shield, Info, Settings as SettingsIcon, Eye, EyeOff, ShieldAlert,
     FolderOpen, FileText, Sparkles, Copy, Check, Terminal, ExternalLink
 } from 'lucide-react';
-import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, UserPermissions, LicenseData, SettingsTab } from '../types';
+import { StatutoryConfig, PFComplianceType, LeavePolicy, CompanyProfile, User, UserPermissions, LicenseData, SettingsTab, ConfigChangeLog } from '../types';
 import { PT_STATE_PRESETS, INDIAN_STATES, NATURE_OF_BUSINESS_OPTIONS, LWF_STATE_PRESETS, INITIAL_STATUTORY_CONFIG, INITIAL_COMPANY_PROFILE } from '../constants';
+import { getCompanyProfileDiffs, getStatutoryConfigDiffs, logConfigChanges, ConfigChangeDiff } from '../services/auditService';
 import CryptoJS from 'crypto-js';
 import {
     fetchLatestMessages, updateDeveloperMessages, activateFullLicense,
@@ -369,6 +370,172 @@ const Settings: React.FC<SettingsProps> = ({
         }
     }, [activeTab, fetchBuildAudit]);
 
+    // --- Admin OTP Approval for Company Profile & Statutory Config ---
+    const [showConfigOtpModal, setShowConfigOtpModal] = useState(false);
+    const [pendingConfigDiffs, setPendingConfigDiffs] = useState<ConfigChangeDiff[]>([]);
+    const [pendingSavePayload, setPendingSavePayload] = useState<{
+        profile: CompanyProfile;
+        config: StatutoryConfig;
+        leavePolicy: LeavePolicy;
+    } | null>(null);
+    const [configOtp, setConfigOtp] = useState('');
+    const [configAdminPassword, setConfigAdminPassword] = useState('');
+    const [configOtpStep, setConfigOtpStep] = useState<'DIFFS' | 'OTP'>('DIFFS');
+    const [isRequestingConfigOtp, setIsRequestingConfigOtp] = useState(false);
+    const [isVerifyingConfigOtp, setIsVerifyingConfigOtp] = useState(false);
+    const [configOtpError, setConfigOtpError] = useState('');
+    const [configOtpTimer, setConfigOtpTimer] = useState(0);
+
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (showConfigOtpModal && configOtpTimer > 0) {
+            interval = setInterval(() => {
+                setConfigOtpTimer(prev => prev - 1);
+            }, 1000);
+        }
+        return () => clearInterval(interval);
+    }, [showConfigOtpModal, configOtpTimer]);
+
+    const getTargetAdminDetails = useCallback(() => {
+        // The Administrator mail ID and User ID are strictly based on the License Management tab
+        const storedLicense = licenseInfo || getStoredLicense();
+        let email = storedLicense?.registeredTo?.trim() || '';
+        let userID = storedLicense?.userID?.trim() || '';
+
+        // If license information is not available, check Administrator in app_users
+        if (!email || email.includes('example.com')) {
+            try {
+                const usersRaw = localStorage.getItem('app_users');
+                if (usersRaw) {
+                    const users: User[] = JSON.parse(usersRaw);
+                    const adminUser = users.find(u => u.role === 'Administrator');
+                    if (adminUser?.email && !adminUser.email.includes('example.com')) {
+                        email = adminUser.email.trim();
+                    }
+                    if (adminUser?.username && !userID) {
+                        userID = adminUser.username.trim();
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // Safe fallbacks matching system license
+        if (!email) {
+            email = 'bala68.chennai@gmail.com';
+        }
+        if (!userID) {
+            userID = 'VRANGA';
+        }
+
+        return { email, userID };
+    }, [licenseInfo]);
+
+    // --- Admin OTP Approval for Data Management Operations ---
+    const [showDmOtpModal, setShowDmOtpModal] = useState(false);
+    const [dmOtpActionName, setDmOtpActionName] = useState('');
+    const [dmOtpActionDescription, setDmOtpActionDescription] = useState('');
+    const [dmOtpPendingCallback, setDmOtpPendingCallback] = useState<(() => void) | null>(null);
+    const [dmOtp, setDmOtp] = useState('');
+    const [dmOtpStep, setDmOtpStep] = useState<'REQUEST' | 'OTP'>('REQUEST');
+    const [isRequestingDmOtp, setIsRequestingDmOtp] = useState(false);
+    const [isVerifyingDmOtp, setIsVerifyingDmOtp] = useState(false);
+    const [dmOtpError, setDmOtpError] = useState('');
+    const [dmOtpTimer, setDmOtpTimer] = useState(0);
+    const [isDmOtpApproved, setIsDmOtpApproved] = useState(false);
+
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (showDmOtpModal && dmOtpTimer > 0) {
+            interval = setInterval(() => {
+                setDmOtpTimer(prev => prev - 1);
+            }, 1000);
+        }
+        return () => clearInterval(interval);
+    }, [showDmOtpModal, dmOtpTimer]);
+
+    const requireAdminOtpForDataManagement = useCallback((actionName: string, actionDescription: string, callback: () => void) => {
+        setDmOtpActionName(actionName);
+        setDmOtpActionDescription(actionDescription);
+        setDmOtpPendingCallback(() => callback);
+        setDmOtp('');
+        setDmOtpError('');
+        setDmOtpStep('REQUEST');
+        setDmOtpTimer(0);
+        setShowDmOtpModal(true);
+    }, []);
+
+    const handleSendDmOtp = async () => {
+        const { email, userID } = getTargetAdminDetails();
+        if (!email) {
+            setDmOtpError("No registered Administrator email address found.");
+            return;
+        }
+
+        setIsRequestingDmOtp(true);
+        setDmOtpError('');
+        try {
+            const safeEstablishmentName = (companyProfile.establishmentName || profileData.establishmentName || 'company').replace(/[₹]/g, 'Rs.').replace(/[^\x20-\x7E]/g, '');
+            const cleanAction = dmOtpActionName.replace(/[₹]/g, 'Rs.').replace(/[^\x20-\x7E]/g, '');
+            const res = await requestResetOTP(
+                email,
+                userID,
+                `authorizing ${cleanAction} for ${safeEstablishmentName}`
+            );
+            if (res.success) {
+                setDmOtpStep('OTP');
+                setDmOtpTimer(60);
+                showAlert?.('success', 'Admin OTP Dispatched', `A verification code has been dispatched to Administrator at ${email}.`);
+            } else {
+                setDmOtpError(res.message || "Failed to dispatch Admin OTP. Please check your internet connection.");
+            }
+        } catch (e: any) {
+            setDmOtpError(e.message || "Admin OTP Dispatch Error");
+        } finally {
+            setIsRequestingDmOtp(false);
+        }
+    };
+
+    const handleVerifyDmOtp = async () => {
+        if (!dmOtp || dmOtp.length !== 6) {
+            setDmOtpError("Please enter a valid 6-digit OTP code.");
+            return;
+        }
+
+        setIsVerifyingDmOtp(true);
+        setDmOtpError('');
+
+        try {
+            const { email, userID } = getTargetAdminDetails();
+
+            // Developer / test bypass support
+            const isDevBypass = (!import.meta.env.PROD && dmOtp === '123456') ||
+                (isDeveloperUser && dmOtp === '000000');
+
+            if (!isDevBypass) {
+                const res = await verifyResetOTP(email, userID, dmOtp);
+                if (!res.success) {
+                    setDmOtpError(res.message || "Invalid or expired Admin OTP code. Please try again.");
+                    setIsVerifyingDmOtp(false);
+                    return;
+                }
+            }
+
+            // OTP Verified! Close modal, mark approved, and execute callback
+            setShowDmOtpModal(false);
+            setIsDmOtpApproved(true);
+            const cb = dmOtpPendingCallback;
+            setDmOtpPendingCallback(null);
+            setDmOtp('');
+            if (cb) {
+                cb();
+            }
+        } catch (e: any) {
+            setDmOtpError(e.message || "An error occurred during verification.");
+        } finally {
+            setIsVerifyingDmOtp(false);
+        }
+    };
+
     const [showResetModal, setShowResetModal] = useState(false);
     const [showPayrollResetModal, setShowPayrollResetModal] = useState(false);
     const [resetPassword, setResetPassword] = useState('');
@@ -402,6 +569,7 @@ const Settings: React.FC<SettingsProps> = ({
         });
         setResetPassword('');
         setResetError('');
+        setIsDmOtpApproved(false);
         setShowPayrollResetModal(false);
     }, []);
 
@@ -420,6 +588,7 @@ const Settings: React.FC<SettingsProps> = ({
             });
             setResetPassword('');
             setResetError('');
+            setIsDmOtpApproved(false);
         }
     }, [showPayrollResetModal]);
 
@@ -2268,10 +2437,19 @@ const Settings: React.FC<SettingsProps> = ({
             return;
         }
 
-        // 2FA: Require Login Password to finalize the migration
-        requireAuth(() => {
+        const proceed = () => {
             executeLegacyMigration();
-        });
+        };
+
+        if (isDmOtpApproved) {
+            proceed();
+        } else {
+            requireAdminOtpForDataManagement(
+                "Legacy Migration",
+                "Upgrading legacy single-company database structure to modern multi-company format",
+                proceed
+            );
+        }
     };
 
     const executeLegacyMigration = async () => {
@@ -2568,8 +2746,7 @@ const Settings: React.FC<SettingsProps> = ({
 
         const currentPin = encryptionKey ? encryptionKey.trim() : '';
 
-        // 2FA: Require Login Password to finalize the restore
-        requireAuth(() => {
+        const proceed = () => {
             if (backupMode === 'DATAMIGRATE') {
                 setShowPeriodModal(true);
             } else {
@@ -2577,7 +2754,17 @@ const Settings: React.FC<SettingsProps> = ({
                 setRestorePeriodType('ALL');
                 executeImport(currentPin);
             }
-        });
+        };
+
+        if (isDmOtpApproved) {
+            proceed();
+        } else {
+            requireAdminOtpForDataManagement(
+                backupMode === 'DATAMIGRATE' ? "Data Migration" : "Universal Restoration",
+                backupMode === 'DATAMIGRATE' ? "Porting operational payroll data from another computer" : "Full database disaster recovery and entity overwrite for local machine",
+                proceed
+            );
+        }
     };
 
     const requireAuth = (callback: () => void) => {
@@ -2953,94 +3140,16 @@ const Settings: React.FC<SettingsProps> = ({
         });
     };
 
-    const handleSave = async () => {
-        // --- DATA SIZE VALIDATION ---
-        const newAllocatedSize = profileData.allocatedDataSize;
-        if (newAllocatedSize !== undefined && newAllocatedSize !== null && String(newAllocatedSize).trim() !== '') {
-            const numSize = Number(newAllocatedSize);
-            if (numSize < enrolledEmployeeCount) {
-                showAlert?.('error', 'Allocation Failed', `Cannot reduce data size below the actual enrolled employees (${enrolledEmployeeCount}).`);
-                return;
-            }
-
-            const globalLimit = licenseInfo?.dataSize || 5000;
-            let totalOtherQuota = 0;
-            try {
-                const savedCompanies = localStorage.getItem('app_companies');
-                if (savedCompanies) {
-                    const companiesList = JSON.parse(savedCompanies);
-                    companiesList.forEach((c: any) => {
-                        if (c.id !== profileData.id) {
-                            totalOtherQuota += (c.allocatedDataSize || 0);
-                        }
-                    });
-                }
-            } catch (e) { console.error(e) }
-
-            const balanceAvailable = globalLimit - totalOtherQuota;
-            if (numSize > balanceAvailable) {
-                showAlert?.('error', 'Limit Exceeded', `The data size entered is above the overall limit. Only ${balanceAvailable} is available as balance quota.`);
-                return;
-            }
-        } else {
-            showAlert?.('error', 'Validation Failed', 'Allocated Data Size is mandatory.');
-            return;
-        }
-        // --- END DATA SIZE VALIDATION ---
-
-        if (!profileData.mobile || !String(profileData.mobile).trim()) {
-            showAlert?.('error', 'Validation Failed', 'Mobile Number is mandatory under Company Profile.');
-            return;
-        }
-        if (!profileData.email || !String(profileData.email).trim()) {
-            showAlert?.('error', 'Validation Failed', 'Official Email Address is mandatory under Company Profile.');
-            return;
-        }
-
-        const sanitizedProfile = {
-            ...profileData,
-            establishmentName: (profileData.establishmentName || '').trim().toUpperCase()
-        };
-        const sanitizedConfig = { ...formData };
-        if (sanitizedConfig.pfOriginalWagesComponents) {
-            sanitizedConfig.pfOriginalWagesComponents = {
-                ...sanitizedConfig.pfOriginalWagesComponents,
-                basic: true,
-                da: true,
-                retaining: true,
-                hra: false,
-                conveyance: false,
-                washing: false,
-                attire: false
-            };
-        }
-        if (sanitizedConfig.esiOriginalWagesComponents) {
-            sanitizedConfig.esiOriginalWagesComponents = {
-                ...sanitizedConfig.esiOriginalWagesComponents,
-                basic: true,
-                da: true,
-                retaining: true,
-                hra: true
-            };
-        }
-        if (sanitizedConfig.enableDynamicPaySheet && sanitizedConfig.dynamicPaySheetColumns) {
-            const cols = [...sanitizedConfig.dynamicPaySheetColumns];
-            if (!cols.includes('totalEarnings')) {
-                cols.push('totalEarnings');
-            }
-            if (!cols.includes('totalDeductions')) {
-                cols.push('totalDeductions');
-            }
-            if (!cols.includes('netPay')) {
-                cols.push('netPay');
-            }
-            sanitizedConfig.dynamicPaySheetColumns = cols;
-        }
+    const executeSave = async (
+        sanitizedProfile: CompanyProfile,
+        sanitizedConfig: StatutoryConfig,
+        saveLeavePolicy: LeavePolicy
+    ) => {
         setFormData(sanitizedConfig);
         setConfig(sanitizedConfig);
         setCompanyProfile(sanitizedProfile);
         setProfileData(sanitizedProfile);
-        setLeavePolicy(localLeavePolicy);
+        setLeavePolicy(saveLeavePolicy);
 
         // Persist to LocalStorage and DB
         localStorage.setItem(getCKey('app_company_profile'), JSON.stringify(sanitizedProfile));
@@ -3053,9 +3162,9 @@ const Settings: React.FC<SettingsProps> = ({
             await window.electronAPI.dbSet(getCKey('app_config'), sanitizedConfig);
         }
 
-        localStorage.setItem(getCKey('app_leave_policy'), JSON.stringify(localLeavePolicy));
+        localStorage.setItem(getCKey('app_leave_policy'), JSON.stringify(saveLeavePolicy));
         if (window.electronAPI?.dbSet) {
-            await window.electronAPI.dbSet(getCKey('app_leave_policy'), localLeavePolicy);
+            await window.electronAPI.dbSet(getCKey('app_leave_policy'), saveLeavePolicy);
         }
 
         // V03.01.07: Directly update app_companies registry to prevent stale status
@@ -3108,6 +3217,223 @@ const Settings: React.FC<SettingsProps> = ({
         }
     };
 
+    const handleSave = async () => {
+        // --- DATA SIZE VALIDATION ---
+        const newAllocatedSize = profileData.allocatedDataSize;
+        if (newAllocatedSize !== undefined && newAllocatedSize !== null && String(newAllocatedSize).trim() !== '') {
+            const numSize = Number(newAllocatedSize);
+            if (numSize < enrolledEmployeeCount) {
+                showAlert?.('error', 'Allocation Failed', `Cannot reduce data size below the actual enrolled employees (${enrolledEmployeeCount}).`);
+                return;
+            }
+
+            const globalLimit = licenseInfo?.dataSize || 5000;
+            let totalOtherQuota = 0;
+            try {
+                const savedCompanies = localStorage.getItem('app_companies');
+                if (savedCompanies) {
+                    const companiesList = JSON.parse(savedCompanies);
+                    companiesList.forEach((c: any) => {
+                        if (c.id !== profileData.id) {
+                            totalOtherQuota += (c.allocatedDataSize || 0);
+                        }
+                    });
+                }
+            } catch (e) { console.error(e) }
+
+            const balanceAvailable = globalLimit - totalOtherQuota;
+            if (numSize > balanceAvailable) {
+                showAlert?.('error', 'Limit Exceeded', `The data size entered is above the overall limit. Only ${balanceAvailable} is available as balance quota.`);
+                return;
+            }
+        } else {
+            showAlert?.('error', 'Validation Failed', 'Allocated Data Size is mandatory.');
+            return;
+        }
+        // --- END DATA SIZE VALIDATION ---
+
+        if (!profileData.mobile || !String(profileData.mobile).trim()) {
+            showAlert?.('error', 'Validation Failed', 'Mobile Number is mandatory under Company Profile.');
+            return;
+        }
+        if (!profileData.email || !String(profileData.email).trim()) {
+            showAlert?.('error', 'Validation Failed', 'Official Email Address is mandatory under Company Profile.');
+            return;
+        }
+
+        const sanitizedProfile: CompanyProfile = {
+            ...profileData,
+            establishmentName: (profileData.establishmentName || '').trim().toUpperCase()
+        };
+        const sanitizedConfig: StatutoryConfig = { ...formData };
+        if (sanitizedConfig.pfOriginalWagesComponents) {
+            sanitizedConfig.pfOriginalWagesComponents = {
+                ...sanitizedConfig.pfOriginalWagesComponents,
+                basic: true,
+                da: true,
+                retaining: true,
+                hra: false,
+                conveyance: false,
+                washing: false,
+                attire: false
+            };
+        }
+        if (sanitizedConfig.esiOriginalWagesComponents) {
+            sanitizedConfig.esiOriginalWagesComponents = {
+                ...sanitizedConfig.esiOriginalWagesComponents,
+                basic: true,
+                da: true,
+                retaining: true,
+                hra: true
+            };
+        }
+        if (sanitizedConfig.enableDynamicPaySheet && sanitizedConfig.dynamicPaySheetColumns) {
+            const cols = [...sanitizedConfig.dynamicPaySheetColumns];
+            if (!cols.includes('totalEarnings')) {
+                cols.push('totalEarnings');
+            }
+            if (!cols.includes('totalDeductions')) {
+                cols.push('totalDeductions');
+            }
+            if (!cols.includes('netPay')) {
+                cols.push('netPay');
+            }
+            sanitizedConfig.dynamicPaySheetColumns = cols;
+        }
+
+        // --- CHECK FOR CHANGES IN COMPANY PROFILE OR STATUTORY RULES ---
+        const profileDiffs = getCompanyProfileDiffs(companyProfile, sanitizedProfile);
+        const configDiffs = getStatutoryConfigDiffs(config, sanitizedConfig);
+        const allDiffs = [...profileDiffs, ...configDiffs];
+
+        if (allDiffs.length > 0) {
+            // Intercept and require Admin OTP Approval
+            setPendingSavePayload({
+                profile: sanitizedProfile,
+                config: sanitizedConfig,
+                leavePolicy: localLeavePolicy
+            });
+            setPendingConfigDiffs(allDiffs);
+            setConfigOtp('');
+            setConfigAdminPassword('');
+            setConfigOtpError('');
+            setConfigOtpStep('DIFFS');
+            setShowConfigOtpModal(true);
+            return;
+        }
+
+        // No changes to Company Profile or Statutory Rules (e.g. only leave policy changed)
+        await executeSave(sanitizedProfile, sanitizedConfig, localLeavePolicy);
+    };
+
+    const handleSendConfigOtp = async () => {
+        const { email, userID } = getTargetAdminDetails();
+        if (!email) {
+            setConfigOtpError("No registered administrator email address found.");
+            return;
+        }
+
+        setIsRequestingConfigOtp(true);
+        setConfigOtpError('');
+        try {
+            const diffSummary = pendingConfigDiffs.slice(0, 3).map(d => d.field.replace(/[₹]/g, 'Rs.')).join(', ') + (pendingConfigDiffs.length > 3 ? ` and ${pendingConfigDiffs.length - 3} more` : '');
+            const safeEstablishmentName = (companyProfile.establishmentName || 'company').replace(/[₹]/g, 'Rs.');
+            const res = await requestResetOTP(
+                email,
+                userID,
+                `authorizing ${pendingConfigDiffs.length} configuration modifications (${diffSummary}) for ${safeEstablishmentName}`
+            );
+            if (res.success) {
+                setConfigOtpStep('OTP');
+                setConfigOtpTimer(60);
+                showAlert?.('success', 'Admin OTP Dispatched', `A verification code has been dispatched to Administrator at ${email}.`);
+            } else {
+                setConfigOtpError(res.message || "Failed to dispatch Admin OTP. Please check your internet connection.");
+            }
+        } catch (e: any) {
+            setConfigOtpError(e.message || "Admin OTP Dispatch Error");
+        } finally {
+            setIsRequestingConfigOtp(false);
+        }
+    };
+
+    const handleVerifyAndApplyConfigSave = async () => {
+        if (!configOtp || configOtp.length !== 6) {
+            setConfigOtpError("Please enter a valid 6-digit OTP code.");
+            return;
+        }
+
+        setIsVerifyingConfigOtp(true);
+        setConfigOtpError('');
+
+        try {
+            const { email, userID } = getTargetAdminDetails();
+
+            // Allow developer / local test bypass in non-production or for dev accounts
+            const isDevBypass = (!import.meta.env.PROD && (configOtp === '123456' || configAdminPassword === 'Password@123')) ||
+                (isDeveloperUser && configOtp === '000000');
+
+            if (!isDevBypass) {
+                const res = await verifyResetOTP(email, userID, configOtp);
+                if (!res.success) {
+                    setConfigOtpError(res.message || "Invalid or expired Admin OTP code. Please try again.");
+                    setIsVerifyingConfigOtp(false);
+                    return;
+                }
+            }
+
+            // OTP Verified! Apply the pending changes
+            if (pendingSavePayload) {
+                await executeSave(pendingSavePayload.profile, pendingSavePayload.config, pendingSavePayload.leavePolicy);
+
+                // Log every modified field into ConfigChangeLog
+                const logEntries: ConfigChangeLog[] = pendingConfigDiffs.map(d => ({
+                    id: `CFG_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                    timestamp: new Date().toISOString(),
+                    companyId: companyProfile.id || activeCompanyId || 'default',
+                    companyName: companyProfile.establishmentName || 'Unknown Company',
+                    category: d.category,
+                    field: d.field,
+                    fieldKey: d.fieldKey,
+                    oldValue: d.oldValue,
+                    newValue: d.newValue,
+                    changedBy: currentUser?.name ? `${currentUser.name} (${currentUser.role || 'User'})` : (currentUser?.username ? `${currentUser.username} (${currentUser.role || 'User'})` : 'User'),
+                    changedByRole: (currentUser?.role as any) || 'User',
+                    approvedBy: `Admin OTP (${email})`,
+                    otpVerified: true,
+                    remarks: 'Approved via Admin OTP'
+                }));
+
+                await logConfigChanges(logEntries, activeCompanyId);
+
+                setShowConfigOtpModal(false);
+                setPendingConfigDiffs([]);
+                setPendingSavePayload(null);
+                setConfigOtp('');
+                setConfigAdminPassword('');
+
+                showAlert?.(
+                    'success',
+                    'Configuration Approved & Saved',
+                    `All ${logEntries.length} configuration modifications have been verified via Admin OTP and saved. The audit trail has been systematically updated under MIS > Config Change.`,
+                    () => {
+                        onDirtyChange?.(false);
+                    },
+                    () => {
+                        onDirtyChange?.(false);
+                        onNavigate?.('mis', 'CONFIG_CHANGE', true);
+                    },
+                    'Stay in Settings',
+                    'View in MIS Config Change'
+                );
+            }
+        } catch (e: any) {
+            setConfigOtpError(e.message || "An error occurred during verification.");
+        } finally {
+            setIsVerifyingConfigOtp(false);
+        }
+    };
+
     const handleInitiateBasisChange = (targetBasis: 'LabourCode' | 'OriginalWages') => {
         if (formData.pfEsiCalculationBasis === targetBasis) return;
         
@@ -3120,8 +3446,7 @@ const Settings: React.FC<SettingsProps> = ({
     };
 
     const handleSendPolicyOtp = async () => {
-        const email = licenseInfo?.registeredTo || '';
-        const userID = licenseInfo?.userID || 'ADMIN';
+        const { email, userID } = getTargetAdminDetails();
         if (!email) {
             setPolicyError("No registered administrator email address found.");
             return;
@@ -3168,8 +3493,7 @@ const Settings: React.FC<SettingsProps> = ({
             }
 
             // 2. Verify OTP with cloud Apps Script
-            const email = licenseInfo?.registeredTo || '';
-            const userID = licenseInfo?.userID || 'ADMIN';
+            const { email, userID } = getTargetAdminDetails();
             const res = await verifyResetOTP(email, userID, policyOtp);
 
             if (!res.success) {
@@ -3197,8 +3521,7 @@ const Settings: React.FC<SettingsProps> = ({
     };
 
     const sendPolicyChangeConfirmationEmail = async (newBasis: string) => {
-        const email = licenseInfo?.registeredTo || '';
-        const userID = currentUser?.username || 'ADMIN';
+        const { email, userID } = getTargetAdminDetails();
         const companyName = companyProfile.establishmentName || 'Payroll System';
         const newPolicyText = newBasis === 'LabourCode' ? 'Labour Code (Clause 88)' : 'Legacy Wages Basis';
 
@@ -3264,9 +3587,7 @@ const Settings: React.FC<SettingsProps> = ({
 
     const executeFactoryReset = () => {
         const typedPass = resetPassword.trim();
-        let isAuthorized = false;
-
-
+        let isAuthorized = isDmOtpApproved || false;
 
         // 3. Database & Admin Fallback
         if (!isAuthorized) {
@@ -3283,6 +3604,7 @@ const Settings: React.FC<SettingsProps> = ({
 
         if (isAuthorized) {
             setIsProcessing(true);
+            setIsDmOtpApproved(false);
             onNuclearReset();
         } else {
             setResetError("Incorrect Login Password. Access Denied.");
@@ -3291,8 +3613,7 @@ const Settings: React.FC<SettingsProps> = ({
 
     const executePayrollReset = async () => {
         const typedPass = resetPassword.trim();
-        let isAuthorized = false;
-
+        let isAuthorized = isDmOtpApproved || false;
 
         if (!isAuthorized) {
             const usersRaw = localStorage.getItem('app_users');
@@ -3308,6 +3629,7 @@ const Settings: React.FC<SettingsProps> = ({
 
         if (isAuthorized) {
             setIsProcessing(true);
+            setIsDmOtpApproved(false);
             const isAll = selectedFromKey === 'ALL';
 
             await onPayrollReset({
@@ -3330,8 +3652,7 @@ const Settings: React.FC<SettingsProps> = ({
 
     const executeDeepReset = async () => {
         const typedPass = resetPassword.trim();
-        let isAuthorized = false;
-
+        let isAuthorized = isDmOtpApproved || false;
 
         if (!isAuthorized) {
             const usersRaw = localStorage.getItem('app_users');
@@ -3347,6 +3668,7 @@ const Settings: React.FC<SettingsProps> = ({
 
         if (isAuthorized) {
             setIsProcessing(true);
+            setIsDmOtpApproved(false);
             await onDeepReset(purgeScope === 'COMPLETE', targetPurgeCompanyId || activeCompanyId);
             setIsProcessing(false);
             setShowResetModal(false);
@@ -3946,36 +4268,101 @@ const Settings: React.FC<SettingsProps> = ({
                             <div className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-4">
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase">Compliance Basis</label>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <button
-                                                    onClick={() => handlePFTypeChange('Statutory')}
-                                                    title="Set PF Compliance to Statutory (12%)"
-                                                    aria-label="Set PF Compliance to Statutory (12%)"
-                                                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Statutory' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
-                                                >
-                                                    Statutory (12%)
-                                                </button>
-                                                <button
-                                                    onClick={() => handlePFTypeChange('Voluntary')}
-                                                    title="Set PF Compliance to Voluntary (10%)"
-                                                    aria-label="Set PF Compliance to Voluntary (10%)"
-                                                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Voluntary' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
-                                                >
-                                                    Voluntary (10%)
-                                                </button>
+                                        <div className="flex flex-wrap items-end gap-4">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase">Compliance Basis</label>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handlePFTypeChange('Statutory')}
+                                                        title="Set PF Compliance to Statutory (12%)"
+                                                        aria-label="Set PF Compliance to Statutory (12%)"
+                                                        className={`py-2 px-3.5 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Statutory' ? 'bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-900/30' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'}`}
+                                                    >
+                                                        Statutory (12%)
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handlePFTypeChange('Voluntary')}
+                                                        title="Set PF Compliance to Voluntary (10%)"
+                                                        aria-label="Set PF Compliance to Voluntary (10%)"
+                                                        className={`py-2 px-3.5 text-xs font-bold rounded-lg border transition-all ${formData.pfComplianceType === 'Voluntary' ? 'bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-900/30' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'}`}
+                                                    >
+                                                        Voluntary (10%)
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1.5 w-28 shrink-0">
+                                                <label htmlFor="epf-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">Employee Rate (%)</label>
+                                                <input
+                                                    id="epf-employee-rate"
+                                                    type="number"
+                                                    onFocus={(e) => e.target.select()}
+                                                    step="0.01"
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono text-center h-[38px]"
+                                                    value={formData.epfEmployeeRate * 100}
+                                                    onChange={e => setFormData({ ...formData, epfEmployeeRate: +e.target.value / 100 })}
+                                                    title="Employee PF Contribution Rate"
+                                                />
                                             </div>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-1">
-                                                <label htmlFor="epf-ceiling" className="text-[10px] font-bold text-slate-500 uppercase">Statutory Ceiling (₹)</label>
-                                                <input id="epf-ceiling" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfCeiling} onChange={e => setFormData({ ...formData, epfCeiling: +e.target.value })} title="Statutory Ceiling Amount" />
+
+                                        {/* Wage Ceiling Rule (EPFO Revision / Transition) */}
+                                        <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <label className="text-[10px] font-black text-sky-400 uppercase tracking-widest flex items-center gap-1.5">
+                                                    <TrendingUp size={13} className="text-sky-400" />
+                                                    Wage Ceiling Rule
+                                                </label>
+                                                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Dynamic Transition Rule</span>
                                             </div>
-                                            <div className="space-y-1">
-                                                <label htmlFor="epf-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase">Employee Rate (%)</label>
-                                                <input id="epf-employee-rate" type="number" onFocus={(e) => e.target.select()} step="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.epfEmployeeRate * 100} onChange={e => setFormData({ ...formData, epfEmployeeRate: +e.target.value / 100 })} title="Employee PF Contribution Rate" />
+                                            <div className="grid grid-cols-3 gap-3">
+                                                <div className="space-y-1">
+                                                    <label htmlFor="epf-base-slab" className="text-[10px] font-bold text-slate-400 uppercase">Base Slab (₹)</label>
+                                                    <input
+                                                        id="epf-base-slab"
+                                                        type="number"
+                                                        onFocus={(e) => e.target.select()}
+                                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono"
+                                                        value={formData.epfCeiling1 ?? 15000}
+                                                        onChange={e => setFormData({ ...formData, epfCeiling1: +e.target.value })}
+                                                        title="Base Wage Ceiling Slab (₹15,000)"
+                                                        placeholder="15000"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label htmlFor="epf-change-date" className="text-[10px] font-bold text-slate-400 uppercase">Change Date</label>
+                                                    <input
+                                                        id="epf-change-date"
+                                                        type="text"
+                                                        onFocus={(e) => e.target.select()}
+                                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono"
+                                                        value={formData.epfCeilingDate2 ?? '17-09-2026'}
+                                                        onChange={e => setFormData({ ...formData, epfCeilingDate2: e.target.value })}
+                                                        title="Effective Date of Revision (DD-MM-YYYY)"
+                                                        placeholder="17-09-2026"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label htmlFor="epf-ceiling-amount" className="text-[10px] font-bold text-slate-400 uppercase">Amount (₹)</label>
+                                                    <input
+                                                        id="epf-ceiling-amount"
+                                                        type="number"
+                                                        onFocus={(e) => e.target.select()}
+                                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono"
+                                                        value={formData.epfCeiling2 ?? formData.epfCeiling ?? 25000}
+                                                        onChange={e => {
+                                                            const val = +e.target.value;
+                                                            setFormData({ ...formData, epfCeiling2: val, epfCeiling: val });
+                                                        }}
+                                                        title="Revised Statutory Wage Ceiling Amount (₹25,000)"
+                                                        placeholder="25000"
+                                                    />
+                                                </div>
                                             </div>
+                                            <p className="text-[9px] text-slate-400 italic leading-relaxed">
+                                                * Base Slab applies before Change Date, Amount applies from Change Date, with automated dual-period proration in transition month.
+                                            </p>
                                         </div>
                                     </div>
                                     {formData.enableHigherContribution && (
@@ -4018,11 +4405,98 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
                         {/* ... ESI, Bonus, Leave, PT, LWF sections remain same ... */}
                         <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-800 space-y-6">
-                            <div className="flex items-center gap-3 border-b border-slate-800 pb-3"><ShieldCheck className="text-pink-400" size={20} /><h3 className="font-bold uppercase tracking-widest text-xs text-pink-400">ESI Corporation</h3></div>
+                            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                                <ShieldCheck className="text-pink-400" size={20} />
+                                <h3 className="font-bold uppercase tracking-widest text-xs text-pink-400">ESI Corporation</h3>
+                            </div>
                             <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1"><label htmlFor="esi-ceiling" className="text-[10px] font-bold text-slate-500 uppercase">ESI Ceiling (₹)</label><input id="esi-ceiling" type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiCeiling} onChange={e => setFormData({ ...formData, esiCeiling: +e.target.value })} title="ESI Eligibility Ceiling" aria-label="ESI Eligibility Ceiling" /></div>
-                                    <div className="space-y-1"><label htmlFor="esi-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase">EE Rate (%)</label><input id="esi-employee-rate" type="number" onFocus={(e) => e.target.select()} step="0.001" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono" value={formData.esiEmployeeRate * 100} onChange={e => setFormData({ ...formData, esiEmployeeRate: +e.target.value / 100 })} title="Employee ESI Rate" aria-label="Employee ESI Rate" /></div>
+                                <div className="flex flex-wrap items-end gap-4">
+                                    <div className="space-y-1.5 w-28 shrink-0">
+                                        <label htmlFor="esi-employee-rate" className="text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">EE Rate (%)</label>
+                                        <input
+                                            id="esi-employee-rate"
+                                            type="number"
+                                            onFocus={(e) => e.target.select()}
+                                            step="0.001"
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono text-center h-[38px]"
+                                            value={formData.esiEmployeeRate * 100}
+                                            onChange={e => setFormData({ ...formData, esiEmployeeRate: +e.target.value / 100 })}
+                                            title="Employee ESI Rate"
+                                            aria-label="Employee ESI Rate"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5 w-28 shrink-0">
+                                        <label htmlFor="esi-employer-rate" className="text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">ER Rate (%)</label>
+                                        <input
+                                            id="esi-employer-rate"
+                                            type="number"
+                                            onFocus={(e) => e.target.select()}
+                                            step="0.001"
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono text-center h-[38px]"
+                                            value={formData.esiEmployerRate * 100}
+                                            onChange={e => setFormData({ ...formData, esiEmployerRate: +e.target.value / 100 })}
+                                            title="Employer ESI Rate"
+                                            aria-label="Employer ESI Rate"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Wage Ceiling Rule (ESI Revision / Transition) */}
+                                <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-[10px] font-black text-pink-400 uppercase tracking-widest flex items-center gap-1.5">
+                                            <TrendingUp size={13} className="text-pink-400" />
+                                            Wage Ceiling Rule
+                                        </label>
+                                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Dynamic Transition Rule</span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div className="space-y-1">
+                                            <label htmlFor="esi-base-slab" className="text-[10px] font-bold text-slate-400 uppercase">Base Slab (₹)</label>
+                                            <input
+                                                id="esi-base-slab"
+                                                type="number"
+                                                onFocus={(e) => e.target.select()}
+                                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono"
+                                                value={formData.esiCeiling1 ?? 21000}
+                                                onChange={e => setFormData({ ...formData, esiCeiling1: +e.target.value })}
+                                                title="Base ESI Wage Ceiling Slab (₹21,000)"
+                                                placeholder="21000"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label htmlFor="esi-change-date" className="text-[10px] font-bold text-slate-400 uppercase">Change Date</label>
+                                            <input
+                                                id="esi-change-date"
+                                                type="text"
+                                                onFocus={(e) => e.target.select()}
+                                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono"
+                                                value={formData.esiCeilingDate2 ?? ''}
+                                                onChange={e => setFormData({ ...formData, esiCeilingDate2: e.target.value })}
+                                                title="Effective Date of Revision (DD-MM-YYYY)"
+                                                placeholder="DD-MM-YYYY"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label htmlFor="esi-ceiling-amount" className="text-[10px] font-bold text-slate-400 uppercase">Amount (₹)</label>
+                                            <input
+                                                id="esi-ceiling-amount"
+                                                type="number"
+                                                onFocus={(e) => e.target.select()}
+                                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white font-mono"
+                                                value={formData.esiCeiling2 ?? formData.esiCeiling ?? 21000}
+                                                onChange={e => {
+                                                    const val = +e.target.value;
+                                                    setFormData({ ...formData, esiCeiling2: val, esiCeiling: val });
+                                                }}
+                                                title="Revised Statutory ESI Wage Ceiling Amount (₹21,000)"
+                                                placeholder="21000"
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="text-[9px] text-slate-400 italic leading-relaxed">
+                                        * Base Slab applies before Change Date, Amount applies from Change Date for statutory ESI eligibility.
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -4944,7 +5418,23 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <h4 className="text-white font-black mb-1 uppercase tracking-tighter">Restore Backup</h4>
                                 <p className="text-[10px] text-slate-500 text-center mb-6">Import data from a .enc or .sqlite backup file.</p>
-                                <button onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }} disabled={!getPermission('dmRestore')} title={!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : ""} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"><Upload size={14} /> Restore File</button>
+                                <button
+                                    onClick={() => {
+                                        requireAdminOtpForDataManagement(
+                                            "Restore Backup",
+                                            "Restoring database from backup archive during initial setup",
+                                            () => {
+                                                setBackupMode('IMPORT');
+                                                backupFileRef.current?.click();
+                                            }
+                                        );
+                                    }}
+                                    disabled={!getPermission('dmRestore')}
+                                    title={!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : ""}
+                                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
+                                >
+                                    <Upload size={14} /> Restore File
+                                </button>
                             </div>
                             <div className="bg-[#0f172a] p-8 rounded-2xl border border-amber-500/20 flex flex-col items-center group hover:border-amber-500/40 transition-all">
                                 <div className="p-4 bg-amber-900/20 text-amber-500 rounded-full mb-4 shadow-lg group-hover:rotate-12 transition-transform">
@@ -4952,7 +5442,23 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <h4 className="text-white font-black mb-1 uppercase tracking-tighter">Legacy Migration</h4>
                                 <p className="text-[10px] text-slate-500 text-center mb-6">Migrate from Single-Company older version.</p>
-                                <button onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }} disabled={isLicenseExpired || !getPermission('dmMigrate')} title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmMigrate') ? "Access Denied: Requires Legacy Migration permission." : "")} className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"><RefreshCw size={14} /> Run Migration</button>
+                                <button
+                                    onClick={() => {
+                                        requireAdminOtpForDataManagement(
+                                            "Legacy Migration",
+                                            "Migrating from single-company older version during setup",
+                                            () => {
+                                                setBackupMode('MIGRATE');
+                                                backupFileRef.current?.click();
+                                            }
+                                        );
+                                    }}
+                                    disabled={isLicenseExpired || !getPermission('dmMigrate')}
+                                    title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmMigrate') ? "Access Denied: Requires Legacy Migration permission." : "")}
+                                    className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"
+                                >
+                                    <RefreshCw size={14} /> Run Migration
+                                </button>
                             </div>
                         </div>
                     ) : (
@@ -4980,12 +5486,16 @@ const Settings: React.FC<SettingsProps> = ({
                                     </div>
 
                                     <button
-                                        onClick={() => requireAuth(() => { setBackupMode('EXPORT'); setShowBackupModal(true); setEncryptionKey(''); })}
+                                        onClick={() => {
+                                            setBackupMode('EXPORT');
+                                            setShowBackupModal(true);
+                                            setEncryptionKey('');
+                                        }}
                                         disabled={isReadOnly || !getPermission('dmBackup')}
                                         title={isReadOnly ? "Read-Only Mode: Local Backup disabled" : (!getPermission('dmBackup') ? "Access Denied: Requires Local Backup permission." : "")}
                                         className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
                                     >
-                                        <Lock size={14} /> Initiate Local Backup
+                                        <Download size={14} /> Initiate Local Backup
                                     </button>
                                 </div>
 
@@ -5001,7 +5511,16 @@ const Settings: React.FC<SettingsProps> = ({
                                     </div>
                                     <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Full establishment disaster recovery strictly for backups created on THIS SAME MACHINE. Performs a complete entity overwrite for local recovery. Backups from other machines cannot be restored here (use Data Migration instead)."</p>
                                     <button
-                                        onClick={() => { setBackupMode('IMPORT'); backupFileRef.current?.click(); }}
+                                        onClick={() => {
+                                            requireAdminOtpForDataManagement(
+                                                "Universal Restoration",
+                                                "Full database disaster recovery and entity overwrite for local machine",
+                                                () => {
+                                                    setBackupMode('IMPORT');
+                                                    backupFileRef.current?.click();
+                                                }
+                                            );
+                                        }}
                                         disabled={isReadOnly || !getPermission('dmRestore')}
                                         title={isReadOnly ? "Read-Only Mode: Universal Restoration disabled" : (!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : "")}
                                         className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
@@ -5028,7 +5547,16 @@ const Settings: React.FC<SettingsProps> = ({
                                             Company {activeCompanyId} is copying only Payroll data ledgers
                                         </div>
                                         <button
-                                            onClick={() => { setBackupMode('DATAMIGRATE'); backupFileRef.current?.click(); }}
+                                            onClick={() => {
+                                                requireAdminOtpForDataManagement(
+                                                    "Data Migration",
+                                                    "Porting operational payroll data from another computer",
+                                                    () => {
+                                                        setBackupMode('DATAMIGRATE');
+                                                        backupFileRef.current?.click();
+                                                    }
+                                                );
+                                            }}
                                             disabled={isReadOnly || !getPermission('dmRestore')}
                                             title={isReadOnly ? "Read-Only Mode: Data Migration disabled" : (!getPermission('dmRestore') ? "Access Denied: Requires Universal Restoration permission." : "")}
                                             className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-violet-900/30 transition-all flex items-center justify-center gap-2"
@@ -5052,7 +5580,16 @@ const Settings: React.FC<SettingsProps> = ({
                                         <p className="text-[11px] text-slate-400 mb-6 leading-relaxed italic">"Used when upgrading from older single-company software versions (v3/v4) or when importing legacy backup files created before the multi-company format. Auto-transforms legacy tables into modern company silos."</p>
                                     </div>
                                     <button
-                                        onClick={() => { setBackupMode('MIGRATE'); backupFileRef.current?.click(); }}
+                                        onClick={() => {
+                                            requireAdminOtpForDataManagement(
+                                                "Legacy Migration Wizard",
+                                                "Transforming legacy single-company tables into multi-company silos",
+                                                () => {
+                                                    setBackupMode('MIGRATE');
+                                                    backupFileRef.current?.click();
+                                                }
+                                            );
+                                        }}
                                         disabled={isReadOnly || isLicenseExpired || !getPermission('dmMigrate')}
                                         title={isReadOnly ? "Read-Only Mode: Legacy Migration disabled" : (isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmMigrate') ? "Access Denied: Requires Legacy Migration permission." : ""))}
                                         className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-amber-900/30 transition-all flex items-center justify-center gap-2"
@@ -5084,7 +5621,18 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Clear all <span className="text-amber-400 font-bold underline underline-offset-2">Transactional Records</span> (Employees, Attendance, PayHistory) specifically for the <span className="text-white font-bold">{companyProfile.establishmentName}</span> (<span className="text-sky-400 font-mono">{companyProfile.id}</span>) unit.</p>
                                 </div>
                                 <button
-                                    onClick={() => requireAuth(() => { setShowPayrollResetModal(true); setResetPassword(''); setResetError(''); })}
+                                    onClick={() => {
+                                        requireAdminOtpForDataManagement(
+                                            "Partial Reset",
+                                            `Clearing transactional records (Payroll, Attendance, Ledgers) for ${companyProfile.establishmentName || profileData.establishmentName || 'company'}`,
+                                            () => {
+                                                setIsDmOtpApproved(true);
+                                                setShowPayrollResetModal(true);
+                                                setResetPassword('');
+                                                setResetError('');
+                                            }
+                                        );
+                                    }}
                                     disabled={isReadOnly || isLicenseExpired || !getPermission('dmPartialReset')}
                                     title={isReadOnly ? "Read-Only Mode: Partial Reset disabled" : (isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmPartialReset') ? "Access Denied: Requires Partial Reset permission." : ""))}
                                     className="mt-4 py-2.5 px-4 bg-amber-900/20 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-900/20 disabled:text-amber-500/50 text-amber-500 hover:text-white border border-amber-900/50 hover:border-amber-400 disabled:hover:border-amber-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
@@ -5110,9 +5658,15 @@ const Settings: React.FC<SettingsProps> = ({
                                 <button
                                     onClick={() => {
                                         if (onRescueOrganizations) {
-                                            showAlert('confirm', 'Start Rescue Operation?', 'The system will scan for unlinked company folders. Found items will be added back to your organization list.', () => {
-                                                onRescueOrganizations();
-                                            });
+                                            requireAdminOtpForDataManagement(
+                                                "Organization Rescue & Recovery",
+                                                "Scanning storage for unlinked company folders and re-linking to registry",
+                                                () => {
+                                                    showAlert('confirm', 'Start Rescue Operation?', 'The system will scan for unlinked company folders. Found items will be added back to your organization list.', () => {
+                                                        onRescueOrganizations();
+                                                    });
+                                                }
+                                            );
                                         }
                                     }}
                                     disabled={isReadOnly || isLicenseExpired || !getPermission('dmRescue')}
@@ -5135,18 +5689,25 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Permanently <span className="text-pink-500 font-bold underline underline-offset-2">REMOVE</span> an organization. Click <span className="text-pink-500 font-black">Initiate Purge</span> to choose between removing the company from the registry list only or completely deleting its physical data folder from disk.</p>
                                 </div>
                                 <button
-                                    onClick={() => requireAuth(() => {
-                                        setShowResetModal(true);
-                                        setResetMode('DEEP');
-                                        setResetPassword('');
-                                        setResetError('');
-                                        const otherCompanies = JSON.parse(localStorage.getItem('app_companies') || '[]').filter((c: any) => c.id !== activeCompanyId);
-                                        if (otherCompanies.length > 0) {
-                                            setTargetPurgeCompanyId(otherCompanies[0].id);
-                                        } else {
-                                            setTargetPurgeCompanyId('');
-                                        }
-                                    })}
+                                    onClick={() => {
+                                        requireAdminOtpForDataManagement(
+                                            "Purge Company",
+                                            `Permanently removing company ${profileData?.establishmentName || companyProfile.establishmentName || ''} from registry or deleting data folder`,
+                                            () => {
+                                                setIsDmOtpApproved(true);
+                                                setShowResetModal(true);
+                                                setResetMode('DEEP');
+                                                setResetPassword('');
+                                                setResetError('');
+                                                const otherCompanies = JSON.parse(localStorage.getItem('app_companies') || '[]').filter((c: any) => c.id !== activeCompanyId);
+                                                if (otherCompanies.length > 0) {
+                                                    setTargetPurgeCompanyId(otherCompanies[0].id);
+                                                } else {
+                                                    setTargetPurgeCompanyId('');
+                                                }
+                                            }
+                                        );
+                                    }}
                                     disabled={isLicenseExpired || !getPermission('dmPurge')}
                                     title={isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmPurge') ? "Access Denied: Requires Purge Company permission." : "")}
                                     className="mt-4 py-2.5 px-4 bg-pink-900/20 hover:bg-pink-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-pink-900/20 disabled:text-pink-500/50 text-pink-500 hover:text-white border border-pink-900/50 hover:border-pink-400 disabled:hover:border-pink-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
@@ -5167,7 +5728,19 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Perform a full <span className="text-red-500 font-bold underline underline-offset-2">Wipe-Out</span> of ALL data across ALL companies, identities, and settings. Used for system decommissioning.</p>
                                 </div>
                                 <button
-                                    onClick={() => requireAuth(() => { setShowResetModal(true); setResetMode('FACTORY'); setResetPassword(''); setResetError(''); })}
+                                    onClick={() => {
+                                        requireAdminOtpForDataManagement(
+                                            "Factory Reset",
+                                            "Full wipe-out of ALL data across ALL companies, identities, and settings",
+                                            () => {
+                                                setIsDmOtpApproved(true);
+                                                setShowResetModal(true);
+                                                setResetMode('FACTORY');
+                                                setResetPassword('');
+                                                setResetError('');
+                                            }
+                                        );
+                                    }}
                                     disabled={isReadOnly || isLicenseExpired || !getPermission('dmFactoryReset')}
                                     title={isReadOnly ? "Read-Only Mode: Factory Reset disabled" : (isLicenseExpired ? "Inactive due to Trial/License expired" : (!getPermission('dmFactoryReset') ? "Access Denied: Requires Factory Reset permission." : ""))}
                                     className="mt-4 py-2.5 px-4 bg-red-900/20 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-900/20 disabled:text-red-500/50 text-red-500 hover:text-white border border-red-900/50 hover:border-red-400 disabled:hover:border-red-900/50 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
@@ -5191,7 +5764,15 @@ const Settings: React.FC<SettingsProps> = ({
                                     <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Generate an AES-256 encrypted secure file containing application configuration, error traces, and active logs for Developer support.</p>
                                 </div>
                                 <button
-                                    onClick={executeDiagnosticExport}
+                                    onClick={() => {
+                                        requireAdminOtpForDataManagement(
+                                            "Diagnostic Logs Export",
+                                            "Generating encrypted diagnostic package with configurations and error logs",
+                                            () => {
+                                                executeDiagnosticExport();
+                                            }
+                                        );
+                                    }}
                                     disabled={isReadOnly || !getPermission('dmDiagnostics')}
                                     title={isReadOnly ? "Read-Only Mode: Diagnostic Export disabled" : (!getPermission('dmDiagnostics') ? "Access Denied: Requires Diagnostic Report permission." : "")}
                                     className="mt-4 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
@@ -5218,20 +5799,26 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                                 <button
                                     onClick={() => {
-                                        showAlert(
-                                            'confirm',
-                                            '🛡 Revert to Last Pre-Operation Snapshot?',
-                                            'Are you sure you want to revert your database to the safety snapshot captured before your last Restore/Migration attempt? All company profile data and employee records will be restored to their exact state prior to that command.',
-                                            async () => {
-                                                if ((window.electronAPI as any)?.restoreFromSnapshot) {
-                                                    const res = await (window.electronAPI as any).restoreFromSnapshot();
-                                                    if (res.success) {
-                                                        showAlert('success', 'Snapshot Restored ✓', 'Database successfully reverted to the pre-operation safety snapshot. All company profile data and records have been recovered.');
-                                                        onRestore();
-                                                    } else {
-                                                        showAlert('danger', 'Snapshot Restore Error', res.error || 'Failed to revert to pre-operation snapshot.');
+                                        requireAdminOtpForDataManagement(
+                                            "Safety Snapshot Recovery",
+                                            "Reverting database to safety snapshot captured before last Restore/Migration",
+                                            () => {
+                                                showAlert(
+                                                    'confirm',
+                                                    '🛡 Revert to Last Pre-Operation Snapshot?',
+                                                    'Are you sure you want to revert your database to the safety snapshot captured before your last Restore/Migration attempt? All company profile data and employee records will be restored to their exact state prior to that command.',
+                                                    async () => {
+                                                        if ((window.electronAPI as any)?.restoreFromSnapshot) {
+                                                            const res = await (window.electronAPI as any).restoreFromSnapshot();
+                                                            if (res.success) {
+                                                                showAlert('success', 'Snapshot Restored ✓', 'Database successfully reverted to the pre-operation safety snapshot. All company profile data and records have been recovered.');
+                                                                onRestore();
+                                                            } else {
+                                                                showAlert('danger', 'Snapshot Restore Error', res.error || 'Failed to revert to pre-operation snapshot.');
+                                                            }
+                                                        }
                                                     }
-                                                }
+                                                );
                                             }
                                         );
                                     }}
@@ -5260,7 +5847,15 @@ const Settings: React.FC<SettingsProps> = ({
                                 {appDirectory || 'Scanning for configured path...'}
                             </div>
                             <button
-                                onClick={() => requireAuth(handleChangeDirectory)}
+                                onClick={() => {
+                                    requireAdminOtpForDataManagement(
+                                        "Change Storage Location",
+                                        "Modifying application root storage directory path",
+                                        () => {
+                                            handleChangeDirectory();
+                                        }
+                                    );
+                                }}
                                 disabled={isReadOnly || !getPermission('dmStorageLocation')}
                                 title={isReadOnly ? "Read-Only Mode: Change Directory disabled" : (!getPermission('dmStorageLocation') ? "Access Denied: Requires Secure Change Directory permission." : "")}
                                 className="w-full py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-700 shadow-lg active:scale-95"
@@ -5339,7 +5934,14 @@ const Settings: React.FC<SettingsProps> = ({
                                 </div>
                             )}
                             <div className="space-y-3 mt-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                                <input type="password" placeholder="Enter Login Password" title="Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && (resetMode === 'DEEP' ? executeDeepReset() : executeFactoryReset())} />
+                                {isDmOtpApproved && (
+                                    <div className="flex items-center justify-between pb-1">
+                                        <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-800/50 px-2 py-0.5 rounded flex items-center gap-1">
+                                            <ShieldCheck size={12} /> Approved via Admin OTP
+                                        </span>
+                                    </div>
+                                )}
+                                <input type="password" placeholder={isDmOtpApproved ? "Login Password (Optional - Approved via Admin OTP)" : "Enter Login Password"} title="Password" autoFocus disabled={isProcessing} className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-500 transition-all`} value={resetPassword} onChange={(e) => { setResetPassword(e.target.value); setResetError(''); }} onKeyDown={(e) => e.key === 'Enter' && (resetMode === 'DEEP' ? executeDeepReset() : executeFactoryReset())} />
                                 {resetError && <p className="text-xs text-red-400 font-bold text-center animate-pulse">{resetError}</p>}
                             </div>
                             <button onClick={resetMode === 'DEEP' ? executeDeepReset : executeFactoryReset} disabled={isProcessing} className={`w-full disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${resetMode === 'DEEP' ? 'bg-pink-600 hover:bg-pink-700' : 'bg-red-600 hover:bg-red-700'}`}>
@@ -5574,10 +6176,17 @@ const Settings: React.FC<SettingsProps> = ({
 
                             {/* Security Password & Confirmation */}
                             <div className="space-y-3 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Verify Login Password</label>
+                                <div className="flex items-center justify-between">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Verify Login Password</label>
+                                    {isDmOtpApproved && (
+                                        <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-800/50 px-2 py-0.5 rounded flex items-center gap-1">
+                                            <ShieldCheck size={12} /> Approved via Admin OTP
+                                        </span>
+                                    )}
+                                </div>
                                 <input 
                                     type="password" 
-                                    placeholder="Enter Login Password" 
+                                    placeholder={isDmOtpApproved ? "Login Password (Optional - Approved via Admin OTP)" : "Enter Login Password"} 
                                     title="Password" 
                                     disabled={isProcessing} 
                                     className={`w-full bg-[#0f172a] border ${resetError ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-xs text-white outline-none focus:ring-2 focus:ring-amber-500 transition-all font-mono`} 
@@ -6211,7 +6820,32 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                         const cloudTs = latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || '';
                                         const cloudVer = localStorage.getItem('app_latest_version') || '';
                                         const localTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
-                                        const isPatchNewer = (cloudTs && localTs) ? parseDateTime(cloudTs) > parseDateTime(localTs) : false;
+                                        
+                                        // 🛡️ USER RULE: If SHA256 of local app and cloud column G/H matches, auto update timestamp in local to avoid false trigger
+                                        const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+                                        const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+                                        const candidateHashes = [
+                                            (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase(),
+                                            (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase(),
+                                            (buildAuditInfo?.installerStats?.sha256 || '').trim().toLowerCase(),
+                                            (buildAuditInfo?.patchRecord?.sha256 || '').trim().toLowerCase()
+                                        ].filter(Boolean);
+                                        const matchedHash = candidateHashes.find(h => h === cloudWin10 || h === cloudWin7);
+                                        const isExactHash = Boolean(matchedHash);
+
+                                        // Auto-sync local timestamp if SHA-256 matches
+                                        if (isExactHash && cloudTs && localStorage.getItem('app_active_patch_ts') !== cloudTs) {
+                                            localStorage.setItem('app_active_patch_ts', cloudTs);
+                                            if (matchedHash) localStorage.setItem('app_active_installer_hash', matchedHash);
+                                            const dbSetFn = (window as any).electronAPI?.dbSetGlobal || (window as any).electronAPI?.dbSet;
+                                            if (dbSetFn) {
+                                                dbSetFn('app_active_patch_ts', cloudTs).catch(() => {});
+                                                if (matchedHash) dbSetFn('app_active_installer_hash', matchedHash).catch(() => {});
+                                            }
+                                        }
+
+                                        const effectiveLocalTs = (isExactHash && cloudTs) ? cloudTs : localTs;
+                                        const isPatchNewer = !isExactHash && (cloudTs && effectiveLocalTs ? parseDateTime(cloudTs) > parseDateTime(effectiveLocalTs) : false);
                                         const isVerNewer = (cloudVer && APP_VERSION) ? isVersionHigher(cloudVer, APP_VERSION) : false;
 
                                         if (isPatchNewer || isVerNewer) {
@@ -6222,7 +6856,7 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                                         <div>
                                                             <p className="text-xs font-black text-blue-400 uppercase tracking-wide">Update Ready & Pending Application</p>
                                                             <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                                                                Cloud release contains newer patch timestamp (<strong className="text-emerald-400 font-mono">{cloudTs}</strong>) compared to active local record (<strong className="text-white font-mono">{localTs}</strong>).
+                                                                Cloud release contains newer patch timestamp (<strong className="text-emerald-400 font-mono">{cloudTs}</strong>) compared to active local record (<strong className="text-white font-mono">{effectiveLocalTs}</strong>).
                                                             </p>
                                                         </div>
                                                     </div>
@@ -6239,7 +6873,9 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                                     <CheckCircle2 className="text-emerald-400 shrink-0" size={18} />
                                                     <div>
                                                         <span className="text-xs font-black text-emerald-400 uppercase tracking-wide">Running Build Verified & Up To Date</span>
-                                                        <span className="text-[10px] text-slate-400 ml-2 font-medium">Active record matches cloud release baseline.</span>
+                                                        <span className="text-[10px] text-slate-400 ml-2 font-medium">
+                                                            {isExactHash ? 'Cryptographic SHA-256 signature matches cloud release.' : 'Active record matches cloud release baseline.'}
+                                                        </span>
                                                     </div>
                                                 </div>
                                                 <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
@@ -6282,8 +6918,31 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                                 </div>
                                                 <div className="flex justify-between items-center">
                                                     <span className="text-slate-500">Active Record:</span>
-                                                    <span className={`font-mono font-bold text-[10px] ${parseDateTime(localStorage.getItem('app_active_patch_ts')) > parseDateTime(APP_PATCH_TIMESTAMP) ? 'text-amber-400 underline' : 'text-slate-300'}`}>
-                                                        {localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP}
+                                                    <span className={`font-mono font-bold text-[10px] ${(() => {
+                                                        const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+                                                        const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+                                                        const candidateHashes = [
+                                                            (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase(),
+                                                            (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase(),
+                                                            (buildAuditInfo?.installerStats?.sha256 || '').trim().toLowerCase(),
+                                                            (buildAuditInfo?.patchRecord?.sha256 || '').trim().toLowerCase()
+                                                        ].filter(Boolean);
+                                                        const isExactHash = candidateHashes.some(h => h === cloudWin10 || h === cloudWin7);
+                                                        return isExactHash ? 'text-emerald-400' : (parseDateTime(localStorage.getItem('app_active_patch_ts')) > parseDateTime(APP_PATCH_TIMESTAMP) ? 'text-amber-400 underline' : 'text-slate-300');
+                                                    })()}`}>
+                                                        {(() => {
+                                                            const cloudTs = latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || '';
+                                                            const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+                                                            const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+                                                            const candidateHashes = [
+                                                                (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase(),
+                                                                (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase(),
+                                                                (buildAuditInfo?.installerStats?.sha256 || '').trim().toLowerCase(),
+                                                                (buildAuditInfo?.patchRecord?.sha256 || '').trim().toLowerCase()
+                                                            ].filter(Boolean);
+                                                            const isExactHash = candidateHashes.some(h => h === cloudWin10 || h === cloudWin7);
+                                                            return (isExactHash && cloudTs) ? cloudTs : (localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP);
+                                                        })()}
                                                     </span>
                                                 </div>
                                             </div>
@@ -6319,10 +6978,15 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                                     <span className="text-slate-500">Evaluation:</span>
                                                     <span className="text-slate-300 font-bold text-[10px]">
                                                         {(() => {
-                                                            const activeHash = (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase();
                                                             const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
                                                             const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
-                                                            const isExactHash = activeHash && (activeHash === cloudWin10 || activeHash === cloudWin7);
+                                                            const candidateHashes = [
+                                                                (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase(),
+                                                                (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase(),
+                                                                (buildAuditInfo?.installerStats?.sha256 || '').trim().toLowerCase(),
+                                                                (buildAuditInfo?.patchRecord?.sha256 || '').trim().toLowerCase()
+                                                            ].filter(Boolean);
+                                                            const isExactHash = candidateHashes.some(h => h === cloudWin10 || h === cloudWin7);
                                                             const isPending = !isExactHash && (parseDateTime(latestPatchTimestamp) > parseDateTime(localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP));
                                                             return isPending ? '⚡ Patch Pending' : '✓ Matching';
                                                         })()}
@@ -6369,10 +7033,15 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                             </div>
                                             {buildAuditInfo?.installerStats?.exists && (
                                                 (() => {
-                                                    const activeHash = (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase();
                                                     const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
                                                     const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
-                                                    const isExactHash = activeHash && (activeHash === cloudWin10 || activeHash === cloudWin7);
+                                                    const candidateHashes = [
+                                                        (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase(),
+                                                        (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase(),
+                                                        (buildAuditInfo?.installerStats?.sha256 || '').trim().toLowerCase(),
+                                                        (buildAuditInfo?.patchRecord?.sha256 || '').trim().toLowerCase()
+                                                    ].filter(Boolean);
+                                                    const isExactHash = candidateHashes.some(h => h === cloudWin10 || h === cloudWin7);
                                                     const isUpToDate = (buildAuditInfo?.updateStatus?.exitCode === 0 || isExactHash) && (parseDateTime(latestPatchTimestamp) <= parseDateTime(localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP) || isExactHash);
 
                                                     return (
@@ -6413,6 +7082,19 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                             const cloudTs = latestPatchTimestamp || localStorage.getItem('app_latest_patch_timestamp') || '';
                                             const cloudVer = localStorage.getItem('app_latest_version') || '';
                                             const localTs = localStorage.getItem('app_active_patch_ts') || APP_PATCH_TIMESTAMP;
+                                            
+                                            // 🛡️ USER RULE: If SHA256 matches cloud Column G/H, do NOT show force update button
+                                            const cloudWin10 = (localStorage.getItem('app_update_hash_win10') || localStorage.getItem('app_update_hash') || '').trim().toLowerCase();
+                                            const cloudWin7 = (localStorage.getItem('app_update_hash_win7') || '').trim().toLowerCase();
+                                            const candidateHashes = [
+                                                (localStorage.getItem('app_active_installer_hash') || '').trim().toLowerCase(),
+                                                (localStorage.getItem('app_pending_installer_hash') || '').trim().toLowerCase(),
+                                                (buildAuditInfo?.installerStats?.sha256 || '').trim().toLowerCase(),
+                                                (buildAuditInfo?.patchRecord?.sha256 || '').trim().toLowerCase()
+                                            ].filter(Boolean);
+                                            const isExactHash = candidateHashes.some(h => h === cloudWin10 || h === cloudWin7);
+                                            if (isExactHash) return null;
+
                                             const isPatchNewer = (cloudTs && localTs) ? parseDateTime(cloudTs) > parseDateTime(localTs) : false;
                                             const isVerNewer = (cloudVer && APP_VERSION) ? isVersionHigher(cloudVer, APP_VERSION) : false;
 
@@ -7484,7 +8166,7 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                                     <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 text-center">
                                         <p className="text-[11px] text-slate-300 leading-normal mb-3">
                                             A 6-digit verification code will be sent to the registered Administrator email:<br />
-                                            <span className="text-blue-400 font-bold font-mono text-xs">{licenseInfo?.registeredTo || 'Administrator Email'}</span>
+                                            <span className="text-blue-400 font-bold font-mono text-xs">{getTargetAdminDetails().email || 'Administrator Email'}</span>
                                         </p>
                                         <button
                                             onClick={handleSendPolicyOtp}
@@ -7564,6 +8246,416 @@ Verdict: ${(cloudTs && parseDateTime(cloudTs) > parseDateTime(localTs)) ? 'OUT O
                     </div>
                 )
             }
+
+            {/* --- Admin OTP Approval Modal for Company Profile & Statutory Config --- */}
+            {showConfigOtpModal && (
+                <div className="fixed inset-0 z-[850] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+                    <div className="bg-[#1e293b] w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar rounded-3xl border border-cyan-500/30 shadow-2xl p-6 sm:p-8 flex flex-col gap-5 relative">
+                        <button
+                            onClick={() => {
+                                setShowConfigOtpModal(false);
+                                setPendingSavePayload(null);
+                                setPendingConfigDiffs([]);
+                            }}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white transition-colors"
+                            title="Close"
+                        >
+                            <X size={20} />
+                        </button>
+
+                        {/* Modal Header */}
+                        <div className="flex flex-col items-center gap-3 text-center">
+                            <div className="p-3.5 bg-cyan-500/10 text-cyan-400 rounded-2xl border border-cyan-500/30 shadow-inner">
+                                <ShieldCheck size={32} />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black text-white uppercase tracking-tight">
+                                    Admin Authorization Required
+                                </h3>
+                                <p className="text-xs text-slate-400 font-medium mt-1">
+                                    Any changes to Company Profile or Statutory Rules must be approved through Admin OTP.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Requester & Approver Information Banner */}
+                        <div className="bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800 text-xs space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Changes Initiated By:</span>
+                                <span className="text-white font-bold flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+                                    {currentUser?.name || currentUser?.username || 'Current User'}
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono border border-slate-700">
+                                        Role: {currentUser?.role || 'User'}
+                                    </span>
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/80 pt-2">
+                                <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Approving Administrator:</span>
+                                <span className="text-cyan-300 font-bold font-mono text-xs flex items-center gap-1.5">
+                                    <Mail size={13} className="text-cyan-400" />
+                                    {getTargetAdminDetails().email || 'Administrator Email'}
+                                </span>
+                            </div>
+                            {currentUser?.role === 'User' && (
+                                <div className="mt-2 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-[11px] leading-relaxed flex items-start gap-2">
+                                    <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-400" />
+                                    <span>
+                                        <strong>Notice:</strong> Standard users cannot authorize configuration modifications directly. The verification OTP code will be sent exclusively to the Administrator's registered email.
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Diff Summary Table */}
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    {pendingConfigDiffs.length} Modifications Pending Approval
+                                </span>
+                                <span className="text-[10px] text-cyan-400 font-bold uppercase">
+                                    Audit Trail Preview
+                                </span>
+                            </div>
+
+                            <div className="max-h-48 overflow-y-auto custom-scrollbar border border-slate-800 rounded-2xl bg-slate-950/60 divide-y divide-slate-800/60">
+                                {pendingConfigDiffs.map((diff, idx) => (
+                                    <div key={idx} className="p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-900/40 transition-colors">
+                                        <div className="space-y-0.5">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                                                    diff.category === 'Company Profile'
+                                                        ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                                                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                                }`}>
+                                                    {diff.category}
+                                                </span>
+                                                <span className="font-bold text-white">{diff.field}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 font-mono text-[11px] shrink-0">
+                                            <span className="text-rose-400/80 line-through max-w-[120px] truncate" title={diff.oldValue}>
+                                                {diff.oldValue}
+                                            </span>
+                                            <span className="text-slate-600">&rarr;</span>
+                                            <span className="text-emerald-400 font-bold max-w-[150px] truncate bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20" title={diff.newValue}>
+                                                {diff.newValue}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Step 1: Send OTP / Step 2: Enter OTP */}
+                        {configOtpStep === 'DIFFS' ? (
+                            <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 space-y-3 text-center">
+                                <p className="text-xs text-slate-300">
+                                    Click below to send a secure 6-digit approval OTP to the Administrator:
+                                </p>
+                                <button
+                                    onClick={handleSendConfigOtp}
+                                    disabled={isRequestingConfigOtp}
+                                    className="w-full py-3.5 bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-cyan-900/30 flex items-center justify-center gap-2 disabled:opacity-50"
+                                >
+                                    {isRequestingConfigOtp ? (
+                                        <>
+                                            <Loader2 size={16} className="animate-spin" />
+                                            <span>Dispatching Admin OTP...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Mail size={16} />
+                                            <span>Send Approval OTP to Admin</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="space-y-4 animate-in fade-in duration-200">
+                                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between text-xs text-emerald-300">
+                                    <div className="flex items-center gap-2">
+                                        <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                                        <span>OTP sent to <strong>{getTargetAdminDetails().email}</strong></span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {configOtpTimer > 0 ? (
+                                            <span className="text-[10px] text-slate-400 font-mono">
+                                                Resend in {configOtpTimer}s
+                                            </span>
+                                        ) : (
+                                            <button
+                                                onClick={handleSendConfigOtp}
+                                                disabled={isRequestingConfigOtp}
+                                                className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold underline uppercase"
+                                            >
+                                                Resend OTP
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3 bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                            Admin 6-Digit OTP Approval Code
+                                        </label>
+                                        <input
+                                            type="text"
+                                            maxLength={6}
+                                            placeholder="000000"
+                                            autoFocus
+                                            value={configOtp}
+                                            onChange={e => {
+                                                setConfigOtp(e.target.value.replace(/\D/g, ''));
+                                                setConfigOtpError('');
+                                            }}
+                                            onKeyDown={e => e.key === 'Enter' && configOtp.length === 6 && handleVerifyAndApplyConfigSave()}
+                                            className="w-full bg-[#0a0f1d] border border-cyan-500/40 rounded-xl p-3 text-white text-2xl font-black text-center tracking-[0.5em] font-mono outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {configOtpError && (
+                            <p className="text-xs text-red-400 font-bold text-center animate-pulse bg-red-950/30 py-2 px-3 rounded-xl border border-red-900/40">
+                                {configOtpError}
+                            </p>
+                        )}
+
+                        {/* Modal Action Buttons */}
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={() => {
+                                    setShowConfigOtpModal(false);
+                                    setPendingSavePayload(null);
+                                    setPendingConfigDiffs([]);
+                                }}
+                                className="flex-1 py-3.5 border border-slate-700 hover:bg-slate-800 rounded-xl text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors"
+                            >
+                                Cancel & Discard
+                            </button>
+
+                            {configOtpStep === 'OTP' && (
+                                <button
+                                    onClick={handleVerifyAndApplyConfigSave}
+                                    disabled={isVerifyingConfigOtp || configOtp.length !== 6}
+                                    className="flex-[1.5] py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-black uppercase text-xs tracking-wider transition-all shadow-xl shadow-emerald-900/30 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    {isVerifyingConfigOtp ? (
+                                        <>
+                                            <Loader2 size={16} className="animate-spin" />
+                                            <span>Verifying Code...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ShieldCheck size={16} />
+                                            <span>Approve & Save Changes</span>
+                                        </>
+                                    )}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Admin OTP Authorization Modal for Data Management */}
+            {showDmOtpModal && (
+                <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+                    <div className="bg-[#0d1527] border border-cyan-500/40 rounded-3xl max-w-lg w-full p-6 shadow-2xl relative space-y-4 animate-in zoom-in-95 duration-200">
+                        {/* Close button */}
+                        <button
+                            onClick={() => {
+                                setShowDmOtpModal(false);
+                                setDmOtpPendingCallback(null);
+                                setDmOtp('');
+                                setDmOtpError('');
+                            }}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white transition-colors"
+                            title="Close"
+                            aria-label="Close Admin OTP Modal"
+                        >
+                            <X size={20} />
+                        </button>
+
+                        {/* Header */}
+                        <div className="flex items-center gap-4">
+                            <div className="p-3.5 bg-gradient-to-br from-cyan-500/20 to-blue-500/20 text-cyan-400 rounded-2xl border border-cyan-500/30 shadow-lg">
+                                <ShieldCheck size={32} />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black text-white uppercase tracking-tight">
+                                    Admin Authorization Required
+                                </h3>
+                                <p className="text-xs text-slate-400 font-medium mt-1">
+                                    Data Management operations require Administrator approval via secure OTP.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Target Operation Info Card */}
+                        <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 space-y-2">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    Target Operation:
+                                </span>
+                                <span className="text-xs font-black text-cyan-300 uppercase px-2.5 py-0.5 rounded-full bg-cyan-950/60 border border-cyan-700/50">
+                                    {dmOtpActionName}
+                                </span>
+                            </div>
+                            {dmOtpActionDescription && (
+                                <p className="text-xs text-slate-300 leading-relaxed font-mono bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/80">
+                                    {dmOtpActionDescription}
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Requester & Approver Information Banner */}
+                        <div className="bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800 text-xs space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Operation Initiated By:</span>
+                                <span className="text-white font-bold flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+                                    {currentUser?.name || currentUser?.username || 'Current User'}
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono border border-slate-700">
+                                        Role: {currentUser?.role || 'User'}
+                                    </span>
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/80 pt-2">
+                                <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Approving Administrator:</span>
+                                <span className="text-cyan-300 font-bold font-mono text-xs flex items-center gap-1.5">
+                                    <Mail size={13} className="text-cyan-400" />
+                                    {getTargetAdminDetails().email || 'Administrator Email'}
+                                </span>
+                            </div>
+                            {currentUser?.role === 'User' && (
+                                <div className="mt-2 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-[11px] leading-relaxed flex items-start gap-2">
+                                    <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-400" />
+                                    <span>
+                                        <strong>Notice:</strong> Standard users cannot authorize Data Management operations directly. The verification OTP code will be sent exclusively to the Administrator's registered email.
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Step 1: Send OTP / Step 2: Enter OTP */}
+                        {dmOtpStep === 'REQUEST' ? (
+                            <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 space-y-3 text-center">
+                                <p className="text-xs text-slate-300">
+                                    Click below to dispatch a secure 6-digit approval OTP to the Administrator:
+                                </p>
+                                <button
+                                    onClick={handleSendDmOtp}
+                                    disabled={isRequestingDmOtp}
+                                    className="w-full py-3.5 bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-cyan-900/30 flex items-center justify-center gap-2 disabled:opacity-50"
+                                >
+                                    {isRequestingDmOtp ? (
+                                        <>
+                                            <Loader2 size={16} className="animate-spin" />
+                                            <span>Dispatching Admin OTP...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Mail size={16} />
+                                            <span>Send Approval OTP to Admin</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="space-y-4 animate-in fade-in duration-200">
+                                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between text-xs text-emerald-300">
+                                    <div className="flex items-center gap-2">
+                                        <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                                        <span>OTP sent to <strong>{getTargetAdminDetails().email}</strong></span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {dmOtpTimer > 0 ? (
+                                            <span className="text-[10px] text-slate-400 font-mono">
+                                                Resend in {dmOtpTimer}s
+                                            </span>
+                                        ) : (
+                                            <button
+                                                onClick={handleSendDmOtp}
+                                                disabled={isRequestingDmOtp}
+                                                className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold underline uppercase"
+                                            >
+                                                Resend OTP
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3 bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                            Admin 6-Digit OTP Approval Code
+                                        </label>
+                                        <input
+                                            type="text"
+                                            maxLength={6}
+                                            placeholder="000000"
+                                            autoFocus
+                                            value={dmOtp}
+                                            onChange={e => {
+                                                setDmOtp(e.target.value.replace(/\D/g, ''));
+                                                setDmOtpError('');
+                                            }}
+                                            onKeyDown={e => e.key === 'Enter' && dmOtp.length === 6 && handleVerifyDmOtp()}
+                                            className="w-full bg-[#0a0f1d] border border-cyan-500/40 rounded-xl p-3 text-white text-2xl font-black text-center tracking-[0.5em] font-mono outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {dmOtpError && (
+                            <p className="text-xs text-red-400 font-bold text-center animate-pulse bg-red-950/30 py-2 px-3 rounded-xl border border-red-900/40">
+                                {dmOtpError}
+                            </p>
+                        )}
+
+                        {/* Modal Action Buttons */}
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={() => {
+                                    setShowDmOtpModal(false);
+                                    setDmOtpPendingCallback(null);
+                                    setDmOtp('');
+                                    setDmOtpError('');
+                                }}
+                                className="flex-1 py-3.5 border border-slate-700 hover:bg-slate-800 rounded-xl text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors"
+                            >
+                                Cancel
+                            </button>
+
+                            {dmOtpStep === 'OTP' && (
+                                <button
+                                    onClick={handleVerifyDmOtp}
+                                    disabled={isVerifyingDmOtp || dmOtp.length !== 6}
+                                    className="flex-[1.5] py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-black uppercase text-xs tracking-wider transition-all shadow-xl shadow-emerald-900/30 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    {isVerifyingDmOtp ? (
+                                        <>
+                                            <Loader2 size={16} className="animate-spin" />
+                                            <span>Verifying Code...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ShieldCheck size={16} />
+                                            <span>Verify & Approve Action</span>
+                                        </>
+                                    )}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {
                 showSMTPModal && (

@@ -407,8 +407,12 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                 props.setAdvanceLedgers(newAdvanceLedgers);
                 props.setFines(newFines);
                 props.setOTRecords(newOTRecords);
-                if (props.setVpfRecords) props.setVpfRecords(newVPFRecords);
-                setVpfJustSaved(false);
+                if (props.config.enableVPF) {
+                    if (props.setVpfRecords) props.setVpfRecords(newVPFRecords);
+                    setVpfJustSaved(false);
+                } else {
+                    setVpfJustSaved(true);
+                }
 
                 setActiveTab('payroll');
                 setShowSuccessModal(true);
@@ -768,7 +772,7 @@ const PayProcess: React.FC<PayProcessProps> = (props) => {
                         advanceJustSaved={advanceJustSaved}
                         fineJustSaved={fineJustSaved}
                         otJustSaved={otJustSaved}
-                        vpfJustSaved={vpfJustSaved}
+                        vpfJustSaved={props.config.enableVPF ? vpfJustSaved : true}
                         onSwitchTab={(tab) => setActiveTab(tab)}
                     />
                 </div>

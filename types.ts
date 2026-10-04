@@ -90,9 +90,17 @@ export interface StatutoryConfig {
   enableBonus?: boolean;
   enableGratuity?: boolean;
   epfCeiling: number;
+  epfCeiling1?: number; // Historical / Baseline ceiling (₹15,000)
+  epfCeilingDate1?: string; // Baseline effective date ('01-09-2014')
+  epfCeiling2?: number; // Revised statutory ceiling (₹25,000)
+  epfCeilingDate2?: string; // Revised effective date ('17-09-2026')
   epfEmployeeRate: number;
   epfEmployerRate: number;
   esiCeiling: number;
+  esiCeiling1?: number; // Historical / Baseline ESI ceiling (₹21,000)
+  esiCeilingDate1?: string; // Baseline effective date ('01-01-2017')
+  esiCeiling2?: number; // Revised statutory ESI ceiling
+  esiCeilingDate2?: string; // Revised effective date ('17-09-2026')
   esiEmployeeRate: number;
   esiEmployerRate: number;
   // PT Configuration
@@ -276,6 +284,8 @@ export interface Employee {
   // NEW: Higher Pension Eligibility Fields
   epfMembershipDate?: string;
   jointDeclaration?: boolean;
+  epfEnrolmentStatus?: 'Regular' | 'EnrolledFrom17Sep2026' | 'EPSOnlyFrom17Sep2026';
+  esiEnrolmentStatus?: 'Regular' | 'EnrolledFromRevisionDate';
 
   // NEW: PF Higher Pension Option Impact
   pfHigherPension?: {
@@ -366,6 +376,11 @@ export interface PayrollResult {
   esiRemark?: string;
   leaveSnapshot?: LeaveLedger; // Snapshot of ledger at the time of freezing
   fineReason?: string; // Store reason for fine in result for reporting
+  epfWage?: number;
+  epsWage?: number;
+  edliWage?: number;
+  edliCharges?: number;
+  adminCharges?: number;
 }
 
 // New Types for Arrear Management
@@ -549,6 +564,23 @@ export interface AppVersion {
   releaseDate: string;
   features: string[];
   statutoryUpdates?: string[];
+}
+
+export interface ConfigChangeLog {
+  id: string;
+  timestamp: string; // ISO string e.g. "2026-09-30T09:30:00.000Z"
+  companyId: string;
+  companyName: string;
+  category: 'Company Profile' | 'Statutory Configuration';
+  field: string;
+  fieldKey: string;
+  oldValue: string;
+  newValue: string;
+  changedBy: string; // User Name + Role
+  changedByRole: string; // "Administrator" | "User" | "Developer"
+  approvedBy: string; // Admin info / OTP verified
+  otpVerified: boolean;
+  remarks?: string;
 }
 
 declare global {

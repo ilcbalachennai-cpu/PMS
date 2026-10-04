@@ -1,11 +1,12 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { 
-  ShieldAlert, AlertTriangle, Search, CheckCircle2, FileSpreadsheet, ArrowRight, Lock
+  ShieldAlert, AlertTriangle, Search, CheckCircle2, FileSpreadsheet, ArrowRight, Lock,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { Employee, PayrollResult, CompanyProfile, StatutoryConfig } from '../../types';
 import { 
   calculateECRAudit, calculateESIAudit, calculatePayAudit, 
-  exportECRAuditExcel, exportESIAuditExcel, exportPayAuditExcel,
+  exportAuditMoMStackedExcel,
   ECRAuditSummary, ESIAuditSummary, PayAuditSummary
 } from '../../services/auditService';
 import { openSavedReport } from '../../services/reportService';
@@ -238,8 +239,8 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
 
   // Compute Audits
   const ecrSummary: ECRAuditSummary = useMemo(() => {
-    return calculateECRAudit(currResults, prevResults, employees, currPeriod, prevPeriod);
-  }, [currResults, prevResults, employees, currPeriod, prevPeriod]);
+    return calculateECRAudit(currResults, prevResults, employees, currPeriod, prevPeriod, config);
+  }, [currResults, prevResults, employees, currPeriod, prevPeriod, config]);
 
   const esiSummary: ESIAuditSummary = useMemo(() => {
     return calculateESIAudit(currResults, prevResults, employees, currPeriod, prevPeriod, config);
@@ -249,34 +250,183 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
     return calculatePayAudit(currResults, prevResults, employees, currPeriod, prevPeriod);
   }, [currResults, prevResults, employees, currPeriod, prevPeriod]);
 
-  // Handle Export to Excel
-  const handleExport = async () => {
-    if (!isCurrFrozen) {
-      showAlert('warning', 'Export Blocked', `Cannot export audit spreadsheet for ${currPeriod}: Data is not frozen.`);
-      return;
-    }
-
+  // Handle Export to Excel (Month-over-Month Comparison with Stacked Rows & Column Variance)
+  const handleExportMoM = async () => {
     try {
       setIsExporting(true);
-      let savedPath: string | null = null;
-      if (subTab === 'ECR') {
-        savedPath = await exportECRAuditExcel(ecrSummary, companyProfile);
-      } else if (subTab === 'ESI') {
-        savedPath = await exportESIAuditExcel(esiSummary, companyProfile);
-      } else {
-        savedPath = await exportPayAuditExcel(paySummary, companyProfile);
+      if (!isCurrFrozen) {
+        showAlert('info', 'Exporting Comparison', `Generating MoM comparison report based on current draft records for ${currPeriod}.`);
       }
+      const savedPath = await exportAuditMoMStackedExcel(
+        ecrSummary,
+        esiSummary,
+        paySummary,
+        companyProfile,
+        subTab
+      );
 
       if (savedPath) {
         await openSavedReport(savedPath);
-        showAlert('success', 'Export Successful', `Audit report generated and saved successfully.`);
+        showAlert(
+          'success',
+          'Export Successful',
+          `Month-over-month comparison spreadsheet generated and opened in Excel.`
+        );
       }
     } catch (e: any) {
-      showAlert('error', 'Export Failed', e.message || 'Could not export audit spreadsheet.');
+      showAlert('error', 'Export Failed', e.message || 'Could not export audit comparison spreadsheet.');
     } finally {
       setIsExporting(false);
     }
   };
+
+  // Synchronized Dual-Scrollbar State for Top Slide Bar
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(1600);
+  const isSyncingTop = useRef(false);
+  const isSyncingTable = useRef(false);
+
+  const handleTopScroll = useCallback(() => {
+    if (isSyncingTop.current) {
+      isSyncingTop.current = false;
+      return;
+    }
+    if (tableScrollRef.current && topScrollRef.current) {
+      isSyncingTable.current = true;
+      tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    }
+  }, []);
+
+  const handleTableScroll = useCallback(() => {
+    if (isSyncingTable.current) {
+      isSyncingTable.current = false;
+      return;
+    }
+    if (topScrollRef.current && tableScrollRef.current) {
+      isSyncingTop.current = true;
+      topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+    }
+  }, []);
+
+  const handleScrollStep = useCallback((delta: number) => {
+    if (tableScrollRef.current) {
+      tableScrollRef.current.scrollBy({ left: delta, behavior: 'smooth' });
+    }
+  }, []);
+
+  const handleScrollTo = useCallback((pos: 'start' | 'end') => {
+    if (tableScrollRef.current) {
+      tableScrollRef.current.scrollTo({
+        left: pos === 'start' ? 0 : tableScrollRef.current.scrollWidth,
+        behavior: 'smooth'
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const updateWidth = () => {
+      if (tableScrollRef.current) {
+        const sw = tableScrollRef.current.scrollWidth;
+        if (sw > 0) {
+          setTableScrollWidth(sw);
+        }
+      }
+    };
+
+    updateWidth();
+    const timer = setTimeout(updateWidth, 150);
+
+    const el = tableScrollRef.current;
+    if (!el) return () => clearTimeout(timer);
+
+    const observer = new ResizeObserver(() => {
+      updateWidth();
+    });
+    observer.observe(el);
+    if (el.firstElementChild) {
+      observer.observe(el.firstElementChild);
+    }
+
+    if (topScrollRef.current) topScrollRef.current.scrollLeft = 0;
+    if (tableScrollRef.current) tableScrollRef.current.scrollLeft = 0;
+
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [subTab, filterMode, searchQuery]);
+
+  // Reusable Top Scrolling Slide Bar component
+  const renderTopScrollBar = () => (
+    <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-lg shadow-black/20">
+      <div className="flex items-center gap-2 shrink-0 select-none">
+        <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider flex items-center gap-1.5 pl-1">
+          <ArrowRight size={13} className="text-amber-400 rotate-180" />
+          <ArrowRight size={13} className="text-amber-400 -ml-2" />
+          <span>Slide Table:</span>
+        </span>
+        <div className="flex items-center gap-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800">
+          <button
+            type="button"
+            onClick={() => handleScrollTo('start')}
+            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 active:bg-amber-600 text-slate-300 hover:text-white rounded text-[10px] font-bold transition-all"
+            title="Scroll to beginning (Employee Names / IDs)"
+          >
+            |◀ Start
+          </button>
+          <button
+            type="button"
+            onClick={() => handleScrollStep(-350)}
+            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 active:bg-amber-600 text-slate-300 hover:text-white rounded text-[10px] font-bold flex items-center gap-1 transition-all"
+            title="Slide left by 350px"
+          >
+            <ChevronLeft size={13} /> Left
+          </button>
+          <button
+            type="button"
+            onClick={() => handleScrollStep(350)}
+            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 active:bg-amber-600 text-slate-300 hover:text-white rounded text-[10px] font-bold flex items-center gap-1 transition-all"
+            title="Slide right by 350px"
+          >
+            Right <ChevronRight size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleScrollTo('end')}
+            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 active:bg-amber-600 text-slate-300 hover:text-white rounded text-[10px] font-bold transition-all"
+            title="Scroll to end (Totals / Status)"
+          >
+            End ▶|
+          </button>
+        </div>
+      </div>
+
+      {/* Active Top Horizontal Scrollbar Track */}
+      <div
+        ref={topScrollRef}
+        onScroll={handleTopScroll}
+        className="flex-1 overflow-x-auto top-scrollbar bg-slate-950/90 rounded-lg border border-slate-800/80 p-1 min-w-[200px]"
+        title="Top scrolling slide bar - drag or scroll horizontally to view full table"
+      >
+        <div style={{ width: `${tableScrollWidth}px`, height: '8px' }} />
+      </div>
+
+      {/* Action Button: Export MoM Comparison Excel */}
+      <div className="shrink-0 flex items-center">
+        <button
+          type="button"
+          onClick={handleExportMoM}
+          disabled={isExporting}
+          title="Generate Excel report with baseline month, current month, and column variance rows per employee"
+          className="w-full sm:w-auto px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 border border-emerald-500/50 transition-all disabled:opacity-50 cursor-pointer"
+        >
+          <FileSpreadsheet size={15} />
+          {isExporting ? 'Generating...' : 'Export MoM Comparison (Excel)'}
+        </button>
+      </div>
+    </div>
+  );
 
   // Filtered ECR rows
   const filteredEcrRows = useMemo(() => {
@@ -396,16 +546,6 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
               </span>
             )}
           </div>
-
-          <button
-            onClick={handleExport}
-            disabled={isExporting || !isCurrFrozen}
-            title={!isCurrFrozen ? "Audit comparison Excel export is blocked: Selected month is not frozen." : "Export Audit to Excel"}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-emerald-900/40 border border-emerald-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <FileSpreadsheet size={16} />
-            {isExporting ? 'Exporting...' : 'Export Excel'}
-          </button>
         </div>
       </div>
 
@@ -548,7 +688,7 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
                 : 'text-slate-400 hover:text-white bg-slate-800/50'
             }`}
           >
-            Changes Only
+            Changes Only ({subTab === 'ECR' ? ecrSummary.rows.filter(r => r.hasChange).length : subTab === 'ESI' ? esiSummary.rows.filter(r => r.hasChange).length : paySummary.rows.filter(r => r.hasChange).length})
           </button>
           <button
             onClick={() => setFilterMode('ALL')}
@@ -558,7 +698,7 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
                 : 'text-slate-400 hover:text-white bg-slate-800/50'
             }`}
           >
-            {subTab === 'ESI' ? 'All Covered IPs' : 'All Members'}
+            {subTab === 'ESI' ? `All Covered IPs (${esiSummary.rows.length})` : `All Members (${subTab === 'ECR' ? ecrSummary.rows.length : paySummary.rows.length})`}
           </button>
           <button
             onClick={() => setFilterMode('ALERTS_ONLY')}
@@ -713,9 +853,16 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
             />
           </div>
 
+          {/* Top Scrolling Slide Bar & Quick Actions */}
+          {renderTopScrollBar()}
+
           {/* Comparison Table */}
           <div className="flex-1 bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden flex flex-col">
-            <div className="overflow-x-auto custom-scrollbar flex-1">
+            <div 
+              ref={tableScrollRef}
+              onScroll={handleTableScroll}
+              className="overflow-auto custom-scrollbar flex-1 max-h-[640px]"
+            >
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="bg-slate-900/90 text-slate-400 uppercase font-extrabold text-[10px] tracking-wider sticky top-0 z-10 border-b border-slate-800">
                   <tr>
@@ -723,12 +870,12 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
                     <th className="p-3">UAN</th>
                     <th className="p-3 text-right">EPF Wages ({prevPeriod} ➔ {currPeriod})</th>
                     <th className="p-3 text-right">EPS Wages ({prevPeriod} ➔ {currPeriod})</th>
-                    <th className="p-3 text-right">NCP Days ({prevPeriod} ➔ {currPeriod})</th>
                     <th className="p-3 text-right">EE PF Share</th>
                     <th className="p-3 text-right">ER EPS Share</th>
                     <th className="p-3 text-right">ER EPF Share</th>
                     <th className="p-3 text-right">EDLI (0.5%)</th>
                     <th className="p-3 text-right">Total Contrib</th>
+                    <th className="p-3 text-right">NCP Days ({prevPeriod} ➔ {currPeriod})</th>
                     <th className="p-3">Audit Alert / Status</th>
                   </tr>
                 </thead>
@@ -762,13 +909,6 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
                         </span>
                       </td>
                       <td className="p-3 text-right font-mono">
-                        <span className="text-slate-400">{r.prevNCPDays} d</span>
-                        <ArrowRight size={10} className="inline mx-1 text-slate-600" />
-                        <span className={`font-bold ${r.currNCPDays > 0 ? 'text-amber-400' : 'text-slate-300'}`}>
-                          {r.currNCPDays} d
-                        </span>
-                      </td>
-                      <td className="p-3 text-right font-mono">
                         <span className="text-slate-400">₹{r.prevEEPF.toLocaleString()}</span>
                         <ArrowRight size={10} className="inline mx-1 text-slate-600" />
                         <span className="text-sky-400 font-bold">₹{r.currEEPF.toLocaleString()}</span>
@@ -794,6 +934,13 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
                         <span className="text-slate-400">₹{r.prevTotalContrib.toLocaleString()}</span>
                         <ArrowRight size={10} className="inline mx-1 text-slate-600" />
                         <span className="text-emerald-400 font-black">₹{r.currTotalContrib.toLocaleString()}</span>
+                      </td>
+                      <td className="p-3 text-right font-mono">
+                        <span className="text-slate-400">{r.prevNCPDays} d</span>
+                        <ArrowRight size={10} className="inline mx-1 text-slate-600" />
+                        <span className={`font-bold ${r.currNCPDays > 0 ? 'text-amber-400' : 'text-slate-300'}`}>
+                          {r.currNCPDays} d
+                        </span>
                       </td>
                       <td className="p-3">
                         {r.alerts.length > 0 ? (
@@ -914,16 +1061,23 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
             />
           </div>
 
+          {/* Top Scrolling Slide Bar & Quick Actions */}
+          {renderTopScrollBar()}
+
           {/* ESI Table */}
           <div className="flex-1 bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden flex flex-col">
-            <div className="overflow-x-auto custom-scrollbar flex-1">
+            <div 
+              ref={tableScrollRef}
+              onScroll={handleTableScroll}
+              className="overflow-auto custom-scrollbar flex-1 max-h-[640px]"
+            >
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="bg-slate-900/90 text-slate-400 uppercase font-extrabold text-[10px] tracking-wider sticky top-0 z-10 border-b border-slate-800">
                   <tr>
                     <th className="p-3">Employee</th>
                     <th className="p-3">ESI Number</th>
                     <th className="p-3 text-right">Payable Days</th>
-                    <th className="p-3 text-right">Gross Wages ({prevPeriod} ➔ {currPeriod})</th>
+                    <th className="p-3 text-right">ESI Wages ({prevPeriod} ➔ {currPeriod})</th>
                     <th className="p-3 text-right">IP Share (0.75%)</th>
                     <th className="p-3 text-right">ER Share (3.25%)</th>
                     <th className="p-3">Audit Alert / Status</th>
@@ -1074,9 +1228,16 @@ export const PayrollAuditTrail: React.FC<PayrollAuditTrailProps> = ({
             />
           </div>
 
+          {/* Top Scrolling Slide Bar & Quick Actions */}
+          {renderTopScrollBar()}
+
           {/* Pay Table */}
           <div className="flex-1 bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden flex flex-col">
-            <div className="overflow-x-auto custom-scrollbar flex-1">
+            <div 
+              ref={tableScrollRef}
+              onScroll={handleTableScroll}
+              className="overflow-auto custom-scrollbar flex-1 max-h-[640px]"
+            >
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="bg-slate-900/90 text-slate-400 uppercase font-extrabold text-[10px] tracking-wider sticky top-0 z-10 border-b border-slate-800">
                   <tr>

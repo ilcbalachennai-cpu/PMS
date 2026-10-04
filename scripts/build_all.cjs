@@ -70,4 +70,19 @@ if (arg === 'both') {
 }
 
 console.log('\n✅ Build Process Complete!');
-console.log('📁 Check the "release" folder for your executables.');
+console.log('📁 Check the "release" folder for your executables.\n');
+
+try {
+    const crypto = require('crypto');
+    const releaseDir = path.join(__dirname, '..', 'release');
+    ['BPP_APP_V06.01.11_Win10.exe', 'BPP_APP_V06.01.11_Win7.exe'].forEach(file => {
+        const fullPath = path.join(releaseDir, file);
+        if (fs.existsSync(fullPath)) {
+            const buf = fs.readFileSync(fullPath);
+            const hash = crypto.createHash('sha256').update(buf).digest('hex').toUpperCase();
+            console.log(`🔑 SHA256 [${file}]: ${hash}`);
+        }
+    });
+} catch (e) {
+    console.error('Failed to compute SHA256 hashes:', e.message);
+}

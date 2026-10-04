@@ -836,6 +836,41 @@ ipcMain.handle('save-template', async (_, { fileName, data, type, subfolder }) =
     }
 });
 
+// 2b-2. Temporary Report Saving (for Preview without saving to permanent report storage)
+ipcMain.handle('save-temp-report', async (_, { fileName, data, type }) => {
+    try {
+        console.log(`[IPC] save-temp-report requested: ${fileName}.${type}`);
+
+        const tempDir = path.join(app.getPath('temp'), 'BharatPP_Preview');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        const safeBaseName = (fileName || 'Report').replace(/[^a-zA-Z0-9_\-\s]/g, '_').trim();
+        let targetFileName = `${safeBaseName}_PREVIEW.${type}`;
+        let filePath = path.resolve(tempDir, targetFileName);
+
+        const buffer = Buffer.from(data);
+        try {
+            fs.writeFileSync(filePath, new Uint8Array(buffer));
+        } catch (writeErr: any) {
+            // If file is open and locked by external viewer, fallback to timestamped filename
+            if (writeErr.code === 'EBUSY' || writeErr.code === 'EPERM') {
+                targetFileName = `${safeBaseName}_PREVIEW_${Date.now()}.${type}`;
+                filePath = path.resolve(tempDir, targetFileName);
+                fs.writeFileSync(filePath, new Uint8Array(buffer));
+            } else {
+                throw writeErr;
+            }
+        }
+
+        console.log(`[IPC] Temporary preview file ready at: ${filePath}`);
+        return { success: true, path: filePath };
+    } catch (e: any) {
+        console.error('[IPC] Save temp report failed:', e);
+        return { success: false, error: e.message };
+    }
+});
 
 ipcMain.handle('open-item-location', async (_, filePath: string) => {
     try {
@@ -856,7 +891,15 @@ ipcMain.handle('open-item-path', async (_, filePath: string) => {
     try {
         if (filePath && fs.existsSync(filePath)) {
             console.log(`[IPC] Opening file path directly: ${filePath}`);
-            await shell.openPath(filePath);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.blur();
+            }
+            const openError = await shell.openPath(filePath);
+            if (openError) {
+                console.warn(`[IPC] shell.openPath failed with error: ${openError}. Falling back to openExternal...`);
+                const fileUrl = `file:///${filePath.replace(/\\/g, '/')}`;
+                await shell.openExternal(fileUrl);
+            }
             return { success: true };
         }
         return { success: false, error: 'File not found' };
@@ -1044,6 +1087,29 @@ ipcMain.handle('send-email', async (_, { smtpConfig, mailOptions }) => {
     }
 });
 // 3. Simple Key-Value Store
+export const SYSTEM_UPDATE_KEYS = [
+    'app_active_patch_ts',
+    'app_pending_patch_ts',
+    'app_active_installer_hash',
+    'app_pending_installer_hash',
+    'app_latest_patch_timestamp',
+    'app_latest_version',
+    'app_update_hash',
+    'app_update_hash_win10',
+    'app_update_hash_win7',
+    'app_patch_skip_count',
+    'app_version_skip_count',
+    'app_version_marker',
+    'app_last_seen_version',
+    'app_last_seen_patch_ts',
+    'app_download_url',
+    'app_download_url_win7',
+    'app_launcher_url',
+    'app_update_ready',
+    'app_update_log',
+    'heartbeat_debug_logs'
+];
+
 const GLOBAL_KEYS = [
     'app_companies', 
     'app_active_company_id', 
@@ -1056,17 +1122,8 @@ const GLOBAL_KEYS = [
     'app_data_size', 
     'app_company_limit', 
     'app_logo',
-    'app_active_patch_ts',
-    'app_pending_patch_ts',
-    'app_active_installer_hash',
-    'app_pending_installer_hash',
-    'app_patch_skip_count',
-    'app_version_skip_count',
-    'app_version_marker',
-    'app_last_seen_version',
-    'app_last_seen_patch_ts',
-    'heartbeat_debug_logs',
-    'app_gemini_api_key'
+    'app_gemini_api_key',
+    ...SYSTEM_UPDATE_KEYS
 ];
 
 async function performAutoRescue(rootDb: Database.Database, appPaths: any) {
@@ -2193,15 +2250,24 @@ ipcMain.handle('run-full-backup', async (_, arg) => {
         const rawRows = db.prepare('SELECT key, value FROM store').all() as { key: string; value: string }[];
 
         // Exclude only machine-specific identity rows that must NEVER travel between machines
-        const machineOnlyKeys = ['app_machine_id', 'app_developer_secure', 'app_data_size'];
+        // Exclude machine-specific identity rows and system update metadata that must NEVER travel between machines or corrupt update state
+        const machineOnlyKeys = ['app_machine_id', 'app_developer_secure', 'app_data_size', ...SYSTEM_UPDATE_KEYS];
         const currentMachineId = await getInternalMachineId();
 
         const insertStmt = backupDb.prepare('INSERT OR REPLACE INTO store (key, value) VALUES (?, ?)');
         backupDb.transaction(() => {
             for (const row of rawRows) {
-                if (!machineOnlyKeys.includes(row.key)) {
-                    insertStmt.run(row.key, row.value);
+                if (
+                    machineOnlyKeys.includes(row.key) ||
+                    row.key.startsWith('app_update_') ||
+                    row.key.startsWith('app_patch_') ||
+                    row.key.includes('installer_hash') ||
+                    row.key.includes('patch_ts') ||
+                    row.key.includes('version_marker')
+                ) {
+                    continue;
                 }
+                insertStmt.run(row.key, row.value);
             }
             if (currentMachineId) {
                 insertStmt.run('app_origin_machine_id', JSON.stringify(currentMachineId));
@@ -2294,7 +2360,8 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
             'app_users', 
             'app_machine_id', 
             'app_developer_secure',
-            'app_data_size'
+            'app_data_size',
+            ...SYSTEM_UPDATE_KEYS
         ];
         const currentMachineId = await getInternalMachineId();
         
@@ -2302,9 +2369,17 @@ ipcMain.handle('create-data-backup', async (_, arg) => {
         
         backupDb.transaction(() => {
             for (const row of rows) {
-                if (!excludedKeys.includes(row.key)) {
-                    insertStmt.run(row.key, row.value);
+                if (
+                    excludedKeys.includes(row.key) ||
+                    row.key.startsWith('app_update_') ||
+                    row.key.startsWith('app_patch_') ||
+                    row.key.includes('installer_hash') ||
+                    row.key.includes('patch_ts') ||
+                    row.key.includes('version_marker')
+                ) {
+                    continue;
                 }
+                insertStmt.run(row.key, row.value);
             }
             if (currentMachineId) {
                 insertStmt.run('app_origin_machine_id', JSON.stringify(currentMachineId));
@@ -2846,11 +2921,12 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
         const isMigration = typeof arg === 'object' && arg.isMigration === true;
 
         // ── 3. Key exclusion lists ──────────────────────────────────────────────────────────
-        // Keys that are ALWAYS protected regardless of restore mode (machine & company profile identity)
+        // Keys that are ALWAYS protected regardless of restore mode (machine & company profile identity & software update state)
         const alwaysExcludedKeys = [
             'app_license_secure', 'app_license_data', 'app_users',
             'app_machine_id', 'app_developer_secure', 'app_data_size',
-            'app_company_profile', 'company_profile', 'app_companies', 'app_active_company_id', 'companySignature'
+            'app_company_profile', 'company_profile', 'app_companies', 'app_active_company_id', 'companySignature',
+            ...SYSTEM_UPDATE_KEYS
         ];
         // Keys additionally protected during DATA MIGRATION (preserve target Machine B's identity)
         const migrationExtraExclusions = [
@@ -2866,8 +2942,10 @@ ipcMain.handle('restore-sqlite-backup', async (_, arg) => {
 
         const isAlwaysExcluded = (key: string): boolean => {
             if (alwaysExcludedKeys.includes(key)) return true;
+            if (SYSTEM_UPDATE_KEYS.includes(key)) return true;
             if (key.startsWith('app_license') || key.startsWith('app_user') || key.includes('sys_limit')) return true;
             if (key.startsWith('app_company_profile') || key.startsWith('company_profile') || key.startsWith('companySignature')) return true;
+            if (key.startsWith('app_update_') || key.startsWith('app_patch_') || key.includes('installer_hash') || key.includes('patch_ts') || key.includes('version_marker')) return true;
             return false;
         };
 
@@ -3435,7 +3513,7 @@ ipcMain.handle('api-fetch', async (_, url: string, options: any) => {
             });
 
             if (options?.body) {
-                request.write(options.body);
+                request.write(options.body, 'utf8');
             }
             request.end();
         });
@@ -4010,11 +4088,17 @@ ipcMain.handle('get-app-build-audit-info', async () => {
         try {
             if (fs.existsSync(installerPath)) {
                 const stat = fs.statSync(installerPath);
+                let installerHash = '';
+                try {
+                    const buf = fs.readFileSync(installerPath);
+                    installerHash = crypto.createHash('sha256').update(buf).digest('hex').toLowerCase();
+                } catch (_) {}
                 installerStats = {
                     exists: true,
                     path: installerPath,
                     size: stat.size,
-                    mtime: stat.mtime.toISOString()
+                    mtime: stat.mtime.toISOString(),
+                    sha256: installerHash
                 };
             } else {
                 installerStats = { exists: false, path: installerPath };
@@ -4028,7 +4112,15 @@ ipcMain.handle('get-app-build-audit-info', async () => {
         let updateStatus: any = null;
         if (fs.existsSync(statusFile)) {
             try {
-                updateStatus = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+                const parsed = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+                // Check if the status file is stale (older than 24 hours). If so, do not report it as active.
+                const stat = fs.statSync(statusFile);
+                const fileAgeHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+                if (fileAgeHours <= 24) {
+                    updateStatus = parsed;
+                } else {
+                    console.log(`ℹ️ [BuildAudit] Ignored stale update status file (${fileAgeHours.toFixed(1)} hours old).`);
+                }
             } catch (_) {}
         }
 
@@ -4049,6 +4141,18 @@ ipcMain.handle('get-app-build-audit-info', async () => {
             } catch (_) {}
         }
 
+        // Check for local patch record file in install dir or userData
+        let patchRecord: any = null;
+        try {
+            const installRecordPath = path.join(appInstallDir, 'app_patch_record.json');
+            const userRecordPath = path.join(app.getPath('userData'), 'app_patch_record.json');
+            if (fs.existsSync(installRecordPath)) {
+                patchRecord = JSON.parse(fs.readFileSync(installRecordPath, 'utf8'));
+            } else if (fs.existsSync(userRecordPath)) {
+                patchRecord = JSON.parse(fs.readFileSync(userRecordPath, 'utf8'));
+            }
+        } catch (_) {}
+
         return {
             success: true,
             isPackaged: app.isPackaged,
@@ -4057,6 +4161,7 @@ ipcMain.handle('get-app-build-audit-info', async () => {
             exeDir: appInstallDir,
             exeStats,
             installerStats,
+            patchRecord,
             updateStatus,
             updateLogLines,
             pendingUpdate,
@@ -4065,6 +4170,52 @@ ipcMain.handle('get-app-build-audit-info', async () => {
         };
     } catch (err: any) {
         return { success: false, error: err?.message || 'Failed to fetch build audit info' };
+    }
+});
+
+ipcMain.handle('save-app-patch-record', async (_, record: { timestamp?: string, sha256?: string, version?: string }) => {
+    try {
+        const payload = JSON.stringify({
+            timestamp: record.timestamp || '',
+            sha256: (record.sha256 || '').toLowerCase(),
+            version: record.version || app.getVersion(),
+            updatedAt: new Date().toISOString()
+        }, null, 2);
+
+        // 1. Try to save to installation directory
+        try {
+            const installRecordPath = path.join(path.dirname(process.execPath), 'app_patch_record.json');
+            fs.writeFileSync(installRecordPath, payload, 'utf8');
+            console.log(`✅ App patch record saved to install directory: ${installRecordPath}`);
+        } catch (_) {}
+
+        // 2. Save to userData directory (always writable)
+        try {
+            const userRecordPath = path.join(app.getPath('userData'), 'app_patch_record.json');
+            fs.writeFileSync(userRecordPath, payload, 'utf8');
+            console.log(`✅ App patch record saved to userData: ${userRecordPath}`);
+        } catch (_) {}
+
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e?.message };
+    }
+});
+
+ipcMain.handle('clear-update-status', async () => {
+    try {
+        const tempDir = app.getPath('temp');
+        const statusFile = path.join(tempDir, 'bpp_update_status.json');
+        const pendingFile = path.join(tempDir, 'bpp_pending_update.json');
+        if (fs.existsSync(statusFile)) {
+            try { fs.unlinkSync(statusFile); } catch (_) {}
+        }
+        if (fs.existsSync(pendingFile)) {
+            try { fs.unlinkSync(pendingFile); } catch (_) {}
+        }
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e?.message };
     }
 });
 

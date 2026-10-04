@@ -374,8 +374,9 @@ export const didConfigCalculationFieldsChange = (c1: any, c2: any): boolean => {
   if (!c1 || !c2) return false;
   const keys = [
     'enablePF', 'enableESI', 'enableBonus', 'enableGratuity',
-    'epfCeiling', 'epfEmployeeRate', 'epfEmployerRate',
-    'esiCeiling', 'esiEmployeeRate', 'esiEmployerRate',
+    'epfCeiling', 'epfCeiling1', 'epfCeilingDate1', 'epfCeiling2', 'epfCeilingDate2',
+    'esiCeiling', 'esiCeiling1', 'esiCeilingDate1', 'esiCeiling2', 'esiCeilingDate2',
+    'esiEmployeeRate', 'esiEmployerRate',
     'enableProfessionalTax', 'ptDeductionCycle', 'ptSlabs',
     'enableLWF', 'lwfDeductionCycle', 'lwfEmployeeContribution', 'lwfEmployerContribution',
     'incomeTaxCalculationType', 'bonusRate', 'pfComplianceType',
@@ -425,7 +426,7 @@ export const didEmployeePayFieldsChange = (oldEmp: any, newEmp: any): boolean =>
 
   // 4. String statutory & pay configuration fields (case-insensitive comparison)
   const strFields = [
-    'isEPSEligible', 'deferredPensionOption', 'leavingReason',
+    'isEPSEligible', 'deferredPensionOption', 'leavingReason', 'epfEnrolmentStatus',
     'gender', 'branch', 'state', 'uanc', 'pfNumber', 'esiNumber', 'pan'
   ];
   for (const f of strFields) {

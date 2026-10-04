@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('save-report', { fileName, data, type, subfolder }),
     saveTemplate: (fileName: string, data: Uint8Array, type: string, subfolder?: string) =>
         ipcRenderer.invoke('save-template', { fileName, data, type, subfolder }),
+    saveTempReport: (fileName: string, data: Uint8Array, type: string) =>
+        ipcRenderer.invoke('save-temp-report', { fileName, data, type }),
 
     dbSet: (key: string, value: any) =>
         ipcRenderer.invoke('db-set', { key, value }),
@@ -96,8 +98,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     wipeCompanyData: (companyId: string) => ipcRenderer.invoke('wipe-company-data', companyId),
     generateDiagnostics: (uiState: any) => ipcRenderer.invoke('generate-diagnostics', uiState),
     getAppBuildAuditInfo: () => ipcRenderer.invoke('get-app-build-audit-info'),
+    saveAppPatchRecord: (record: { timestamp?: string, sha256?: string, version?: string }) => ipcRenderer.invoke('save-app-patch-record', record),
     launchInstallerManually: () => ipcRenderer.invoke('launch-installer-manually'),
     openUpdateLog: () => ipcRenderer.invoke('open-update-log'),
+    clearUpdateStatus: () => ipcRenderer.invoke('clear-update-status'),
     launchBootstrapInstaller: () => ipcRenderer.invoke('launch-bootstrap-installer'),
     openBootstrapLink: (url?: string) => ipcRenderer.invoke('open-bootstrap-link', url)
 });
